@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}项目管理{% endblock %}
+{% block page_title %}文件库项目管理{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="text-base font-semibold text-gray-800 mb-2">新建项目</h3>
+        <p class="text-xs text-gray-500 mb-3">项目编码可不填，系统会自动生成。<strong>项目与任务为多对多</strong>；文件在 <a href="{% url 'library_task_management' %}" class="text-indigo-700 underline font-medium">任务管理</a> 中按任务维护（全部分类），此处只维护项目与任务的关联。</p>
+        {% if can_assign_tasks %}
+        <form method="post" class="space-y-4 max-w-3xl">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create_project">
+            <div class="flex flex-wrap items-end gap-3">
+                <input type="text" name="project_code" placeholder="项目编码（可选）" class="px-3 py-2 border border-gray-300 rounded-md text-sm">
+                <input type="text" name="project_name" placeholder="项目名称（必填）" required class="px-3 py-2 border border-gray-300 rounded-md text-sm">
+                <input type="text" name="project_desc" placeholder="描述（可选）" class="px-3 py-2 border border-gray-300 rounded-md text-sm min-w-[18rem]">
+                <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">创建项目</button>
+            </div>
+            {% if all_library_tasks %}
+            <div>
+                <p class="text-sm font-medium text-gray-700 mb-2">同时关联任务（可选）</p>
+                <p class="text-xs text-gray-500 mb-2">勾选的任务将在项目创建后立即纳入本项目。</p>
+                <div class="max-h-40 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100 bg-gray-50/50">
+                    {% for t in all_library_tasks %}
+                    <label class="flex items-center gap-3 px-3 py-2 hover:bg-white cursor-pointer text-sm">
+                        <input type="checkbox" name="task_ids" value="{{ t.id }}" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                        <span><span class="font-mono text-xs text-gray-500">{{ t.code }}</span> · {{ t.name }}</span>
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </form>
+        {% else %}
+        <p class="text-sm text-amber-800">仅具备「分配文件库任务」权限的角色可创建项目。</p>
+        {% endif %}
+    </div>
+
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="flex flex-wrap items-end gap-3 mb-4">
+            <div>
+                <label class="block text-xs text-gray-600 mb-1">选择项目</label>
+                <select id="project-switch" class="px-3 py-2 border border-gray-300 rounded-md text-sm min-w-[18rem]">
+                    <option value="">请选择项目</option>
+                    {% for p in projects %}
+                    <option value="{{ p.id }}" {% if selected_project_id == p.id|stringformat:"s" %}selected{% endif %}>{{ p.code }} · {{ p.name }}{% if not p.is_active %}（已停用）{% endif %}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% if selected_project %}
+            <p class="text-xs text-indigo-700 bg-indigo-50 px-2 py-1 rounded">当前项目：{{ selected_project.code }} · {{ selected_project.name }}</p>
+            {% endif %}
+        </div>
+
+        {% if selected_project and can_assign_tasks %}
+        <div class="mb-2 p-4 border border-indigo-100 rounded-lg bg-indigo-50/40">
+            <h3 class="text-sm font-semibold text-gray-800 mb-2">维护本项目关联的任务</h3>
+            <p class="text-xs text-gray-600 mb-3">勾选后使用下方按钮加入或移除；各任务上的文件请在 <a href="{% url 'library_task_management' %}" class="text-indigo-700 underline font-medium">任务管理</a> 中维护。</p>
+            {% if not all_library_tasks %}
+            <p class="text-sm text-amber-800">尚无文件库任务，请先在任务管理中创建。</p>
+            {% else %}
+            <form method="post" class="space-y-3">
+                {% csrf_token %}
+                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                <div class="max-h-48 overflow-y-auto border border-gray-200 rounded-lg bg-white divide-y divide-gray-100">
+                    {% for t in all_library_tasks %}
+                    <label class="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 cursor-pointer text-sm">
+                        <input type="checkbox" name="task_ids" value="{{ t.id }}" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                               {% if t.id in project_task_ids %}checked{% endif %}>
+                        <span><span class="font-mono text-xs text-gray-500">{{ t.code }}</span> · {{ t.name }}</span>
+                    </label>
+                    {% endfor %}
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <button type="submit" name="action" value="bind_tasks" class="px-3 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">将勾选任务加入项目</button>
+                    <button type="submit" name="action" value="unbind_tasks" class="px-3 py-2 bg-slate-200 text-slate-800 text-sm rounded-lg hover:bg-slate-300">从项目移除勾选任务</button>
+                </div>
+            </form>
+            {% endif %}
+        </div>
+        {% elif selected_project and not can_assign_tasks %}
+        <p class="text-sm text-gray-500">您无权修改项目与任务的关联。</p>
+        {% else %}
+        <p class="text-sm text-gray-500">请选择项目后可查看或维护任务关联。</p>
+        {% endif %}
+
+        {% if selected_project and can_assign_tasks and project_assignees %}
+        <div class="mt-8 pt-6 border-t border-gray-200">
+            <h3 class="text-sm font-semibold text-gray-800 mb-2">项目成员与编辑权限</h3>
+            <p class="text-xs text-gray-600 mb-4">以下用户曾被分配过本项目的任务。<strong>取消用户项目</strong>后，该用户仍可<strong>下载</strong>本项目文件，但不能再上传、删除、改绑或执行其他会改动库内数据的操作；需要时可恢复编辑权限。</p>
+            <div class="overflow-x-auto border border-gray-200 rounded-lg divide-y divide-gray-100 bg-white">
+                {% for row in project_assignees %}
+                <div class="flex flex-wrap items-center justify-between gap-3 px-3 py-3 text-sm">
+                    <div>
+                        <span class="font-medium text-gray-800">{{ row.user.username }}</span>
+                        {% if row.user.get_full_name %}
+                        <span class="text-gray-500">（{{ row.user.get_full_name }}）</span>
+                        {% endif %}
+                        {% if row.revoked %}
+                        <span class="ml-2 text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-800">已取消编辑</span>
+                        {% else %}
+                        <span class="ml-2 text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">可编辑</span>
+                        {% endif %}
+                    </div>
+                    <form method="post" class="shrink-0">
+                        {% csrf_token %}
+                        <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                        <input type="hidden" name="user_id" value="{{ row.user.pk }}">
+                        {% if row.revoked %}
+                        <button type="submit" name="action" value="restore_project_user" class="px-3 py-1.5 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">恢复编辑权限</button>
+                        {% else %}
+                        <button type="submit" name="action" value="revoke_project_user" class="px-3 py-1.5 text-sm rounded-lg bg-slate-200 text-slate-800 hover:bg-slate-300"
+                                onclick="return confirm('确定取消该用户在本项目上的编辑权限？其仍可下载文件。');">取消用户项目</button>
+                        {% endif %}
+                    </form>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+<script>
+(function () {
+    var projectSwitch = document.getElementById('project-switch');
+    function go() {
+        var pid = projectSwitch ? projectSwitch.value : '';
+        var q = pid ? '?project_id=' + encodeURIComponent(pid) : '';
+        window.location.href = q;
+    }
+    projectSwitch?.addEventListener('change', go);
+})();
+</script>
+{% endblock %}

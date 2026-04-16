@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+
+{% block page_title %}角色管理{% endblock %}
+
+{% block content %}
+<!-- 操作栏 -->
+<div class="mb-6 flex justify-between items-center">
+    <div>
+        <h3 class="text-lg font-semibold text-gray-800">角色列表</h3>
+        <p class="text-sm text-gray-500 mt-1">管理系统角色和权限</p>
+    </div>
+    <a href="{% url 'role_create' %}" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2">
+        <i class="ri-add-line"></i>
+        <span>创建角色</span>
+    </a>
+</div>
+
+<!-- 角色表格 -->
+<div class="bg-white rounded-lg shadow overflow-hidden">
+    <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+            <tr>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">角色名称</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">角色代码</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">描述</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">创建时间</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+            </tr>
+        </thead>
+        <tbody class="bg-white divide-y divide-gray-200">
+            {% for role in roles %}
+            <tr>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <div class="text-sm font-medium text-gray-900">{{ role.name }}</div>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+                        {{ role.code }}
+                    </span>
+                </td>
+                <td class="px-6 py-4">
+                    <div class="text-sm text-gray-500">{{ role.description|default:"-" }}</div>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <div class="text-sm text-gray-500">{{ role.created_at|date:"Y-m-d H:i" }}</div>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                    <a href="{% url 'role_edit' role.id %}" class="text-blue-600 hover:text-blue-900 mr-4 flex items-center space-x-1">
+                        <i class="ri-edit-line"></i>
+                        <span>编辑</span>
+                    </a>
+                    <a href="{% url 'role_delete' role.id %}" class="text-red-600 hover:text-red-900 flex items-center space-x-1">
+                        <i class="ri-delete-bin-line"></i>
+                        <span>删除</span>
+                    </a>
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="5" class="px-6 py-4 text-center text-gray-500">暂无角色</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

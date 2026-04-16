@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+
+{% block page_title %}删除角色{% endblock %}
+
+{% block content %}
+<div class="bg-white rounded-lg shadow p-6">
+    <div class="max-w-md">
+        <div class="flex items-center mb-4">
+            <div class="p-3 bg-red-100 rounded-full">
+                <i class="ri-alert-line text-2xl text-red-600"></i>
+            </div>
+            <h3 class="ml-4 text-lg font-semibold text-gray-800">确认删除</h3>
+        </div>
+        
+        <p class="text-gray-600 mb-6">
+            您确定要删除角色 <strong>{{ role.name }}</strong> 吗？此操作无法撤销。
+        </p>
+        
+        <form method="post">
+            {% csrf_token %}
+            
+            <div class="flex justify-end space-x-4">
+                <a href="{% url 'role_list' %}" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+                    取消
+                </a>
+                <button 
+                    type="submit" 
+                    class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                >
+                    确认删除
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

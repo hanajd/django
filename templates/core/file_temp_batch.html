@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}临时文件 - {{ batch_id }}{% endblock %}
+{% block page_title %}临时文件库（批次）{% endblock %}
+
+{% block content %}
+<div class="bg-white rounded-lg shadow p-6">
+    <p class="text-sm text-gray-600 mb-4">批次 <code class="bg-gray-100 px-1 rounded">{{ batch_id }}</code> 的中间产物（合并 PDF、MinerU 输出等）。可预览图片 / PDF / JSON / Markdown。</p>
+    <div class="overflow-x-auto">
+        <table class="min-w-full text-sm text-left text-gray-700">
+            <thead class="bg-gray-50 text-gray-600 uppercase text-xs">
+                <tr>
+                    <th class="px-3 py-2">文件名</th>
+                    <th class="px-3 py-2">相对路径</th>
+                    <th class="px-3 py-2">大小</th>
+                    <th class="px-3 py-2">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for f in files %}
+                <tr class="border-b border-gray-100 hover:bg-gray-50">
+                    <td class="px-3 py-2">
+                        {% if f.preview_kind != 'unsupported' %}
+                        <a href="{% url 'file_preview' f.pk %}" target="_blank" rel="noopener" class="text-blue-600 hover:underline">{{ f.original_name }}</a>
+                        {% else %}
+                        {{ f.original_name }}
+                        {% endif %}
+                    </td>
+                    <td class="px-3 py-2 text-xs text-gray-500 break-all">{{ f.relative_path }}</td>
+                    <td class="px-3 py-2">{{ f.size }} B</td>
+                    <td class="px-3 py-2">
+                        <a href="{% url 'file_library_download' f.pk %}" class="text-emerald-600 hover:underline text-sm">下载</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="4" class="px-3 py-6 text-center text-gray-400">暂无记录（处理完成后会自动登记）</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <a href="{% url 'process_pipeline' %}" class="inline-block mt-4 text-blue-600 hover:underline text-sm">返回流程处理</a>
+</div>
+{% endblock %}

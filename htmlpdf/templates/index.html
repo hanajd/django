@@ -1,0 +1,1102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF模板编辑工具</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: "Microsoft YaHei", sans-serif;
+        }
+        body {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background: #f5f7fa;
+            overflow: hidden;
+        }
+        .toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 20px;
+            background: #fff;
+            border-bottom: 1px solid #e5e6eb;
+        }
+        .toolbar-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .toolbar strong {
+            font-size: 16px;
+            color: #1d2129;
+        }
+        .toolbar button,
+        .toolbar select,
+        .toolbar input {
+            padding: 6px 12px;
+            border: 1px solid #dcdfe6;
+            border-radius: 6px;
+            font-size: 14px;
+            outline: none;
+        }
+        .toolbar button {
+            cursor: pointer;
+            background: #fff;
+        }
+        .toolbar button:hover {
+            border-color: #165DFF;
+            color: #165DFF;
+        }
+        .toolbar button.active {
+            background: #165DFF;
+            color: #fff;
+            border-color: #165DFF;
+        }
+        #templateName {
+            width: 160px;
+        }
+        .main {
+            display: flex;
+            flex: 1;
+            min-height: 0;
+            overflow: hidden;
+        }
+        .sidebar {
+            width: 300px;
+            flex-shrink: 0;
+            background: #fff;
+            border-right: 1px solid #e5e6eb;
+            padding: 16px;
+            overflow-y: auto;
+        }
+        .sidebar h3 {
+            font-size: 15px;
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #e5e6eb;
+        }
+        .sidebar-hint {
+            font-size: 12px;
+            color: #86909c;
+            line-height: 1.45;
+            margin-bottom: 12px;
+        }
+        .field-row {
+            display: flex;
+            align-items: stretch;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 10px 10px 10px 8px;
+            background: #fafafa;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            border: 1px solid transparent;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+        }
+        .field-row:hover {
+            background: #f0f5ff;
+            border-color: #c9d8ff;
+        }
+        .field-row.field-row--highlight {
+            background: #e8f0ff;
+            border-color: #165dff;
+            box-shadow: 0 0 0 2px rgba(22, 93, 255, 0.2);
+        }
+        .field-row-main {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            min-width: 0;
+            flex: 1;
+        }
+        .field-row-badge {
+            flex-shrink: 0;
+            width: 26px;
+            height: 26px;
+            border-radius: 8px;
+            background: #1d2129;
+            color: #fff;
+            font-size: 12px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+        }
+        .field-row-badge.type-text {
+            background: #165dff;
+        }
+        .field-row-badge.type-check {
+            background: #f53f3f;
+        }
+        .field-row-badge.type-image {
+            background: #00b42a;
+        }
+        .field-row-text {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 0;
+        }
+        .field-row-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #1d2129;
+        }
+        .field-row-sub {
+            font-size: 12px;
+            color: #86909c;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .field-row-id {
+            font-size: 11px;
+            color: #c9cdd4;
+            font-family: Consolas, monospace;
+        }
+        .field-row-actions {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            justify-content: center;
+            gap: 4px;
+        }
+        .field-row button {
+            padding: 4px 8px;
+            border: 1px solid #f53f3f;
+            color: #f53f3f;
+            background: #fff;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .field-row button:hover {
+            background: #fff2f0;
+        }
+        .pdf-scroll {
+            flex: 1;
+            overflow: auto;
+            background: #4a4a4a;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .pdf-container {
+            position: relative;
+            width: max-content;
+        }
+        .pdf-page {
+            position: relative;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+            background: #fff;
+        }
+        .field-wrap {
+            position: absolute;
+            z-index: 30;
+        }
+        .field-wrap .input-box,
+        .field-wrap .check-box,
+        .field-wrap .image-box {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+        }
+        /* 角标放在控件外上方，避免压住小框内的文字 */
+        .field-badge {
+            position: absolute;
+            left: 0;
+            top: auto;
+            bottom: 100%;
+            margin-bottom: 3px;
+            z-index: 40;
+            min-width: 18px;
+            height: 18px;
+            padding: 0 4px;
+            border-radius: 4px;
+            background: #1d2129;
+            color: #fff;
+            font-size: 10px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+            pointer-events: none;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
+            border: 1px solid rgba(255, 255, 255, 0.95);
+        }
+        .field-wrap.type-text .field-badge {
+            background: #165dff;
+        }
+        .field-wrap.type-check .field-badge {
+            background: #f53f3f;
+        }
+        .field-wrap.type-image .field-badge {
+            background: #00b42a;
+        }
+        .field-wrap.field-canvas-hover {
+            z-index: 35;
+        }
+        .field-wrap.field-canvas-hover .input-box,
+        .field-wrap.field-canvas-hover .check-box,
+        .field-wrap.field-canvas-hover .image-box {
+            box-shadow: 0 0 0 3px rgba(22, 93, 255, 0.55);
+            filter: brightness(1.02);
+        }
+        .field-wrap.type-check.field-canvas-hover .check-box,
+        .field-wrap.type-image.field-canvas-hover .image-box {
+            box-shadow: 0 0 0 3px rgba(22, 93, 255, 0.55);
+        }
+        @keyframes field-flash {
+            0% {
+                box-shadow: 0 0 0 0 rgba(22, 93, 255, 0.7);
+            }
+            100% {
+                box-shadow: 0 0 0 14px rgba(22, 93, 255, 0);
+            }
+        }
+        .field-wrap.field-flash::after {
+            content: '';
+            position: absolute;
+            inset: -4px;
+            border-radius: 6px;
+            pointer-events: none;
+            animation: field-flash 0.9s ease-out 2;
+        }
+        .input-box {
+            position: absolute;
+            z-index: 30;
+            border: 1.5px dashed #165DFF;
+            background: rgba(22, 93, 255, 0.18);
+            padding: 2px 4px;
+            font-family: "SimSun", "Times New Roman", serif !important;
+            font-size: 10.5pt !important;
+            line-height: 1.2;
+            color: #000;
+            outline: none;
+            border-radius: 2px;
+            text-align: center;
+            resize: none;
+            overflow: hidden;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .check-box {
+            position: absolute;
+            z-index: 30;
+            border: 1.5px dashed #F53F3F;
+            background: rgba(245, 63, 63, 0.18);
+            border-radius: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: "SimSun", "Times New Roman", serif !important;
+            font-size: 10.5pt !important;
+            cursor: pointer;
+            user-select: none;
+        }
+        .image-box {
+            position: absolute;
+            z-index: 30;
+            border: 1.5px dashed #00B42A;
+            background: rgba(0, 180, 42, 0.18);
+            border-radius: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            cursor: pointer;
+            color: #666;
+            font-size: 12px;
+        }
+        .image-box img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            pointer-events: none;
+        }
+        #btnAddText {
+            border-color: #165DFF;
+            color: #165DFF;
+            background: rgba(22, 93, 255, 0.08);
+        }
+        #btnAddCheck {
+            border-color: #F53F3F;
+            color: #F53F3F;
+            background: rgba(245, 63, 63, 0.08);
+        }
+        #btnAddImage {
+            border-color: #00B42A;
+            color: #00B42A;
+            background: rgba(0, 180, 42, 0.08);
+        }
+        #btnAddText.active {
+            background: #165DFF;
+            color: #fff;
+            border-color: #165DFF;
+        }
+        #btnAddCheck.active {
+            background: #F53F3F;
+            color: #fff;
+            border-color: #F53F3F;
+        }
+        #btnAddImage.active {
+            background: #00B42A;
+            color: #fff;
+            border-color: #00B42A;
+        }
+        .input-box:focus {
+            background: rgba(22, 93, 255, 0.1);
+            border-style: solid;
+        }
+        .rubber-band {
+            position: absolute;
+            z-index: 20;
+            pointer-events: none;
+            border: 2px dashed #165DFF;
+            background: rgba(22, 93, 255, 0.1);
+        }
+        .pdf-page.draw-mode {
+            cursor: crosshair !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <div class="toolbar-group">
+        <strong>PDF模板编辑工具</strong>
+        <input type="file" id="imageFilePicker" accept="image/*" style="display:none;">
+        <select id="templateJsonSelect" title="从模板分类选择 JSON">
+            <option value="">模板JSON</option>
+        </select>
+        <button id="btnImportTemplate">导入模板</button>
+        <button id="btnImportContent">导入内容</button>
+        <input type="text" id="templateName" placeholder="导出文件名(可选)">
+        <button id="saveTemplate">保存模板</button>
+        </div>
+        <div class="toolbar-group">
+        <button id="btnAddText">添加输入框</button>
+        <button id="btnAddCheck">添加打勾</button>
+        <button id="btnAddImage">添加图片框</button>
+        </div>
+        <div class="toolbar-group">
+        <select id="outputCategory" title="生成 PDF 存储分类">
+            <option value="site_record">保存到现场记录</option>
+            <option value="report">保存到报告</option>
+        </select>
+        <button id="btnSave">导出填写PDF</button>
+        </div>
+    </div>
+
+    <div class="main">
+        <aside class="sidebar">
+            <h3>输入框列表</h3>
+            <p class="sidebar-hint">序号与画布角标一致；悬停列表或控件会联动高亮；点击一行可滚动定位到对应控件。</p>
+            <div id="fieldList"></div>
+        </aside>
+        <div class="pdf-scroll">
+            <div id="pdfContainer" class="pdf-container"></div>
+        </div>
+    </div>
+
+    <script>
+        const pdfjsLib = window['pdfjs-dist/build/pdf'];
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+        let pdfDoc = null,
+            pageMeta = {},
+            fields = [],
+            fieldIdSeq = 1;
+        let pdfReady = false;
+        const DEFAULT_FONT_PT = 10.5; // 五号字
+        // 最小文本框：至少容纳一个五号汉字宽度，且高度可正常显示五号字单行
+        const MIN_FIELD_WIDTH = Math.ceil((DEFAULT_FONT_PT * 1.05) + 10);
+        const MIN_FIELD_HEIGHT = Math.ceil((DEFAULT_FONT_PT * 1.2) + 6);
+        const pdfContainer = document.getElementById('pdfContainer');
+        const pdfScroll = document.querySelector('.pdf-scroll');
+        const btnAddText = document.getElementById('btnAddText');
+        const btnAddCheck = document.getElementById('btnAddCheck');
+        const btnAddImage = document.getElementById('btnAddImage');
+        const imageFilePicker = document.getElementById('imageFilePicker');
+        const templateJsonSelect = document.getElementById('templateJsonSelect');
+        let drawMode = false,
+            currentFieldType = 'text',
+            drawActive = false,
+            drawPage = null,
+            drawStart = null,
+            bandEl = null,
+            pendingImageField = null;
+
+        function nextId() {
+            return 'f' + fieldIdSeq++;
+        }
+
+        function normalizeFieldSize(field) {
+            if (!field) return field;
+            if ((field.fieldType || 'text') === 'check') return field;
+            field.w = Math.max(MIN_FIELD_WIDTH, Number(field.w) || 0);
+            field.h = Math.max(MIN_FIELD_HEIGHT, Number(field.h) || 0);
+            return field;
+        }
+
+        function fieldTypeKey(fieldType) {
+            if (fieldType === 'check') return 'check';
+            if (fieldType === 'image') return 'image';
+            return 'text';
+        }
+
+        function fieldTypeLabel(fieldType) {
+            if (fieldType === 'check') return '勾选';
+            if (fieldType === 'image') return '图片';
+            return '文本';
+        }
+
+        function updateFieldBadges() {
+            fields.forEach((f, idx) => {
+                if (f.badgeEl) f.badgeEl.textContent = String(idx + 1);
+            });
+        }
+
+        function getFieldById(id) {
+            return fields.find(x => x.id === id) || null;
+        }
+
+        function setCanvasHoverForField(id, on) {
+            const f = getFieldById(id);
+            if (f && f.wrap) f.wrap.classList.toggle('field-canvas-hover', !!on);
+        }
+
+        function setRowHighlightForField(id, on) {
+            const row = document.querySelector('.field-row[data-field-id="' + id + '"]');
+            if (row) row.classList.toggle('field-row--highlight', !!on);
+        }
+
+        function clearAllRowHighlights() {
+            document.querySelectorAll('.field-row--highlight').forEach(r => r.classList.remove('field-row--highlight'));
+        }
+
+        function attachFieldHoverSync(wrap, id) {
+            wrap.addEventListener('mouseenter', () => setRowHighlightForField(id, true));
+            wrap.addEventListener('mouseleave', () => setRowHighlightForField(id, false));
+        }
+
+        function scrollFieldIntoView(id) {
+            const f = getFieldById(id);
+            if (!f || !f.wrap) return;
+            f.wrap.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+            f.wrap.classList.remove('field-flash');
+            void f.wrap.offsetWidth;
+            f.wrap.classList.add('field-flash');
+            setTimeout(() => f.wrap.classList.remove('field-flash'), 2000);
+        }
+
+        function refreshFieldList() {
+            const el = document.getElementById('fieldList');
+            el.innerHTML = '';
+            if (!fields.length) {
+                el.textContent = '暂无输入框';
+                return;
+            }
+            fields.forEach((f, idx) => {
+                const ft = f.fieldType || 'text';
+                const tk = fieldTypeKey(ft);
+                const row = document.createElement('div');
+                row.className = 'field-row';
+                row.dataset.fieldId = f.id;
+                const main = document.createElement('div');
+                main.className = 'field-row-main';
+                const badge = document.createElement('span');
+                badge.className = 'field-row-badge type-' + tk;
+                badge.textContent = String(idx + 1);
+                const textCol = document.createElement('div');
+                textCol.className = 'field-row-text';
+                const title = document.createElement('span');
+                title.className = 'field-row-title';
+                title.textContent = fieldTypeLabel(ft) + ' · 第' + f.page + '页';
+                const sub = document.createElement('span');
+                sub.className = 'field-row-sub';
+                sub.textContent = f.placeholder || '(未命名)';
+                sub.title = f.placeholder || '';
+                const idSpan = document.createElement('span');
+                idSpan.className = 'field-row-id';
+                idSpan.textContent = f.id;
+                textCol.appendChild(title);
+                textCol.appendChild(sub);
+                textCol.appendChild(idSpan);
+                main.appendChild(badge);
+                main.appendChild(textCol);
+                const actions = document.createElement('div');
+                actions.className = 'field-row-actions';
+                const del = document.createElement('button');
+                del.type = 'button';
+                del.textContent = '删除';
+                del.addEventListener('click', ev => {
+                    ev.stopPropagation();
+                    removeField(f.id);
+                });
+                actions.appendChild(del);
+                row.appendChild(main);
+                row.appendChild(actions);
+                row.addEventListener('click', ev => {
+                    if (ev.target.closest('button')) return;
+                    clearAllRowHighlights();
+                    setRowHighlightForField(f.id, true);
+                    scrollFieldIntoView(f.id);
+                });
+                row.addEventListener('mouseenter', () => setCanvasHoverForField(f.id, true));
+                row.addEventListener('mouseleave', () => setCanvasHoverForField(f.id, false));
+                el.appendChild(row);
+            });
+            updateFieldBadges();
+        }
+
+        function removeField(id) {
+            const idx = fields.findIndex(f => f.id === id);
+            if (idx === -1) return;
+            const item = fields[idx];
+            if (item.wrap) item.wrap.remove();
+            else item.el?.remove();
+            fields.splice(idx, 1);
+            refreshFieldList();
+        }
+
+        function fitInputStyle(input) {
+            const maxFs = 10.5;
+            let fs = maxFs;
+            input.style.lineHeight = '1.2';
+            input.style.paddingLeft = '4px';
+            input.style.paddingRight = '4px';
+            input.style.paddingTop = '0px';
+            input.style.paddingBottom = '0px';
+            input.style.fontSize = fs + 'pt';
+
+            // 先使用固定五号字，让文本按宽度自然自动换行；
+            // 仅当高度放不下时，才逐步缩小字号。
+            while (fs >= 5 && input.scrollHeight > input.clientHeight + 1) {
+                input.style.fontSize = fs + 'pt';
+                fs -= 0.5;
+            }
+            if (fs < 5) {
+                input.style.fontSize = '5pt';
+            }
+            input.style.textAlign = 'center';
+            const overflowY = input.scrollHeight > input.clientHeight + 1;
+            if (overflowY) {
+                input.style.paddingTop = '1px';
+                input.style.paddingBottom = '1px';
+                return;
+            }
+            const freeHeight = input.clientHeight - input.scrollHeight;
+            const topPad = Math.max(1, Math.floor(freeHeight / 2));
+            const bottomPad = Math.max(1, Math.ceil(freeHeight / 2));
+            input.style.paddingTop = topPad + 'px';
+            input.style.paddingBottom = bottomPad + 'px';
+        }
+
+        function mountField(f) {
+            f.wrap?.remove();
+            f.el?.remove();
+            f.wrap = null;
+            f.badgeEl = null;
+            const meta = pageMeta[f.page];
+            if (!meta) return;
+            const l = (f.x * meta.scale) + 'px';
+            const t = (f.y * meta.scale) + 'px';
+            const w = (f.w * meta.scale) + 'px';
+            const h = (f.h * meta.scale) + 'px';
+            const fieldType = f.fieldType || 'text';
+            const typeKey = fieldTypeKey(fieldType);
+
+            const wrap = document.createElement('div');
+            wrap.className = 'field-wrap type-' + typeKey;
+            wrap.style.left = l;
+            wrap.style.top = t;
+            wrap.style.width = w;
+            wrap.style.height = h;
+            wrap.dataset.fieldId = f.id;
+
+            const badge = document.createElement('span');
+            badge.className = 'field-badge';
+            badge.textContent = String(fields.indexOf(f) + 1);
+            f.badgeEl = badge;
+            attachFieldHoverSync(wrap, f.id);
+
+            if (fieldType === 'check') {
+                const box = document.createElement('div');
+                box.className = 'check-box';
+                box.textContent = f.checked ? '✓' : '';
+                box.onclick = () => {
+                    f.checked = !f.checked;
+                    box.textContent = f.checked ? '✓' : '';
+                };
+                wrap.appendChild(badge);
+                wrap.appendChild(box);
+                meta.pageDiv.appendChild(wrap);
+                f.wrap = wrap;
+                f.el = box;
+                updateFieldBadges();
+                return;
+            }
+
+            if (fieldType === 'image') {
+                const box = document.createElement('div');
+                box.className = 'image-box';
+                if (f.imageData) {
+                    const img = document.createElement('img');
+                    img.src = f.imageData;
+                    box.appendChild(img);
+                } else {
+                    box.textContent = '点击上传图片';
+                }
+                box.onclick = () => {
+                    pendingImageField = f;
+                    imageFilePicker.click();
+                };
+                wrap.appendChild(badge);
+                wrap.appendChild(box);
+                meta.pageDiv.appendChild(wrap);
+                f.wrap = wrap;
+                f.el = box;
+                updateFieldBadges();
+                return;
+            }
+
+            const i = document.createElement('textarea');
+            i.className = 'input-box';
+            i.placeholder = f.placeholder;
+            i.value = f.value || '';
+            i.rows = 1;
+            i.oninput = () => {
+                f.value = i.value;
+                fitInputStyle(i);
+            };
+            wrap.appendChild(badge);
+            wrap.appendChild(i);
+            meta.pageDiv.appendChild(wrap);
+            f.wrap = wrap;
+            f.el = i;
+            updateFieldBadges();
+            requestAnimationFrame(() => fitInputStyle(i));
+        }
+
+        function renderPdfAndFields(pdfUrl, loadedFields = []) {
+            pdfReady = false;
+            fields = (loadedFields || []).map(f => normalizeFieldSize(f));
+            fieldIdSeq = fields.length ? Math.max(...fields.map(f => parseInt(f.id.slice(1)) || 0)) + 1 : 1;
+            pdfContainer.innerHTML = '';
+            pageMeta = {};
+
+            pdfjsLib.getDocument(pdfUrl).promise.then(async doc => {
+                pdfDoc = doc;
+                const viewportWidth = pdfScroll.clientWidth - 40;
+                const firstPage = await doc.getPage(1);
+                const baseViewport = firstPage.getViewport({ scale: 1 });
+                const scale = viewportWidth / baseViewport.width;
+
+                for (let p = 1; p <= doc.numPages; p++) {
+                    const page = await doc.getPage(p);
+                    const vp = page.getViewport({ scale: scale });
+                    const div = document.createElement('div');
+                    div.className = 'pdf-page';
+                    div.style.width = vp.width + 'px';
+                    div.style.height = vp.height + 'px';
+                    pdfContainer.appendChild(div);
+
+                    const canvas = document.createElement('canvas');
+                    canvas.width = vp.width;
+                    canvas.height = vp.height;
+                    div.appendChild(canvas);
+
+                    await page.render({
+                        canvasContext: canvas.getContext('2d'),
+                        viewport: vp
+                    }).promise;
+
+                    pageMeta[p] = {
+                        viewport: vp,
+                        pageDiv: div,
+                        scale: scale,
+                        realWidth: baseViewport.width,
+                        realHeight: baseViewport.height
+                    };
+                    div.addEventListener('mousedown', e => startDraw(e, p));
+                }
+                fields.forEach(f => mountField(f));
+                refreshFieldList();
+                setDrawMode(false);
+                pdfReady = true;
+            });
+        }
+
+        function setDrawMode(on, fieldType = 'text') {
+            drawMode = on;
+            currentFieldType = fieldType;
+            btnAddText.classList.toggle('active', on && fieldType === 'text');
+            btnAddCheck.classList.toggle('active', on && fieldType === 'check');
+            btnAddImage.classList.toggle('active', on && fieldType === 'image');
+            Object.values(pageMeta).forEach(m => m.pageDiv.classList.toggle('draw-mode', on));
+        }
+
+        function clientToPage(div, x, y) {
+            const r = div.getBoundingClientRect();
+            return {
+                x: x - r.left,
+                y: y - r.top
+            };
+        }
+
+        function startDraw(e, p) {
+            if (!drawMode || e.button !== 0 || e.target.closest('.field-wrap')) return;
+            const meta = pageMeta[p];
+            const pt = clientToPage(meta.pageDiv, e.clientX, e.clientY);
+            if (currentFieldType === 'check') {
+                const showSize = 18;
+                const realSize = showSize / meta.scale;
+                const f = {
+                    id: nextId(),
+                    page: p,
+                    x: (pt.x - showSize / 2) / meta.scale,
+                    y: (pt.y - showSize / 2) / meta.scale,
+                    w: realSize,
+                    h: realSize,
+                    placeholder: '勾选' + fields.length,
+                    fieldType: 'check',
+                    value: '',
+                    checked: false,
+                    imageData: ''
+                };
+                normalizeFieldSize(f);
+                fields.push(f);
+                mountField(f);
+                refreshFieldList();
+                e.preventDefault();
+                return;
+            }
+            drawPage = p;
+            drawActive = true;
+            drawStart = pt;
+            bandEl = document.createElement('div');
+            bandEl.className = 'rubber-band';
+            pageMeta[p].pageDiv.appendChild(bandEl);
+            window.addEventListener('mousemove', onDraw);
+            window.addEventListener('mouseup', stopDraw);
+            e.preventDefault();
+        }
+
+        function onDraw(e) {
+            if (!drawActive) return;
+            const pt = clientToPage(pageMeta[drawPage].pageDiv, e.clientX, e.clientY);
+            const l = Math.min(drawStart.x, pt.x),
+                t = Math.min(drawStart.y, pt.y);
+            const w = Math.abs(pt.x - drawStart.x),
+                h = Math.abs(pt.y - drawStart.y);
+            bandEl.style.cssText = `left:${l}px;top:${t}px;width:${w}px;height:${h}px`;
+        }
+
+        function stopDraw(e) {
+            if (!drawActive) return;
+            window.removeEventListener('mousemove', onDraw);
+            window.removeEventListener('mouseup', stopDraw);
+            const pt = clientToPage(pageMeta[drawPage].pageDiv, e.clientX, e.clientY);
+            const meta = pageMeta[drawPage];
+            const showX = Math.min(drawStart.x, pt.x);
+            const showY = Math.min(drawStart.y, pt.y);
+            const showW = Math.abs(pt.x - drawStart.x);
+            const showH = Math.abs(pt.y - drawStart.y);
+            const realX = showX / meta.scale;
+            const realY = showY / meta.scale;
+            const realW = showW / meta.scale;
+            const realH = showH / meta.scale;
+
+            bandEl.remove();
+            drawActive = false;
+            if (showW >= 15 && showH >= 15) {
+                const f = {
+                    id: nextId(),
+                    page: drawPage,
+                    x: realX,
+                    y: realY,
+                    w: realW,
+                    h: realH,
+                    placeholder: '栏位' + fields.length,
+                    fieldType: currentFieldType,
+                    value: '',
+                    checked: false,
+                    imageData: ''
+                };
+                normalizeFieldSize(f);
+                fields.push(f);
+                mountField(f);
+                refreshFieldList();
+            }
+        }
+
+        btnAddText.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'text'), 'text');
+        btnAddCheck.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'check'), 'check');
+        btnAddImage.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'image'), 'image');
+
+        function importTemplatePayload(d) {
+            if (!pdfDoc || !pdfReady) {
+                alert('模板 PDF 尚未加载完成，请稍后重试。');
+                return;
+            }
+            const loadedFields = (d.fields || []).map((f, idx) => ({
+                id: f.id || 'f' + (idx + 1),
+                page: f.page,
+                x: f.x,
+                y: f.y,
+                w: f.w,
+                h: f.h,
+                placeholder: f.placeholder || ('栏位' + idx),
+                fieldType: f.fieldType || 'text',
+                value: '',
+                checked: false,
+                imageData: ''
+            })).map(item => normalizeFieldSize(item));
+            fields.forEach(item => {
+                if (item.wrap) item.wrap.remove();
+                else item.el?.remove();
+            });
+            fields = loadedFields;
+            fieldIdSeq = fields.length ? Math.max(...fields.map(f => parseInt(f.id.slice(1)) || 0)) + 1 : 1;
+            fields.forEach(f => mountField(f));
+            refreshFieldList();
+        }
+
+        function importContentPayload(d) {
+            if (!pdfDoc || !pdfReady) {
+                alert('模板 PDF 尚未加载完成，请稍后重试。');
+                return;
+            }
+            if (!fields.length) {
+                alert('请先导入模板，再导入内容');
+                return;
+            }
+            const contentMap = d.content || {};
+            const fieldContentMap = {};
+            (d.fields || []).forEach(item => {
+                if (!item || !item.id) return;
+                if (Object.prototype.hasOwnProperty.call(item, 'content')) {
+                    fieldContentMap[item.id] = item.content || '';
+                }
+                if (Object.prototype.hasOwnProperty.call(item, 'checked')) {
+                    fieldContentMap[item.id + '__checked'] = !!item.checked;
+                }
+                if (Object.prototype.hasOwnProperty.call(item, 'imageData')) {
+                    fieldContentMap[item.id + '__imageData'] = item.imageData || '';
+                }
+            });
+            fields.forEach(f => {
+                if (f.fieldType === 'check') {
+                    if (Object.prototype.hasOwnProperty.call(fieldContentMap, f.id + '__checked')) {
+                        f.checked = !!fieldContentMap[f.id + '__checked'];
+                    } else if (Object.prototype.hasOwnProperty.call(contentMap, f.id)) {
+                        f.checked = !!contentMap[f.id];
+                    }
+                    if (f.el) f.el.textContent = f.checked ? '✓' : '';
+                    return;
+                }
+                if (f.fieldType === 'image') {
+                    if (Object.prototype.hasOwnProperty.call(fieldContentMap, f.id + '__imageData')) {
+                        f.imageData = fieldContentMap[f.id + '__imageData'] || '';
+                        mountField(f);
+                    }
+                    return;
+                }
+                if (Object.prototype.hasOwnProperty.call(contentMap, f.id)) {
+                    f.value = contentMap[f.id] || '';
+                } else if (Object.prototype.hasOwnProperty.call(fieldContentMap, f.id)) {
+                    f.value = fieldContentMap[f.id] || '';
+                } else {
+                    return;
+                }
+                if (f.el) {
+                    f.el.value = f.value;
+                    fitInputStyle(f.el);
+                }
+            });
+        }
+
+        async function requestLibraryJsonPayload() {
+            const selected = templateJsonSelect.value;
+            if (!selected) throw new Error('请先选择模板 JSON');
+            const res = await fetch('/files/htmlpdf/api/import-json-from-library/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ template_id: Number(selected) })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '读取模板 JSON 失败');
+            return data;
+        }
+
+        async function refreshTemplateJsonOptions() {
+            const res = await fetch('/files/htmlpdf/api/template-jsons/');
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '读取模板 JSON 列表失败');
+            templateJsonSelect.innerHTML = '<option value="">模板JSON</option>';
+            (data.templates || []).forEach(t => {
+                const opt = document.createElement('option');
+                opt.value = String(t.id);
+                opt.textContent = t.name;
+                templateJsonSelect.appendChild(opt);
+            });
+            if ((data.templates || []).length) {
+                templateJsonSelect.value = String(data.templates[0].id);
+            }
+        }
+        document.getElementById('btnImportTemplate').onclick = () => {
+            requestLibraryJsonPayload()
+                .then(importTemplatePayload)
+                .catch(err => alert(err.message));
+        };
+        document.getElementById('btnImportContent').onclick = () => {
+            requestLibraryJsonPayload()
+                .then(importContentPayload)
+                .catch(err => alert(err.message));
+        };
+
+        imageFilePicker.onchange = e => {
+            const file = e.target.files[0];
+            if (!file || !pendingImageField) {
+                e.target.value = '';
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = () => {
+                pendingImageField.imageData = reader.result;
+                mountField(pendingImageField);
+                pendingImageField = null;
+                e.target.value = '';
+            };
+            reader.readAsDataURL(file);
+        };
+
+        function buildFieldsPayload() {
+            return fields.map(i => ({
+                id: i.id,
+                page: i.page,
+                x: i.x,
+                y: i.y,
+                w: i.w,
+                h: i.h,
+                placeholder: i.placeholder,
+                fieldType: i.fieldType || 'text',
+                content: i.value || '',
+                checked: !!i.checked,
+                imageData: i.imageData || ''
+            }));
+        }
+
+        function exportJsonMerged() {
+            const name = document.getElementById('templateName').value.trim() || 'template';
+            fetch('/files/htmlpdf/api/export-json/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    type: 'merged',
+                    name,
+                    fields: buildFieldsPayload()
+                })
+            }).then(async r => {
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.error || '保存模板失败');
+                alert('模板已保存到文件库「模板」分类');
+                if (d.file && d.file.library_url) {
+                    window.open(d.file.library_url, '_blank');
+                }
+            }).catch(err => alert(err.message));
+        }
+
+        document.getElementById('saveTemplate').onclick = exportJsonMerged;
+
+        document.getElementById('btnSave').onclick = () => {
+            const outputCategory = document.getElementById('outputCategory')?.value || 'site_record';
+            const payload = {
+                fields: fields.map(i => ({
+                    page: i.page,
+                    x0: i.x,
+                    y0: i.y,
+                    x1: i.x + i.w,
+                    y1: i.y + i.h,
+                    fieldType: i.fieldType || 'text',
+                    value: i.value || '',
+                    checked: !!i.checked,
+                    imageData: i.imageData || ''
+                })),
+                output_category: outputCategory
+            };
+            fetch('/files/htmlpdf/api/save-pdf/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            }).then(async r => {
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.error || '保存PDF失败');
+                const where = d.saved_to === 'report' ? '报告' : '现场记录';
+                alert(`填写 PDF 已保存到文件库「${where}」分类`);
+                if (d.file && d.file.library_url) {
+                    window.open(d.file.library_url, '_blank');
+                }
+            }).catch(err => alert(err.message));
+        };
+        pdfContainer.addEventListener('focusin', e => {
+            const ta = e.target.closest('.input-box');
+            if (!ta || !pdfContainer.contains(ta)) return;
+            const wrap = ta.closest('.field-wrap');
+            if (!wrap || !wrap.dataset.fieldId) return;
+            clearAllRowHighlights();
+            setRowHighlightForField(wrap.dataset.fieldId, true);
+            const row = document.querySelector('.field-row[data-field-id="' + wrap.dataset.fieldId + '"]');
+            if (row) row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+
+        pdfContainer.addEventListener('click', e => {
+            const wrap = e.target.closest('.field-wrap');
+            if (!wrap || !wrap.dataset.fieldId) {
+                clearAllRowHighlights();
+                return;
+            }
+            if (e.target.closest('.input-box')) return;
+            clearAllRowHighlights();
+            setRowHighlightForField(wrap.dataset.fieldId, true);
+            const row = document.querySelector('.field-row[data-field-id="' + wrap.dataset.fieldId + '"]');
+            if (row) row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+
+        setDrawMode(false);
+        const pathMatch = window.location.pathname.match(/\/files\/htmlpdf\/editor\/(\d+)\/?$/);
+        const initialTemplatePdfId = Number(
+            window.HTMLPDF_INITIAL_TEMPLATE_PDF_ID || (pathMatch ? pathMatch[1] : 0)
+        );
+        if (initialTemplatePdfId) {
+            fetch('/files/htmlpdf/api/use-template-pdf/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ template_id: initialTemplatePdfId })
+            })
+                .then(async r => {
+                    const d = await r.json();
+                    if (!r.ok) throw new Error(d.error || '加载模板 PDF 失败');
+                    if (!d.pdf_url) throw new Error('模板 PDF 地址缺失');
+                    renderPdfAndFields(d.pdf_url, []);
+                })
+                .catch(err => alert(err.message));
+        }
+        refreshTemplateJsonOptions().catch(err => console.warn(err));
+    </script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}HTMLPDF{% endblock %}
+{% block page_title %}HTMLPDF 模板编辑入口{% endblock %}
+
+{% block content %}
+<div class="bg-white rounded-lg shadow p-6">
+    <p class="text-sm text-gray-600 mb-4">
+        请选择「模板」分类中的 PDF 文件，点击“编辑模板”进入 PDF 模板编辑工具。
+    </p>
+    <div class="overflow-x-auto">
+        <table class="min-w-full text-sm text-left text-gray-700">
+            <thead class="bg-gray-50 text-gray-600 uppercase text-xs">
+                <tr>
+                    <th class="px-3 py-2">文件名</th>
+                    <th class="px-3 py-2">上传者</th>
+                    <th class="px-3 py-2">时间</th>
+                    <th class="px-3 py-2">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for f in template_pdf_files %}
+                <tr class="border-b border-gray-100 hover:bg-gray-50">
+                    <td class="px-3 py-2">{{ f.original_name }}</td>
+                    <td class="px-3 py-2">{% if f.created_by %}{{ f.created_by.username }}{% else %}—{% endif %}</td>
+                    <td class="px-3 py-2">{{ f.created_at|date:"Y-m-d H:i" }}</td>
+                    <td class="px-3 py-2">
+                        <a href="{% url 'htmlpdf_editor_open' f.pk %}" class="text-indigo-600 hover:underline">编辑模板</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="4" class="px-3 py-8 text-center text-gray-400">模板分类中暂无 PDF 文件</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

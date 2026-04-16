@@ -1,0 +1,126 @@
+{% extends 'base.html' %}
+
+{% block page_title %}{% if menu %}编辑菜单{% else %}创建菜单{% endif %}{% endblock %}
+
+{% block content %}
+<div class="bg-white rounded-lg shadow p-6">
+    <form method="post">
+        {% csrf_token %}
+        
+        <div class="max-w-2xl">
+            <div class="space-y-6">
+                <div>
+                    <label for="name" class="block text-sm font-medium text-gray-700 mb-1">菜单名称 <span class="text-red-500">*</span></label>
+                    <input 
+                        type="text" 
+                        name="name" 
+                        id="name" 
+                        value="{% if menu %}{{ menu.name }}{% endif %}"
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                    >
+                </div>
+                
+                <div>
+                    <label for="path" class="block text-sm font-medium text-gray-700 mb-1">路由路径</label>
+                    <input 
+                        type="text" 
+                        name="path" 
+                        id="path" 
+                        value="{% if menu %}{{ menu.path }}{% endif %}"
+                        placeholder="/users/ 或留空表示父菜单"
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                </div>
+                
+                <div>
+                    <label for="icon" class="block text-sm font-medium text-gray-700 mb-1">图标</label>
+                    <input 
+                        type="text" 
+                        name="icon" 
+                        id="icon" 
+                        value="{% if menu %}{{ menu.icon }}{% endif %}"
+                        placeholder="例如: dashboard, user, settings"
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                    <p class="text-xs text-gray-500 mt-1">使用 RemixIcon 图标名称，如: dashboard, user, settings</p>
+                </div>
+                
+                <div>
+                    <label for="parent" class="block text-sm font-medium text-gray-700 mb-1">父级菜单</label>
+                    <select 
+                        name="parent" 
+                        id="parent" 
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                        <option value="">无（顶级菜单）</option>
+                        {% for m in menus %}
+                        {% if menu and menu.id == m.id %}
+                        <option value="{{ m.id }}" disabled>{{ m.name }}</option>
+                        {% else %}
+                        <option value="{{ m.id }}" {% if menu and menu.parent_id == m.id %}selected{% endif %}>{{ m.name }}</option>
+                        {% endif %}
+                        {% endfor %}
+                    </select>
+                </div>
+                
+                <div>
+                    <label for="sort_order" class="block text-sm font-medium text-gray-700 mb-1">排序</label>
+                    <input 
+                        type="number" 
+                        name="sort_order" 
+                        id="sort_order" 
+                        value="{% if menu %}{{ menu.sort_order }}{% else %}0{% endif %}"
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                </div>
+                
+                {% if menu %}
+                <div>
+                    <label class="flex items-center">
+                        <input 
+                            type="checkbox" 
+                            name="is_visible" 
+                            id="is_visible" 
+                            {% if menu.is_visible %}checked{% endif %}
+                            class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        >
+                        <span class="ml-2 text-sm text-gray-700">是否可见</span>
+                    </label>
+                </div>
+                {% endif %}
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">允许访问的角色</label>
+                    <div class="space-y-2">
+                        {% for role in roles %}
+                        <label class="flex items-center">
+                            <input 
+                                type="checkbox" 
+                                name="roles" 
+                                value="{{ role.id }}"
+                                {% if menu and role in menu.roles.all %}checked{% endif %}
+                                class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                            >
+                            <span class="ml-2 text-sm text-gray-700">{{ role.name }}</span>
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mt-6 flex justify-end space-x-4">
+                <a href="{% url 'menu_list' %}" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+                    取消
+                </a>
+                <button 
+                    type="submit" 
+                    class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                    保存
+                </button>
+            </div>
+        </div>
+    </form>
+</div>
+{% endblock %}

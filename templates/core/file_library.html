@@ -1,0 +1,431 @@
+{% extends "base.html" %}
+{% block title %}文件库{% endblock %}
+{% block page_title %}文件库{% endblock %}
+
+{% block content %}
+{% if role_perm.perm_file_delete %}
+{% for f in files %}
+<form id="del-form-{{ f.pk }}" method="post" action="{% url 'file_library_delete' f.pk %}" class="hidden">
+    {% csrf_token %}
+    {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
+    {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
+    {% if uploader_selected %}<input type="hidden" name="uploader" value="{{ uploader_selected }}">{% endif %}
+    {% if project_selected %}<input type="hidden" name="project" value="{{ project_selected }}">{% endif %}
+</form>
+{% endfor %}
+{% endif %}
+
+<div class="bg-white rounded-lg shadow p-6">
+    <div class="mb-6 p-4 bg-indigo-50 rounded-lg border border-indigo-200">
+        <p class="text-sm font-medium text-indigo-900 mb-2">项目管理（位于分类上方）</p>
+        <p class="text-xs text-indigo-700 mb-3">通过项目筛选可定位单项目文件；同一文件允许关联多个项目以支持复用。</p>
+        <form method="post" class="flex flex-wrap items-end gap-3 mb-3">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create_project">
+            <input type="text" name="project_code" placeholder="项目编码" class="px-3 py-2 border border-indigo-300 rounded-md text-sm">
+            <input type="text" name="project_name" placeholder="项目名称" class="px-3 py-2 border border-indigo-300 rounded-md text-sm">
+            <input type="text" name="project_desc" placeholder="描述（可选）" class="px-3 py-2 border border-indigo-300 rounded-md text-sm min-w-[16rem]">
+            <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">新增项目</button>
+        </form>
+    </div>
+    <div class="flex flex-wrap gap-2 mb-6 border-b border-gray-200 pb-4">
+        {% for t in file_library_tabs %}
+        <a href="{% url 'file_library' %}?tab={{ t.key }}{% if date_from and date_to %}&amp;date_from={{ date_from }}&amp;date_to={{ date_to }}{% endif %}{% if uploader_selected %}&amp;uploader={{ uploader_selected }}{% endif %}{% if project_selected %}&amp;project={{ project_selected }}{% endif %}"
+           class="px-4 py-2 rounded-lg {% if tab == t.key %}bg-blue-600 text-white{% else %}bg-gray-100 text-gray-700 hover:bg-gray-200{% endif %}">
+            {{ t.label }}
+        </a>
+        {% endfor %}
+        {% if role_perm.perm_process_pipeline %}
+        <a href="{% url 'process_pipeline' %}"
+           class="ml-auto px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">
+            流程处理
+        </a>
+        {% endif %}
+    </div>
+
+    {% if file_scope_own_only %}
+    <p class="mb-4 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+        已开启「文件库仅本人数据」：列表仅显示本人上传或产生的记录；是否可上传、下载、预览、删除等仍由角色权限控制。
+    </p>
+    {% endif %}
+
+    <div class="mb-6 p-4 bg-slate-50 rounded-lg border border-slate-200">
+        <p class="text-sm font-medium text-gray-800 mb-2">筛选</p>
+        <p class="text-xs text-gray-500 mb-3">按创建日期：须同时选择起止日，含首尾最多 30 天。{% if not file_scope_own_only %}按上传者：仅统计当前 Tab 与日期范围内的记录。{% endif %}</p>
+        <form method="get" id="file-library-date-filter" class="flex flex-wrap items-end gap-4">
+            <input type="hidden" name="tab" value="{{ tab }}">
+            <div>
+                <label for="project" class="block text-xs text-gray-600 mb-1">项目</label>
+                <select name="project" id="project"
+                        class="px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-800 min-w-[12rem]">
+                    <option value="">全部项目</option>
+                    {% for p in projects %}
+                    <option value="{{ p.id }}" {% if project_selected == p.id|stringformat:"s" %}selected{% endif %}>{{ p.code }} · {{ p.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="date_from" class="block text-xs text-gray-600 mb-1">开始日期</label>
+                <input type="date" name="date_from" id="date_from" value="{{ date_from }}"
+                       class="px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-800">
+            </div>
+            <div>
+                <label for="date_to" class="block text-xs text-gray-600 mb-1">结束日期</label>
+                <input type="date" name="date_to" id="date_to" value="{{ date_to }}"
+                       class="px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-800">
+            </div>
+            {% if not file_scope_own_only %}
+            <div>
+                <label for="uploader" class="block text-xs text-gray-600 mb-1">上传者</label>
+                <select name="uploader" id="uploader"
+                        class="px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-800 min-w-[12rem]">
+                    <option value="">全部</option>
+                    {% for u in uploader_choices %}
+                    <option value="{{ u.id }}" {% if uploader_selected == u.id|stringformat:"s" %}selected{% endif %}>#{{ u.id }} {{ u.username }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+            <button type="submit" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">应用筛选</button>
+            <a href="{% url 'file_library' %}?tab={{ tab }}{% if uploader_selected %}&amp;uploader={{ uploader_selected }}{% endif %}{% if project_selected %}&amp;project={{ project_selected }}{% endif %}" class="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 underline">清除日期</a>
+            {% if not file_scope_own_only and uploader_selected %}
+            <a href="{% url 'file_library' %}?tab={{ tab }}{% if date_from and date_to %}&amp;date_from={{ date_from }}&amp;date_to={{ date_to }}{% endif %}" class="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 underline">清除上传者</a>
+            {% endif %}
+        </form>
+    </div>
+
+    {% if tab == 'ocr' and role_perm.perm_file_upload %}
+    <div class="mb-2 text-sm font-medium text-gray-700">上传到「OCR文件」分类</div>
+    <div class="mb-6 p-4 bg-slate-50 rounded-lg border border-slate-200 space-y-3">
+        <p class="text-xs text-gray-600">可多次选择文件加入列表，在列表中移除不需要上传的项后再提交。</p>
+        <div>
+            <label class="block text-sm text-gray-600 mb-1">选择文件（可多选，可多次添加）</label>
+            <input type="file" id="ocr-picker" multiple
+                   class="block w-full text-sm text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700">
+        </div>
+        <div id="ocr-pending-section" class="hidden">
+            <p class="text-xs font-medium text-gray-700 mb-2">待上传列表</p>
+            <div class="border border-gray-200 rounded-lg overflow-hidden mb-3">
+                <table class="min-w-full text-sm text-left text-gray-700" id="ocr-pending-table">
+                    <thead class="bg-gray-50 text-gray-600 text-xs uppercase">
+                        <tr><th class="px-3 py-2">文件名</th><th class="px-3 py-2 w-24">操作</th></tr>
+                    </thead>
+                    <tbody id="ocr-pending-body"></tbody>
+                </table>
+            </div>
+            <form method="post" enctype="multipart/form-data" id="ocr-upload-form" class="flex flex-wrap items-center gap-3">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="upload">
+                {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
+                {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
+                {% if uploader_selected %}<input type="hidden" name="uploader" value="{{ uploader_selected }}">{% endif %}
+                <input type="file" name="files" id="ocr-files-input" multiple class="sr-only" tabindex="-1" aria-hidden="true" title="">
+                <button type="submit" id="ocr-upload-submit" disabled
+                        class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                    上传列表中的文件
+                </button>
+                <button type="button" id="ocr-clear-all" class="px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
+                    清空列表
+                </button>
+            </form>
+        </div>
+    </div>
+    {% elif tab == 'json' and role_perm.perm_file_upload %}
+    <div class="mb-2 text-sm font-medium text-gray-700">上传 JSON 到「JSON 文件」分类</div>
+    <form method="post" enctype="multipart/form-data" class="mb-6 flex flex-wrap items-end gap-4 p-4 bg-slate-50 rounded-lg border border-slate-200">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="upload_json">
+        {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
+        {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
+        {% if uploader_selected %}<input type="hidden" name="uploader" value="{{ uploader_selected }}">{% endif %}
+        <div>
+            <label class="block text-sm text-gray-600 mb-1">选择 .json 文件（可多选）</label>
+            <input type="file" name="files" multiple accept=".json,application/json"
+                   class="block w-full text-sm text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700">
+        </div>
+        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">上传 JSON</button>
+    </form>
+    {% elif tab == 'template' and role_perm.perm_file_upload %}
+    <div class="mb-2 text-sm font-medium text-gray-700">上传到「模板」分类</div>
+    <form method="post" enctype="multipart/form-data" class="mb-6 flex flex-wrap items-end gap-4 p-4 bg-slate-50 rounded-lg border border-slate-200">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="upload_template">
+        {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
+        {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
+        {% if uploader_selected %}<input type="hidden" name="uploader" value="{{ uploader_selected }}">{% endif %}
+        <div>
+            <label class="block text-sm text-gray-600 mb-1">选择文件（可多选）</label>
+            <input type="file" name="files" multiple
+                   class="block w-full text-sm text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700">
+        </div>
+        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">上传</button>
+    </form>
+    {% elif tab == 'site_record' and role_perm.perm_file_upload %}
+    <div class="mb-2 text-sm font-medium text-gray-700">上传到「现场记录」分类</div>
+    <form method="post" enctype="multipart/form-data" class="mb-6 flex flex-wrap items-end gap-4 p-4 bg-slate-50 rounded-lg border border-slate-200">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="upload_site_record">
+        {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
+        {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
+        {% if uploader_selected %}<input type="hidden" name="uploader" value="{{ uploader_selected }}">{% endif %}
+        <div>
+            <label class="block text-sm text-gray-600 mb-1">选择文件（可多选）</label>
+            <input type="file" name="files" multiple
+                   class="block w-full text-sm text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700">
+        </div>
+        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">上传</button>
+    </form>
+    {% elif tab == 'report' and role_perm.perm_file_upload %}
+    <div class="mb-2 text-sm font-medium text-gray-700">上传到「报告」分类</div>
+    <form method="post" enctype="multipart/form-data" class="mb-6 flex flex-wrap items-end gap-4 p-4 bg-slate-50 rounded-lg border border-slate-200">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="upload_report">
+        {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
+        {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
+        {% if uploader_selected %}<input type="hidden" name="uploader" value="{{ uploader_selected }}">{% endif %}
+        <div>
+            <label class="block text-sm text-gray-600 mb-1">选择文件（可多选）</label>
+            <input type="file" name="files" multiple
+                   class="block w-full text-sm text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700">
+        </div>
+        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">上传</button>
+    </form>
+    {% elif tab == 'attachment' and role_perm.perm_file_upload_attachment %}
+    <div class="mb-2 text-sm font-medium text-gray-700">上传到「附件」分类</div>
+    <form method="post" enctype="multipart/form-data" class="mb-6 flex flex-wrap items-end gap-4 p-4 bg-slate-50 rounded-lg border border-slate-200">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="upload_attachment">
+        {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
+        {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
+        {% if uploader_selected %}<input type="hidden" name="uploader" value="{{ uploader_selected }}">{% endif %}
+        <div>
+            <label class="block text-sm text-gray-600 mb-1">选择附件（可多选）</label>
+            <input type="file" name="files" multiple
+                   class="block w-full text-sm text-gray-700 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700">
+        </div>
+        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">上传附件</button>
+    </form>
+    {% elif tab == 'ocr' or tab == 'json' or tab == 'template' or tab == 'site_record' or tab == 'report' %}
+    <p class="mb-6 text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">当前角色无权在此分类上传文件。</p>
+    {% elif tab == 'attachment' %}
+    <p class="mb-6 text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">当前角色无权上传附件；可在「角色管理」中为该角色开启「附件上传」权限。</p>
+    {% endif %}
+
+    {% if can_batch_delete %}
+    <form method="post" action="{% url 'file_library_batch_delete' %}" id="batch-form">
+        {% csrf_token %}
+        <input type="hidden" name="tab" value="{{ tab }}">
+        {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
+        {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
+        {% if uploader_selected %}<input type="hidden" name="uploader" value="{{ uploader_selected }}">{% endif %}
+    {% else %}
+    <div>
+    {% endif %}
+        <div class="flex flex-wrap items-center gap-3 mb-4">
+            {% if can_batch_delete %}
+            <button type="submit" class="px-3 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700"
+                    onclick="return confirm('确定删除所选文件？');">
+                批量删除
+            </button>
+            {% endif %}
+            <span class="text-sm text-gray-500">
+                {% if can_batch_delete %}勾选后批量删除；{% endif %}
+                {% if role_perm.perm_file_download %}支持下载；{% endif %}
+                {% if role_perm.perm_file_preview %}图片 / PDF / JSON / Markdown 可预览（新标签页）。{% endif %}
+            </span>
+            {% if date_filter_active %}
+            <span class="text-xs text-blue-700 bg-blue-50 px-2 py-1 rounded">当前按日期筛选：{{ date_from }} ～ {{ date_to }}</span>
+            {% endif %}
+            {% if not file_scope_own_only and uploader_selected %}
+            <span class="text-xs text-violet-700 bg-violet-50 px-2 py-1 rounded">上传者 ID：{{ uploader_selected }}</span>
+            {% endif %}
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="min-w-full text-sm text-left text-gray-700">
+                <thead class="bg-gray-50 text-gray-600 uppercase text-xs">
+                    <tr>
+                        {% if can_batch_delete %}
+                        <th class="px-3 py-2 w-10"><input type="checkbox" id="check-all"></th>
+                        {% endif %}
+                        <th class="px-3 py-2">文件名</th>
+                        <th class="px-3 py-2">大小</th>
+                        <th class="px-3 py-2">上传者</th>
+                        <th class="px-3 py-2">时间</th>
+                        <th class="px-3 py-2">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for f in files %}
+                    <tr class="border-b border-gray-100 hover:bg-gray-50">
+                        {% if can_batch_delete %}
+                        <td class="px-3 py-2"><input type="checkbox" name="ids" value="{{ f.pk }}" class="row-check"></td>
+                        {% endif %}
+                        <td class="px-3 py-2">
+                            {% if role_perm.perm_file_preview and f.preview_kind != 'unsupported' %}
+                            <a href="{% url 'file_preview' f.pk %}" target="_blank" rel="noopener" class="text-blue-600 hover:underline">
+                                {{ f.original_name }}
+                            </a>
+                            {% else %}
+                            <span>{{ f.original_name }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-3 py-2">{{ f.size }} B</td>
+                        <td class="px-3 py-2 text-xs">
+                            {% if f.created_by_id %}
+                            <span class="font-mono text-gray-800">#{{ f.created_by_id }}</span>
+                            {% if f.created_by %}
+                            <span class="block text-gray-500">{{ f.created_by.username }}</span>
+                            {% endif %}
+                            {% else %}
+                            <span class="text-gray-400">—</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-3 py-2">{{ f.created_at|date:"Y-m-d H:i" }}</td>
+                        <td class="px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+                            {% if role_perm.perm_file_download %}
+                            <a href="{% url 'file_library_download' f.pk %}"
+                               class="text-emerald-600 hover:underline text-sm">下载</a>
+                            {% endif %}
+                            {% if role_perm.perm_file_delete %}
+                            <button type="submit" form="del-form-{{ f.pk }}"
+                                    class="text-red-600 hover:underline text-sm"
+                                    onclick="return confirm('确定删除该文件？');">
+                                删除
+                            </button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="{% if can_batch_delete %}6{% else %}5{% endif %}" class="px-3 py-6 text-center text-gray-400">暂无文件</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% if can_batch_delete %}
+    </form>
+    {% else %}
+    </div>
+    {% endif %}
+</div>
+<script>
+(function () {
+    var project = "{{ project_selected|default:''|escapejs }}";
+    if (project) {
+        document.querySelectorAll('form[method="post"]').forEach(function (fm) {
+            if (!fm.querySelector('input[name="project_ids"]')) {
+                var pi = document.createElement('input');
+                pi.type = 'hidden';
+                pi.name = 'project_ids';
+                pi.value = project;
+                fm.appendChild(pi);
+            }
+            if (!fm.querySelector('input[name="project"]')) {
+                var p = document.createElement('input');
+                p.type = 'hidden';
+                p.name = 'project';
+                p.value = project;
+                fm.appendChild(p);
+            }
+        });
+    }
+    document.getElementById('check-all')?.addEventListener('change', function () {
+        document.querySelectorAll('.row-check').forEach(function (cb) { cb.checked = this.checked; }.bind(this));
+    });
+    var df = document.getElementById('date_from');
+    var dt = document.getElementById('date_to');
+    var form = document.getElementById('file-library-date-filter');
+    if (form && df && dt) {
+        form.addEventListener('submit', function (e) {
+            var a = df.value;
+            var b = dt.value;
+            if (!a && !b) return;
+            if (!a || !b) {
+                e.preventDefault();
+                alert('请同时选择开始日期与结束日期，或点击「清除日期」查看全部。');
+                return;
+            }
+            var d0 = new Date(a + 'T12:00:00');
+            var d1 = new Date(b + 'T12:00:00');
+            if (d0 > d1) {
+                e.preventDefault();
+                alert('开始日期不能晚于结束日期。');
+                return;
+            }
+            var days = Math.round((d1 - d0) / 86400000) + 1;
+            if (days > 30) {
+                e.preventDefault();
+                alert('日期范围最多连续 30 天（含起止日），请缩小区间。');
+            }
+        });
+    }
+})();
+{% if tab == 'ocr' and role_perm.perm_file_upload %}
+(function () {
+    var picker = document.getElementById('ocr-picker');
+    var fileInput = document.getElementById('ocr-files-input');
+    var pendingBody = document.getElementById('ocr-pending-body');
+    var section = document.getElementById('ocr-pending-section');
+    var submitBtn = document.getElementById('ocr-upload-submit');
+    var clearBtn = document.getElementById('ocr-clear-all');
+    if (!picker || !fileInput || !pendingBody || !section || !submitBtn) return;
+
+    var pending = [];
+
+    function syncToInput() {
+        var dt = new DataTransfer();
+        pending.forEach(function (f) { dt.items.add(f); });
+        fileInput.files = dt.files;
+        submitBtn.disabled = pending.length === 0;
+    }
+
+    function renderTable() {
+        pendingBody.innerHTML = '';
+        pending.forEach(function (f, i) {
+            var tr = document.createElement('tr');
+            tr.className = 'border-t border-gray-100';
+            var tdName = document.createElement('td');
+            tdName.className = 'px-3 py-2';
+            tdName.textContent = f.name;
+            var tdAct = document.createElement('td');
+            tdAct.className = 'px-3 py-2';
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'text-sm text-red-600 hover:underline';
+            btn.textContent = '移除';
+            btn.addEventListener('click', function () {
+                pending.splice(i, 1);
+                syncToInput();
+                if (pending.length === 0) {
+                    section.classList.add('hidden');
+                }
+                renderTable();
+            });
+            tdAct.appendChild(btn);
+            tr.appendChild(tdName);
+            tr.appendChild(tdAct);
+            pendingBody.appendChild(tr);
+        });
+        if (pending.length) {
+            section.classList.remove('hidden');
+        }
+    }
+
+    picker.addEventListener('change', function () {
+        var add = Array.from(this.files || []);
+        add.forEach(function (f) { pending.push(f); });
+        this.value = '';
+        syncToInput();
+        renderTable();
+    });
+
+    clearBtn.addEventListener('click', function () {
+        pending = [];
+        syncToInput();
+        section.classList.add('hidden');
+        renderTable();
+    });
+})();
+{% endif %}
+</script>
+{% endblock %}

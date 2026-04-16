@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}流程处理{% endblock %}
+{% block page_title %}集成处理流程（utils.document_pipeline）{% endblock %}
+
+{% block content %}
+<style>
+@keyframes pipeline-progress-slide {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(280%); }
+}
+.pipeline-progress-thumb {
+    width: 38%;
+    min-width: 4rem;
+    animation: pipeline-progress-slide 1.35s ease-in-out infinite;
+}
+</style>
+
+<div id="pipeline-busy-overlay" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/30 px-4" aria-live="polite" aria-busy="false">
+    <div class="bg-white rounded-xl shadow-2xl p-6 sm:p-8 max-w-md w-full border border-gray-200">
+        <div class="flex items-start gap-3 mb-4">
+            <span class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-100 text-blue-600">
+                <svg class="h-5 w-5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+            </span>
+            <div>
+                <p class="text-sm font-semibold text-gray-900">正在执行管线</p>
+                <p class="text-xs text-gray-500 mt-1 leading-relaxed">合并 PDF → MinerU → Markdown 清洗 → Ollama 生成 JSON。耗时取决于文件大小与模型，请勿关闭或刷新本页。</p>
+            </div>
+        </div>
+        <p class="text-xs text-gray-400 mb-2">进度（不确定）：表示任务仍在进行</p>
+        <div class="h-2.5 w-full rounded-full bg-gray-200 overflow-hidden">
+            <div class="pipeline-progress-thumb h-full rounded-full bg-gradient-to-r from-blue-400 via-blue-600 to-blue-400"></div>
+        </div>
+    </div>
+</div>
+
+<div class="bg-white rounded-lg shadow p-6 mb-6">
+    <p class="text-sm text-gray-600 mb-4">
+        从「OCR文件」分类中选择 PDF / JPG / PNG 提取铭牌，并转换为 JSON 文件。
+    </p>
+    <form method="post" id="pipeline-form">
+        {% csrf_token %}
+        <div class="mb-4">
+            <label for="project" class="block text-sm text-gray-600 mb-1">项目筛选</label>
+            <select id="project" name="project" class="px-3 py-2 border border-gray-300 rounded-md text-sm min-w-[14rem]"
+                    onchange="window.location.href='?project='+this.value">
+                <option value="">全部项目</option>
+                {% for p in projects %}
+                <option value="{{ p.id }}" {% if project_selected == p.id|stringformat:'s' %}selected{% endif %}>{{ p.code }} · {{ p.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="overflow-x-auto max-h-96 border border-gray-200 rounded-lg">
+            <table class="min-w-full text-sm text-left">
+                <thead class="bg-gray-50 text-gray-600 uppercase text-xs sticky top-0">
+                    <tr>
+                        <th class="px-3 py-2 w-10"></th>
+                        <th class="px-3 py-2">文件名</th>
+                        <th class="px-3 py-2">大小</th>
+                        <th class="px-3 py-2">上传时间</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for f in uploads %}
+                    <tr class="border-t border-gray-100 hover:bg-gray-50">
+                        <td class="px-3 py-2">
+                            <input type="checkbox" name="file_ids" value="{{ f.pk }}">
+                        </td>
+                        <td class="px-3 py-2">{{ f.original_name }}</td>
+                        <td class="px-3 py-2">{{ f.size }} B</td>
+                        <td class="px-3 py-2">{{ f.created_at|date:"Y-m-d H:i" }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="4" class="px-3 py-6 text-center text-gray-400">请先在文件库上传 PDF 或图片</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="mt-4 flex gap-3">
+            <button type="submit" id="pipeline-submit-btn" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed">开始处理</button>
+            <a href="{% url 'file_library' %}?tab=ocr" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">返回文件库</a>
+        </div>
+    </form>
+</div>
+
+{% if result %}
+<div class="bg-white rounded-lg shadow p-6 space-y-4">
+    <h3 class="text-lg font-semibold text-gray-800">处理结果</h3>
+    <p class="text-sm text-gray-600">批次 ID：<code class="bg-gray-100 px-1 rounded">{{ result.batch_id }}</code></p>
+    <p class="text-sm">
+        <a class="text-blue-600 hover:underline" href="{% url 'file_temp_batch' result.batch_id %}" target="_blank" rel="noopener">
+            查看本次中间文件（临时文件库）
+        </a>
+    </p>
+    <p class="text-sm text-gray-600">管线状态：</p>
+    <pre class="text-xs bg-gray-50 border border-gray-200 rounded p-4 overflow-auto max-h-48">{{ result.pipeline_json }}</pre>
+    <div>
+        <h4 class="font-medium text-gray-800 mb-2">设备 JSON</h4>
+        <pre class="text-xs bg-gray-50 border border-gray-200 rounded p-4 overflow-auto max-h-96">{{ result.devices_json }}</pre>
+    </div>
+    <h4 class="font-medium text-gray-800 mb-2">图片数据（images）</h4>
+    <pre class="text-xs bg-gray-50 border border-gray-200 rounded p-4 overflow-auto max-h-64">{{ result.images_json }}</pre>
+    <p class="text-sm text-gray-600">每台仪器已拆分为独立 JSON 文件并登记到文件库「JSON 文件」分类，可在文件库中按日期筛选、预览或下载。</p>
+</div>
+{% endif %}
+<script>
+(function () {
+    var form = document.querySelector('#pipeline-form');
+    var btn = document.getElementById('pipeline-submit-btn');
+    var overlay = document.getElementById('pipeline-busy-overlay');
+    if (!form || !btn || !overlay) return;
+
+    form.addEventListener('submit', function (e) {
+        var checked = form.querySelectorAll('input[name="file_ids"]:checked');
+        if (!checked.length) {
+            return;
+        }
+        if (btn.disabled) return;
+        btn.disabled = true;
+        btn.textContent = '处理中…';
+        overlay.classList.remove('hidden');
+        overlay.setAttribute('aria-busy', 'true');
+        form.classList.add('pointer-events-none', 'opacity-60');
+    });
+})();
+</script>
+{% endblock %}

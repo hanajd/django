@@ -1,0 +1,94 @@
+{% extends 'base.html' %}
+
+{% block page_title %}{% if role %}编辑角色{% else %}创建角色{% endif %}{% endblock %}
+
+{% block content %}
+<div class="bg-white rounded-lg shadow p-6">
+    <form method="post">
+        {% csrf_token %}
+        
+        <div class="max-w-2xl">
+            <div class="space-y-6">
+                <div>
+                    <label for="name" class="block text-sm font-medium text-gray-700 mb-1">角色名称 <span class="text-red-500">*</span></label>
+                    <input 
+                        type="text" 
+                        name="name" 
+                        id="name" 
+                        value="{% if role %}{{ role.name }}{% endif %}"
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                    >
+                </div>
+                
+                <div>
+                    <label for="code" class="block text-sm font-medium text-gray-700 mb-1">角色代码 <span class="text-red-500">*</span></label>
+                    <select 
+                        name="code" 
+                        id="code" 
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        {% if role %}disabled{% endif %}
+                        required
+                    >
+                        <option value="">请选择角色代码</option>
+                        <option value="super_admin" {% if role and role.code == 'super_admin' %}selected{% endif %}>super_admin</option>
+                        <option value="admin" {% if role and role.code == 'admin' %}selected{% endif %}>admin</option>
+                        <option value="app_user" {% if role and role.code == 'app_user' %}selected{% endif %}>app_user</option>
+                    </select>
+                    {% if role %}
+                    <input type="hidden" name="code" value="{{ role.code }}">
+                    <p class="text-xs text-gray-500 mt-1">角色代码创建后不可修改</p>
+                    {% endif %}
+                </div>
+                
+                <div>
+                    <label for="description" class="block text-sm font-medium text-gray-700 mb-1">描述</label>
+                    <textarea 
+                        name="description" 
+                        id="description" 
+                        rows="4"
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >{% if role %}{{ role.description }}{% endif %}</textarea>
+                </div>
+
+                {% if role and perm_rows %}
+                <div class="border-t border-gray-200 pt-6 mt-2">
+                    <h3 class="text-sm font-semibold text-gray-800 mb-1">基础功能权限</h3>
+                    <p class="text-xs text-gray-500 mb-4">勾选即授予该角色对应能力；保存后立即对用户侧菜单与文件库行为生效。</p>
+                    {% if role.code == 'super_admin' %}
+                    <p class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
+                        超级管理员角色的权限固定为全开（含可管理他人数据），不可下调；下列仅作展示。
+                    </p>
+                    {% endif %}
+                    <div class="space-y-3">
+                        {% for row in perm_rows %}
+                        <label class="flex items-start gap-3 p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer">
+                            <input type="checkbox" name="{{ row.field }}" class="mt-1 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                   {% if row.value %}checked{% endif %}
+                                   {% if role.code == 'super_admin' %}disabled{% endif %}>
+                            <span>
+                                <span class="block text-sm font-medium text-gray-800">{{ row.title }}</span>
+                                <span class="block text-xs text-gray-500 mt-0.5">{{ row.help }}</span>
+                            </span>
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+            
+            <div class="mt-6 flex justify-end space-x-4">
+                <a href="{% url 'role_list' %}" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+                    取消
+                </a>
+                <button 
+                    type="submit" 
+                    class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                    保存
+                </button>
+            </div>
+        </div>
+    </form>
+</div>
+{% endblock %}
