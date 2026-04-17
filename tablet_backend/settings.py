@@ -130,6 +130,7 @@ FILE_LIBRARY_TEMPLATE_DIR = FILE_LIBRARY_ROOT / 'templates'
 FILE_LIBRARY_SITE_RECORD_DIR = FILE_LIBRARY_ROOT / 'site_records'
 FILE_LIBRARY_REPORT_DIR = FILE_LIBRARY_ROOT / 'reports'
 FILE_LIBRARY_ATTACHMENT_DIR = FILE_LIBRARY_ROOT / 'attachments'
+FILE_LIBRARY_INSPECTION_SUBMIT_DIR = FILE_LIBRARY_ROOT / 'inspection_submits'
 FILE_LIBRARY_TEMP_ROOT = FILE_LIBRARY_ROOT / 'temp'
 # Paths passed to utils.pipeline_config.set_pipeline_directories（见 apps.core.pipeline_service）
 PIPELINE_TEMP_PDF = FILE_LIBRARY_TEMP_ROOT / 'temp_pdf'

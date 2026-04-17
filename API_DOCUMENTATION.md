@@ -1,552 +1,296 @@
-# API 接口文档
+# API 接口文档（当前实现）
+
+本文档基于当前代码生成，覆盖 `django/apps/api/urls.py` 下已注册接口。
 
 ## 基础信息
 
-- **Base URL**: `http://localhost:11223/api/v1/`
-- **认证方式**: JWT Token (Bearer Token)
-- **数据格式**: JSON
+- Base URL: `http://localhost:11223/api/v1`
+- 认证方式: `Authorization: Bearer <access_token>`
+- 默认返回: JSON（文件下载接口返回二进制）
 
-## 认证接口
+## 通用状态码
 
-### 1. 用户登录
+- `200` 成功
+- `201` 创建成功
+- `202` 已受理（异步任务已创建）
+- `400` 参数错误
+- `401` 未认证 / token 无效
+- `403` 无权限
+- `404` 资源不存在
+- `409` 冲突（如 OCR 处理中）
+- `422` 数据校验失败（检测提交系列）
+- `500` 服务端内部错误
 
-**接口地址**: `POST /api/v1/auth/login/`
+---
 
-**请求参数**:
+## 1. 认证接口
+
+### 1.1 登录
+
+- `POST /auth/login/`
+- 请求体:
+
 ```json
 {
   "username": "admin",
-  "password": "password123"
+  "password": "123456"
 }
 ```
 
-**响应示例**:
+- 响应:
+
 ```json
 {
-  "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "access": "jwt_access_token",
+  "refresh": "jwt_refresh_token",
   "user": {
     "id": 1,
     "username": "admin",
-    "email": "admin@example.com",
-    "first_name": "Admin",
-    "last_name": "User",
+    "email": "",
+    "first_name": "",
+    "last_name": "",
     "role_code": "super_admin",
     "role_name": "超级管理员"
   }
 }
 ```
 
-**状态码**:
-- `200 OK`: 登录成功
-- `401 UNAUTHORIZED`: 用户名或密码错误
+### 1.2 刷新 Token
 
----
+- `POST /auth/token/refresh/`
+- 请求体:
 
-### 2. Token 刷新
-
-**接口地址**: `POST /api/v1/auth/token/refresh/`
-
-**请求参数**:
 ```json
 {
-  "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  "refresh": "jwt_refresh_token"
 }
 ```
 
-**响应示例**:
+---
+
+## 2. 检测任务（taskNo 主链路）
+
+> 推荐前端统一使用本章节接口。
+
+### 2.1 待检测任务列表
+
+- `GET /inspections/pending`
+- Query:
+  - `page` (可选，默认 1)
+  - `pageSize` (可选，默认 20，最大 100)
+  - `deviceType` (可选)
+- 响应结构:
+
 ```json
 {
-  "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-}
-```
-
-**状态码**:
-- `200 OK`: 刷新成功
-- `400 BAD REQUEST`: 缺少 refresh token
-- `401 UNAUTHORIZED`: Token 无效或已过期
-
----
-
-## 用户管理接口
-
-### 3. 用户列表
-
-**接口地址**: `GET /api/v1/users/`
-
-**认证要求**: 需要登录 + 管理员权限
-
-**请求头**:
-```
-Authorization: Bearer {access_token}
-```
-
-**响应示例**:
-```json
-[
-  {
-    "id": 1,
-    "username": "admin",
-    "email": "admin@example.com",
-    "first_name": "Admin",
-    "last_name": "User",
-    "phone": "13800138000",
-    "department": "技术部",
-    "position": "技术总监",
-    "role_code": "super_admin",
-    "is_staff": true,
-    "is_active": true
-  }
-]
-```
-
-**状态码**:
-- `200 OK`: 查询成功
-
----
-
-### 4. 创建用户
-
-**接口地址**: `POST /api/v1/users/`
-
-**认证要求**: 需要登录 + 管理员权限
-
-**请求头**:
-```
-Authorization: Bearer {access_token}
-```
-
-**请求参数**:
-```json
-{
-  "username": "newuser",
-  "email": "newuser@example.com",
-  "password": "password123",
-  "first_name": "New",
-  "last_name": "User",
-  "phone": "13900139000",
-  "department": "运营部",
-  "position": "运营专员",
-  "role_code": "app_user"
-}
-```
-
-**响应示例**:
-```json
-{
-  "id": 2,
-  "username": "newuser",
-  "email": "newuser@example.com",
-  "first_name": "New",
-  "last_name": "User",
-  "phone": "13900139000",
-  "department": "运营部",
-  "position": "运营专员",
-  "role_code": "app_user",
-  "is_staff": false,
-  "is_active": true
-}
-```
-
-**状态码**:
-- `201 CREATED`: 创建成功
-- `400 BAD REQUEST`: 参数错误
-
----
-
-### 5. 获取单个用户
-
-**接口地址**: `GET /api/v1/users/{id}/`
-
-**认证要求**: 需要登录 + 管理员权限
-
-**请求头**:
-```
-Authorization: Bearer {access_token}
-```
-
-**响应示例**:
-```json
-{
-  "id": 1,
-  "username": "admin",
-  "email": "admin@example.com",
-  "first_name": "Admin",
-  "last_name": "User",
-  "phone": "13800138000",
-  "department": "技术部",
-  "position": "技术总监",
-  "role_code": "super_admin",
-  "is_staff": true,
-  "is_active": true
-}
-```
-
-**状态码**:
-- `200 OK`: 查询成功
-- `404 NOT FOUND`: 用户不存在
-
----
-
-### 6. 更新用户
-
-**接口地址**: `PUT /api/v1/users/{id}/` 或 `PATCH /api/v1/users/{id}/`
-
-**认证要求**: 需要登录 + 管理员权限
-
-**请求头**:
-```
-Authorization: Bearer {access_token}
-```
-
-**请求参数** (PATCH 支持部分更新):
-```json
-{
-  "email": "updated@example.com",
-  "phone": "13800138001",
-  "department": "产品部"
-}
-```
-
-**响应示例**:
-```json
-{
-  "id": 1,
-  "username": "admin",
-  "email": "updated@example.com",
-  "first_name": "Admin",
-  "last_name": "User",
-  "phone": "13800138001",
-  "department": "产品部",
-  "position": "技术总监",
-  "role_code": "super_admin",
-  "is_staff": true,
-  "is_active": true
-}
-```
-
-**状态码**:
-- `200 OK`: 更新成功
-- `400 BAD REQUEST`: 参数错误
-- `404 NOT FOUND`: 用户不存在
-
----
-
-### 7. 删除用户
-
-**接口地址**: `DELETE /api/v1/users/{id}/`
-
-**认证要求**: 需要登录 + 管理员权限
-
-**请求头**:
-```
-Authorization: Bearer {access_token}
-```
-
-**响应**: 无内容
-
-**状态码**:
-- `204 NO CONTENT`: 删除成功
-- `404 NOT FOUND`: 用户不存在
-
----
-
-### 8. 获取当前用户信息
-
-**接口地址**: `GET /api/v1/users/me/`
-
-**认证要求**: 需要登录
-
-**请求头**:
-```
-Authorization: Bearer {access_token}
-```
-
-**响应示例**:
-```json
-{
-  "id": 1,
-  "username": "admin",
-  "email": "admin@example.com",
-  "first_name": "Admin",
-  "last_name": "User",
-  "phone": "13800138000",
-  "department": "技术部",
-  "position": "技术总监",
-  "role_code": "super_admin",
-  "is_staff": true,
-  "is_active": true
-}
-```
-
-**状态码**:
-- `200 OK`: 查询成功
-
----
-
-## 角色管理接口
-
-### 9. 角色列表
-
-**接口地址**: `GET /api/v1/roles/`
-
-**认证要求**: 需要登录
-
-**请求头**:
-```
-Authorization: Bearer {access_token}
-```
-
-**响应示例**:
-```json
-[
-  {
-    "id": 1,
-    "name": "超级管理员",
-    "code": "super_admin",
-    "description": "系统最高权限管理员",
-    "created_at": "2024-01-01T00:00:00Z",
-    "updated_at": "2024-01-01T00:00:00Z"
-  },
-  {
-    "id": 2,
-    "name": "普通管理员",
-    "code": "admin",
-    "description": "普通管理员",
-    "created_at": "2024-01-01T00:00:00Z",
-    "updated_at": "2024-01-01T00:00:00Z"
-  },
-  {
-    "id": 3,
-    "name": "App 用户",
-    "code": "app_user",
-    "description": "平板 App 端用户",
-    "created_at": "2024-01-01T00:00:00Z",
-    "updated_at": "2024-01-01T00:00:00Z"
-  }
-]
-```
-
-**状态码**:
-- `200 OK`: 查询成功
-
----
-
-### 10. 获取单个角色
-
-**接口地址**: `GET /api/v1/roles/{id}/`
-
-**认证要求**: 需要登录
-
-**请求头**:
-```
-Authorization: Bearer {access_token}
-```
-
-**响应示例**:
-```json
-{
-  "id": 1,
-  "name": "超级管理员",
-  "code": "super_admin",
-  "description": "系统最高权限管理员",
-  "created_at": "2024-01-01T00:00:00Z",
-  "updated_at": "2024-01-01T00:00:00Z"
-}
-```
-
-**状态码**:
-- `200 OK`: 查询成功
-- `404 NOT FOUND`: 角色不存在
-
----
-
-## 菜单管理接口
-
-### 11. 菜单列表
-
-**接口地址**: `GET /api/v1/menus/`
-
-**认证要求**: 需要登录
-
-**请求头**:
-```
-Authorization: Bearer {access_token}
-```
-
-**说明**: 
-- 超级管理员可获取所有菜单
-- 普通用户根据角色权限获取对应菜单
-- 返回顶级菜单及其子菜单
-
-**响应示例**:
-```json
-[
-  {
-    "id": 1,
-    "name": "用户管理",
-    "path": "/users/",
-    "icon": "user",
-    "parent": null,
-    "sort_order": 1,
-    "is_visible": true,
-    "children": [
+  "success": true,
+  "message": "获取成功",
+  "data": {
+    "total": 1,
+    "page": 1,
+    "pageSize": 20,
+    "list": [
       {
-        "id": 2,
-        "name": "用户列表",
-        "path": "/users/",
-        "icon": "list",
-        "parent": 1,
-        "sort_order": 1,
-        "is_visible": true,
-        "children": []
-      },
-      {
-        "id": 3,
-        "name": "角色管理",
-        "path": "/roles/",
-        "icon": "shield",
-        "parent": 1,
-        "sort_order": 2,
-        "is_visible": true,
-        "children": []
+        "taskNo": "ASG-24",
+        "reportType": "xray_fluoroscopy",
+        "status": "pending",
+        "createdAt": "2026-04-16T15:00:00+08:00",
+        "assignedAt": "2026-04-16T15:01:00+08:00",
+        "reportInfo": {},
+        "hospitalInfo": {},
+        "equipmentInfo": {}
       }
-    ],
-    "created_at": "2024-01-01T00:00:00Z",
-    "updated_at": "2024-01-01T00:00:00Z"
+    ]
   }
-]
-```
-
-**状态码**:
-- `200 OK`: 查询成功
-
----
-
-### 12. 获取单个菜单
-
-**接口地址**: `GET /api/v1/menus/{id}/`
-
-**认证要求**: 需要登录
-
-**请求头**:
-```
-Authorization: Bearer {access_token}
-```
-
-**响应示例**:
-```json
-{
-  "id": 1,
-  "name": "用户管理",
-  "path": "/users/",
-  "icon": "user",
-  "parent": null,
-  "sort_order": 1,
-  "is_visible": true,
-  "children": [
-    {
-      "id": 2,
-      "name": "用户列表",
-      "path": "/users/",
-      "icon": "list",
-      "parent": 1,
-      "sort_order": 1,
-      "is_visible": true,
-      "children": []
-    }
-  ],
-  "created_at": "2024-01-01T00:00:00Z",
-  "updated_at": "2024-01-01T00:00:00Z"
 }
 ```
 
-**状态码**:
-- `200 OK`: 查询成功
-- `404 NOT FOUND`: 菜单不存在
+### 2.2 历史任务列表
+
+- `GET /inspections/history`
+- Query 同 `pending`
+- 返回 `submitted/approved/rejected` 状态任务
+
+### 2.3 任务详情
+
+- `GET /inspections/{taskNo}`
+
+### 2.4 标记任务开始
+
+- `POST /inspections/{taskNo}/start`
+
+### 2.5 保存草稿（允许部分字段）
+
+- `POST /inspections/{taskNo}/draft`
+- 请求体可包含任意子集:
+  - `reportInfo`
+  - `hospitalInfo`
+  - `equipmentInfo`
+  - `instruments`
+  - `testResult`
+  - `signatures`
+  - `conclusion`
+
+### 2.6 提交检测结果（推荐）
+
+- `POST /inspections/{taskNo}/submit`
+- 请求体: 完整提交结构（reportInfo/hospitalInfo/equipmentInfo/instruments/testResult/signatures/conclusion）
+- 成功后会自动把提交内容另存为文件库 `inspection_submit` 分类 JSON 文件并关联项目。
+- 成功后会自动将当前项目下模板 JSON（`template` 分类）按 placeholder 映射填充，并将填充结果写入 `inspection_submit` 分类；签名会同步写入模板 image 字段。
+
+### 2.7 兼容提交接口（保留）
+
+- `POST /inspections/submit`
+- 说明: 兼容旧版，要求请求体包含 `taskNo`，内部复用 `/{taskNo}/submit` 流程。
+
+### 2.8 签名下载
+
+- `GET /inspections/{taskNo}/signatures/{role}`
+- `role`: `author | reviewer | approver`
 
 ---
 
-## 权限说明
+## 3. taskNo 文件接口（项目隔离）
 
-### 角色类型
+### 3.1 上传文件
 
-- **super_admin**: 超级管理员，拥有所有权限
-- **admin**: 普通管理员，可管理用户、角色、菜单
-- **app_user**: App 用户，仅可查看基本信息
+- `POST /inspections/{taskNo}/files/{category}`
+- 表单字段:
+  - `category`: `upload | json | template | site_record | report | attachment | inspection_submit`
+  - `files`（多文件）或 `file`（单文件）
+  - `link_entity`（可选）: `inspection_case | site_record | report`
+  - `link_object_id`（可选）
 
-### 权限要求
+### 3.2 文件列表
 
-- **用户管理接口** (增删改查): 需要 `super_admin` 或 `admin` 角色
-- **角色和菜单接口** (查询): 需要登录即可
-- **认证接口**: 无需认证
+- `GET /inspections/{taskNo}/files/{category}`
+- Path:
+  - `category`: `upload | json | template | site_record | report | attachment | inspection_submit`
+- 返回结果包含:
+  - `category`
+  - `download_url`（已包含路径中的分类，可直接用于定向下载）
 
----
+### 3.3 文件下载
 
-## 错误响应格式
-
-所有错误响应遵循统一格式：
-
-```json
-{
-  "error": "错误描述信息"
-}
-```
-
-常见错误状态码：
-- `400 BAD REQUEST`: 请求参数错误
-- `401 UNAUTHORIZED`: 未认证或 Token 无效
-- `403 FORBIDDEN`: 权限不足
-- `404 NOT FOUND`: 资源不存在
-- `500 INTERNAL SERVER ERROR`: 服务器内部错误
+- `GET /inspections/{taskNo}/files/{id}/download/{category}`
+- Path:
+  - `category`: `upload | json | template | site_record | report | attachment | inspection_submit`
+- 说明:
+  - 下载会限制在该分类内匹配指定 `id`，避免跨分类命中。
 
 ---
 
-## 使用示例
+## 4. taskNo OCR 接口（新）
 
-### cURL 示例
+### 4.1 OCR 上传（创建异步任务）
+
+- `POST /inspections/{taskNo}/ocr/upload`
+- 表单字段: `files` 或 `file`
+
+### 4.2 OCR 任务状态
+
+- `GET /inspections/{taskNo}/ocr/tasks/{ocrTaskId}/status`
+
+### 4.3 OCR 自动填充
+
+- `GET /inspections/{taskNo}/ocr/tasks/{ocrTaskId}/autofill`
+
+---
+
+## 5. 文件库旧接口（保留）
+
+### 5.1 OCR 上传（旧）
+
+- `POST /library/files/ocr/`
+
+### 5.2 OCR 状态（旧）
+
+- `GET /library/files/ocr/tasks/{taskId}/status/`
+
+### 5.3 OCR 自动填充（旧）
+
+- `GET /library/files/ocr/tasks/{taskId}/autofill/`
+
+### 5.4 文件下载（旧）
+
+- `GET /library/files/{id}/download/`
+
+### 5.5 业务联动上传
+
+- `POST /library/files/upload-linked/`
+
+### 5.6 模板列表
+
+- `GET /library/templates/downloadable/`
+
+### 5.7 模板转 PDF
+
+- `GET|POST /library/templates/{id}/prepare-pdf-download/`
+
+### 5.8 临时 PDF 下载
+
+- `GET /library/templates/temp-pdf-download/?token=...`
+
+---
+
+## 6. 用户 / 角色 / 菜单
+
+### 6.1 用户
+
+- `GET /users/`
+- `POST /users/`
+- `GET /users/{id}/`
+- `PUT/PATCH /users/{id}/`
+- `DELETE /users/{id}/`
+- `GET /users/me/`
+
+### 6.2 角色（只读）
+
+- `GET /roles/`
+- `GET /roles/{id}/`
+
+### 6.3 菜单（只读）
+
+- `GET /menus/`
+- `GET /menus/{id}/`
+
+---
+
+## 7. 业务登记（Registry）
+
+- `registry/organizations`（ModelViewSet）
+- `registry/contacts`（ModelViewSet）
+- `registry/devices`（ModelViewSet）
+- `registry/cases`（ModelViewSet）
+- `registry/site-records`（ModelViewSet）
+- `registry/reports`（ModelViewSet）
+- `GET /registry/reports/{id}/trace/`
+
+---
+
+## 8. taskNo 与项目隔离规则
+
+- `inspections/*` 接口统一通过 `taskNo -> case -> project` 校验关联。
+- 非管理员用户必须是该项目分配用户才可访问。
+- `/{taskNo}/files/*` 与 `/{taskNo}/ocr/*` 全部按项目隔离，防止跨项目数据污染。
+
+---
+
+## 9. 快速调用示例
 
 ```bash
-# 1. 登录获取 Token
+# 1) 登录
 curl -X POST http://localhost:11223/api/v1/auth/login/ \
   -H "Content-Type: application/json" \
-  -d '{"username": "admin", "password": "password123"}'
+  -d '{"username":"app_user","password":"123456"}'
 
-# 2. 使用 Token 获取用户列表
-curl -X GET http://localhost:11223/api/v1/users/ \
-  -H "Authorization: Bearer {access_token}"
+# 2) 查待办
+curl -X GET "http://localhost:11223/api/v1/inspections/pending?page=1&pageSize=20" \
+  -H "Authorization: Bearer <access_token>"
 
-# 3. 刷新 Token
-curl -X POST http://localhost:11223/api/v1/auth/token/refresh/ \
+# 3) 提交（推荐新接口）
+curl -X POST "http://localhost:11223/api/v1/inspections/ASG-24/submit" \
+  -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
-  -d '{"refresh": "{refresh_token}"}'
+  -d '{ "reportInfo": {}, "hospitalInfo": {}, "equipmentInfo": {}, "instruments": [], "testResult": {}, "signatures": {}, "conclusion": {} }'
 ```
-
-### Python 示例
-
-```python
-import requests
-
-# 1. 登录获取 Token
-response = requests.post('http://localhost:11223/api/v1/auth/login/', json={
-    'username': 'admin',
-    'password': 'password123'
-})
-data = response.json()
-access_token = data['access']
-
-# 2. 使用 Token 访问受保护接口
-headers = {'Authorization': f'Bearer {access_token}'}
-response = requests.get('http://localhost:11223/api/v1/users/', headers=headers)
-print(response.json())
-```
-
----
-
-## 注意事项
-
-1. **Token 有效期**: Access Token 有效期为 2 小时，Refresh Token 有效期为 7 天
-2. **Token 刷新**: Access Token 过期后，使用 Refresh Token 获取新的 Access Token
-3. **权限控制**: 用户管理接口需要管理员权限，普通用户无法访问
-4. **菜单过滤**: 菜单接口会根据用户角色自动过滤，只返回有权限访问的菜单
-5. **分页**: 用户列表支持分页，默认每页 20 条数据

@@ -38,6 +38,8 @@ def library_disk_dir_and_rel_prefix(category: str) -> Tuple[Path, str]:
         return Path(settings.FILE_LIBRARY_REPORT_DIR), "reports"
     if category == LibraryFile.CATEGORY_ATTACHMENT:
         return Path(settings.FILE_LIBRARY_ATTACHMENT_DIR), "attachments"
+    if category == LibraryFile.CATEGORY_INSPECTION_SUBMIT:
+        return Path(settings.FILE_LIBRARY_INSPECTION_SUBMIT_DIR), "inspection_submits"
     raise ValueError(f"unsupported library category: {category}")
 
 
@@ -89,12 +91,26 @@ def save_library_binary_uploads(
                 content_sha256=sha256,
             ).first()
             if existing:
-                skipped.append(
+                # OCR 文件按 hash 去重；若命中历史文件，仍需补齐当前项目关联。
+                if project_map:
+                    for pid in project_map.keys():
+                        LibraryFileProject.objects.get_or_create(
+                            library_file=existing,
+                            project_id=pid,
+                            defaults={"created_by": user},
+                        )
+                created.append(
                     {
-                        "filename": name,
-                        "reason": "duplicate_by_hash",
-                        "existing_id": str(existing.pk),
-                        "sha256": sha256,
+                        "id": existing.pk,
+                        "original_name": existing.original_name,
+                        "relative_path": existing.relative_path,
+                        "size": existing.size,
+                        "category": existing.category,
+                        "link_entity": existing.link_entity,
+                        "link_object_id": existing.link_object_id,
+                        "project_ids": list(project_map.keys()),
+                        "created_at": existing.created_at.isoformat() if existing.created_at else "",
+                        "reused_existing": True,
                     }
                 )
                 continue
@@ -177,6 +193,12 @@ def attach_files_to_projects(file_ids: List[int], project_ids: List[int], user=N
                 project_id=pid,
                 defaults={"created_by": user},
             )
+
+
+def detach_files_from_projects(file_ids: List[int], project_ids: List[int]) -> None:
+    if not file_ids or not project_ids:
+        return
+    LibraryFileProject.objects.filter(library_file_id__in=file_ids, project_id__in=project_ids).delete()
 
 
 def attach_files_to_tasks(file_ids: List[int], task_ids: List[int], user=None) -> None:

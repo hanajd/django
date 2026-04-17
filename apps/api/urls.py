@@ -19,6 +19,22 @@ from apps.api.api_views import (
     TokenRefreshAPIView,
     UserViewSet,
 )
+from apps.api.inspection_views import (
+    InspectionDetailAPIView,
+    InspectionDraftAPIView,
+    InspectionHistoryAPIView,
+    InspectionPendingAPIView,
+    InspectionSignatureDownloadAPIView,
+    InspectionStartAPIView,
+    InspectionSubmitAPIView,
+    InspectionSubmitByTaskAPIView,
+    InspectionTaskOCRAutofillAPIView,
+    InspectionTaskOCRStatusAPIView,
+    InspectionTaskOCRUploadAPIView,
+    InspectionTaskFileDownloadAPIView,
+    InspectionTaskFileListAPIView,
+    InspectionTaskFileUploadAPIView,
+)
 from apps.api.registry_views import (
     BizContactViewSet,
     BizDeviceViewSet,
@@ -88,6 +104,76 @@ urlpatterns = [
         "library/files/upload-linked/",
         RegistryLinkedFileUploadAPIView.as_view(),
         name="api_library_file_upload_linked",
+    ),
+    path(
+        "inspections/submit",
+        InspectionSubmitAPIView.as_view(),
+        name="api_inspection_submit",
+    ),
+    path(
+        "inspections/pending",
+        InspectionPendingAPIView.as_view(),
+        name="api_inspection_pending",
+    ),
+    path(
+        "inspections/history",
+        InspectionHistoryAPIView.as_view(),
+        name="api_inspection_history",
+    ),
+    path(
+        "inspections/<str:task_no>",
+        InspectionDetailAPIView.as_view(),
+        name="api_inspection_detail",
+    ),
+    path(
+        "inspections/<str:task_no>/start",
+        InspectionStartAPIView.as_view(),
+        name="api_inspection_start",
+    ),
+    path(
+        "inspections/<str:task_no>/draft",
+        InspectionDraftAPIView.as_view(),
+        name="api_inspection_draft",
+    ),
+    path(
+        "inspections/<str:task_no>/submit",
+        InspectionSubmitByTaskAPIView.as_view(),
+        name="api_inspection_submit_by_task",
+    ),
+    path(
+        "inspections/<str:task_no>/signatures/<str:role>",
+        InspectionSignatureDownloadAPIView.as_view(),
+        name="api_inspection_signature_download",
+    ),
+    path(
+        "inspections/<str:task_no>/files/upload",
+        InspectionTaskFileUploadAPIView.as_view(),
+        name="api_inspection_task_file_upload",
+    ),
+    path(
+        "inspections/<str:task_no>/ocr/upload",
+        InspectionTaskOCRUploadAPIView.as_view(),
+        name="api_inspection_task_ocr_upload",
+    ),
+    path(
+        "inspections/<str:task_no>/ocr/tasks/<int:ocr_task_id>/status",
+        InspectionTaskOCRStatusAPIView.as_view(),
+        name="api_inspection_task_ocr_status",
+    ),
+    path(
+        "inspections/<str:task_no>/ocr/tasks/<int:ocr_task_id>/autofill",
+        InspectionTaskOCRAutofillAPIView.as_view(),
+        name="api_inspection_task_ocr_autofill",
+    ),
+    path(
+        "inspections/<str:task_no>/files/<str:category>",
+        InspectionTaskFileListAPIView.as_view(),
+        name="api_inspection_task_file_list",
+    ),
+    path(
+        "inspections/<str:task_no>/files/<int:pk>/download/<str:category>",
+        InspectionTaskFileDownloadAPIView.as_view(),
+        name="api_inspection_task_file_download",
     ),
     
     # API 视图集路由

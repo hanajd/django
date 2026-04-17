@@ -74,7 +74,8 @@ class LibraryFileTaskInline(admin.TabularInline):
 
 
 class LibraryTaskAdmin(admin.ModelAdmin):
-    list_display = ("code", "name", "created_by", "created_at")
+    list_display = ("code", "name", "output_target", "created_by", "created_at")
+    list_filter = ("output_target",)
     search_fields = ("code", "name")
     inlines = (LibraryFileTaskInline,)
 

@@ -23,6 +23,7 @@ def ensure_file_library_dirs():
         settings.FILE_LIBRARY_SITE_RECORD_DIR,
         settings.FILE_LIBRARY_REPORT_DIR,
         settings.FILE_LIBRARY_ATTACHMENT_DIR,
+        settings.FILE_LIBRARY_INSPECTION_SUBMIT_DIR,
         settings.FILE_LIBRARY_TEMP_ROOT,
         settings.PIPELINE_TEMP_PDF,
         settings.PIPELINE_BATCH_ARCHIVE,

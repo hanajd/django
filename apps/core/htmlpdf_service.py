@@ -175,7 +175,7 @@ def build_filled_pdf(fields: List[Dict[str, Any]], source_pdf: Path) -> bytes:
                         "✓",
                         fontname="F_CHECK",
                         fontsize=10.5,
-                        color=(0, 0, 0),
+                        color=(1, 0, 0),
                         align=fitz.TEXT_ALIGN_CENTER,
                         overlay=True,
                     )
@@ -189,7 +189,7 @@ def build_filled_pdf(fields: List[Dict[str, Any]], source_pdf: Path) -> bytes:
                             "✓",
                             fontname="F_CHECK",
                             fontsize=10.5,
-                            color=(0, 0, 0),
+                            color=(1, 0, 0),
                             overlay=True,
                         )
                 continue
@@ -226,7 +226,7 @@ def build_filled_pdf(fields: List[Dict[str, Any]], source_pdf: Path) -> bytes:
                 wrapped_text,
                 fontname=font_name,
                 fontsize=fs,
-                color=(0, 0, 0),
+                color=(1, 0, 0),
                 align=align,
                 overlay=True,
             )

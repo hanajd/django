@@ -50,6 +50,14 @@
             </div>
             {% if selected_project %}
             <p class="text-xs text-indigo-700 bg-indigo-50 px-2 py-1 rounded">当前项目：{{ selected_project.code }} · {{ selected_project.name }}</p>
+            {% if can_assign_tasks %}
+            <form method="post" class="inline" onsubmit="return confirm('确定删除当前项目？该操作不可恢复。');">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="delete_project">
+                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                <button type="submit" class="px-3 py-1.5 bg-red-600 text-white text-xs rounded hover:bg-red-700">删除项目</button>
+            </form>
+            {% endif %}
             {% endif %}
         </div>
 
@@ -78,6 +86,63 @@
                 </div>
             </form>
             {% endif %}
+        </div>
+
+        <div class="mb-2 mt-4 p-4 border border-emerald-100 rounded-lg bg-emerald-50/30">
+            <h3 class="text-sm font-semibold text-gray-800 mb-2">项目文件管理</h3>
+            <p class="text-xs text-gray-600 mb-3">可按分类浏览文件库并把文件加入当前项目，或从当前项目移除。该操作只影响项目关联，不影响文件本体。</p>
+            <form method="get" class="flex flex-wrap items-end gap-3 mb-4">
+                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                <div>
+                    <label class="block text-xs text-gray-600 mb-1">文件分类</label>
+                    <select name="project_file_tab" class="px-3 py-2 border border-gray-300 rounded-md text-sm"
+                            onchange="this.form.submit()">
+                        {% for t in file_library_tabs %}
+                        <option value="{{ t.key }}" {% if project_file_tab == t.key %}selected{% endif %}>{{ t.label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </form>
+
+            <form method="post" class="space-y-3">
+                {% csrf_token %}
+                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                <input type="hidden" name="project_file_tab" value="{{ project_file_tab }}">
+                <div class="flex flex-wrap gap-2">
+                    <button type="submit" name="action" value="bind_project_files" class="px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700">将勾选文件加入项目</button>
+                    <button type="submit" name="action" value="unbind_project_files" class="px-3 py-2 bg-slate-200 text-slate-800 text-sm rounded-lg hover:bg-slate-300">从项目移除勾选文件</button>
+                </div>
+                <div class="overflow-x-auto border border-gray-200 rounded-lg max-h-96 overflow-y-auto bg-white">
+                    <table class="min-w-full text-sm text-left text-gray-700">
+                        <thead class="bg-gray-50 text-gray-600 uppercase text-xs sticky top-0">
+                            <tr>
+                                <th class="px-3 py-2 w-10"><input type="checkbox" id="check-all-project-files"></th>
+                                <th class="px-3 py-2">文件名</th>
+                                <th class="px-3 py-2">分类</th>
+                                <th class="px-3 py-2">项目内</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for f in project_file_rows %}
+                            <tr class="border-b border-gray-100 hover:bg-gray-50">
+                                <td class="px-3 py-2"><input type="checkbox" name="file_ids" value="{{ f.id }}" class="row-project-file"></td>
+                                <td class="px-3 py-2">{{ f.original_name }}</td>
+                                <td class="px-3 py-2 text-gray-500">{{ f.get_category_display }}</td>
+                                <td class="px-3 py-2">
+                                    {% if f.id in project_file_ids %}
+                                    <span class="text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-700">已关联</span>
+                                    {% else %}
+                                    <span class="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-500">未关联</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="4" class="px-3 py-8 text-center text-gray-400">当前分类暂无文件</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </form>
         </div>
         {% elif selected_project and not can_assign_tasks %}
         <p class="text-sm text-gray-500">您无权修改项目与任务的关联。</p>
@@ -119,17 +184,75 @@
             </div>
         </div>
         {% endif %}
+
+        {% if selected_project and can_assign_tasks %}
+        <div class="mt-8 pt-6 border-t border-gray-200">
+            <h3 class="text-sm font-semibold text-gray-800 mb-2">任务提交状态（taskNo）</h3>
+            <p class="text-xs text-gray-600 mb-4">可查看本项目 taskNo 当前状态。仅支持将 <strong>submitted</strong> 回退为 <strong>pending</strong>。</p>
+            <div class="overflow-x-auto border border-gray-200 rounded-lg bg-white">
+                <table class="min-w-full text-sm text-left text-gray-700">
+                    <thead class="bg-gray-50 text-gray-600 uppercase text-xs">
+                        <tr>
+                            <th class="px-3 py-2">taskNo</th>
+                            <th class="px-3 py-2">案件号</th>
+                            <th class="px-3 py-2">状态</th>
+                            <th class="px-3 py-2">提交时间</th>
+                            <th class="px-3 py-2">更新时间</th>
+                            <th class="px-3 py-2">提交用户</th>
+                            <th class="px-3 py-2">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in project_submissions %}
+                        <tr class="border-b border-gray-100 hover:bg-gray-50">
+                            <td class="px-3 py-2 font-mono text-xs">{{ row.task_no }}</td>
+                            <td class="px-3 py-2">{{ row.case_no|default:"-" }}</td>
+                            <td class="px-3 py-2">
+                                <span class="text-xs px-2 py-0.5 rounded {% if row.status == 'submitted' %}bg-emerald-100 text-emerald-700{% elif row.status == 'pending' %}bg-amber-100 text-amber-800{% else %}bg-gray-100 text-gray-600{% endif %}">
+                                    {{ row.status_display }}（{{ row.status }}）
+                                </span>
+                            </td>
+                            <td class="px-3 py-2">{{ row.submitted_at|date:"Y-m-d H:i:s"|default:"-" }}</td>
+                            <td class="px-3 py-2">{{ row.updated_at|date:"Y-m-d H:i:s" }}</td>
+                            <td class="px-3 py-2">{{ row.created_by|default:"-" }}</td>
+                            <td class="px-3 py-2">
+                                {% if row.can_rollback %}
+                                <form method="post" class="inline" onsubmit="return confirm('确定将该任务从 submitted 回退为 pending 吗？');">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="rollback_submission_to_pending">
+                                    <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                                    <input type="hidden" name="submission_id" value="{{ row.id }}">
+                                    <button type="submit" class="px-2 py-1 text-xs rounded bg-amber-600 text-white hover:bg-amber-700">回退为 pending</button>
+                                </form>
+                                {% else %}
+                                <span class="text-xs text-gray-400">不可回退</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="7" class="px-3 py-8 text-center text-gray-400">当前项目暂无检测提交记录</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
     </div>
 </div>
 <script>
 (function () {
     var projectSwitch = document.getElementById('project-switch');
+    var checkAllProjectFiles = document.getElementById('check-all-project-files');
+    var projectFileRows = Array.from(document.querySelectorAll('.row-project-file'));
     function go() {
         var pid = projectSwitch ? projectSwitch.value : '';
         var q = pid ? '?project_id=' + encodeURIComponent(pid) : '';
         window.location.href = q;
     }
     projectSwitch?.addEventListener('change', go);
+    checkAllProjectFiles?.addEventListener('change', function (e) {
+        projectFileRows.forEach(function (cb) { cb.checked = !!e.target.checked; });
+    });
 })();
 </script>
 {% endblock %}

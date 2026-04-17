@@ -1,0 +1,1014 @@
+openapi: 3.0.3
+info:
+  title: Django API
+  version: 1.0.0
+  description: |
+    项目 API 文档（基于当前后端实现）。
+    说明：
+    - Base URL: /api/v1
+    - 认证方式: Bearer JWT
+    - inspections 相关接口统一遵循 taskNo -> case -> project 的隔离规则
+servers:
+  - url: http://localhost:11223/api/v1
+    description: Local
+tags:
+  - name: Auth
+  - name: Inspections
+  - name: Inspection Files
+  - name: Inspection OCR
+  - name: Library
+  - name: Users
+  - name: Roles
+  - name: Menus
+  - name: Registry
+paths:
+  /auth/login/:
+    post:
+      tags: [Auth]
+      summary: 用户登录
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+  /auth/token/refresh/:
+    post:
+      tags: [Auth]
+      summary: 刷新访问令牌
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: 刷新成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access:
+                    type: string
+  /inspections/pending:
+    get:
+      tags: [Inspections]
+      summary: 获取待办任务列表
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+        - in: query
+          name: deviceType
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PendingResponse'
+  /inspections/history:
+    get:
+      tags: [Inspections]
+      summary: 获取历史任务列表
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/pageSize'
+        - in: query
+          name: deviceType
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PendingResponse'
+  /inspections/{taskNo}:
+    get:
+      tags: [Inspections]
+      summary: 获取任务详情
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/taskNo'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InspectionDetailResponse'
+  /inspections/{taskNo}/start:
+    post:
+      tags: [Inspections]
+      summary: 标记任务开始
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/taskNo'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericSuccess'
+  /inspections/{taskNo}/draft:
+    post:
+      tags: [Inspections]
+      summary: 保存草稿
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/taskNo'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InspectionDraftRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericSuccess'
+        '422':
+          description: 参数校验失败
+  /inspections/{taskNo}/submit:
+    post:
+      tags: [Inspections]
+      summary: 提交检测结果（推荐）
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/taskNo'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InspectionSubmitRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericSuccess'
+        '422':
+          description: 参数校验失败
+  /inspections/submit:
+    post:
+      tags: [Inspections]
+      summary: 兼容旧版提交接口
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/InspectionSubmitRequest'
+                - type: object
+                  required: [taskNo]
+                  properties:
+                    taskNo:
+                      type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericSuccess'
+  /inspections/{taskNo}/signatures/{role}:
+    get:
+      tags: [Inspections]
+      summary: 下载签名图片
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/taskNo'
+        - in: path
+          name: role
+          required: true
+          schema:
+            type: string
+            enum: [author, reviewer, approver]
+      responses:
+        '200':
+          description: PNG 文件流
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+  /inspections/{taskNo}/files/upload:
+    post:
+      tags: [Inspection Files]
+      summary: 上传 taskNo 关联文件
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/taskNo'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TaskFileUploadRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericSuccess'
+  /inspections/{taskNo}/files:
+    get:
+      tags: [Inspection Files]
+      summary: 获取 taskNo 关联文件列表
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/taskNo'
+        - in: query
+          name: category
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskFileListResponse'
+  /inspections/{taskNo}/files/{id}/download:
+    get:
+      tags: [Inspection Files]
+      summary: 下载 taskNo 关联文件
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/taskNo'
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 文件流
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+  /inspections/{taskNo}/ocr/upload:
+    post:
+      tags: [Inspection OCR]
+      summary: 创建 taskNo OCR 任务
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/taskNo'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        '202':
+          description: OCR 任务已受理
+  /inspections/{taskNo}/ocr/tasks/{ocrTaskId}/status:
+    get:
+      tags: [Inspection OCR]
+      summary: 查询 taskNo OCR 任务状态
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/taskNo'
+        - in: path
+          name: ocrTaskId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+  /inspections/{taskNo}/ocr/tasks/{ocrTaskId}/autofill:
+    get:
+      tags: [Inspection OCR]
+      summary: 获取 taskNo OCR 自动填充结果
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/taskNo'
+        - in: path
+          name: ocrTaskId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+  /library/files/ocr/:
+    post:
+      tags: [Library]
+      summary: 旧版 OCR 上传
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        '202':
+          description: OCR 任务已受理
+  /library/files/ocr/tasks/{taskId}/status/:
+    get:
+      tags: [Library]
+      summary: 旧版 OCR 状态
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: taskId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+  /library/files/ocr/tasks/{taskId}/autofill/:
+    get:
+      tags: [Library]
+      summary: 旧版 OCR 自动填充
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: taskId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+  /library/files/{pk}/download/:
+    get:
+      tags: [Library]
+      summary: 旧版文件下载
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: pk
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 文件流
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+  /library/files/upload-linked/:
+    post:
+      tags: [Library]
+      summary: 业务联动上传
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+  /library/templates/downloadable/:
+    get:
+      tags: [Library]
+      summary: 模板下载列表
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功
+  /library/templates/{pk}/prepare-pdf-download/:
+    get:
+      tags: [Library]
+      summary: 准备模板 PDF 下载
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: pk
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+    post:
+      tags: [Library]
+      summary: 准备模板 PDF 下载（POST）
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: pk
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+  /library/templates/temp-pdf-download/:
+    get:
+      tags: [Library]
+      summary: 临时 PDF 下载
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 文件流
+  /users/:
+    get:
+      tags: [Users]
+      summary: 用户列表
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功
+    post:
+      tags: [Users]
+      summary: 创建用户
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreateRequest'
+      responses:
+        '201':
+          description: 创建成功
+  /users/me/:
+    get:
+      tags: [Users]
+      summary: 当前用户信息
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功
+  /users/{id}/:
+    get:
+      tags: [Users]
+      summary: 用户详情
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+    put:
+      tags: [Users]
+      summary: 更新用户
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdateRequest'
+      responses:
+        '200':
+          description: 成功
+    patch:
+      tags: [Users]
+      summary: 部分更新用户
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdateRequest'
+      responses:
+        '200':
+          description: 成功
+    delete:
+      tags: [Users]
+      summary: 删除用户
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: 删除成功
+  /roles/:
+    get:
+      tags: [Roles]
+      summary: 角色列表
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功
+  /roles/{id}/:
+    get:
+      tags: [Roles]
+      summary: 角色详情
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+  /menus/:
+    get:
+      tags: [Menus]
+      summary: 菜单列表
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功
+  /menus/{id}/:
+    get:
+      tags: [Menus]
+      summary: 菜单详情
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+  /registry/organizations/:
+    get:
+      tags: [Registry]
+      summary: 机构列表
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功
+    post:
+      tags: [Registry]
+      summary: 创建机构
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '201':
+          description: 创建成功
+  /registry/contacts/:
+    get:
+      tags: [Registry]
+      summary: 联系人列表
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功
+  /registry/devices/:
+    get:
+      tags: [Registry]
+      summary: 设备列表
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功
+  /registry/cases/:
+    get:
+      tags: [Registry]
+      summary: 案件列表
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功
+  /registry/site-records/:
+    get:
+      tags: [Registry]
+      summary: 现场记录列表
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功
+  /registry/reports/:
+    get:
+      tags: [Registry]
+      summary: 报告列表
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 成功
+  /registry/reports/{id}/trace/:
+    get:
+      tags: [Registry]
+      summary: 报告溯源
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    page:
+      in: query
+      name: page
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    pageSize:
+      in: query
+      name: pageSize
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    taskNo:
+      in: path
+      name: taskNo
+      required: true
+      schema:
+        type: string
+        description: 支持 XF-YYYYMMDD-n 或 ASG-n
+  schemas:
+    GenericSuccess:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: 操作成功
+        data:
+          type: object
+          nullable: true
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+    LoginResponse:
+      type: object
+      properties:
+        access:
+          type: string
+        refresh:
+          type: string
+        user:
+          $ref: '#/components/schemas/User'
+    RefreshRequest:
+      type: object
+      required: [refresh]
+      properties:
+        refresh:
+          type: string
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        email:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+        role_code:
+          type: string
+        role_name:
+          type: string
+    UserCreateRequest:
+      type: object
+      required: [username, password, role_code]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+        email:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+        phone:
+          type: string
+        department:
+          type: string
+        position:
+          type: string
+        role_code:
+          type: string
+    UserUpdateRequest:
+      type: object
+      additionalProperties: true
+    PendingItem:
+      type: object
+      properties:
+        taskNo:
+          type: string
+        reportType:
+          type: string
+        status:
+          type: string
+          enum: [pending, in_progress, submitted, approved, rejected]
+        createdAt:
+          type: string
+          format: date-time
+        assignedAt:
+          type: string
+          format: date-time
+        reportInfo:
+          type: object
+          additionalProperties: true
+        hospitalInfo:
+          type: object
+          additionalProperties: true
+        equipmentInfo:
+          type: object
+          additionalProperties: true
+    PendingResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: object
+          properties:
+            total:
+              type: integer
+            page:
+              type: integer
+            pageSize:
+              type: integer
+            list:
+              type: array
+              items:
+                $ref: '#/components/schemas/PendingItem'
+    InspectionInstrument:
+      type: object
+      properties:
+        name:
+          type: string
+        identifier:
+          type: string
+        certificateNo:
+          type: string
+        validUntil:
+          type: string
+          format: date-time
+        enabled:
+          type: boolean
+    SignatureBlock:
+      type: object
+      properties:
+        author:
+          type: string
+          description: data:image/png;base64,...
+        reviewer:
+          type: string
+          description: data:image/png;base64,...
+        approver:
+          type: string
+          description: data:image/png;base64,...
+        signDate:
+          type: string
+          format: date-time
+    InspectionDraftRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reportInfo:
+          type: object
+          additionalProperties: true
+        hospitalInfo:
+          type: object
+          additionalProperties: true
+        equipmentInfo:
+          type: object
+          additionalProperties: true
+        instruments:
+          type: array
+          items:
+            $ref: '#/components/schemas/InspectionInstrument'
+        testResult:
+          type: object
+          additionalProperties: true
+        signatures:
+          $ref: '#/components/schemas/SignatureBlock'
+        conclusion:
+          type: object
+          additionalProperties: true
+    InspectionSubmitRequest:
+      type: object
+      required:
+        - reportInfo
+        - hospitalInfo
+        - equipmentInfo
+      properties:
+        reportType:
+          type: string
+          example: xray_fluoroscopy
+        reportInfo:
+          type: object
+          additionalProperties: true
+        hospitalInfo:
+          type: object
+          additionalProperties: true
+        equipmentInfo:
+          type: object
+          additionalProperties: true
+        instruments:
+          type: array
+          items:
+            $ref: '#/components/schemas/InspectionInstrument'
+        testResult:
+          type: object
+          additionalProperties: true
+        signatures:
+          $ref: '#/components/schemas/SignatureBlock'
+        conclusion:
+          type: object
+          additionalProperties: true
+    InspectionDetailResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+    TaskFileUploadRequest:
+      type: object
+      required: [category]
+      properties:
+        category:
+          type: string
+          enum: [upload, ocr, json, template, site_record, report, attachment, inspection_submit]
+        file:
+          type: string
+          format: binary
+        files:
+          type: array
+          items:
+            type: string
+            format: binary
+        link_entity:
+          type: string
+          enum: [inspection_case, site_record, report]
+        link_object_id:
+          type: integer
+    TaskFileMeta:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        category:
+          type: string
+        uploadedAt:
+          type: string
+          format: date-time
+        size:
+          type: integer
+    TaskFileListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: object
+          properties:
+            list:
+              type: array
+              items:
+                $ref: '#/components/schemas/TaskFileMeta'

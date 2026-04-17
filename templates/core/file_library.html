@@ -16,18 +16,6 @@
 {% endif %}
 
 <div class="bg-white rounded-lg shadow p-6">
-    <div class="mb-6 p-4 bg-indigo-50 rounded-lg border border-indigo-200">
-        <p class="text-sm font-medium text-indigo-900 mb-2">项目管理（位于分类上方）</p>
-        <p class="text-xs text-indigo-700 mb-3">通过项目筛选可定位单项目文件；同一文件允许关联多个项目以支持复用。</p>
-        <form method="post" class="flex flex-wrap items-end gap-3 mb-3">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="create_project">
-            <input type="text" name="project_code" placeholder="项目编码" class="px-3 py-2 border border-indigo-300 rounded-md text-sm">
-            <input type="text" name="project_name" placeholder="项目名称" class="px-3 py-2 border border-indigo-300 rounded-md text-sm">
-            <input type="text" name="project_desc" placeholder="描述（可选）" class="px-3 py-2 border border-indigo-300 rounded-md text-sm min-w-[16rem]">
-            <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">新增项目</button>
-        </form>
-    </div>
     <div class="flex flex-wrap gap-2 mb-6 border-b border-gray-200 pb-4">
         {% for t in file_library_tabs %}
         <a href="{% url 'file_library' %}?tab={{ t.key }}{% if date_from and date_to %}&amp;date_from={{ date_from }}&amp;date_to={{ date_to }}{% endif %}{% if uploader_selected %}&amp;uploader={{ uploader_selected }}{% endif %}{% if project_selected %}&amp;project={{ project_selected }}{% endif %}"
@@ -209,6 +197,8 @@
     <p class="mb-6 text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">当前角色无权在此分类上传文件。</p>
     {% elif tab == 'attachment' %}
     <p class="mb-6 text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">当前角色无权上传附件；可在「角色管理」中为该角色开启「附件上传」权限。</p>
+    {% elif tab == 'inspection_submit' %}
+    <p class="mb-6 text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">该分类用于保存前端提交结果，由系统自动写入，不支持手工上传。</p>
     {% endif %}
 
     {% if can_batch_delete %}
@@ -226,6 +216,14 @@
             <button type="submit" class="px-3 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700"
                     onclick="return confirm('确定删除所选文件？');">
                 批量删除
+            </button>
+            {% endif %}
+            {% if can_manual_export_submit_pdf %}
+            <button type="submit" name="action" value="manual_export_submit_pdf"
+                    formaction="{% url 'file_library' %}"
+                    class="px-3 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700"
+                    onclick="return confirm('确定对勾选的检测提交 JSON 手动导出 PDF？');">
+                手动导出 PDF
             </button>
             {% endif %}
             <span class="text-sm text-gray-500">

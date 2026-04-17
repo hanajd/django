@@ -203,6 +203,7 @@ class LibraryFile(models.Model):
     CATEGORY_SITE_RECORD = 'site_record'
     CATEGORY_REPORT = 'report'
     CATEGORY_ATTACHMENT = 'attachment'
+    CATEGORY_INSPECTION_SUBMIT = 'inspection_submit'
     CATEGORY_CHOICES = (
         (CATEGORY_UPLOAD, _('OCR文件')),
         (CATEGORY_JSON, _('JSON 文件')),
@@ -210,6 +211,7 @@ class LibraryFile(models.Model):
         (CATEGORY_SITE_RECORD, _('现场记录')),
         (CATEGORY_REPORT, _('报告')),
         (CATEGORY_ATTACHMENT, _('附件')),
+        (CATEGORY_INSPECTION_SUBMIT, _('检测提交')),
         (CATEGORY_TEMP, _('临时文件')),
     )
 
@@ -307,8 +309,23 @@ class LibraryFile(models.Model):
 class LibraryTask(models.Model):
     """文件库任务：与项目多对多；文件通过 LibraryFileTask 挂载（全部分类）。"""
 
+    OUTPUT_SITE_RECORD = "site_record"
+    OUTPUT_REPORT = "report"
+    OUTPUT_TARGET_CHOICES = (
+        (OUTPUT_SITE_RECORD, _("现场记录")),
+        (OUTPUT_REPORT, _("报告")),
+    )
+
     code = models.SlugField(max_length=64, unique=True, db_index=True, verbose_name=_("任务编码"))
     name = models.CharField(max_length=128, verbose_name=_("任务名称"))
+    output_target = models.CharField(
+        max_length=20,
+        choices=OUTPUT_TARGET_CHOICES,
+        default=OUTPUT_SITE_RECORD,
+        db_index=True,
+        verbose_name=_("PDF 输出目标"),
+        help_text=_("决定该任务生成的 PDF 默认保存到现场记录或报告分类"),
+    )
     created_by = models.ForeignKey(
         User,
         null=True,
@@ -830,3 +847,99 @@ class Report(models.Model):
 
         if self.site_record_id and self.case_id and self.site_record.case_id != self.case_id:
             raise ValidationError({'site_record': _('原始记录必须属于同一案件。')})
+
+
+class InspectionSubmission(models.Model):
+    """前端检测报告提交记录（按 taskNo 绑定后台案件与项目）。"""
+
+    STATUS_PENDING = "pending"
+    STATUS_IN_PROGRESS = "in_progress"
+    STATUS_SUBMITTED = "submitted"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_CHOICES = (
+        (STATUS_PENDING, _("待检测")),
+        (STATUS_IN_PROGRESS, _("检测中")),
+        (STATUS_SUBMITTED, _("已提交")),
+        (STATUS_APPROVED, _("已通过")),
+        (STATUS_REJECTED, _("已驳回")),
+    )
+
+    task_no = models.CharField(max_length=64, unique=True, db_index=True, verbose_name=_("任务编号"))
+    report_type = models.CharField(max_length=64, db_index=True, verbose_name=_("报告类型"))
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+        db_index=True,
+        verbose_name=_("状态"),
+    )
+    case = models.ForeignKey(
+        InspectionCase,
+        on_delete=models.PROTECT,
+        related_name="inspection_submissions",
+        verbose_name=_("关联案件"),
+    )
+    project = models.ForeignKey(
+        LibraryProject,
+        on_delete=models.PROTECT,
+        related_name="inspection_submissions",
+        verbose_name=_("关联项目"),
+    )
+    created_at_remote = models.DateTimeField(verbose_name=_("客户端创建时间"))
+    updated_at_remote = models.DateTimeField(verbose_name=_("客户端更新时间"))
+    report_info = models.JSONField(default=dict, blank=True, verbose_name=_("报告信息"))
+    hospital_info = models.JSONField(default=dict, blank=True, verbose_name=_("医院信息"))
+    equipment_info = models.JSONField(default=dict, blank=True, verbose_name=_("设备信息"))
+    test_result = models.JSONField(default=dict, blank=True, verbose_name=_("检测结果"))
+    conclusion = models.JSONField(default=dict, blank=True, verbose_name=_("结论"))
+    raw_payload = models.JSONField(default=dict, blank=True, verbose_name=_("原始请求体"))
+    sign_author_png = models.BinaryField(null=True, blank=True, verbose_name=_("编制人签名PNG"))
+    sign_reviewer_png = models.BinaryField(null=True, blank=True, verbose_name=_("审核人签名PNG"))
+    sign_approver_png = models.BinaryField(null=True, blank=True, verbose_name=_("批准人签名PNG"))
+    sign_date = models.DateTimeField(null=True, blank=True, verbose_name=_("签发日期"))
+    started_at = models.DateTimeField(null=True, blank=True, verbose_name=_("开始检测时间"))
+    draft_saved_at = models.DateTimeField(null=True, blank=True, verbose_name=_("草稿保存时间"))
+    submitted_at = models.DateTimeField(null=True, blank=True, verbose_name=_("提交时间"))
+    created_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="inspection_submissions",
+        verbose_name=_("提交用户"),
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("创建时间"))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_("更新时间"))
+
+    class Meta:
+        verbose_name = _("检测报告提交")
+        verbose_name_plural = verbose_name
+        ordering = ["-updated_at", "-id"]
+
+    def __str__(self):
+        return self.task_no
+
+
+class InspectionSubmissionInstrument(models.Model):
+    """检测报告中的仪器列表。"""
+
+    submission = models.ForeignKey(
+        InspectionSubmission,
+        on_delete=models.CASCADE,
+        related_name="instruments",
+        verbose_name=_("提交记录"),
+    )
+    name = models.CharField(max_length=128, verbose_name=_("仪器名称"))
+    identifier = models.CharField(max_length=128, verbose_name=_("仪器编号"))
+    certificate_no = models.CharField(max_length=128, blank=True, default="", verbose_name=_("证书号"))
+    valid_until = models.DateTimeField(null=True, blank=True, verbose_name=_("有效期至"))
+    enabled = models.BooleanField(default=True, verbose_name=_("启用"))
+
+    class Meta:
+        verbose_name = _("检测报告仪器")
+        verbose_name_plural = verbose_name
+        ordering = ["id"]
+
+    def __str__(self):
+        return f"{self.submission.task_no} / {self.name}"

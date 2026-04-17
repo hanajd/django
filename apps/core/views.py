@@ -18,6 +18,7 @@ from django.contrib.auth.models import User
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Q
+from django.db.models.deletion import ProtectedError
 from django.core.exceptions import PermissionDenied
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -31,6 +32,7 @@ from apps.core import htmlpdf_service
 from apps.core.library_file_service import (
     attach_files_to_projects,
     attach_files_to_tasks,
+    detach_files_from_projects,
     detach_files_from_tasks,
     library_file_download_response,
     parse_project_ids,
@@ -49,6 +51,8 @@ from apps.core.library_access import (
     role_has,
 )
 from apps.core.models import (
+    InspectionCase,
+    InspectionSubmission,
     LibraryFile,
     LibraryProject,
     LibraryProjectUserRevocation,
@@ -552,11 +556,65 @@ def library_projects(request):
                     messages.error(request, "存在无效任务")
                 elif action == "bind_tasks":
                     proj.library_tasks.add(*tasks)
+                    # 任务与项目建立关联时，自动同步该任务已有关联文件到项目。
+                    all_file_ids = set()
+                    for t in tasks:
+                        all_file_ids.update(t.library_files.values_list("id", flat=True))
+                    if all_file_ids:
+                        attach_files_to_projects(sorted(all_file_ids), [proj.pk], request.user)
                     messages.success(request, f"已向项目关联 {len(tasks)} 个任务")
                 else:
                     proj.library_tasks.remove(*tasks)
+                    # 任务与项目解除关联时，自动移除该任务文件与项目的关联。
+                    all_file_ids = set()
+                    for t in tasks:
+                        all_file_ids.update(t.library_files.values_list("id", flat=True))
+                    if all_file_ids:
+                        detach_files_from_projects(sorted(all_file_ids), [proj.pk])
                     messages.success(request, f"已从项目移除 {len(tasks)} 个任务")
             return redirect(reverse("library_projects") + f"?project_id={proj.pk}")
+
+        if action in ("bind_project_files", "unbind_project_files"):
+            post_raw = request.POST.get("project_id", "").strip()
+            try:
+                post_pid = int(post_raw) if post_raw else None
+            except ValueError:
+                post_pid = None
+            proj = LibraryProject.objects.filter(pk=post_pid).first() if post_pid else None
+            if proj is None:
+                proj = selected_project
+            if proj is None:
+                messages.error(request, "请先在上方选择项目")
+                return redirect(reverse("library_projects"))
+            if not role_has(request.user, "perm_assign_tasks"):
+                messages.error(request, "当前角色无权维护项目文件")
+                return redirect(reverse("library_projects") + f"?project_id={proj.pk}")
+
+            file_tab = _normalize_library_tab(request.POST.get("project_file_tab", "ocr"))
+            file_cat = _library_category_for_tab(file_tab)
+            raw_ids = []
+            for x in request.POST.getlist("file_ids"):
+                try:
+                    raw_ids.append(int(x))
+                except (TypeError, ValueError):
+                    continue
+            raw_ids = list(dict.fromkeys([i for i in raw_ids if i > 0]))
+            if not raw_ids:
+                messages.error(request, "请至少勾选一个文件")
+            else:
+                qs = LibraryFile.objects.filter(pk__in=raw_ids, category=file_cat)
+                if library_scope_own_files_only(request.user):
+                    qs = qs.filter(created_by=request.user)
+                valid_ids = list(qs.values_list("id", flat=True))
+                if len(valid_ids) != len(raw_ids):
+                    messages.error(request, "存在无效文件，或文件分类与当前标签不一致")
+                elif action == "bind_project_files":
+                    attach_files_to_projects(valid_ids, [proj.pk], request.user)
+                    messages.success(request, f"已向项目关联 {len(valid_ids)} 个文件")
+                else:
+                    detach_files_from_projects(valid_ids, [proj.pk])
+                    messages.success(request, f"已从项目移除 {len(valid_ids)} 个文件")
+            return redirect(reverse("library_projects") + f"?project_id={proj.pk}&project_file_tab={file_tab}")
 
         if action in ("revoke_project_user", "restore_project_user"):
             post_raw = request.POST.get("project_id", "").strip()
@@ -594,10 +652,77 @@ def library_projects(request):
                 messages.success(request, f"已恢复 {target.username} 在本项目上的编辑权限。")
             return redirect(reverse("library_projects") + f"?project_id={proj.pk}")
 
+        if action == "rollback_submission_to_pending":
+            post_raw = request.POST.get("project_id", "").strip()
+            try:
+                post_pid = int(post_raw) if post_raw else None
+            except ValueError:
+                post_pid = None
+            proj = LibraryProject.objects.filter(pk=post_pid).first() if post_pid else None
+            if proj is None:
+                proj = selected_project
+            if proj is None:
+                messages.error(request, "请选择项目")
+                return redirect(reverse("library_projects"))
+            if not role_has(request.user, "perm_assign_tasks"):
+                messages.error(request, "无权操作任务状态")
+                return redirect(reverse("library_projects") + f"?project_id={proj.pk}")
+            try:
+                sid = int(request.POST.get("submission_id", "") or 0)
+            except ValueError:
+                sid = 0
+            sub = InspectionSubmission.objects.filter(pk=sid, project=proj).first() if sid else None
+            if sub is None:
+                messages.error(request, "提交记录不存在或不属于当前项目")
+            elif sub.status != InspectionSubmission.STATUS_SUBMITTED:
+                messages.error(request, "仅已提交（submitted）状态可回退为 pending")
+            else:
+                sub.status = InspectionSubmission.STATUS_PENDING
+                sub.submitted_at = None
+                sub.save(update_fields=["status", "submitted_at", "updated_at"])
+                messages.success(request, f"已将任务 {sub.task_no} 从 submitted 回退为 pending。")
+            return redirect(reverse("library_projects") + f"?project_id={proj.pk}")
+
+        if action == "delete_project":
+            if not role_has(request.user, "perm_assign_tasks"):
+                messages.error(request, "当前角色无权删除项目")
+                return redirect(reverse("library_projects"))
+            post_raw = request.POST.get("project_id", "").strip()
+            try:
+                post_pid = int(post_raw) if post_raw else None
+            except ValueError:
+                post_pid = None
+            proj = LibraryProject.objects.filter(pk=post_pid).first() if post_pid else None
+            if proj is None:
+                messages.error(request, "项目不存在")
+                return redirect(reverse("library_projects"))
+            label = f"{proj.code} · {proj.name}"
+            try:
+                proj.delete()
+            except ProtectedError:
+                messages.error(
+                    request,
+                    "项目删除失败：该项目已被检测提交等记录引用，请先清理关联数据后再删除。",
+                )
+                return redirect(reverse("library_projects") + f"?project_id={proj.pk}")
+            messages.success(request, f"已删除项目：{label}")
+            return redirect(reverse("library_projects"))
+
     all_library_tasks = LibraryTask.objects.order_by("code")
+    project_file_tab = _normalize_library_tab(request.GET.get("project_file_tab", "ocr"))
+    project_file_cat = _library_category_for_tab(project_file_tab)
     project_task_ids = set()
+    project_file_ids = set()
+    project_file_rows = []
     if selected_project:
         project_task_ids = set(selected_project.library_tasks.values_list("id", flat=True))
+        fq = LibraryFile.objects.filter(category=project_file_cat).select_related("created_by").order_by("-created_at")
+        if library_scope_own_files_only(request.user):
+            fq = fq.filter(created_by=request.user)
+        project_file_rows = list(fq[:600])
+        project_file_ids = set(
+            selected_project.library_files.filter(category=project_file_cat).values_list("id", flat=True)
+        )
 
     project_assignees = []
     if selected_project and role_has(request.user, "perm_assign_tasks"):
@@ -614,6 +739,28 @@ def library_projects(request):
         for u in User.objects.filter(pk__in=assignee_ids).order_by("username"):
             project_assignees.append({"user": u, "revoked": u.pk in revoked_ids})
 
+    project_submissions = []
+    if selected_project and role_has(request.user, "perm_assign_tasks"):
+        subs = (
+            InspectionSubmission.objects.filter(project=selected_project)
+            .select_related("case", "created_by")
+            .order_by("-updated_at")[:600]
+        )
+        for s in subs:
+            project_submissions.append(
+                {
+                    "id": s.pk,
+                    "task_no": s.task_no,
+                    "status": s.status,
+                    "status_display": s.get_status_display(),
+                    "case_no": s.case.case_no if s.case_id else "",
+                    "updated_at": s.updated_at,
+                    "submitted_at": s.submitted_at,
+                    "created_by": s.created_by.username if s.created_by_id else "",
+                    "can_rollback": s.status == InspectionSubmission.STATUS_SUBMITTED,
+                }
+            )
+
     return render(
         request,
         "core/library_projects.html",
@@ -623,8 +770,21 @@ def library_projects(request):
             "selected_project_id": str(selected_project.pk) if selected_project else "",
             "all_library_tasks": all_library_tasks,
             "project_task_ids": project_task_ids,
+            "project_file_tab": project_file_tab,
+            "project_file_rows": project_file_rows,
+            "project_file_ids": project_file_ids,
             "project_assignees": project_assignees,
+            "project_submissions": project_submissions,
             "can_assign_tasks": role_has(request.user, "perm_assign_tasks"),
+            "file_library_tabs": [
+                {"key": "ocr", "label": "OCR文件"},
+                {"key": "json", "label": "JSON 文件"},
+                {"key": "template", "label": "模板"},
+                {"key": "site_record", "label": "现场记录"},
+                {"key": "report", "label": "报告"},
+                {"key": "attachment", "label": "附件"},
+                {"key": "inspection_submit", "label": "检测提交"},
+            ],
         },
     )
 
@@ -671,7 +831,7 @@ def _parse_file_library_date_range(request):
 
 
 _FILE_LIBRARY_VALID_TABS = frozenset(
-    {"ocr", "json", "template", "site_record", "report", "attachment"}
+    {"ocr", "json", "template", "site_record", "report", "attachment", "inspection_submit"}
 )
 
 
@@ -692,6 +852,7 @@ def _library_category_for_tab(tab: str) -> str:
         "site_record": LibraryFile.CATEGORY_SITE_RECORD,
         "report": LibraryFile.CATEGORY_REPORT,
         "attachment": LibraryFile.CATEGORY_ATTACHMENT,
+        "inspection_submit": LibraryFile.CATEGORY_INSPECTION_SUBMIT,
     }[t]
 
 
@@ -703,6 +864,7 @@ def _library_tab_for_category(category: str) -> str:
         LibraryFile.CATEGORY_SITE_RECORD: "site_record",
         LibraryFile.CATEGORY_REPORT: "report",
         LibraryFile.CATEGORY_ATTACHMENT: "attachment",
+        LibraryFile.CATEGORY_INSPECTION_SUBMIT: "inspection_submit",
     }.get(category, "ocr")
 
 
@@ -719,7 +881,10 @@ def _persist_binary_library_files(request, files, category: str, project_ids=Non
 
 @login_required
 def file_library(request):
-    tab = _normalize_library_tab(request.GET.get("tab", "ocr"))
+    tab_raw = request.GET.get("tab")
+    if not tab_raw and request.method == "POST":
+        tab_raw = request.POST.get("tab")
+    tab = _normalize_library_tab(tab_raw or "ocr")
 
     gx = _require_perm(request, "perm_file_library")
     if gx:
@@ -990,6 +1155,118 @@ def file_library(request):
             reverse("file_library") + _file_library_query_string("attachment", df, dt, up, project_selected)
         )
 
+    if request.method == "POST" and request.POST.get("action") == "manual_export_submit_pdf":
+        if tab != "inspection_submit":
+            messages.error(request, "仅支持在「检测提交」分类执行手动导出 PDF")
+            df = request.POST.get("date_from", "").strip()
+            dt = request.POST.get("date_to", "").strip()
+            up = request.POST.get("uploader", "").strip()
+            return redirect(reverse("file_library") + _file_library_query_string(tab, df, dt, up, project_selected))
+        if not role_has(request.user, "perm_process_pipeline"):
+            messages.error(request, "当前角色无权执行手动导出 PDF")
+            df = request.POST.get("date_from", "").strip()
+            dt = request.POST.get("date_to", "").strip()
+            up = request.POST.get("uploader", "").strip()
+            return redirect(reverse("file_library") + _file_library_query_string(tab, df, dt, up, project_selected))
+        ids = []
+        for x in request.POST.getlist("ids"):
+            try:
+                ids.append(int(x))
+            except (TypeError, ValueError):
+                continue
+        ids = list(dict.fromkeys([i for i in ids if i > 0]))
+        if not ids:
+            messages.error(request, "请先勾选至少一条检测提交 JSON")
+            df = request.POST.get("date_from", "").strip()
+            dt = request.POST.get("date_to", "").strip()
+            up = request.POST.get("uploader", "").strip()
+            return redirect(reverse("file_library") + _file_library_query_string(tab, df, dt, up, project_selected))
+
+        from apps.api.inspection_views import (
+            _build_filled_template_fields_for_task,
+            _pick_submit_generation_tasks,
+            _persist_filled_pdf_from_submit,
+        )
+
+        qs = (
+            LibraryFile.objects.filter(pk__in=ids, category=LibraryFile.CATEGORY_INSPECTION_SUBMIT)
+            .select_related("created_by")
+            .order_by("-created_at")
+        )
+        success_count = 0
+        skipped_count = 0
+        skip_reasons = []
+        for lf in qs:
+            if not library_file_access_allowed(request.user, lf):
+                skipped_count += 1
+                skip_reasons.append(f"{lf.original_name}: 无权访问该文件")
+                continue
+            try:
+                p = pipeline_service.library_absolute_path(lf.relative_path)
+                payload = json_std.loads(p.read_text(encoding="utf-8", errors="replace"))
+            except Exception:
+                skipped_count += 1
+                skip_reasons.append(f"{lf.original_name}: JSON 读取或解析失败")
+                continue
+            required_keys = {"reportInfo", "hospitalInfo", "equipmentInfo", "testResult"}
+            if not isinstance(payload, dict) or not required_keys.issubset(set(payload.keys())):
+                skipped_count += 1
+                skip_reasons.append(f"{lf.original_name}: 不是原始 submit JSON")
+                continue
+            if lf.link_entity != LibraryFile.LINK_ENTITY_INSPECTION_CASE or not lf.link_object_id:
+                skipped_count += 1
+                skip_reasons.append(f"{lf.original_name}: 未关联 inspection_case")
+                continue
+            case = InspectionCase.objects.select_related("library_project").filter(pk=lf.link_object_id).first()
+            if case is None or not case.library_project_id:
+                skipped_count += 1
+                skip_reasons.append(f"{lf.original_name}: 关联案件或项目不存在")
+                continue
+            generated_any = False
+            for task_obj in _pick_submit_generation_tasks(case.case_no, case.library_project):
+                filled_fields, template_pdf_id, fill_reason, template_json_name = _build_filled_template_fields_for_task(
+                    task_obj, payload, project=case.library_project
+                )
+                if not filled_fields:
+                    skip_reasons.append(
+                        f"{lf.original_name} / {task_obj.code}({task_obj.output_target}): {fill_reason or '模板填充失败'}"
+                    )
+                    continue
+                ok, pdf_reason = _persist_filled_pdf_from_submit(
+                    request.user,
+                    case.case_no,
+                    case,
+                    case.library_project,
+                    filled_fields,
+                    template_pdf_id=template_pdf_id,
+                    template_json_name=template_json_name,
+                    task_obj=task_obj,
+                )
+                if not ok:
+                    skip_reasons.append(
+                        f"{lf.original_name} / {task_obj.code}({task_obj.output_target}): {pdf_reason or 'PDF 生成失败'}"
+                    )
+                    continue
+                if pdf_reason:
+                    messages.warning(request, f"{lf.original_name} / {task_obj.code}: {pdf_reason}")
+                generated_any = True
+            if generated_any:
+                success_count += 1
+            else:
+                skipped_count += 1
+        if success_count:
+            messages.success(request, f"已为 {success_count} 条检测提交执行手动导出 PDF")
+        if skipped_count:
+            messages.warning(request, f"有 {skipped_count} 条记录未导出")
+            for reason in skip_reasons[:20]:
+                messages.warning(request, reason)
+            if len(skip_reasons) > 20:
+                messages.warning(request, f"其余 {len(skip_reasons) - 20} 条原因已省略")
+        df = request.POST.get("date_from", "").strip()
+        dt = request.POST.get("date_to", "").strip()
+        up = request.POST.get("uploader", "").strip()
+        return redirect(reverse("file_library") + _file_library_query_string(tab, df, dt, up, project_selected))
+
     date_err, d0, d1, date_from, date_to = _parse_file_library_date_range(request)
     if date_err:
         messages.warning(request, date_err)
@@ -1066,6 +1343,7 @@ def file_library(request):
                 {"key": "site_record", "label": "现场记录"},
                 {"key": "report", "label": "报告"},
                 {"key": "attachment", "label": "附件"},
+                {"key": "inspection_submit", "label": "检测提交"},
             ],
             "files": files,
             "date_from": date_from,
@@ -1076,6 +1354,12 @@ def file_library(request):
             "file_scope_own_only": restricted,
             "can_batch_delete": role_has(request.user, "perm_file_delete")
             and not restricted,
+            "can_manual_export_submit_pdf": (
+                tab == "inspection_submit"
+                and role_has(request.user, "perm_process_pipeline")
+                and role_has(request.user, "perm_file_delete")
+                and not restricted
+            ),
         },
     )
 
@@ -1642,7 +1926,20 @@ def htmlpdf_api_save_pdf(request):
     except Exception:
         return JsonResponse({"error": "请求体不是合法JSON"}, status=400)
     fields = data.get("fields", [])
-    output_category = (data.get("output_category") or LibraryFile.CATEGORY_SITE_RECORD).strip()
+    output_category = (data.get("output_category") or "").strip()
+    task_id_raw = str(data.get("task_id") or "").strip()
+    if not output_category and task_id_raw:
+        try:
+            task_id = int(task_id_raw)
+        except ValueError:
+            task_id = 0
+        task_obj = LibraryTask.objects.filter(pk=task_id).only("output_target").first() if task_id else None
+        if task_obj and task_obj.output_target == LibraryTask.OUTPUT_REPORT:
+            output_category = LibraryFile.CATEGORY_REPORT
+        else:
+            output_category = LibraryFile.CATEGORY_SITE_RECORD
+    if not output_category:
+        output_category = LibraryFile.CATEGORY_SITE_RECORD
     if output_category not in (LibraryFile.CATEGORY_SITE_RECORD, LibraryFile.CATEGORY_REPORT):
         return JsonResponse({"error": "output_category 仅支持 site_record/report"}, status=400)
     try:
@@ -1760,16 +2057,44 @@ def library_task_management(request):
         if action == "create_task":
             name = request.POST.get("name", "").strip()
             code_in = request.POST.get("code", "").strip()
+            output_target = (request.POST.get("output_target") or LibraryTask.OUTPUT_SITE_RECORD).strip()
+            if output_target not in {LibraryTask.OUTPUT_SITE_RECORD, LibraryTask.OUTPUT_REPORT}:
+                output_target = LibraryTask.OUTPUT_SITE_RECORD
             if not name:
                 messages.error(request, "任务名称不能为空")
             else:
                 code = _unique_library_task_code(name, code_in)
-                row = LibraryTask.objects.create(code=code, name=name, created_by=request.user)
+                row = LibraryTask.objects.create(
+                    code=code,
+                    name=name,
+                    output_target=output_target,
+                    created_by=request.user,
+                )
                 messages.success(
                     request,
-                    f"已创建任务 {row.code}。已选中该任务，点击「编辑任务」可维护文件关联。",
+                    f"已创建任务 {row.code}（输出到：{row.get_output_target_display()}）。"
+                    f"已选中该任务，点击「编辑任务」可维护文件关联。",
                 )
                 return redirect(reverse("library_task_management") + f"?manage_task={row.pk}")
+        elif action == "update_task_output_target":
+            try:
+                tid = int(request.POST.get("manage_task_id", "") or request.POST.get("task_id", "") or 0)
+            except ValueError:
+                tid = 0
+            output_target = (request.POST.get("output_target") or LibraryTask.OUTPUT_SITE_RECORD).strip()
+            if output_target not in {LibraryTask.OUTPUT_SITE_RECORD, LibraryTask.OUTPUT_REPORT}:
+                output_target = LibraryTask.OUTPUT_SITE_RECORD
+            t_obj = LibraryTask.objects.filter(pk=tid).first() if tid else None
+            if t_obj is None:
+                messages.error(request, "任务不存在或无效")
+            else:
+                t_obj.output_target = output_target
+                t_obj.save(update_fields=["output_target", "updated_at"])
+                messages.success(
+                    request,
+                    f"已更新任务「{t_obj.code}」的 PDF 输出目标为：{t_obj.get_output_target_display()}。",
+                )
+            return redirect(_library_task_management_redirect_url(request))
         elif action in ("bind_task_files", "unbind_task_files"):
             try:
                 tid = int(request.POST.get("manage_task_id", "") or 0)
@@ -1798,9 +2123,17 @@ def library_task_management(request):
                     messages.error(request, "所选文件无效或分类与当前标签不一致")
                 elif action == "bind_task_files":
                     attach_files_to_tasks(valid_ids, [task_obj.pk], request.user)
+                    # 文件挂到任务后，同步挂到该任务关联的所有项目（传递性）。
+                    project_ids = list(task_obj.projects.values_list("id", flat=True))
+                    if project_ids:
+                        attach_files_to_projects(valid_ids, project_ids, request.user)
                     messages.success(request, f"已向任务关联 {len(valid_ids)} 个文件")
                 else:
                     detach_files_from_tasks(valid_ids, [task_obj.pk])
+                    # 文件从任务移除后，同步从该任务关联的所有项目移除（传递性）。
+                    project_ids = list(task_obj.projects.values_list("id", flat=True))
+                    if project_ids:
+                        detach_files_from_projects(valid_ids, project_ids)
                     messages.success(request, f"已从任务移除 {len(valid_ids)} 个文件")
         elif action == "delete_task":
             try:
@@ -1818,13 +2151,10 @@ def library_task_management(request):
         elif action == "assign":
             project_raw = request.POST.get("project_id", "").strip()
             assignee_raw = request.POST.get("assignee", "").strip()
-            library_task_raw = request.POST.get("library_task_id", "").strip()
             if not assignee_raw:
                 messages.error(request, "请选择接收用户")
             elif not project_raw:
                 messages.error(request, "请选择项目")
-            elif not library_task_raw:
-                messages.error(request, "请选择任务")
             else:
                 try:
                     assignee_id = int(assignee_raw)
@@ -1834,42 +2164,53 @@ def library_task_management(request):
                     project_id = int(project_raw)
                 except ValueError:
                     project_id = 0
-                try:
-                    library_task_id = int(library_task_raw)
-                except ValueError:
-                    library_task_id = 0
                 project = LibraryProject.objects.filter(pk=project_id, is_active=True).first()
-                library_task = LibraryTask.objects.filter(pk=library_task_id).first()
                 if project is None:
                     messages.error(request, "请选择有效项目")
                     return redirect(reverse("library_task_management"))
-                if library_task is None:
-                    messages.error(request, "请选择有效任务")
-                elif not project.library_tasks.filter(pk=library_task.pk).exists():
-                    messages.error(request, "该任务未与此项目关联，请先在「项目管理」中为项目勾选任务")
+                assignee = User.objects.filter(
+                    pk=assignee_id,
+                    profile__role__code="app_user",
+                    is_active=True,
+                ).first()
+                if assignee is None:
+                    messages.error(request, "接收用户必须是已启用的 App 用户")
                 else:
-                    assignee = User.objects.filter(
-                        pk=assignee_id,
-                        profile__role__code="app_user",
-                        is_active=True,
-                    ).first()
-                    if assignee is None:
-                        messages.error(request, "接收用户必须是已启用的 App 用户")
+                    project_tasks = list(project.library_tasks.all().order_by("code"))
+                    if not project_tasks:
+                        messages.error(request, "该项目尚未关联任务，请先在「项目管理」中为项目勾选任务")
                     else:
-                        LibraryTaskAssignment.objects.create(
-                            library_task=library_task,
-                            project=project,
-                            assignee=assignee,
-                            assigned_by=request.user,
-                        )
-                        file_ids = list(library_task.library_files.values_list("pk", flat=True))
-                        if file_ids:
-                            attach_files_to_projects(file_ids, [project.pk], request.user)
-                        messages.success(
-                            request,
-                            f"已向 {assignee.username} 分配任务「{library_task.name}」；"
-                            f"项目、任务与用户已关联，并已同步 {len(file_ids)} 个文件到项目。",
-                        )
+                        created_count = 0
+                        all_file_ids = set()
+                        for library_task in project_tasks:
+                            exists = LibraryTaskAssignment.objects.filter(
+                                library_task=library_task,
+                                project=project,
+                                assignee=assignee,
+                            ).exists()
+                            if not exists:
+                                LibraryTaskAssignment.objects.create(
+                                    library_task=library_task,
+                                    project=project,
+                                    assignee=assignee,
+                                    assigned_by=request.user,
+                                )
+                                created_count += 1
+                            for fid in library_task.library_files.values_list("pk", flat=True):
+                                all_file_ids.add(fid)
+                        if all_file_ids:
+                            attach_files_to_projects(sorted(all_file_ids), [project.pk], request.user)
+                        if created_count:
+                            messages.success(
+                                request,
+                                f"已向 {assignee.username} 分配项目「{project.name}」下 {created_count} 个任务，"
+                                f"并同步 {len(all_file_ids)} 个文件到项目。",
+                            )
+                        else:
+                            messages.info(
+                                request,
+                                f"{assignee.username} 已拥有该项目全部任务；已同步 {len(all_file_ids)} 个项目文件。",
+                            )
             return redirect(reverse("library_task_management"))
         else:
             messages.error(request, "未知操作")
@@ -1882,29 +2223,68 @@ def library_task_management(request):
     )
 
     if can_assign:
-        assignments = (
-            LibraryTaskAssignment.objects.all()
-            .select_related("assignee", "assigned_by", "project", "library_task")
-            .prefetch_related("library_task__library_files")
-            .order_by("-created_at")[:200]
+        assignment_rows = list(
+            LibraryTaskAssignment.objects.filter(project_id__isnull=False)
+            .select_related("assignee", "assigned_by", "project")
+            .order_by("-created_at")[:800]
         )
     else:
-        assignments = (
-            LibraryTaskAssignment.objects.filter(assignee=request.user)
-            .select_related("assignee", "assigned_by", "project", "library_task")
-            .prefetch_related("library_task__library_files")
-            .order_by("-created_at")[:200]
+        assignment_rows = list(
+            LibraryTaskAssignment.objects.filter(
+                assignee=request.user,
+                project_id__isnull=False,
+            )
+            .select_related("assignee", "assigned_by", "project")
+            .order_by("-created_at")[:800]
         )
 
-    tasks = LibraryTask.objects.prefetch_related("library_files").order_by("code")
+    grouped = {}
+    for row in assignment_rows:
+        key = (row.assignee_id, row.project_id)
+        cur = grouped.get(key)
+        if cur is None or row.created_at > cur["created_at"]:
+            grouped[key] = {
+                "assignee": row.assignee,
+                "assigned_by": row.assigned_by,
+                "project": row.project,
+                "created_at": row.created_at,
+            }
+    assignment_records = []
+    if grouped:
+        project_ids = sorted({v["project"].pk for v in grouped.values() if v.get("project")})
+        project_map = {
+            p.pk: p
+            for p in LibraryProject.objects.filter(pk__in=project_ids)
+            .prefetch_related("library_tasks")
+            .order_by("code")
+        }
+        project_files_map = {}
+        pfiles = (
+            LibraryFile.objects.filter(projects__id__in=project_ids)
+            .select_related("created_by")
+            .order_by("original_name")
+            .distinct()
+        )
+        for f in pfiles:
+            for pid in f.projects.filter(pk__in=project_ids).values_list("id", flat=True):
+                project_files_map.setdefault(pid, []).append(f)
+        for item in grouped.values():
+            proj = project_map.get(item["project"].pk) if item.get("project") else None
+            if proj is None:
+                continue
+            assignment_records.append(
+                {
+                    "assignee": item["assignee"],
+                    "assigned_by": item["assigned_by"],
+                    "project": proj,
+                    "created_at": item["created_at"],
+                    "tasks": sorted(list(proj.library_tasks.all()), key=lambda x: x.code),
+                    "files": project_files_map.get(proj.pk, []),
+                }
+            )
+        assignment_records.sort(key=lambda x: x["created_at"], reverse=True)
 
-    project_tasks_map = {}
-    if can_assign:
-        for p in projects:
-            project_tasks_map[str(p.pk)] = [
-                {"id": t.pk, "label": f"{t.code} · {t.name}"}
-                for t in sorted(p.library_tasks.all(), key=lambda x: x.code)
-            ]
+    tasks = LibraryTask.objects.prefetch_related("library_files").order_by("code")
 
     manage_task = None
     manage_task_id_val = None
@@ -1958,9 +2338,8 @@ def library_task_management(request):
         {
             "can_assign": can_assign,
             "projects": projects,
-            "project_tasks_map": project_tasks_map,
             "app_users": app_users,
-            "assignments": assignments,
+            "assignment_records": assignment_records,
             "tasks": tasks,
             "manage_task": manage_task,
             "manage_task_id_val": manage_task_id_val,
@@ -1977,6 +2356,7 @@ def library_task_management(request):
                 {"key": "site_record", "label": "现场记录"},
                 {"key": "report", "label": "报告"},
                 {"key": "attachment", "label": "附件"},
+                {"key": "inspection_submit", "label": "检测提交"},
             ],
         },
     )
