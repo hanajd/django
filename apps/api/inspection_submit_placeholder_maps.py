@@ -320,14 +320,14 @@ _RULES_DEFAULT: list[dict[str, Any]] = [
     {"key": "dsa_doseFirst_chest_measuredValue", "kind": "path", "path": ["testResult", "dsa", "doseFirst", "measurements", 3, "measuredValue"], "cast": "str"},
     {"key": "dsa_doseFirst_head_measuredValue", "kind": "path", "path": ["testResult", "dsa", "doseFirst", "measurements", 4, "measuredValue"], "cast": "str"},
     # 与模板 *_result 占位符保持一致（结果 = measuredValue）
-    {"key": "dsa_doseFirst_foot_result", "kind": "path", "path": ["testResult", "dsa", "doseFirst", "measurements", 0, "measuredValue"], "cast": "str"},
-    {"key": "dsa_doseFirst_leg_result", "kind": "path", "path": ["testResult", "dsa", "doseFirst", "measurements", 1, "measuredValue"], "cast": "str"},
-    {"key": "dsa_doseFirst_abdomen_result", "kind": "path", "path": ["testResult", "dsa", "doseFirst", "measurements", 2, "measuredValue"], "cast": "str"},
-    {"key": "dsa_doseFirst_chest_result", "kind": "path", "path": ["testResult", "dsa", "doseFirst", "measurements", 3, "measuredValue"], "cast": "str"},
-    {"key": "dsa_doseFirst_head_result", "kind": "path", "path": ["testResult", "dsa", "doseFirst", "measurements", 4, "measuredValue"], "cast": "str"},
+    {"key": "dsa_doseFirst_foot_reportValue", "kind": "path", "path": ["testResult", "dsa", "doseFirst", "measurements", 0, "reportValue"], "cast": "str"},
+    {"key": "dsa_doseFirst_leg_reportValue", "kind": "path", "path": ["testResult", "dsa", "doseFirst", "measurements", 1, "reportValue"], "cast": "str"},
+    {"key": "dsa_doseFirst_abdomen_reportValue", "kind": "path", "path": ["testResult", "dsa", "doseFirst", "measurements", 2, "reportValue"], "cast": "str"},
+    {"key": "dsa_doseFirst_chest_reportValue", "kind": "path", "path": ["testResult", "dsa", "doseFirst", "measurements", 3, "reportValue"], "cast": "str"},
+    {"key": "dsa_doseFirst_head_reportValue", "kind": "path", "path": ["testResult", "dsa", "doseFirst", "measurements", 4, "reportValue"], "cast": "str"},
 
     # DSA - doseFirst 报告值（头部为主）
-    {"key": "dsa_doseFirst_head_reportedValue", "kind": "path", "path": ["testResult", "dsa", "doseFirst", "reportValue"], "cast": "str"},
+    # {"key": "dsa_doseFirst_head_reportValue", "kind": "path", "path": ["testResult", "dsa", "doseFirst", "reportValue"], "cast": "str"},
 
     # DSA - doseSecond 各部位测量值
     {"key": "dsa_doseSecond_foot_measuredValue", "kind": "path", "path": ["testResult", "dsa", "doseSecond", "measurements", 0, "measuredValue"], "cast": "str"},
@@ -336,14 +336,14 @@ _RULES_DEFAULT: list[dict[str, Any]] = [
     {"key": "dsa_doseSecond_chest_measuredValue", "kind": "path", "path": ["testResult", "dsa", "doseSecond", "measurements", 3, "measuredValue"], "cast": "str"},
     {"key": "dsa_doseSecond_head_measuredValue", "kind": "path", "path": ["testResult", "dsa", "doseSecond", "measurements", 4, "measuredValue"], "cast": "str"},
     # 与模板 *_result 占位符保持一致（结果 = measuredValue）
-    {"key": "dsa_doseSecond_foot_result", "kind": "path", "path": ["testResult", "dsa", "doseSecond", "measurements", 0, "measuredValue"], "cast": "str"},
-    {"key": "dsa_doseSecond_leg_result", "kind": "path", "path": ["testResult", "dsa", "doseSecond", "measurements", 1, "measuredValue"], "cast": "str"},
-    {"key": "dsa_doseSecond_abdomen_result", "kind": "path", "path": ["testResult", "dsa", "doseSecond", "measurements", 2, "measuredValue"], "cast": "str"},
-    {"key": "dsa_doseSecond_chest_result", "kind": "path", "path": ["testResult", "dsa", "doseSecond", "measurements", 3, "measuredValue"], "cast": "str"},
-    {"key": "dsa_doseSecond_head_result", "kind": "path", "path": ["testResult", "dsa", "doseSecond", "measurements", 4, "measuredValue"], "cast": "str"},
+    {"key": "dsa_doseSecond_foot_reportValue", "kind": "path", "path": ["testResult", "dsa", "doseSecond", "measurements", 0, "reportValue"], "cast": "str"},
+    {"key": "dsa_doseSecond_leg_reportValue", "kind": "path", "path": ["testResult", "dsa", "doseSecond", "measurements", 1, "reportValue"], "cast": "str"},
+    {"key": "dsa_doseSecond_abdomen_reportValue", "kind": "path", "path": ["testResult", "dsa", "doseSecond", "measurements", 2, "reportValue"], "cast": "str"},
+    {"key": "dsa_doseSecond_chest_reportValue", "kind": "path", "path": ["testResult", "dsa", "doseSecond", "measurements", 3, "reportValue"], "cast": "str"},
+    {"key": "dsa_doseSecond_head_reportValue", "kind": "path", "path": ["testResult", "dsa", "doseSecond", "measurements", 4, "reportValue"], "cast": "str"},
 
     # DSA - doseSecond 报告值
-    {"key": "dsa_doseSecond_head_reportedValue", "kind": "path", "path": ["testResult", "dsa", "doseSecond", "reportValue"], "cast": "str"},
+    # {"key": "dsa_doseSecond_head_reportValue", "kind": "path", "path": ["testResult", "dsa", "doseSecond", "reportValue"], "cast": "str"},
 
     # DSA - dynamicRange
     {"key": "dsa_dynamicRange_kv", "kind": "path", "path": ["testResult", "dsa", "dynamicRange", "kv"], "cast": "str"},
@@ -380,19 +380,19 @@ _RULES_DEFAULT: list[dict[str, Any]] = [
     {"key": "is_kerma_manualcontrol", "kind": "path", "path": ["testResult", "kermaTypical", "controlMode"], "cast": "eq", "value": "手动控制"},
     {"key": "is_kerma_normalmode", "kind": "const", "value": True},
     {"key": "is_kerma_unit1", "kind": "path", "path": ["testResult", "kermaTypical", "unit"], "cast": "eq", "value": "μGy/s"},
-    {"key": "is_kerma_unit2", "kind": "path", "path": ["testResult", "kermaTypical", "unit"], "cast": "eq", "value": "mGy/min"},
-    {"key": "is_kerma_unit3", "kind": "path", "path": ["testResult", "kermaTypical", "unit"], "cast": "eq", "value": "Gy/h"},
+    {"key": "is_kerma_unit2", "kind": "path", "path": ["testResult", "kermaTypical", "unit"], "cast": "eq", "value": "μGy/min"},
+    {"key": "is_kerma_unit3", "kind": "path", "path": ["testResult", "kermaTypical", "unit"], "cast": "eq", "value": "mGy/min"},
     # 6. 最大常规比释动能 单位/模式
-    {"key": "is_kermaMaxNormal_unit1", "kind": "const", "value": False},
-    {"key": "is_kermaMaxNormal_unit2", "kind": "const", "value": False},
-    {"key": "is_kermaMaxNormal_unit3", "kind": "const", "value": False},
+    {"key": "is_kermaMaxNormal_unit1", "kind": "path", "path": ["testResult", "kermaMaxNormal", "unit"], "cast": "eq", "value": "μGy/s"},
+    {"key": "is_kermaMaxNormal_unit2", "kind": "path", "path": ["testResult", "kermaMaxNormal", "unit"], "cast": "eq", "value": "μGy/min"},
+    {"key": "is_kermaMaxNormal_unit3", "kind": "path", "path": ["testResult", "kermaMaxNormal", "unit"], "cast": "eq", "value": "mGy/min"},
     {"key": "is_kermaMaxNormal_normalmode", "kind": "const", "value": True},
     # 7. 最大高剂量比释动能 高剂量模式/单位
     {"key": "is_kermaMaxHigh_highdosemode", "kind": "path", "path": ["testResult", "kermaMaxHigh", "hasHighDoseMode"]},
     {"key": "isnot_kermaMaxHigh_highdosemode", "kind": "path", "path": ["testResult", "kermaMaxHigh", "hasHighDoseMode"], "cast": "not"},
-    {"key": "is_kermaMaxHigh_unit1", "kind": "const", "value": False},
-    {"key": "is_kermaMaxHigh_unit2", "kind": "const", "value": False},
-    {"key": "is_kermaMaxHigh_unit3", "kind": "const", "value": False},
+    {"key": "is_kermaMaxHigh_unit1", "kind": "path", "path": ["testResult", "kermaMaxHigh", "unit"], "cast": "eq", "value": "μGy/s"},
+    {"key": "is_kermaMaxHigh_unit2", "kind": "path", "path": ["testResult", "kermaMaxHigh", "unit"], "cast": "eq", "value": "μGy/min"},
+    {"key": "is_kermaMaxHigh_unit3", "kind": "path", "path": ["testResult", "kermaMaxHigh", "unit"], "cast": "eq", "value": "mGy/min"},
     # 8. 高对比度 控制模式/铝片/结果状态
     {"key": "is_highContrast_autocontrol", "kind": "path", "path": ["testResult", "highContrast", "controlMode"], "cast": "eq", "value": "自动控制"},
     {"key": "is_highContrast_manualcontrol", "kind": "path", "path": ["testResult", "highContrast", "controlMode"], "cast": "eq", "value": "手动控制"},
@@ -407,9 +407,9 @@ _RULES_DEFAULT: list[dict[str, Any]] = [
     {"key": "is_screenKerma_manualcontrol", "kind": "path", "path": ["testResult", "screenKerma", "controlMode"], "cast": "eq", "value": "手动控制"},
     {"key": "is_screenKerma_grid", "kind": "path", "path": ["testResult", "screenKerma", "hasGrid"]},
     {"key": "isnot_screenKerma_grid", "kind": "path", "path": ["testResult", "screenKerma", "hasGrid"], "cast": "not"},
-    {"key": "is_screenKerma_unit1", "kind": "const", "value": False},
-    {"key": "is_screenKerma_unit2", "kind": "const", "value": False},
-    {"key": "is_screenKerma_unit3", "kind": "const", "value": False},
+    {"key": "is_screenKerma_unit1", "kind": "path", "path": ["testResult", "screenKerma", "unit"], "cast": "eq", "value": "μGy/s"},
+    {"key": "is_screenKerma_unit2", "kind": "path", "path": ["testResult", "screenKerma", "unit"], "cast": "eq", "value": "μGy/min"},
+    {"key": "is_screenKerma_unit3", "kind": "path", "path": ["testResult", "screenKerma", "unit"], "cast": "eq", "value": "mGy/min"},
     # 11. ABC 有无ABC功能
     {"key": "is_abc_hasAbc", "kind": "path", "path": ["testResult", "abc", "hasAbc"]},
     {"key": "isnot_abc_hasAbc", "kind": "path", "path": ["testResult", "abc", "hasAbc"], "cast": "not"},

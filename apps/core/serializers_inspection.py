@@ -31,7 +31,7 @@ class InspectionSubmitSerializer(serializers.Serializer):
     equipmentInfo = serializers.DictField()
     instruments = serializers.ListField(child=serializers.DictField(), allow_empty=True)
     testResult = serializers.DictField()
-    signatures = serializers.DictField(required=False, default=dict)
+    signatures = serializers.DictField(required=False, allow_null=True, default=dict)
     conclusion = serializers.DictField()
 
     def validate(self, attrs):
@@ -59,7 +59,7 @@ class InspectionDraftSerializer(serializers.Serializer):
     equipmentInfo = serializers.DictField(required=False)
     instruments = serializers.ListField(child=serializers.DictField(), required=False)
     testResult = serializers.DictField(required=False)
-    signatures = serializers.DictField(required=False)
+    signatures = serializers.DictField(required=False, allow_null=True)
     conclusion = serializers.DictField(required=False)
 
     def validate(self, attrs):

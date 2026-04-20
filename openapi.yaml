@@ -222,6 +222,58 @@ paths:
               schema:
                 type: string
                 format: binary
+  /inspections/{taskNo}/signatures/{character}/upload:
+    post:
+      tags: [Inspections]
+      summary: 上传角色签名（接收 Base64，后端自动转 PNG 入库）
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/taskNo'
+        - in: path
+          name: character
+          required: true
+          schema:
+            type: string
+            enum: [author, reviewer, approver]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                signatures:
+                  type: object
+                  properties:
+                    author:
+                      type: string
+                      description: 与 submit 一致，data:image/png;base64,...
+                    reviewer:
+                      type: string
+                      description: 与 submit 一致，data:image/png;base64,...
+                    approver:
+                      type: string
+                      description: 与 submit 一致，data:image/png;base64,...
+                    preparedBy:
+                      type: string
+                    reviewedBy:
+                      type: string
+                    approvedBy:
+                      type: string
+      responses:
+        '200':
+          description: 上传成功（Base64 已解码为 PNG 并按 {taskNo}_signature_{character}_{date}.png 保存到 inspection_submit）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericSuccess'
+        '400':
+          description: 参数错误（character 非法/signatures 缺失等）
+        '422':
+          description: signatures.{character} 不是合法 PNG Data URL
+        '409':
+          description: 报告尚未生成，暂不允许上传签名
   /inspections/{taskNo}/files/upload:
     post:
       tags: [Inspection Files]

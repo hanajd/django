@@ -25,6 +25,7 @@ from apps.api.inspection_views import (
     InspectionHistoryAPIView,
     InspectionPendingAPIView,
     InspectionSignatureDownloadAPIView,
+    InspectionSignatureUploadAPIView,
     InspectionStartAPIView,
     InspectionSubmitAPIView,
     InspectionSubmitByTaskAPIView,
@@ -144,6 +145,11 @@ urlpatterns = [
         "inspections/<str:task_no>/signatures/<str:role>",
         InspectionSignatureDownloadAPIView.as_view(),
         name="api_inspection_signature_download",
+    ),
+    path(
+        "inspections/<str:task_no>/signatures/<str:character>/upload",
+        InspectionSignatureUploadAPIView.as_view(),
+        name="api_inspection_signature_upload",
     ),
     path(
         "inspections/<str:task_no>/files/upload",

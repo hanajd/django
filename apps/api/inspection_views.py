@@ -1,6 +1,7 @@
 """检测任务接口（pending/history/start/draft/submit + taskNo 文件约束）。"""
 import io
 import json as json_std
+import logging
 import threading
 
 from django.core.paginator import Paginator
@@ -11,7 +12,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import status
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -39,12 +40,17 @@ from apps.core.models import (
     Report,
     SiteRecord,
 )
-from apps.core.serializers_inspection import InspectionDraftSerializer, InspectionSubmitSerializer
+from apps.core.serializers_inspection import (
+    InspectionDraftSerializer,
+    InspectionSubmitSerializer,
+    decode_png_data_url,
+)
 from apps.api.api_views import LibraryOCRUploadAPIView
 
 DEFAULT_REPORT_TYPE = "xray_fluoroscopy"
 AUTO_TASK_PREFIX = "ASG-"
 VALID_LIBRARY_FILE_CATEGORIES = {c for c, _ in LibraryFile.CATEGORY_CHOICES}
+logger = logging.getLogger(__name__)
 
 
 def _ok(message: str, data=None, http_status=status.HTTP_200_OK):
@@ -543,6 +549,14 @@ class InspectionSubmitByTaskAPIView(_InspectionTaskAccessMixin, APIView):
 
         serializer = InspectionSubmitSerializer(data=payload)
         if not serializer.is_valid():
+            logger.warning(
+                "inspection_submit validation failed task_no=%s user_id=%s errors=%s reportType=%r has_signatures=%s",
+                task_no,
+                getattr(request.user, "id", None),
+                serializer.errors,
+                payload.get("reportType"),
+                bool(payload.get("signatures")),
+            )
             return _fail("提交失败：数据验证错误", status.HTTP_422_UNPROCESSABLE_ENTITY, serializer.errors)
         data = serializer.validated_data
         signatures = data.get("signatures") or {}
@@ -550,6 +564,12 @@ class InspectionSubmitByTaskAPIView(_InspectionTaskAccessMixin, APIView):
         if sign_date:
             sign_date = _parse_client_datetime(sign_date)
             if sign_date is None:
+                logger.warning(
+                    "inspection_submit invalid signDate task_no=%s user_id=%s raw_signDate=%r",
+                    task_no,
+                    getattr(request.user, "id", None),
+                    signatures.get("signDate"),
+                )
                 return _fail("提交失败：signatures.signDate 不是合法 ISO8601 时间", status.HTTP_422_UNPROCESSABLE_ENTITY)
 
         obj, _ = InspectionSubmission.objects.update_or_create(
@@ -583,6 +603,12 @@ class InspectionSubmitByTaskAPIView(_InspectionTaskAccessMixin, APIView):
             raw_valid_until = item.get("validUntil")
             valid_until = _parse_client_datetime(raw_valid_until) if raw_valid_until else None
             if raw_valid_until and valid_until is None:
+                logger.warning(
+                    "inspection_submit invalid instrument validUntil task_no=%s user_id=%s raw_validUntil=%r",
+                    task_no,
+                    getattr(request.user, "id", None),
+                    raw_valid_until,
+                )
                 return _fail("提交失败：instruments.validUntil 不是合法 ISO8601 时间", status.HTTP_422_UNPROCESSABLE_ENTITY)
             ins_rows.append(
                 InspectionSubmissionInstrument(
@@ -687,6 +713,130 @@ class InspectionSignatureDownloadAPIView(_InspectionTaskAccessMixin, APIView):
             as_attachment=True,
             filename=f"{task_no}_{role}.png",
             content_type="image/png",
+        )
+
+
+class InspectionSignatureUploadAPIView(_InspectionTaskAccessMixin, APIView):
+    """按 taskNo 上传角色签名（报告生成后开放，格式与 submit 一致）。"""
+
+    permission_classes = [IsAuthenticated]
+    parser_classes = [JSONParser, FormParser]
+
+    _ROLE_FIELD_MAP = {
+        "author": "sign_author_png",
+        "reviewer": "sign_reviewer_png",
+        "approver": "sign_approver_png",
+    }
+
+    def post(self, request, task_no: str, character: str):
+        case, project, err_resp = self._resolve_case_project(request, task_no)
+        if err_resp is not None:
+            return err_resp
+
+        role = (character or "").strip()
+        field = self._ROLE_FIELD_MAP.get(role)
+        if not field:
+            return _fail("character 必须为 author/reviewer/approver", status.HTTP_400_BAD_REQUEST)
+
+        has_report = (
+            LibraryFile.objects.filter(
+                category=LibraryFile.CATEGORY_REPORT,
+                projects=project,
+                link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
+                link_object_id=case.pk,
+            )
+            .distinct()
+            .exists()
+        )
+        if not has_report:
+            return _fail("报告尚未生成，暂不允许上传签名", status.HTTP_409_CONFLICT)
+
+        payload = request.data or {}
+        signatures = payload.get("signatures")
+        if signatures in (None, ""):
+            signatures = {}
+        if not isinstance(signatures, dict):
+            return _fail("signatures 必须是对象", status.HTTP_400_BAD_REQUEST)
+        data_url = signatures.get(role)
+        if not data_url:
+            return _fail(f"signatures.{role} 不能为空", status.HTTP_400_BAD_REQUEST)
+        try:
+            raw = decode_png_data_url(data_url)
+        except Exception as exc:
+            return _fail(f"signatures.{role} 格式无效：{exc}", status.HTTP_422_UNPROCESSABLE_ENTITY)
+        if not raw:
+            return _fail(f"signatures.{role} 不能为空", status.HTTP_400_BAD_REQUEST)
+
+        obj = (
+            InspectionSubmission.objects.filter(task_no=task_no, case=case)
+            .select_related("case", "project")
+            .first()
+        )
+        now = timezone.now()
+        if obj is None:
+            obj = InspectionSubmission(
+                task_no=task_no,
+                report_type=DEFAULT_REPORT_TYPE,
+                status=InspectionSubmission.STATUS_IN_PROGRESS,
+                case=case,
+                project=project,
+                created_at_remote=now,
+                updated_at_remote=now,
+                report_info={},
+                hospital_info={},
+                equipment_info={},
+                test_result={},
+                conclusion={},
+                raw_payload={},
+                created_by=request.user,
+            )
+        setattr(obj, field, raw)
+        obj.sign_date = now
+        obj.project = project
+        obj.updated_at_remote = now
+        existing_raw = obj.raw_payload if isinstance(obj.raw_payload, dict) else {}
+        existing_signatures = existing_raw.get("signatures")
+        if not isinstance(existing_signatures, dict):
+            existing_signatures = {}
+        existing_signatures.update(
+            {
+                "preparedBy": signatures.get("preparedBy") or "",
+                "reviewedBy": signatures.get("reviewedBy") or "",
+                "approvedBy": signatures.get("approvedBy") or "",
+            }
+        )
+        existing_raw["signatures"] = existing_signatures
+        obj.raw_payload = existing_raw
+        if obj.created_by_id is None:
+            obj.created_by = request.user
+        obj.save()
+
+        safe_task_no = (task_no or "").replace("/", "_")
+        ts = timezone.localtime(now).strftime("%Y%m%d%H%M%S")
+        filename = f"{safe_task_no}_signature_{character}_{ts}.png"
+        wrapped = type("UploadLike", (), {"read": lambda self, b=raw: b, "name": filename})()
+        save_library_binary_uploads(
+            request.user,
+            [wrapped],
+            LibraryFile.CATEGORY_INSPECTION_SUBMIT,
+            link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
+            link_object_id=case.pk,
+            project_ids=[project.pk],
+        )
+
+        return _ok(
+            "签名上传成功",
+            {
+                "taskNo": task_no,
+                "character": role,
+                "filename": filename,
+                "signDate": obj.sign_date.isoformat() if obj.sign_date else None,
+                "names": {
+                    "preparedBy": existing_signatures.get("preparedBy", ""),
+                    "reviewedBy": existing_signatures.get("reviewedBy", ""),
+                    "approvedBy": existing_signatures.get("approvedBy", ""),
+                },
+            },
         )
 
 

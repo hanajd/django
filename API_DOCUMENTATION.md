@@ -180,24 +180,49 @@
 
 ---
 
-## 4. taskNo OCR 接口（新）
+## 4. taskNo 签名接口（新）
 
-### 4.1 OCR 上传（创建异步任务）
+### 4.1 角色签名上传（报告生成后）
+
+- `POST /inspections/{taskNo}/signatures/{character}/upload`
+- Path:
+  - `character`: `author | reviewer | approver`
+- 前置条件:
+  - 当前 `taskNo` 对应项目下必须已生成报告（否则返回 409）
+- 请求体（JSON，签名格式与 submit 一致）:
+  - `signatures.author` / `signatures.reviewer` / `signatures.approver`: `data:image/png;base64,...`
+  - `signatures.preparedBy` / `signatures.reviewedBy` / `signatures.approvedBy`: 签名人姓名（可选）
+- 说明:
+  - 路径中的 `character` 决定本次写入哪个签名字段（如 `author`）
+  - 对应的 `signatures.{character}` 必填，且必须是 PNG Base64 Data URL（与 `submit` 一致）
+- 入库行为:
+  - 写入 `InspectionSubmission` 对应签名字段（`sign_author_png/sign_reviewer_png/sign_approver_png`）
+  - 将 `preparedBy/reviewedBy/approvedBy` 持久化到 `InspectionSubmission.raw_payload.signatures`
+  - 后端会自动将 Base64 解码为 PNG，并同步保存到文件库 `inspection_submit` 分类
+- 命名规则:
+  - `{taskNo}_signature_{character}_{date}.png`（`date` 格式：`yyyyMMddHHmmss`）
+  - 例：`ASG-6_signature_reviewer_20260417152237.png`
+
+---
+
+## 5. taskNo OCR 接口（新）
+
+### 5.1 OCR 上传（创建异步任务）
 
 - `POST /inspections/{taskNo}/ocr/upload`
 - 表单字段: `files` 或 `file`
 
-### 4.2 OCR 任务状态
+### 5.2 OCR 任务状态
 
 - `GET /inspections/{taskNo}/ocr/tasks/{ocrTaskId}/status`
 
-### 4.3 OCR 自动填充
+### 5.3 OCR 自动填充
 
 - `GET /inspections/{taskNo}/ocr/tasks/{ocrTaskId}/autofill`
 
 ---
 
-## 5. 文件库旧接口（保留）
+## 6. 文件库旧接口（保留）
 
 ### 5.1 OCR 上传（旧）
 
@@ -233,7 +258,7 @@
 
 ---
 
-## 6. 用户 / 角色 / 菜单
+## 7. 用户 / 角色 / 菜单
 
 ### 6.1 用户
 
@@ -256,7 +281,7 @@
 
 ---
 
-## 7. 业务登记（Registry）
+## 8. 业务登记（Registry）
 
 - `registry/organizations`（ModelViewSet）
 - `registry/contacts`（ModelViewSet）

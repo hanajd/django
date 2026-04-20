@@ -69,9 +69,10 @@ def save_library_binary_uploads(
         if i > 0:
             clean_project_ids.append(i)
     clean_project_ids = sorted(set(clean_project_ids))
-    project_map = {
-        p.pk: p for p in LibraryProject.objects.filter(pk__in=clean_project_ids, is_active=True)
-    }
+    # Keep explicit project bindings even if a project is currently inactive.
+    # taskNo-based APIs resolve a concrete project from business data, and users
+    # still need historical files to remain associated with that project.
+    project_map = {p.pk: p for p in LibraryProject.objects.filter(pk__in=clean_project_ids)}
     dest_dir, rel_prefix = library_disk_dir_and_rel_prefix(category)
     dest_dir.mkdir(parents=True, exist_ok=True)
     created: List[Dict[str, Any]] = []
@@ -181,9 +182,7 @@ def parse_project_ids(raw_values: List[str]) -> List[int]:
 def attach_files_to_projects(file_ids: List[int], project_ids: List[int], user=None) -> None:
     if not file_ids or not project_ids:
         return
-    valid_projects = list(
-        LibraryProject.objects.filter(pk__in=project_ids, is_active=True).values_list("id", flat=True)
-    )
+    valid_projects = list(LibraryProject.objects.filter(pk__in=project_ids).values_list("id", flat=True))
     if not valid_projects:
         return
     for fid in file_ids:
