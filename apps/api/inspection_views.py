@@ -3,6 +3,9 @@ import io
 import json as json_std
 import logging
 import threading
+import re
+from datetime import datetime
+from urllib.parse import quote
 
 from django.core.paginator import Paginator
 from django.db import transaction
@@ -35,6 +38,7 @@ from apps.core.models import (
     InspectedOrganization,
     LibraryFile,
     LibraryOCRProcessTask,
+    LibraryProject,
     LibraryTask,
     LibraryTaskAssignment,
     Report,
@@ -46,6 +50,8 @@ from apps.core.serializers_inspection import (
     decode_png_data_url,
 )
 from apps.api.api_views import LibraryOCRUploadAPIView
+from utils.extract_frontend_template import extract_frontend_template
+from utils.frontend_schema_rule_engine import build_frontend_schema_by_rules
 
 DEFAULT_REPORT_TYPE = "xray_fluoroscopy"
 AUTO_TASK_PREFIX = "ASG-"
@@ -62,6 +68,55 @@ def _fail(message: str, http_status=status.HTTP_400_BAD_REQUEST, errors=None):
     if errors is not None:
         payload["errors"] = errors
     return Response(payload, status=http_status)
+
+
+def _build_accessible_projects_payload(user, *, include_legacy_task_no: bool = False):
+    assignment_qs = LibraryTaskAssignment.objects.select_related("project").filter(project_id__isnull=False)
+    if not role_has(user, "perm_assign_tasks"):
+        assignment_qs = assignment_qs.filter(assignee=user)
+    project_ids = sorted(set(assignment_qs.values_list("project_id", flat=True)))
+    if not project_ids:
+        return {"count": 0, "list": []}
+    projects = list(
+        LibraryProject.objects.filter(pk__in=project_ids, is_active=True)
+        .order_by("-updated_at", "-id")
+        .values("id", "code", "name", "description", "updated_at")
+    )
+    data = []
+    for row in projects:
+        item = {
+            "projectId": row["code"],
+            "projectPk": row["id"],
+            "projectName": row["name"],
+            "description": row.get("description") or "",
+            "updatedAt": row["updated_at"].isoformat() if row.get("updated_at") else "",
+        }
+        if include_legacy_task_no:
+            # 兼容初版前端：taskNo == 新版 projectId（委托编号）。
+            item["taskNo"] = row["code"]
+        data.append(item)
+    return {"count": len(data), "list": data}
+
+
+def _resolve_task_template_json(task_obj):
+    """
+    查找任务关联的最新 JSON 模板文件。
+    返回: (template_file_id, template_file_name, error_message)
+    """
+    template_lf = (
+        LibraryFile.objects.filter(
+            category=LibraryFile.CATEGORY_TEMPLATE,
+            library_tasks=task_obj,
+        )
+        .order_by("-created_at", "-id")
+        .distinct()
+        .first()
+    )
+    if template_lf is None:
+        return None, "", "任务下缺少 JSON 模板"
+    if not (template_lf.original_name or "").lower().endswith(".json"):
+        return template_lf.pk, template_lf.original_name, "任务模板不是 JSON 文件"
+    return template_lf.pk, template_lf.original_name, ""
 
 
 def _parse_client_datetime(value):
@@ -124,9 +179,11 @@ def _persist_submit_signature_files(user, task_no: str, case: InspectionCase, pr
 
 from apps.api.inspection_pdf_service import (
     _build_filled_template_fields_for_task,
-    _build_filled_template_fields_from_submit,
+    _load_site_record_payload_for_report,
     _pick_submit_generation_tasks,
     _persist_filled_pdf_from_submit,
+    _resolve_library_task_for_task_no,
+    _resolve_report_task_for_case,
 )
 
 
@@ -134,7 +191,113 @@ class _InspectionTaskAccessMixin:
     """统一 taskNo -> 案件/项目 访问控制。"""
 
     @staticmethod
+    def _project_public_id(project: LibraryProject) -> str:
+        """
+        对外项目编号（projectId）：
+        - 若项目 code 已是 yyyymmNN，直接使用；
+        - 否则按创建月份 + 当月序号动态生成（历史项目也能得到稳定编号）。
+        """
+        code = str(getattr(project, "code", "") or "").strip()
+        if re.fullmatch(r"\d{8}", code):
+            return code
+        created_at = getattr(project, "created_at", None) or timezone.now()
+        dt = timezone.localtime(created_at)
+        month_prefix = dt.strftime("%Y%m")
+        month_start = dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        if dt.month == 12:
+            next_month_start = dt.replace(year=dt.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        else:
+            next_month_start = dt.replace(month=dt.month + 1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        same_month_ids = list(
+            LibraryProject.objects.filter(
+                created_at__gte=month_start,
+                created_at__lt=next_month_start,
+            )
+            .order_by("created_at", "id")
+            .values_list("id", flat=True)
+        )
+        try:
+            idx = same_month_ids.index(project.id) + 1
+        except ValueError:
+            idx = 1
+        return f"{month_prefix}{idx:02d}"
+
+    @staticmethod
+    def _resolve_project(project_identifier):
+        raw = str(project_identifier or "").strip()
+        if not raw:
+            return None
+        project = LibraryProject.objects.filter(code=raw, is_active=True).first()
+        if project is not None:
+            return project
+        if re.fullmatch(r"\d{8}", raw):
+            month_prefix = raw[:6]
+            try:
+                seq = int(raw[6:])
+            except ValueError:
+                seq = 0
+            if seq > 0:
+                try:
+                    year = int(month_prefix[:4])
+                    month = int(month_prefix[4:6])
+                    month_start = timezone.make_aware(datetime(year, month, 1), timezone.get_current_timezone())
+                    if month == 12:
+                        next_month_start = timezone.make_aware(datetime(year + 1, 1, 1), timezone.get_current_timezone())
+                    else:
+                        next_month_start = timezone.make_aware(datetime(year, month + 1, 1), timezone.get_current_timezone())
+                    same_month_projects = list(
+                        LibraryProject.objects.filter(
+                            created_at__gte=month_start,
+                            created_at__lt=next_month_start,
+                            is_active=True,
+                        ).order_by("created_at", "id")
+                    )
+                    if 1 <= seq <= len(same_month_projects):
+                        return same_month_projects[seq - 1]
+                except Exception:
+                    pass
+        try:
+            pid = int(raw)
+        except ValueError:
+            return None
+        return LibraryProject.objects.filter(pk=pid, is_active=True).first()
+
+    @staticmethod
+    def _build_project_task_no(project: LibraryProject, library_task: LibraryTask) -> str:
+        if project is None or library_task is None:
+            return ""
+        task_ids = list(project.library_tasks.order_by("code", "id").values_list("id", flat=True))
+        try:
+            idx = task_ids.index(library_task.id) + 1
+        except ValueError:
+            return ""
+        return f"{idx:02d}"
+
+    @staticmethod
+    def _resolve_project_task_by_no(project: LibraryProject, task_no: str):
+        raw = str(task_no or "").strip()
+        if not raw:
+            return None
+        try:
+            idx = int(raw)
+        except ValueError:
+            return None
+        if idx <= 0:
+            return None
+        tasks = list(project.library_tasks.order_by("code", "id"))
+        if idx > len(tasks):
+            return None
+        return tasks[idx - 1]
+
+    @staticmethod
     def _build_assignment_task_no(assignment: LibraryTaskAssignment) -> str:
+        if assignment.project_id and assignment.library_task_id:
+            project = getattr(assignment, "project", None)
+            library_task = getattr(assignment, "library_task", None)
+            if project is not None and library_task is not None:
+                new_no = _InspectionTaskAccessMixin._build_project_task_no(project, library_task)
+                if new_no:
+                    return new_no
         return f"{AUTO_TASK_PREFIX}{assignment.pk}"
 
     @staticmethod
@@ -299,9 +462,42 @@ class _InspectionTaskAccessMixin:
             "conclusion": obj.conclusion if (obj.conclusion and has_payload) else None,
         }
 
+    def _ensure_task_under_project(self, request, project_id: str, task_no: str):
+        project = self._resolve_project(project_id)
+        if project is None:
+            return None, None, _fail("projectId 无效", status.HTTP_400_BAD_REQUEST)
+        library_task = self._resolve_project_task_by_no(project, task_no)
+        if library_task is None:
+            return None, None, _fail("taskNo 无效或不属于当前项目", status.HTTP_404_NOT_FOUND)
+        if role_has(request.user, "perm_assign_tasks"):
+            assignment = (
+                LibraryTaskAssignment.objects.filter(project=project, library_task=library_task)
+                .order_by("id")
+                .first()
+            )
+        else:
+            assignment = (
+                LibraryTaskAssignment.objects.filter(
+                    project=project,
+                    library_task=library_task,
+                    assignee=request.user,
+                )
+                .order_by("id")
+                .first()
+            )
+        if assignment is None:
+            return None, None, _fail("当前用户无权访问该项目任务", status.HTTP_403_FORBIDDEN)
+        full_task_no = f"{AUTO_TASK_PREFIX}{assignment.pk}"
+        case, resolved_project, err_resp = self._resolve_case_project(request, full_task_no)
+        if err_resp is not None:
+            return None, None, err_resp
+        if resolved_project.pk != project.pk:
+            return None, None, _fail("任务与项目不匹配", status.HTTP_403_FORBIDDEN)
+        return case, resolved_project, None
+
 
 class InspectionPendingAPIView(_InspectionTaskAccessMixin, APIView):
-    """获取当前用户待检测任务列表。"""
+    """兼容接口：返回当前用户可访问项目列表（初版 taskNo 对应新版 projectId）。"""
 
     permission_classes = [IsAuthenticated]
 
@@ -383,7 +579,38 @@ class InspectionPendingAPIView(_InspectionTaskAccessMixin, APIView):
         )
 
     def get(self, request):
+        # pending 接口改为项目列表入口：前端应先选项目，再查项目下任务。
+        payload = _build_accessible_projects_payload(request.user, include_legacy_task_no=True)
+        for item in payload.get("list", []):
+            project = LibraryProject.objects.filter(pk=item.get("projectPk")).first()
+            if project is None:
+                continue
+            pid = self._project_public_id(project)
+            item["projectId"] = pid
+            item["taskNo"] = pid
+        return _ok("获取成功", payload)
+
+
+class InspectionPendingLegacyAPIView(InspectionPendingAPIView):
+    """v1 兼容：返回旧版待检测任务列表。"""
+
+    def get(self, request):
         return self._build_response(request, forced_status_filter="pending")
+
+
+class InspectionProjectListAPIView(APIView):
+    """返回当前用户有权限访问的项目列表。"""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        payload = _build_accessible_projects_payload(request.user, include_legacy_task_no=False)
+        for item in payload.get("list", []):
+            project = LibraryProject.objects.filter(pk=item.get("projectPk")).first()
+            if project is None:
+                continue
+            item["projectId"] = _InspectionTaskAccessMixin._project_public_id(project)
+        return _ok("获取成功", payload)
 
 
 class InspectionDetailAPIView(_InspectionTaskAccessMixin, APIView):
@@ -628,7 +855,7 @@ class InspectionSubmitByTaskAPIView(_InspectionTaskAccessMixin, APIView):
         generation_results = []
         for task_obj in _pick_submit_generation_tasks(task_no, project):
             filled_fields, template_pdf_id, fill_reason, template_json_name = _build_filled_template_fields_for_task(
-                task_obj, request.data, map_id=ph_map_id, project=project
+                task_obj, request.data, map_id=ph_map_id, project=project, task_no=task_no
             )
             if not filled_fields:
                 generation_results.append(
@@ -684,6 +911,252 @@ class InspectionHistoryAPIView(InspectionPendingAPIView):
 
     def get(self, request):
         return self._build_response(request, forced_status_filter="history")
+
+
+class InspectionProjectTaskListAPIView(APIView):
+    """按项目返回当前用户可访问的任务列表。"""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, project_id: str):
+        project = _InspectionTaskAccessMixin._resolve_project(project_id)
+        if project is None:
+            return _fail("projectId 无效", status.HTTP_400_BAD_REQUEST)
+        tasks = list(project.library_tasks.order_by("code", "id"))
+        if not tasks:
+            return _ok("获取成功", {"projectId": project.code, "count": 0, "list": []})
+        rows = []
+        template_cache = {}
+        for idx, library_task in enumerate(tasks, start=1):
+            assignments_qs = LibraryTaskAssignment.objects.filter(project=project, library_task=library_task)
+            if not role_has(request.user, "perm_assign_tasks"):
+                assignments_qs = assignments_qs.filter(assignee=request.user)
+            assignment = assignments_qs.order_by("-created_at", "-id").first()
+            if assignment is None:
+                continue
+            task_no = f"{idx:02d}"
+            if library_task.id not in template_cache:
+                template_cache[library_task.id] = _resolve_task_template_json(library_task)
+            tpl_id, tpl_name, tpl_error = template_cache[library_task.id]
+            rows.append(
+                {
+                    "assignmentId": assignment.pk,
+                    "taskNo": task_no,
+                    "projectId": _InspectionTaskAccessMixin._project_public_id(project),
+                    "taskId": library_task.id,
+                    "taskCode": library_task.code,
+                    "taskName": library_task.name,
+                    "outputTarget": library_task.output_target,
+                    "assignedAt": assignment.created_at.isoformat() if assignment.created_at else "",
+                    "frontendTemplateDownloadUrl": (
+                        request.build_absolute_uri(
+                            reverse(
+                                "api_v2_inspection_project_task_export_frontend_json",
+                                kwargs={"project_id": _InspectionTaskAccessMixin._project_public_id(project), "task_no": task_no},
+                            )
+                        )
+                        if not tpl_error
+                        else ""
+                    ),
+                    "frontendTemplateMeta": {
+                        "templateFileId": tpl_id,
+                        "templateFileName": tpl_name,
+                        "exported": not bool(tpl_error),
+                        "error": tpl_error or "",
+                    },
+                }
+            )
+        return _ok("获取成功", {"projectId": project.code, "count": len(rows), "list": rows})
+
+
+class InspectionTaskFrontendJsonExportAPIView(_InspectionTaskAccessMixin, APIView):
+    """按任务导出回填后的前端 JSON，并直接下载。"""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, task_no: str):
+        case, project, err_resp = self._resolve_case_project(request, task_no)
+        if err_resp is not None:
+            return err_resp
+
+        task_obj = _resolve_library_task_for_task_no(task_no, project)
+        if task_obj is None:
+            return _fail("未找到任务关联模板", status.HTTP_404_NOT_FOUND)
+
+        submission = (
+            InspectionSubmission.objects.filter(task_no=task_no, case=case, project=project)
+            .order_by("-updated_at", "-id")
+            .first()
+        )
+        now_iso = timezone.now().isoformat()
+        if submission is None:
+            # 导出前端空模板：无提交时也允许导出，只提供结构化空 payload + 任务上下文。
+            payload = {
+                "taskNo": task_no,
+                "projectId": self._project_public_id(project),
+                "reportType": DEFAULT_REPORT_TYPE,
+                "createdAt": now_iso,
+                "updatedAt": now_iso,
+                "reportInfo": {},
+                "hospitalInfo": {},
+                "equipmentInfo": {},
+                "testResult": {},
+                "conclusion": {},
+                "signatures": {},
+                "instruments": [],
+            }
+        else:
+            payload = submission.raw_payload if isinstance(submission.raw_payload, dict) else {}
+            if not payload:
+                payload = {
+                    "reportInfo": submission.report_info or {},
+                    "hospitalInfo": submission.hospital_info or {},
+                    "equipmentInfo": submission.equipment_info or {},
+                    "testResult": submission.test_result or {},
+                    "conclusion": submission.conclusion or {},
+                    "signatures": {},
+                    "instruments": [],
+                }
+            # 兼容旧提交：补齐填充映射依赖的任务/项目/更新时间根字段。
+            payload["taskNo"] = payload.get("taskNo") or task_no
+            payload["projectId"] = payload.get("projectId") or self._project_public_id(project)
+            payload["updatedAt"] = payload.get("updatedAt") or (
+                submission.updated_at_remote.isoformat() if submission.updated_at_remote else now_iso
+            )
+
+        ph_map_id = (
+            (request.GET.get("placeholderMapId") or request.GET.get("placeholder_map_id") or "").strip() or None
+        )
+        filled_fields, _template_pdf_id, fill_reason, _template_json_name = _build_filled_template_fields_for_task(
+            task_obj, payload, map_id=ph_map_id, project=project, task_no=task_no
+        )
+        if not filled_fields:
+            return _fail(fill_reason or "模板字段填充失败", status.HTTP_409_CONFLICT)
+
+        template_json_lf = (
+            LibraryFile.objects.filter(
+                category=LibraryFile.CATEGORY_TEMPLATE,
+                library_tasks=task_obj,
+            )
+            .order_by("-created_at")
+            .distinct()
+            .first()
+        )
+        if template_json_lf is None:
+            return _fail("任务下缺少 JSON 模板", status.HTTP_404_NOT_FOUND)
+
+        try:
+            template_path = pipeline_service.library_absolute_path(template_json_lf.relative_path)
+            template_raw = template_path.read_text(encoding="utf-8", errors="replace")
+            template_obj = json_std.loads(template_raw)
+        except Exception as exc:
+            return _fail(f"读取任务模板失败: {exc}", status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        pdf_block = template_obj.get("pdf") if isinstance(template_obj.get("pdf"), dict) else {}
+        if not isinstance(pdf_block, dict):
+            pdf_block = {}
+        pdf_block["fields"] = filled_fields
+        template_obj["pdf"] = pdf_block
+
+        # 任务接口默认使用规则引擎导出前端模板；失败时回退旧提取逻辑保证可用性。
+        try:
+            frontend_obj = build_frontend_schema_by_rules(template_obj)
+        except Exception as exc:
+            logger.warning("rule frontend export failed, fallback to extract_frontend_template: %s", exc)
+            frontend_obj = extract_frontend_template(template_obj)
+        ts = timezone.localtime().strftime("%Y%m%d%H%M%S")
+        filename = f"{task_no}_frontend_{ts}.json".replace("/", "_")
+        raw = json_std.dumps(frontend_obj, ensure_ascii=False, indent=2).encode("utf-8")
+        resp = FileResponse(
+            io.BytesIO(raw),
+            as_attachment=True,
+            filename=filename,
+            content_type="application/json",
+        )
+        resp["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
+        return resp
+
+
+class InspectionTaskManualExportReportAPIView(_InspectionTaskAccessMixin, APIView):
+    """按任务手动导出报告：使用现场记录 JSON 回填报告模板。"""
+
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, task_no: str):
+        case, project, err_resp = self._resolve_case_project(request, task_no)
+        if err_resp is not None:
+            return err_resp
+
+        report_task = _resolve_report_task_for_case(task_no, project)
+        if report_task is None:
+            return _fail("项目下未找到报告任务", status.HTTP_409_CONFLICT)
+
+        source_payload, source_reason = _load_site_record_payload_for_report(case, project, report_task)
+        if not isinstance(source_payload, dict):
+            return _fail(source_reason or "未找到可用的现场记录 JSON", status.HTTP_409_CONFLICT)
+
+        ph_map_id = (
+            (request.data.get("placeholderMapId") or request.query_params.get("placeholderMapId") or "").strip() or None
+        )
+        filled_fields, template_pdf_id, fill_reason, template_json_name = _build_filled_template_fields_for_task(
+            report_task,
+            source_payload,
+            map_id=ph_map_id,
+            project=project,
+            task_no=task_no,
+        )
+        if not filled_fields:
+            return _fail(fill_reason or "模板字段填充失败", status.HTTP_409_CONFLICT)
+
+        ok, pdf_reason = _persist_filled_pdf_from_submit(
+            request.user,
+            task_no,
+            case,
+            project,
+            filled_fields,
+            template_pdf_id=template_pdf_id,
+            template_json_name=template_json_name,
+            task_obj=report_task,
+        )
+        if not ok:
+            return _fail(pdf_reason or "报告导出失败", status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        latest_file = (
+            LibraryFile.objects.filter(
+                category=LibraryFile.CATEGORY_REPORT,
+                link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
+                link_object_id=case.pk,
+                projects=project,
+                library_tasks=report_task,
+            )
+            .order_by("-created_at", "-id")
+            .distinct()
+            .first()
+        )
+        payload = {
+            "taskNo": task_no,
+            "projectId": self._project_public_id(project),
+            "reportTask": {"id": report_task.id, "code": report_task.code, "name": report_task.name},
+            "sourceSiteRecordTasks": [
+                {"id": t.id, "code": t.code, "name": t.name}
+                for t in report_task.report_source_tasks.filter(output_target=LibraryTask.OUTPUT_SITE_RECORD).order_by(
+                    "code", "id"
+                )
+            ],
+        }
+        if latest_file is not None:
+            payload["reportFile"] = {
+                "id": latest_file.id,
+                "name": latest_file.original_name,
+                "downloadUrl": request.build_absolute_uri(
+                    reverse(
+                        "api_inspection_task_file_download",
+                        kwargs={"task_no": task_no, "pk": latest_file.pk, "category": LibraryFile.CATEGORY_REPORT},
+                    )
+                ),
+            }
+        return _ok("报告导出成功", payload)
 
 
 class InspectionSignatureDownloadAPIView(_InspectionTaskAccessMixin, APIView):
@@ -1218,3 +1691,137 @@ class InspectionTaskOCRAutofillAPIView(_InspectionTaskAccessMixin, APIView):
                 "payload": payload,
             },
         )
+
+
+class InspectionProjectTaskDetailAPIView(InspectionDetailAPIView):
+    def get(self, request, project_id: str, task_no: str):
+        case, _project, err_resp = self._ensure_task_under_project(request, project_id, task_no)
+        if err_resp is not None:
+            return err_resp
+        obj = self._submission_or_init(case, case.library_project)
+        data = self._serialize_task_detail(case, obj)
+        data["projectId"] = self._project_public_id(case.library_project) if case.library_project_id else ""
+        data["taskNo"] = task_no
+        return _ok("获取成功", data)
+
+
+class InspectionProjectTaskStartAPIView(InspectionStartAPIView):
+    def post(self, request, project_id: str, task_no: str):
+        case, _project, err_resp = self._ensure_task_under_project(request, project_id, task_no)
+        if err_resp is not None:
+            return err_resp
+        resp = super().post(request, task_no=case.case_no)
+        if isinstance(getattr(resp, "data", None), dict):
+            data = resp.data.get("data")
+            if isinstance(data, dict):
+                data["taskNo"] = task_no
+                data["projectId"] = self._project_public_id(case.library_project) if case.library_project_id else project_id
+        return resp
+
+
+class InspectionProjectTaskDraftAPIView(InspectionDraftAPIView):
+    def post(self, request, project_id: str, task_no: str):
+        case, _project, err_resp = self._ensure_task_under_project(request, project_id, task_no)
+        if err_resp is not None:
+            return err_resp
+        resp = super().post(request, task_no=case.case_no)
+        if isinstance(getattr(resp, "data", None), dict):
+            data = resp.data.get("data")
+            if isinstance(data, dict):
+                data["taskNo"] = task_no
+                data["projectId"] = self._project_public_id(case.library_project) if case.library_project_id else project_id
+        return resp
+
+
+class InspectionProjectTaskSubmitAPIView(InspectionSubmitByTaskAPIView):
+    def post(self, request, project_id: str, task_no: str):
+        case, _project, err_resp = self._ensure_task_under_project(request, project_id, task_no)
+        if err_resp is not None:
+            return err_resp
+        resp = super().post(request, task_no=case.case_no)
+        if isinstance(getattr(resp, "data", None), dict):
+            data = resp.data.get("data")
+            if isinstance(data, dict):
+                data["taskNo"] = task_no
+                data["projectId"] = self._project_public_id(case.library_project) if case.library_project_id else project_id
+        return resp
+
+
+class InspectionProjectTaskFrontendJsonExportAPIView(InspectionTaskFrontendJsonExportAPIView):
+    def get(self, request, project_id: str, task_no: str):
+        case, _project, err_resp = self._ensure_task_under_project(request, project_id, task_no)
+        if err_resp is not None:
+            return err_resp
+        return super().get(request, task_no=case.case_no)
+
+
+class InspectionProjectTaskManualExportReportAPIView(InspectionTaskManualExportReportAPIView):
+    def post(self, request, project_id: str, task_no: str):
+        case, _project, err_resp = self._ensure_task_under_project(request, project_id, task_no)
+        if err_resp is not None:
+            return err_resp
+        return super().post(request, task_no=case.case_no)
+
+
+class InspectionProjectTaskFileUploadAPIView(InspectionTaskFileUploadAPIView):
+    def post(self, request, project_id: str, task_no: str):
+        case, _project, err_resp = self._ensure_task_under_project(request, project_id, task_no)
+        if err_resp is not None:
+            return err_resp
+        return super().post(request, task_no=case.case_no)
+
+
+class InspectionProjectTaskFileListAPIView(InspectionTaskFileListAPIView):
+    def get(self, request, project_id: str, task_no: str, category: str):
+        case, _project, err_resp = self._ensure_task_under_project(request, project_id, task_no)
+        if err_resp is not None:
+            return err_resp
+        return super().get(request, task_no=case.case_no, category=category)
+
+
+class InspectionProjectTaskFileDownloadAPIView(InspectionTaskFileDownloadAPIView):
+    def get(self, request, project_id: str, task_no: str, pk: int, category: str):
+        case, _project, err_resp = self._ensure_task_under_project(request, project_id, task_no)
+        if err_resp is not None:
+            return err_resp
+        return super().get(request, task_no=case.case_no, pk=pk, category=category)
+
+
+class InspectionProjectTaskOCRUploadAPIView(InspectionTaskOCRUploadAPIView):
+    def post(self, request, project_id: str, task_no: str):
+        case, _project, err_resp = self._ensure_task_under_project(request, project_id, task_no)
+        if err_resp is not None:
+            return err_resp
+        return super().post(request, task_no=case.case_no)
+
+
+class InspectionProjectTaskOCRStatusAPIView(InspectionTaskOCRStatusAPIView):
+    def get(self, request, project_id: str, task_no: str, ocr_task_id: int):
+        case, _project, err_resp = self._ensure_task_under_project(request, project_id, task_no)
+        if err_resp is not None:
+            return err_resp
+        return super().get(request, task_no=case.case_no, ocr_task_id=ocr_task_id)
+
+
+class InspectionProjectTaskOCRAutofillAPIView(InspectionTaskOCRAutofillAPIView):
+    def get(self, request, project_id: str, task_no: str, ocr_task_id: int):
+        case, _project, err_resp = self._ensure_task_under_project(request, project_id, task_no)
+        if err_resp is not None:
+            return err_resp
+        return super().get(request, task_no=case.case_no, ocr_task_id=ocr_task_id)
+
+
+class InspectionProjectTaskSignatureDownloadAPIView(InspectionSignatureDownloadAPIView):
+    def get(self, request, project_id: str, task_no: str, role: str):
+        case, _project, err_resp = self._ensure_task_under_project(request, project_id, task_no)
+        if err_resp is not None:
+            return err_resp
+        return super().get(request, task_no=case.case_no, role=role)
+
+
+class InspectionProjectTaskSignatureUploadAPIView(InspectionSignatureUploadAPIView):
+    def post(self, request, project_id: str, task_no: str, character: str):
+        case, _project, err_resp = self._ensure_task_under_project(request, project_id, task_no)
+        if err_resp is not None:
+            return err_resp
+        return super().post(request, task_no=case.case_no, character=character)

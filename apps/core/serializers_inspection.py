@@ -1,11 +1,7 @@
 """检测报告提交接口序列化器（taskNo 绑定项目任务）。"""
 import base64
-import re
 
 from rest_framework import serializers
-
-
-TASK_NO_PATTERN = re.compile(r"^(XF-\d{8}-\d+|ASG-\d+)$")
 
 
 def decode_png_data_url(data_url: str):
@@ -22,7 +18,9 @@ def decode_png_data_url(data_url: str):
 
 
 class InspectionSubmitSerializer(serializers.Serializer):
+    # 暂不校验 taskNo 格式；实际任务号以 URL / 视图层解析为准
     taskNo = serializers.CharField(max_length=64)
+
     reportType = serializers.CharField(max_length=64)
     createdAt = serializers.DateTimeField()
     updatedAt = serializers.DateTimeField()
@@ -35,9 +33,6 @@ class InspectionSubmitSerializer(serializers.Serializer):
     conclusion = serializers.DictField()
 
     def validate(self, attrs):
-        task_no = attrs.get("taskNo", "")
-        if not TASK_NO_PATTERN.match(task_no):
-            raise serializers.ValidationError({"taskNo": "格式必须为 XF-YYYYMMDD-序号 或 ASG-数字"})
         if attrs.get("reportType") != "xray_fluoroscopy":
             raise serializers.ValidationError({"reportType": "必须为 xray_fluoroscopy"})
 

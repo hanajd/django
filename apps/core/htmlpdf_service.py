@@ -123,17 +123,71 @@ def safe_inset_rect(rect: fitz.Rect, pad: float) -> fitz.Rect:
 def parse_template_json(raw_text: str) -> Dict[str, Any]:
     data = json.loads(raw_text)
     if isinstance(data, list):
-        return {"fields": data, "content": {}}
+        return {"fields": data, "content": {}, "bindings": {}, "source_pdf": {}}
     if isinstance(data, dict):
+        # Unified template format (v1/v2): keep HTMLPDF fields under pdf.fields.
+        pdf_block = data.get("pdf")
+        if isinstance(pdf_block, dict) and isinstance(pdf_block.get("fields"), list):
+            template_meta = data.get("meta", {}) if isinstance(data.get("meta"), dict) else {}
+            if not template_meta:
+                template_meta = {
+                    "templateId": data.get("templateId", ""),
+                    "templateName": data.get("templateName", ""),
+                    "version": data.get("version", ""),
+                    "reportType": data.get("reportType", ""),
+                    "standard": data.get("standard", ""),
+                    "pdfUrl": data.get("pdfUrl", ""),
+                    "locale": data.get("locale", ""),
+                }
+            form_schema = data.get("formSchema") if isinstance(data.get("formSchema"), dict) else {}
+            if not form_schema:
+                form_schema = {
+                    "constants": data.get("constants", {}) if isinstance(data.get("constants"), dict) else {},
+                    "enums": data.get("enums", {}) if isinstance(data.get("enums"), dict) else {},
+                    "steps": data.get("steps", []) if isinstance(data.get("steps"), list) else [],
+                }
+            return {
+                "fields": pdf_block.get("fields") or [],
+                "content": data.get("content", {}) if isinstance(data.get("content"), dict) else {},
+                "bindings": data.get("bindings", {}) if isinstance(data.get("bindings"), dict) else {},
+                "source_pdf": pdf_block.get("source_pdf", {}) if isinstance(pdf_block.get("source_pdf"), dict) else {},
+                "template_meta": template_meta,
+                "form_schema": form_schema,
+                "templateId": template_meta.get("templateId", ""),
+                "templateName": template_meta.get("templateName", ""),
+                "version": template_meta.get("version", ""),
+                "reportType": template_meta.get("reportType", ""),
+                "standard": template_meta.get("standard", ""),
+                "pdfUrl": template_meta.get("pdfUrl", ""),
+                "locale": template_meta.get("locale", ""),
+                "constants": form_schema.get("constants", {}) if isinstance(form_schema.get("constants"), dict) else {},
+                "enums": form_schema.get("enums", {}) if isinstance(form_schema.get("enums"), dict) else {},
+                "steps": form_schema.get("steps", []) if isinstance(form_schema.get("steps"), list) else [],
+                "schema": data.get("schema") or "",
+            }
         if "fields" not in data and "content" not in data:
-            return {"fields": [], "content": data}
+            return {
+                "fields": [],
+                "content": data,
+                "bindings": data.get("bindings", {}) if isinstance(data.get("bindings"), dict) else {},
+                "source_pdf": data.get("source_pdf", {}) if isinstance(data.get("source_pdf"), dict) else {},
+                "template_meta": data.get("meta", {}) if isinstance(data.get("meta"), dict) else {},
+                "schema": data.get("schema") or "",
+            }
         fields = data.get("fields", [])
         content_map = data.get("content", {})
         if not content_map and isinstance(fields, list):
             for item in fields:
                 if isinstance(item, dict) and "id" in item and "content" in item:
                     content_map[item["id"]] = item.get("content", "")
-        return {"fields": fields, "content": content_map}
+        return {
+            "fields": fields,
+            "content": content_map,
+            "bindings": data.get("bindings", {}) if isinstance(data.get("bindings"), dict) else {},
+            "source_pdf": data.get("source_pdf", {}) if isinstance(data.get("source_pdf"), dict) else {},
+            "template_meta": data.get("meta", {}) if isinstance(data.get("meta"), dict) else {},
+            "schema": data.get("schema") or "",
+        }
     raise ValueError("JSON structure unsupported")
 
 

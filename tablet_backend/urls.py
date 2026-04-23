@@ -14,7 +14,8 @@ urlpatterns = [
     path('', include('apps.core.urls')),
     
     # API 路由
-    path('api/v1/', include('apps.api.urls')),
+    path('api/v1/', include('apps.api.urls_v1')),
+    path('api/v2/', include('apps.api.urls_v2')),
 ]
 
 # 开发环境下提供媒体文件服务

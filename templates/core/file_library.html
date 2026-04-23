@@ -226,6 +226,14 @@
                 手动导出 PDF
             </button>
             {% endif %}
+            {% if can_manual_export_report_from_site_record %}
+            <button type="submit" name="action" value="manual_export_report_from_site_record"
+                    formaction="{% url 'file_library' %}"
+                    class="px-3 py-2 bg-violet-600 text-white text-sm rounded-lg hover:bg-violet-700"
+                    onclick="return confirm('确定根据现场记录 JSON 为勾选的检测提交导出报告？');">
+                手动导出报告
+            </button>
+            {% endif %}
             <span class="text-sm text-gray-500">
                 {% if can_batch_delete %}勾选后批量删除；{% endif %}
                 {% if role_perm.perm_file_download %}支持下载；{% endif %}
@@ -249,6 +257,9 @@
                         <th class="px-3 py-2">文件名</th>
                         <th class="px-3 py-2">大小</th>
                         <th class="px-3 py-2">上传者</th>
+                        {% if show_submit_project_task %}
+                        <th class="px-3 py-2 min-w-[14rem]">项目与任务</th>
+                        {% endif %}
                         <th class="px-3 py-2">时间</th>
                         <th class="px-3 py-2">操作</th>
                     </tr>
@@ -279,6 +290,11 @@
                             <span class="text-gray-400">—</span>
                             {% endif %}
                         </td>
+                        {% if show_submit_project_task %}
+                        <td class="px-3 py-2 text-xs text-gray-700 align-top max-w-lg break-words">
+                            {{ f.inspection_submit_project_task|default:"—" }}
+                        </td>
+                        {% endif %}
                         <td class="px-3 py-2">{{ f.created_at|date:"Y-m-d H:i" }}</td>
                         <td class="px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-1">
                             {% if role_perm.perm_file_download %}
@@ -295,7 +311,7 @@
                         </td>
                     </tr>
                     {% empty %}
-                    <tr><td colspan="{% if can_batch_delete %}6{% else %}5{% endif %}" class="px-3 py-6 text-center text-gray-400">暂无文件</td></tr>
+                    <tr><td colspan="{{ file_library_table_colspan }}" class="px-3 py-6 text-center text-gray-400">暂无文件</td></tr>
                     {% endfor %}
                 </tbody>
             </table>

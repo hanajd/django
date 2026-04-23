@@ -326,6 +326,14 @@ class LibraryTask(models.Model):
         verbose_name=_("PDF 输出目标"),
         help_text=_("决定该任务生成的 PDF 默认保存到现场记录或报告分类"),
     )
+    report_source_tasks = models.ManyToManyField(
+        "self",
+        symmetrical=False,
+        blank=True,
+        related_name="report_target_tasks",
+        verbose_name=_("报告来源现场记录任务"),
+        help_text=_("当本任务输出为报告时，可指定一个或多个现场记录任务作为报告填充来源"),
+    )
     created_by = models.ForeignKey(
         User,
         null=True,

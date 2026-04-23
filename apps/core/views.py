@@ -16,13 +16,14 @@ from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.core.paginator import Paginator
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import Q
 from django.db.models.deletion import ProtectedError
 from django.core.exceptions import PermissionDenied
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.http import require_POST
 from django.views.decorators.csrf import csrf_exempt
@@ -62,6 +63,23 @@ from apps.core.models import (
     Role,
     UserProfile,
 )
+from utils.ollama_extract import generate_frontend_template_with_ollama
+from utils.frontend_schema_rule_engine import build_frontend_schema_by_rules
+
+_LIBRARYTASK_HAS_REPORT_SOURCE_RELATION = None
+
+
+def _librarytask_has_report_source_relation() -> bool:
+    global _LIBRARYTASK_HAS_REPORT_SOURCE_RELATION
+    if _LIBRARYTASK_HAS_REPORT_SOURCE_RELATION is not None:
+        return _LIBRARYTASK_HAS_REPORT_SOURCE_RELATION
+    try:
+        with connection.cursor() as cursor:
+            tables = set(connection.introspection.table_names(cursor))
+        _LIBRARYTASK_HAS_REPORT_SOURCE_RELATION = "core_librarytask_report_source_tasks" in tables
+    except Exception:
+        _LIBRARYTASK_HAS_REPORT_SOURCE_RELATION = False
+    return _LIBRARYTASK_HAS_REPORT_SOURCE_RELATION
 
 
 def _require_perm(request, perm: str):
@@ -475,7 +493,16 @@ def _safe_filename(name: str) -> str:
 
 
 def _gen_project_code() -> str:
-    return f"PRJ-{uuid.uuid4().hex[:8].upper()}"
+    now = timezone.localtime()
+    prefix = now.strftime("%Y%m")
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if now.month == 12:
+        next_month_start = now.replace(year=now.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    else:
+        next_month_start = now.replace(month=now.month + 1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    month_count = LibraryProject.objects.filter(created_at__gte=month_start, created_at__lt=next_month_start).count()
+    seq = month_count + 1
+    return f"{prefix}{seq:02d}"
 
 
 @login_required
@@ -523,6 +550,12 @@ def library_projects(request):
                     tasks = list(LibraryTask.objects.filter(pk__in=task_ids))
                     if len(tasks) == len(task_ids):
                         row.library_tasks.set(tasks)
+                        # 新建项目时若已选择任务，同步把任务已有文件挂到项目下。
+                        all_file_ids = set()
+                        for t in tasks:
+                            all_file_ids.update(t.library_files.values_list("id", flat=True))
+                        if all_file_ids:
+                            attach_files_to_projects(sorted(all_file_ids), [row.pk], request.user)
                 messages.success(request, f"已创建项目：{row.code} · {row.name}")
             return redirect(reverse("library_projects"))
 
@@ -573,6 +606,61 @@ def library_projects(request):
                         detach_files_from_projects(sorted(all_file_ids), [proj.pk])
                     messages.success(request, f"已从项目移除 {len(tasks)} 个任务")
             return redirect(reverse("library_projects") + f"?project_id={proj.pk}")
+
+        if action == "update_project_report_sources":
+            post_raw = request.POST.get("project_id", "").strip()
+            try:
+                post_pid = int(post_raw) if post_raw else None
+            except ValueError:
+                post_pid = None
+            proj = LibraryProject.objects.filter(pk=post_pid).first() if post_pid else None
+            if proj is None:
+                proj = selected_project
+            if proj is None:
+                messages.error(request, "请先在上方选择项目")
+                return redirect(reverse("library_projects"))
+            if not role_has(request.user, "perm_assign_tasks"):
+                messages.error(request, "当前角色无权维护报告来源任务")
+                return redirect(reverse("library_projects") + f"?project_id={proj.pk}")
+            if not _librarytask_has_report_source_relation():
+                messages.error(request, "当前环境尚未启用报告来源任务关联，请先完成数据库迁移")
+                return redirect(reverse("library_projects") + f"?project_id={proj.pk}")
+
+            project_tasks = proj.library_tasks.all()
+            report_tasks = list(project_tasks.filter(output_target=LibraryTask.OUTPUT_REPORT).only("id", "code", "name"))
+            report_task_ids = {x.id for x in report_tasks}
+            try:
+                report_task_id = int(request.POST.get("report_task_id", "") or 0)
+            except ValueError:
+                report_task_id = 0
+            if report_task_id <= 0 or report_task_id not in report_task_ids:
+                messages.error(request, "请选择当前项目内的报告任务")
+                return redirect(reverse("library_projects") + f"?project_id={proj.pk}")
+            report_task = next((x for x in report_tasks if x.id == report_task_id), None)
+            if report_task is None:
+                messages.error(request, "报告任务不存在")
+                return redirect(reverse("library_projects") + f"?project_id={proj.pk}")
+
+            site_task_ids = set(
+                project_tasks.filter(output_target=LibraryTask.OUTPUT_SITE_RECORD).values_list("id", flat=True)
+            )
+            selected = []
+            for raw in request.POST.getlist("source_site_task_ids"):
+                try:
+                    sid = int(raw)
+                except ValueError:
+                    continue
+                if sid > 0:
+                    selected.append(sid)
+            selected = sorted(set(selected))
+            if any(sid not in site_task_ids for sid in selected):
+                messages.error(request, "存在不属于当前项目的现场记录来源任务")
+                return redirect(
+                    reverse("library_projects") + f"?project_id={proj.pk}&report_task_id={report_task_id}"
+                )
+            report_task.report_source_tasks.set(selected)
+            messages.success(request, f"已保存报告任务「{report_task.code}」的现场记录来源关联")
+            return redirect(reverse("library_projects") + f"?project_id={proj.pk}&report_task_id={report_task_id}")
 
         if action in ("bind_project_files", "unbind_project_files"):
             post_raw = request.POST.get("project_id", "").strip()
@@ -709,13 +797,40 @@ def library_projects(request):
             return redirect(reverse("library_projects"))
 
     all_library_tasks = LibraryTask.objects.order_by("code")
+    if not _librarytask_has_report_source_relation():
+        all_library_tasks = all_library_tasks.only("id", "code", "name", "output_target")
     project_file_tab = _normalize_library_tab(request.GET.get("project_file_tab", "ocr"))
     project_file_cat = _library_category_for_tab(project_file_tab)
     project_task_ids = set()
+    project_report_tasks = []
+    project_site_tasks = []
+    selected_report_task_id = ""
+    selected_report_source_ids = set()
     project_file_ids = set()
     project_file_rows = []
     if selected_project:
         project_task_ids = set(selected_project.library_tasks.values_list("id", flat=True))
+        if _librarytask_has_report_source_relation():
+            project_site_tasks = list(
+                selected_project.library_tasks.filter(output_target=LibraryTask.OUTPUT_SITE_RECORD).order_by("code", "id")
+            )
+            project_site_task_ids = [x.id for x in project_site_tasks]
+            project_report_tasks = list(
+                selected_project.library_tasks.filter(output_target=LibraryTask.OUTPUT_REPORT).order_by("code", "id")
+            )
+            selected_report_raw = (request.GET.get("report_task_id") or "").strip()
+            try:
+                selected_report_int = int(selected_report_raw) if selected_report_raw else 0
+            except ValueError:
+                selected_report_int = 0
+            if not selected_report_int and project_report_tasks:
+                selected_report_int = project_report_tasks[0].id
+            selected_report_obj = next((x for x in project_report_tasks if x.id == selected_report_int), None)
+            if selected_report_obj:
+                selected_report_task_id = str(selected_report_obj.id)
+                selected_report_source_ids = set(
+                    selected_report_obj.report_source_tasks.filter(pk__in=project_site_task_ids).values_list("id", flat=True)
+                )
         fq = LibraryFile.objects.filter(category=project_file_cat).select_related("created_by").order_by("-created_at")
         if library_scope_own_files_only(request.user):
             fq = fq.filter(created_by=request.user)
@@ -770,6 +885,11 @@ def library_projects(request):
             "selected_project_id": str(selected_project.pk) if selected_project else "",
             "all_library_tasks": all_library_tasks,
             "project_task_ids": project_task_ids,
+            "project_report_tasks": project_report_tasks,
+            "project_site_tasks": project_site_tasks,
+            "selected_report_task_id": selected_report_task_id,
+            "selected_report_source_ids": selected_report_source_ids,
+            "has_report_source_task_column": _librarytask_has_report_source_relation(),
             "project_file_tab": project_file_tab,
             "project_file_rows": project_file_rows,
             "project_file_ids": project_file_ids,
@@ -877,6 +997,45 @@ def _persist_binary_library_files(request, files, category: str, project_ids=Non
         fn = s.get("filename") or "(无名)"
         messages.warning(request, f"跳过文件 {fn}: {s.get('reason', '')}")
     return len(created)
+
+
+def _annotate_inspection_submit_project_task(files: list) -> None:
+    """为检测提交文件库行补充「项目 / 任务」展示文案（写回各 LibraryFile 实例属性）。"""
+    from apps.api.inspection_pdf_service import _resolve_library_task_for_task_no
+
+    case_ids: list[int] = []
+    for f in files:
+        if (
+            f.category == LibraryFile.CATEGORY_INSPECTION_SUBMIT
+            and f.link_entity == LibraryFile.LINK_ENTITY_INSPECTION_CASE
+            and f.link_object_id
+        ):
+            case_ids.append(int(f.link_object_id))
+    cases_by_id = {}
+    if case_ids:
+        for c in InspectionCase.objects.filter(pk__in=sorted(set(case_ids))).select_related("library_project"):
+            cases_by_id[c.pk] = c
+    for f in files:
+        if f.category != LibraryFile.CATEGORY_INSPECTION_SUBMIT:
+            continue
+        if f.link_entity != LibraryFile.LINK_ENTITY_INSPECTION_CASE or not f.link_object_id:
+            f.inspection_submit_project_task = "未绑定检测案件"
+            continue
+        case = cases_by_id.get(int(f.link_object_id))
+        if case is None:
+            f.inspection_submit_project_task = "关联案件不存在"
+            continue
+        proj = case.library_project
+        if proj is None:
+            f.inspection_submit_project_task = f"任务编号 {case.case_no} · 未绑定项目"
+            continue
+        lt = _resolve_library_task_for_task_no(case.case_no, proj)
+        proj_part = f"{proj.code} · {proj.name}"
+        if lt is not None:
+            ot = lt.get_output_target_display()
+            f.inspection_submit_project_task = f"{proj_part} / {lt.code} · {lt.name}（{ot}）"
+        else:
+            f.inspection_submit_project_task = f"{proj_part} / 任务编号 {case.case_no}"
 
 
 @login_required
@@ -1225,7 +1384,7 @@ def file_library(request):
             generated_any = False
             for task_obj in _pick_submit_generation_tasks(case.case_no, case.library_project):
                 filled_fields, template_pdf_id, fill_reason, template_json_name = _build_filled_template_fields_for_task(
-                    task_obj, payload, project=case.library_project
+                    task_obj, payload, project=case.library_project, task_no=case.case_no
                 )
                 if not filled_fields:
                     skip_reasons.append(
@@ -1258,6 +1417,118 @@ def file_library(request):
             messages.success(request, f"已为 {success_count} 条检测提交执行手动导出 PDF")
         if skipped_count:
             messages.warning(request, f"有 {skipped_count} 条记录未导出")
+            for reason in skip_reasons[:20]:
+                messages.warning(request, reason)
+            if len(skip_reasons) > 20:
+                messages.warning(request, f"其余 {len(skip_reasons) - 20} 条原因已省略")
+        df = request.POST.get("date_from", "").strip()
+        dt = request.POST.get("date_to", "").strip()
+        up = request.POST.get("uploader", "").strip()
+        return redirect(reverse("file_library") + _file_library_query_string(tab, df, dt, up, project_selected))
+
+    if request.method == "POST" and request.POST.get("action") == "manual_export_report_from_site_record":
+        if tab != "inspection_submit":
+            messages.error(request, "仅支持在「检测提交」分类执行手动导出报告")
+            df = request.POST.get("date_from", "").strip()
+            dt = request.POST.get("date_to", "").strip()
+            up = request.POST.get("uploader", "").strip()
+            return redirect(reverse("file_library") + _file_library_query_string(tab, df, dt, up, project_selected))
+        if not role_has(request.user, "perm_process_pipeline"):
+            messages.error(request, "当前角色无权执行手动导出报告")
+            df = request.POST.get("date_from", "").strip()
+            dt = request.POST.get("date_to", "").strip()
+            up = request.POST.get("uploader", "").strip()
+            return redirect(reverse("file_library") + _file_library_query_string(tab, df, dt, up, project_selected))
+
+        ids = []
+        for x in request.POST.getlist("ids"):
+            try:
+                ids.append(int(x))
+            except (TypeError, ValueError):
+                continue
+        ids = list(dict.fromkeys([i for i in ids if i > 0]))
+        if not ids:
+            messages.error(request, "请先勾选至少一条检测提交 JSON")
+            df = request.POST.get("date_from", "").strip()
+            dt = request.POST.get("date_to", "").strip()
+            up = request.POST.get("uploader", "").strip()
+            return redirect(reverse("file_library") + _file_library_query_string(tab, df, dt, up, project_selected))
+
+        from apps.api.inspection_pdf_service import (
+            _build_filled_template_fields_for_task,
+            _load_site_record_payload_for_report,
+            _persist_filled_pdf_from_submit,
+            _resolve_report_task_for_case,
+        )
+
+        qs = (
+            LibraryFile.objects.filter(pk__in=ids, category=LibraryFile.CATEGORY_INSPECTION_SUBMIT)
+            .select_related("created_by")
+            .order_by("-created_at")
+        )
+        success_count = 0
+        skipped_count = 0
+        skip_reasons = []
+        for lf in qs:
+            if not library_file_access_allowed(request.user, lf):
+                skipped_count += 1
+                skip_reasons.append(f"{lf.original_name}: 无权访问该文件")
+                continue
+            if lf.link_entity != LibraryFile.LINK_ENTITY_INSPECTION_CASE or not lf.link_object_id:
+                skipped_count += 1
+                skip_reasons.append(f"{lf.original_name}: 未关联 inspection_case")
+                continue
+            case = InspectionCase.objects.select_related("library_project").filter(pk=lf.link_object_id).first()
+            if case is None or not case.library_project_id:
+                skipped_count += 1
+                skip_reasons.append(f"{lf.original_name}: 关联案件或项目不存在")
+                continue
+            report_task = _resolve_report_task_for_case(case.case_no, case.library_project)
+            if report_task is None:
+                skipped_count += 1
+                skip_reasons.append(f"{lf.original_name}: 项目下未找到报告任务")
+                continue
+            source_payload, source_reason = _load_site_record_payload_for_report(case, case.library_project, report_task)
+            if not isinstance(source_payload, dict):
+                skipped_count += 1
+                skip_reasons.append(f"{lf.original_name}: {source_reason or '读取现场记录 JSON 失败'}")
+                continue
+            filled_fields, template_pdf_id, fill_reason, template_json_name = _build_filled_template_fields_for_task(
+                report_task,
+                source_payload,
+                project=case.library_project,
+                task_no=case.case_no,
+            )
+            if not filled_fields:
+                skipped_count += 1
+                skip_reasons.append(
+                    f"{lf.original_name} / {report_task.code}({report_task.output_target}): {fill_reason or '模板填充失败'}"
+                )
+                continue
+            ok, pdf_reason = _persist_filled_pdf_from_submit(
+                request.user,
+                case.case_no,
+                case,
+                case.library_project,
+                filled_fields,
+                template_pdf_id=template_pdf_id,
+                template_json_name=template_json_name,
+                task_obj=report_task,
+            )
+            if not ok:
+                skipped_count += 1
+                skip_reasons.append(
+                    f"{lf.original_name} / {report_task.code}({report_task.output_target}): {pdf_reason or '报告导出失败'}"
+                )
+                continue
+            if pdf_reason:
+                messages.warning(request, f"{lf.original_name} / {report_task.code}: {pdf_reason}")
+            success_count += 1
+
+        if success_count:
+            messages.success(request, f"已为 {success_count} 条检测提交从现场记录 JSON 导出报告")
+        if skipped_count:
+            messages.warning(request, f"有 {skipped_count} 条记录未导出报告")
             for reason in skip_reasons[:20]:
                 messages.warning(request, reason)
             if len(skip_reasons) > 20:
@@ -1306,6 +1577,12 @@ def file_library(request):
     if d0 is not None and d1 is not None:
         files = files.filter(created_at__date__gte=d0, created_at__date__lte=d1)
 
+    files = files.order_by("-created_at", "-id")
+    show_submit_project_task = tab == "inspection_submit"
+    if show_submit_project_task:
+        files = list(files)
+        _annotate_inspection_submit_project_task(files)
+
     uploader_choices = []
     if not restricted:
         chooser_qs = LibraryFile.objects.filter(category=cat).exclude(
@@ -1329,6 +1606,9 @@ def file_library(request):
         ap = library_assigned_project_ids(request.user)
         projects_qs = projects_qs.filter(pk__in=ap) if ap else projects_qs.none()
 
+    can_batch_delete = role_has(request.user, "perm_file_delete") and not restricted
+    file_library_table_colspan = 5 + (1 if can_batch_delete else 0) + (1 if show_submit_project_task else 0)
+
     return render(
         request,
         "core/file_library.html",
@@ -1346,15 +1626,22 @@ def file_library(request):
                 {"key": "inspection_submit", "label": "检测提交"},
             ],
             "files": files,
+            "show_submit_project_task": show_submit_project_task,
+            "file_library_table_colspan": file_library_table_colspan,
             "date_from": date_from,
             "date_to": date_to,
             "date_filter_active": bool(d0 and d1),
             "uploader_selected": uploader_selected,
             "uploader_choices": uploader_choices,
             "file_scope_own_only": restricted,
-            "can_batch_delete": role_has(request.user, "perm_file_delete")
-            and not restricted,
+            "can_batch_delete": can_batch_delete,
             "can_manual_export_submit_pdf": (
+                tab == "inspection_submit"
+                and role_has(request.user, "perm_process_pipeline")
+                and role_has(request.user, "perm_file_delete")
+                and not restricted
+            ),
+            "can_manual_export_report_from_site_record": (
                 tab == "inspection_submit"
                 and role_has(request.user, "perm_process_pipeline")
                 and role_has(request.user, "perm_file_delete")
@@ -1878,6 +2165,11 @@ def htmlpdf_api_export_json(request):
     except Exception:
         return JsonResponse({"error": "请求体不是合法JSON"}, status=400)
     fields = data.get("fields", [])
+    form_schema = data.get("form_schema") if isinstance(data.get("form_schema"), dict) else {}
+    bindings = data.get("bindings") if isinstance(data.get("bindings"), dict) else {}
+    template_meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+    report_type = str(data.get("report_type") or "").strip()
+    standard = str(data.get("standard") or "").strip()
     name = safe_library_basename((data.get("name") or "template").strip() or "template")
     if not name.lower().endswith(".json"):
         name = f"{name}.json"
@@ -1888,7 +2180,42 @@ def htmlpdf_api_export_json(request):
             source_meta = json_std.loads(meta_path.read_text(encoding="utf-8"))
         except Exception:
             source_meta = {}
-    payload = {"fields": fields, "source_pdf": source_meta}
+    normalized_fields = _normalize_pdf_fields_for_unified_template(fields, form_schema, bindings)
+    constants = form_schema.get("constants") if isinstance(form_schema.get("constants"), dict) else {}
+    enums = form_schema.get("enums") if isinstance(form_schema.get("enums"), dict) else {}
+    steps = form_schema.get("steps") if isinstance(form_schema.get("steps"), list) else []
+    payload = {
+        # Unified template schema (v2): frontend format first, backend adds PDF anchors/mappings.
+        "schema": "unified_form_template/v2",
+        "templateId": template_meta.get("templateId") or name.rsplit(".", 1)[0],
+        "templateName": template_meta.get("templateName") or name,
+        "version": template_meta.get("version") or "1.0.0",
+        "reportType": report_type,
+        "standard": standard,
+        "pdfUrl": str(template_meta.get("pdfUrl") or ""),
+        "locale": str(template_meta.get("locale") or "zh-CN"),
+        "constants": constants,
+        "enums": enums,
+        "steps": steps,
+        # Keep v1-compatible blocks for old readers.
+        "meta": {
+            "templateId": template_meta.get("templateId") or name.rsplit(".", 1)[0],
+            "templateName": template_meta.get("templateName") or name,
+            "version": template_meta.get("version") or "1.0.0",
+            "reportType": report_type,
+            "standard": standard,
+            "pdfUrl": str(template_meta.get("pdfUrl") or ""),
+            "locale": str(template_meta.get("locale") or "zh-CN"),
+        },
+        "pdf": {
+            "source_pdf": source_meta,
+            "fields": normalized_fields,
+        },
+        "formSchema": {"constants": constants, "enums": enums, "steps": steps},
+        "bindings": bindings,
+        "fields": normalized_fields,
+        "source_pdf": source_meta,
+    }
     raw = json_std.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     wrapped = type("UploadLike", (), {"read": lambda self: raw, "name": name})()
     created, skipped = save_library_binary_uploads(
@@ -1898,6 +2225,289 @@ def htmlpdf_api_export_json(request):
     )
     if skipped and not created:
         return JsonResponse({"error": "模板保存失败"}, status=500)
+    row = created[0]
+    return JsonResponse(
+        {
+            "ok": True,
+            "saved_to": "template",
+            "file": {
+                "id": row["id"],
+                "name": row["original_name"],
+                "category": row["category"],
+                "library_url": reverse("file_library") + "?tab=template",
+                "download_url": reverse("file_library_download", kwargs={"pk": row["id"]}),
+            },
+        }
+    )
+
+
+def _frontend_type_from_pdf_field_type(field_type: str) -> str:
+    ft = (field_type or "").strip().lower()
+    if ft == "check":
+        return "boolean"
+    if ft == "image":
+        return "signature"
+    return "text"
+
+
+def _iter_form_fields(form_schema: dict):
+    steps = form_schema.get("steps") if isinstance(form_schema.get("steps"), list) else []
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        sections = step.get("sections") if isinstance(step.get("sections"), list) else []
+        for sec in sections:
+            if not isinstance(sec, dict):
+                continue
+            fields = sec.get("fields") if isinstance(sec.get("fields"), list) else []
+            for fld in fields:
+                if isinstance(fld, dict):
+                    yield fld
+
+
+def _build_form_field_meta(form_schema: dict) -> dict:
+    out = {}
+    for fld in _iter_form_fields(form_schema):
+        fid = str(fld.get("id") or "").strip()
+        if not fid:
+            continue
+        out[fid] = {
+            "label": str(fld.get("label") or fid).strip(),
+            "type": str(fld.get("type") or "text").strip().lower(),
+        }
+    return out
+
+
+def _normalize_pdf_fields_for_unified_template(fields, form_schema: dict, bindings: dict):
+    form_meta = _build_form_field_meta(form_schema)
+    rows = bindings.get("field_to_pdf") if isinstance(bindings.get("field_to_pdf"), list) else []
+    by_pdf_id = {}
+    by_placeholder = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        pdf_id = str(row.get("pdfFieldId") or "").strip()
+        ph = str(row.get("placeholder") or "").strip()
+        if pdf_id:
+            by_pdf_id[pdf_id] = row
+        if ph:
+            by_placeholder[ph] = row
+    out = []
+    for idx, item in enumerate(fields or []):
+        if not isinstance(item, dict):
+            continue
+        row = dict(item)
+        old_pdf_id = str(row.get("id") or f"f{idx + 1}").strip()
+        old_placeholder = str(row.get("placeholder") or "").strip()
+        link = by_pdf_id.get(old_pdf_id) or by_placeholder.get(old_placeholder) or {}
+        field_id = str(link.get("fieldId") or old_placeholder or old_pdf_id).strip()
+        title = str(
+            link.get("title")
+            or form_meta.get(field_id, {}).get("label")
+            or row.get("title")
+            or old_placeholder
+            or field_id
+        ).strip()
+        row["pdfFieldId"] = old_pdf_id
+        row["id"] = field_id
+        row["title"] = title
+        # Keep legacy key for compatibility with old pipeline readers.
+        row["placeholder"] = field_id
+        out.append(row)
+    return out
+
+
+def _build_frontend_field_items(fields):
+    """Build one frontend field definition for every PDF field item."""
+    out = []
+    id_counter = {}
+    for idx, item in enumerate(fields or []):
+        if not isinstance(item, dict):
+            continue
+        field_id_raw = str(item.get("id") or "").strip()
+        title = str(item.get("title") or "").strip()
+        placeholder = str(item.get("placeholder") or "").strip()
+        pdf_field_id = str(item.get("pdfFieldId") or item.get("id") or f"f{idx + 1}")
+        base_id = field_id_raw or placeholder or pdf_field_id
+        n = id_counter.get(base_id, 0) + 1
+        id_counter[base_id] = n
+        field_id = base_id if n == 1 else f"{base_id}_{n}"
+        page = item.get("page") or 1
+        try:
+            page = int(page)
+        except (TypeError, ValueError):
+            page = 1
+        anchor_type = str(item.get("fieldType") or "text").lower() or "text"
+        out.append(
+            {
+                "id": field_id,
+                "title": title or placeholder or field_id,
+                "label": title or placeholder or field_id,
+                "type": _frontend_type_from_pdf_field_type(anchor_type),
+                "required": False,
+                "defaultValue": None,
+                "source": {
+                    "key": field_id_raw or placeholder or field_id,
+                    "pdfFieldId": pdf_field_id,
+                    "page": page,
+                    "anchorType": anchor_type,
+                },
+            }
+        )
+    return out
+
+
+@csrf_exempt
+@login_required
+@require_POST
+def htmlpdf_api_export_frontend_json(request):
+    gx = _require_perm(request, "perm_process_pipeline")
+    if gx:
+        return JsonResponse({"error": "forbidden"}, status=403)
+    try:
+        data = json_std.loads(request.body.decode("utf-8"))
+    except Exception:
+        return JsonResponse({"error": "请求体不是合法JSON"}, status=400)
+
+    name = safe_library_basename((data.get("name") or "template_frontend").strip() or "template_frontend")
+    if not name.lower().endswith(".json"):
+        name = f"{name}.json"
+
+    meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+    template_id = str(data.get("templateId") or meta.get("templateId") or "").strip()
+    template_name = str(data.get("templateName") or meta.get("templateName") or "").strip()
+    template_version = str(data.get("version") or meta.get("version") or "1.0.0").strip()
+    report_type = str(data.get("reportType") or data.get("report_type") or meta.get("reportType") or "").strip()
+    standard = str(data.get("standard") or meta.get("standard") or "").strip()
+    form_schema = data.get("form_schema") if isinstance(data.get("form_schema"), dict) else {}
+    if not form_schema:
+        form_schema = data.get("formSchema") if isinstance(data.get("formSchema"), dict) else {}
+    constants = data.get("constants") if isinstance(data.get("constants"), dict) else {}
+    if not constants:
+        constants = form_schema.get("constants") if isinstance(form_schema.get("constants"), dict) else {}
+    enums = data.get("enums") if isinstance(data.get("enums"), dict) else {}
+    if not enums:
+        enums = form_schema.get("enums") if isinstance(form_schema.get("enums"), dict) else {}
+    steps = data.get("steps") if isinstance(data.get("steps"), list) else []
+    if not steps:
+        steps = form_schema.get("steps") if isinstance(form_schema.get("steps"), list) else []
+    payload = {
+        "templateId": template_id or name.rsplit(".", 1)[0],
+        "templateName": template_name or name,
+        "version": template_version or "1.0.0",
+        "reportType": report_type,
+        "standard": standard,
+        "pdfUrl": str(data.get("pdfUrl") or meta.get("pdfUrl") or ""),
+        "locale": str(data.get("locale") or meta.get("locale") or "zh-CN"),
+        "constants": constants,
+        "enums": enums,
+        "steps": steps,
+    }
+    # 保存前端 JSON 支持三种导出模式：
+    # - rule: 纯规则引擎（不经过大模型）
+    # - llm: 强制大模型（失败回退规则引擎）
+    # - auto: 自动模式（默认）
+    export_mode = str(data.get("export_mode") or "auto").strip().lower()
+    if export_mode not in {"auto", "llm", "rule"}:
+        export_mode = "auto"
+    input_fields = data.get("fields") if isinstance(data.get("fields"), list) else []
+    llm_auto = str(os.environ.get("ENABLE_LLM_FRONTEND_EXPORT", "1")).strip().lower() in {"1", "true", "yes", "on"}
+    llm_force = str(data.get("force_llm_steps") or "").strip().lower() in {"1", "true", "yes", "on"}
+    need_llm = export_mode == "llm" or (export_mode == "auto" and llm_auto and (llm_force or not payload.get("steps")))
+    need_rule = export_mode == "rule"
+    rule_template_obj = {
+        "templateId": payload["templateId"],
+        "templateName": payload["templateName"],
+        "version": payload["version"],
+        "reportType": payload["reportType"],
+        "standard": payload["standard"],
+        "pdfUrl": payload["pdfUrl"],
+        "locale": payload["locale"],
+        "constants": payload["constants"],
+        "enums": payload["enums"],
+        "steps": payload["steps"],
+        "pdf": {"fields": input_fields},
+        "meta": meta,
+    }
+    if need_llm:
+        sample_template_obj = {}
+        sample_path = Path(
+            os.environ.get(
+                "FRONTEND_TEMPLATE_SAMPLE_PATH",
+                str(settings.BASE_DIR / "media" / "file_library" / "templates" / "365af054b1d14cf9938440cd8c62f1f8_template_frontend.json"),
+            )
+        )
+        try:
+            if sample_path.is_file():
+                sample_template_obj = json_std.loads(sample_path.read_text(encoding="utf-8"))
+        except Exception:
+            sample_template_obj = {}
+        llm_template_obj = {
+            "schema": "unified_form_template/v2",
+            "templateId": payload["templateId"],
+            "templateName": payload["templateName"],
+            "version": payload["version"],
+            "reportType": payload["reportType"],
+            "standard": payload["standard"],
+            "pdfUrl": payload["pdfUrl"],
+            "locale": payload["locale"],
+            "constants": payload["constants"],
+            "enums": payload["enums"],
+            "steps": payload["steps"],
+            "pdf": {"fields": input_fields},
+            "formSchema": {
+                "constants": payload["constants"],
+                "enums": payload["enums"],
+                "steps": payload["steps"],
+            },
+            "bindings": data.get("bindings") if isinstance(data.get("bindings"), dict) else {},
+        }
+        llm_payload = generate_frontend_template_with_ollama(
+            llm_template_obj,
+            source_file_hint=1,
+            sample_template_obj=sample_template_obj,
+        )
+        if isinstance(llm_payload, dict) and isinstance(llm_payload.get("steps"), list) and llm_payload.get("steps"):
+            payload = {
+                "templateId": str(llm_payload.get("templateId") or payload["templateId"]),
+                "templateName": str(llm_payload.get("templateName") or payload["templateName"]),
+                "version": str(llm_payload.get("version") or payload["version"]),
+                "reportType": str(llm_payload.get("reportType") or payload["reportType"]),
+                "standard": str(llm_payload.get("standard") or payload["standard"]),
+                "pdfUrl": str(llm_payload.get("pdfUrl") or payload["pdfUrl"]),
+                "locale": str(llm_payload.get("locale") or payload["locale"]),
+                "constants": llm_payload.get("constants") if isinstance(llm_payload.get("constants"), dict) else payload["constants"],
+                "enums": llm_payload.get("enums") if isinstance(llm_payload.get("enums"), dict) else payload["enums"],
+                "steps": llm_payload.get("steps"),
+            }
+        else:
+            need_rule = True
+
+    if need_rule or (export_mode == "auto" and not payload.get("steps")):
+        rule_payload = build_frontend_schema_by_rules(rule_template_obj)
+        if isinstance(rule_payload, dict) and isinstance(rule_payload.get("steps"), list):
+            payload = {
+                "templateId": str(rule_payload.get("templateId") or payload["templateId"]),
+                "templateName": str(rule_payload.get("templateName") or payload["templateName"]),
+                "version": str(rule_payload.get("version") or payload["version"]),
+                "reportType": str(rule_payload.get("reportType") or payload["reportType"]),
+                "standard": str(rule_payload.get("standard") or payload["standard"]),
+                "pdfUrl": str(rule_payload.get("pdfUrl") or payload["pdfUrl"]),
+                "locale": str(rule_payload.get("locale") or payload["locale"]),
+                "constants": rule_payload.get("constants") if isinstance(rule_payload.get("constants"), dict) else payload["constants"],
+                "enums": rule_payload.get("enums") if isinstance(rule_payload.get("enums"), dict) else payload["enums"],
+                "steps": rule_payload.get("steps") or payload["steps"],
+            }
+
+    raw = json_std.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    wrapped = type("UploadLike", (), {"read": lambda self: raw, "name": name})()
+    created, skipped = save_library_binary_uploads(
+        request.user,
+        [wrapped],
+        LibraryFile.CATEGORY_TEMPLATE,
+    )
+    if skipped and not created:
+        return JsonResponse({"error": "前端JSON保存失败"}, status=500)
     row = created[0]
     return JsonResponse(
         {
@@ -2024,6 +2634,13 @@ def _library_task_management_redirect_url(request) -> str:
     nt = (request.POST.get("new_task") or request.GET.get("new_task") or "").strip().lower()
     if nt in ("1", "true", "yes", "on"):
         q.append("new_task=1")
+    ep = (request.POST.get("export_project_id") or request.GET.get("export_project_id") or "").strip()
+    if ep:
+        try:
+            int(ep)
+            q.append("export_project_id=" + ep)
+        except ValueError:
+            pass
     if q:
         u += "?" + "&".join(q)
     return u
@@ -2041,7 +2658,7 @@ def redirect_to_task_management(request):
 
 @login_required
 def library_task_management(request):
-    """任务管理：新建任务、按分类维护任务-文件关联、分配任务；项目与任务为多对多。"""
+    """项目分配管理：新建任务模板、维护模板文件、按项目分配给 App 用户。"""
     gx = _require_perm(request, "perm_file_library")
     if gx:
         return gx
@@ -2061,7 +2678,7 @@ def library_task_management(request):
             if output_target not in {LibraryTask.OUTPUT_SITE_RECORD, LibraryTask.OUTPUT_REPORT}:
                 output_target = LibraryTask.OUTPUT_SITE_RECORD
             if not name:
-                messages.error(request, "任务名称不能为空")
+                messages.error(request, "任务模板名称不能为空")
             else:
                 code = _unique_library_task_code(name, code_in)
                 row = LibraryTask.objects.create(
@@ -2072,8 +2689,8 @@ def library_task_management(request):
                 )
                 messages.success(
                     request,
-                    f"已创建任务 {row.code}（输出到：{row.get_output_target_display()}）。"
-                    f"已选中该任务，点击「编辑任务」可维护文件关联。",
+                    f"已创建任务模板 {row.code}（输出到：{row.get_output_target_display()}）。"
+                    f"已选中该模板，点击「编辑任务模板」可维护文件关联。",
                 )
                 return redirect(reverse("library_task_management") + f"?manage_task={row.pk}")
         elif action == "update_task_output_target":
@@ -2086,13 +2703,15 @@ def library_task_management(request):
                 output_target = LibraryTask.OUTPUT_SITE_RECORD
             t_obj = LibraryTask.objects.filter(pk=tid).first() if tid else None
             if t_obj is None:
-                messages.error(request, "任务不存在或无效")
+                messages.error(request, "任务模板不存在或无效")
             else:
                 t_obj.output_target = output_target
                 t_obj.save(update_fields=["output_target", "updated_at"])
+                if _librarytask_has_report_source_relation() and output_target != LibraryTask.OUTPUT_REPORT:
+                    t_obj.report_source_tasks.clear()
                 messages.success(
                     request,
-                    f"已更新任务「{t_obj.code}」的 PDF 输出目标为：{t_obj.get_output_target_display()}。",
+                    f"已更新任务模板「{t_obj.code}」的 PDF 输出目标为：{t_obj.get_output_target_display()}。",
                 )
             return redirect(_library_task_management_redirect_url(request))
         elif action in ("bind_task_files", "unbind_task_files"):
@@ -2111,7 +2730,7 @@ def library_task_management(request):
                     continue
             ids = list(dict.fromkeys([i for i in ids if i > 0]))
             if task_obj is None:
-                messages.error(request, "请选择有效任务")
+                messages.error(request, "请选择有效任务模板")
             elif not ids:
                 messages.error(request, "请至少勾选一个文件")
             else:
@@ -2127,14 +2746,14 @@ def library_task_management(request):
                     project_ids = list(task_obj.projects.values_list("id", flat=True))
                     if project_ids:
                         attach_files_to_projects(valid_ids, project_ids, request.user)
-                    messages.success(request, f"已向任务关联 {len(valid_ids)} 个文件")
+                    messages.success(request, f"已向任务模板关联 {len(valid_ids)} 个文件")
                 else:
                     detach_files_from_tasks(valid_ids, [task_obj.pk])
                     # 文件从任务移除后，同步从该任务关联的所有项目移除（传递性）。
                     project_ids = list(task_obj.projects.values_list("id", flat=True))
                     if project_ids:
                         detach_files_from_projects(valid_ids, project_ids)
-                    messages.success(request, f"已从任务移除 {len(valid_ids)} 个文件")
+                    messages.success(request, f"已从任务模板移除 {len(valid_ids)} 个文件")
         elif action == "delete_task":
             try:
                 tid = int(request.POST.get("task_id", "") or 0)
@@ -2142,12 +2761,121 @@ def library_task_management(request):
                 tid = 0
             t_obj = LibraryTask.objects.filter(pk=tid).first()
             if t_obj is None:
-                messages.error(request, "任务不存在")
+                messages.error(request, "任务模板不存在")
             else:
                 label = f"{t_obj.code} · {t_obj.name}"
                 t_obj.delete()
-                messages.success(request, f"已删除任务：{label}")
+                messages.success(request, f"已删除任务模板：{label}")
             return redirect(reverse("library_task_management"))
+        elif action == "export_task_template_pdf":
+            try:
+                tid = int(request.POST.get("manage_task_id", "") or 0)
+            except ValueError:
+                tid = 0
+            try:
+                project_id = int(request.POST.get("export_project_id", "") or 0)
+            except ValueError:
+                project_id = 0
+            task_obj = LibraryTask.objects.filter(pk=tid).first() if tid else None
+            project = LibraryProject.objects.filter(pk=project_id, is_active=True).first() if project_id else None
+            if not role_has(request.user, "perm_process_pipeline"):
+                messages.error(request, "当前角色无权执行导出 PDF")
+                return redirect(_library_task_management_redirect_url(request))
+            if task_obj is None:
+                messages.error(request, "任务模板不存在或无效")
+                return redirect(_library_task_management_redirect_url(request))
+            if task_obj.output_target not in {LibraryTask.OUTPUT_SITE_RECORD, LibraryTask.OUTPUT_REPORT}:
+                messages.error(request, "仅现场记录/报告模板支持此导出入口")
+                return redirect(_library_task_management_redirect_url(request))
+            if project is None:
+                messages.error(request, "请先选择项目")
+                return redirect(_library_task_management_redirect_url(request))
+            latest_submission = (
+                InspectionSubmission.objects.filter(project=project)
+                .select_related("case")
+                .order_by("-updated_at", "-id")
+                .first()
+            )
+            if latest_submission is None:
+                messages.error(request, "该项目下暂无可用的 submit 记录")
+                return redirect(reverse("library_task_management") + f"?manage_task={task_obj.pk}&export_project_id={project.pk}")
+            case = latest_submission.case
+            if case is None:
+                messages.error(request, "最新 submit 记录缺少关联案件，无法导出")
+                return redirect(reverse("library_task_management") + f"?manage_task={task_obj.pk}&export_project_id={project.pk}")
+
+            from apps.api.inspection_pdf_service import (
+                _build_filled_template_fields_for_task,
+                _load_site_record_payload_for_report,
+                _persist_filled_pdf_from_submit,
+            )
+
+            payload = latest_submission.raw_payload if isinstance(latest_submission.raw_payload, dict) else {}
+            if not payload:
+                payload = {
+                    "taskNo": latest_submission.task_no,
+                    "projectId": project.code,
+                    "reportInfo": latest_submission.report_info or {},
+                    "hospitalInfo": latest_submission.hospital_info or {},
+                    "equipmentInfo": latest_submission.equipment_info or {},
+                    "testResult": latest_submission.test_result or {},
+                    "updatedAt": latest_submission.updated_at_remote.isoformat() if latest_submission.updated_at_remote else "",
+                }
+            else:
+                payload.setdefault("taskNo", latest_submission.task_no)
+                payload.setdefault("projectId", project.code)
+                payload.setdefault(
+                    "updatedAt",
+                    latest_submission.updated_at_remote.isoformat() if latest_submission.updated_at_remote else "",
+                )
+                payload.setdefault("reportInfo", latest_submission.report_info or {})
+                payload.setdefault("hospitalInfo", latest_submission.hospital_info or {})
+                payload.setdefault("equipmentInfo", latest_submission.equipment_info or {})
+                payload.setdefault("testResult", latest_submission.test_result or {})
+            if task_obj.output_target == LibraryTask.OUTPUT_REPORT:
+                report_payload, source_reason = _load_site_record_payload_for_report(case, project, task_obj)
+                if not isinstance(report_payload, dict) or not report_payload:
+                    messages.error(request, source_reason or "未找到可用的现场记录 JSON，无法导出报告")
+                    return redirect(
+                        reverse("library_task_management") + f"?manage_task={task_obj.pk}&export_project_id={project.pk}"
+                    )
+                # 报告模板优先使用现场记录聚合结果，同时补齐项目/任务上下文字段。
+                report_payload.setdefault("taskNo", latest_submission.task_no)
+                report_payload.setdefault("projectId", project.code)
+                report_payload.setdefault(
+                    "updatedAt",
+                    latest_submission.updated_at_remote.isoformat() if latest_submission.updated_at_remote else "",
+                )
+                payload = report_payload
+
+            filled_fields, template_pdf_id, fill_reason, template_json_name = _build_filled_template_fields_for_task(
+                task_obj,
+                payload,
+                project=project,
+                task_no=latest_submission.task_no,
+            )
+            if not filled_fields:
+                messages.error(request, fill_reason or "模板填充失败")
+                return redirect(reverse("library_task_management") + f"?manage_task={task_obj.pk}&export_project_id={project.pk}")
+            ok, pdf_reason = _persist_filled_pdf_from_submit(
+                request.user,
+                latest_submission.task_no,
+                case,
+                project,
+                filled_fields,
+                template_pdf_id=template_pdf_id,
+                template_json_name=template_json_name,
+                task_obj=task_obj,
+            )
+            if not ok:
+                messages.error(request, pdf_reason or "导出 PDF 失败")
+            else:
+                out_label = "报告" if task_obj.output_target == LibraryTask.OUTPUT_REPORT else "现场记录"
+                msg = f"已导出{out_label} PDF（项目：{project.code}，模板：{task_obj.code}，提交：{latest_submission.task_no}）"
+                if pdf_reason:
+                    msg = f"{msg}，提示：{pdf_reason}"
+                messages.success(request, msg)
+            return redirect(reverse("library_task_management") + f"?manage_task={task_obj.pk}&export_project_id={project.pk}")
         elif action == "assign":
             project_raw = request.POST.get("project_id", "").strip()
             assignee_raw = request.POST.get("assignee", "").strip()
@@ -2178,7 +2906,7 @@ def library_task_management(request):
                 else:
                     project_tasks = list(project.library_tasks.all().order_by("code"))
                     if not project_tasks:
-                        messages.error(request, "该项目尚未关联任务，请先在「项目管理」中为项目勾选任务")
+                        messages.error(request, "该项目尚未关联任务模板，请先在「项目管理」中为项目勾选任务模板")
                     else:
                         created_count = 0
                         all_file_ids = set()
@@ -2203,14 +2931,39 @@ def library_task_management(request):
                         if created_count:
                             messages.success(
                                 request,
-                                f"已向 {assignee.username} 分配项目「{project.name}」下 {created_count} 个任务，"
+                                f"已向 {assignee.username} 分配项目「{project.name}」下 {created_count} 个任务模板，"
                                 f"并同步 {len(all_file_ids)} 个文件到项目。",
                             )
                         else:
                             messages.info(
                                 request,
-                                f"{assignee.username} 已拥有该项目全部任务；已同步 {len(all_file_ids)} 个项目文件。",
+                                f"{assignee.username} 已拥有该项目全部任务模板；已同步 {len(all_file_ids)} 个项目文件。",
                             )
+            return redirect(reverse("library_task_management"))
+        elif action == "unassign_project":
+            project_raw = request.POST.get("project_id", "").strip()
+            assignee_raw = request.POST.get("assignee_id", "").strip()
+            try:
+                project_id = int(project_raw)
+            except ValueError:
+                project_id = 0
+            try:
+                assignee_id = int(assignee_raw)
+            except ValueError:
+                assignee_id = 0
+            project = LibraryProject.objects.filter(pk=project_id).first() if project_id else None
+            assignee = User.objects.filter(pk=assignee_id, profile__role__code="app_user").first() if assignee_id else None
+            if project is None or assignee is None:
+                messages.error(request, "撤回失败：项目或用户无效")
+                return redirect(reverse("library_task_management"))
+            deleted_count, _ = LibraryTaskAssignment.objects.filter(
+                project=project,
+                assignee=assignee,
+            ).delete()
+            if deleted_count:
+                messages.success(request, f"已撤回 {assignee.username} 在项目「{project.name}」上的分配")
+            else:
+                messages.info(request, f"{assignee.username} 在项目「{project.name}」上无可撤回分配")
             return redirect(reverse("library_task_management"))
         else:
             messages.error(request, "未知操作")
@@ -2288,11 +3041,15 @@ def library_task_management(request):
 
     manage_task = None
     manage_task_id_val = None
+    template_visible_tabs = {"ocr", "json", "template", "attachment", "inspection_submit"}
     task_mgmt_tab = _normalize_library_tab(request.GET.get("task_tab", "ocr"))
+    if task_mgmt_tab not in template_visible_tabs:
+        task_mgmt_tab = "ocr"
     task_mgmt_cat = _library_category_for_tab(task_mgmt_tab)
     task_mgmt_files = []
     task_mgmt_linked_ids = set()
     task_linked_files = []
+    export_project_id_val = ""
     task_edit_mode = False
     show_new_task_form = False
     if can_assign:
@@ -2307,6 +3064,12 @@ def library_task_management(request):
                 manage_task = LibraryTask.objects.filter(pk=mid).first()
                 if manage_task:
                     manage_task_id_val = mid
+                    export_project_raw = (request.GET.get("export_project_id") or "").strip()
+                    if export_project_raw:
+                        try:
+                            export_project_id_val = str(int(export_project_raw))
+                        except ValueError:
+                            export_project_id_val = ""
                     if task_edit_mode:
                         tq = (
                             LibraryFile.objects.filter(category=task_mgmt_cat)
@@ -2323,7 +3086,9 @@ def library_task_management(request):
                         )
                     else:
                         task_linked_files = list(
-                            manage_task.library_files.select_related("created_by").order_by(
+                            manage_task.library_files.exclude(
+                                category__in=[LibraryFile.CATEGORY_SITE_RECORD, LibraryFile.CATEGORY_REPORT]
+                            ).select_related("created_by").order_by(
                                 "category", "original_name"
                             )
                         )
@@ -2347,14 +3112,13 @@ def library_task_management(request):
             "task_mgmt_files": task_mgmt_files,
             "task_mgmt_linked_ids": task_mgmt_linked_ids,
             "task_linked_files": task_linked_files,
+            "export_project_id_val": export_project_id_val,
             "task_edit_mode": task_edit_mode,
             "show_new_task_form": show_new_task_form,
             "file_library_tabs": [
                 {"key": "ocr", "label": "OCR文件"},
                 {"key": "json", "label": "JSON 文件"},
                 {"key": "template", "label": "模板"},
-                {"key": "site_record", "label": "现场记录"},
-                {"key": "report", "label": "报告"},
                 {"key": "attachment", "label": "附件"},
                 {"key": "inspection_submit", "label": "检测提交"},
             ],

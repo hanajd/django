@@ -157,6 +157,25 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
+        .field-row-label-input {
+            width: 100%;
+            max-width: 100%;
+            box-sizing: border-box;
+            border: 1px solid #e5e6eb;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 12px;
+            color: #1d2129;
+            background: #fff;
+            outline: none;
+        }
+        .field-row-label-input::placeholder {
+            color: #c9cdd4;
+        }
+        .field-row-label-input:focus {
+            border-color: #165dff;
+            box-shadow: 0 0 0 2px rgba(22, 93, 255, 0.12);
+        }
         .field-row-id {
             font-size: 11px;
             color: #c9cdd4;
@@ -384,6 +403,8 @@
         <button id="btnImportContent">导入内容</button>
         <input type="text" id="templateName" placeholder="导出文件名(可选)">
         <button id="saveTemplate">保存模板</button>
+        <button id="saveFrontendTemplate">保存前端JSON(规则)</button>
+        <button id="saveFrontendTemplateAI">保存前端JSON(AI)</button>
         </div>
         <div class="toolbar-group">
         <button id="btnAddText">添加输入框</button>
@@ -402,7 +423,7 @@
     <div class="main">
         <aside class="sidebar">
             <h3>输入框列表</h3>
-            <p class="sidebar-hint">序号与画布角标一致；悬停列表或控件会联动高亮；点击一行可滚动定位到对应控件。</p>
+            <p class="sidebar-hint">序号与画布角标一致；悬停列表或控件会联动高亮；点击行内空白处可滚动定位到对应控件；标签可直接在下方输入框修改，画布会同步更新。</p>
             <div id="fieldList"></div>
         </aside>
         <div class="pdf-scroll">
@@ -437,6 +458,18 @@
             drawStart = null,
             bandEl = null,
             pendingImageField = null;
+        let templateContext = {
+            templateId: '',
+            templateName: '',
+            version: '1.0.0',
+            reportType: '',
+            standard: '',
+            pdfUrl: '',
+            locale: 'zh-CN',
+            constants: {},
+            enums: {},
+            steps: []
+        };
 
         function nextId() {
             return 'f' + fieldIdSeq++;
@@ -501,6 +534,21 @@
             setTimeout(() => f.wrap.classList.remove('field-flash'), 2000);
         }
 
+        function syncFieldLabelToCanvas(f) {
+            if (!f) return;
+            const ft = f.fieldType || 'text';
+            if (ft === 'text' && f.el && f.el.classList && f.el.classList.contains('input-box')) {
+                f.el.placeholder = f.placeholder || '';
+            } else if (ft === 'image' && f.el && f.el.classList && f.el.classList.contains('image-box')) {
+                if (!f.imageData) {
+                    f.el.textContent = (f.placeholder && String(f.placeholder).trim()) ? f.placeholder : '点击上传图片';
+                }
+            }
+            if (f.wrap) {
+                f.wrap.title = f.placeholder || '';
+            }
+        }
+
         function refreshFieldList() {
             const el = document.getElementById('fieldList');
             el.innerHTML = '';
@@ -524,15 +572,22 @@
                 const title = document.createElement('span');
                 title.className = 'field-row-title';
                 title.textContent = fieldTypeLabel(ft) + ' · 第' + f.page + '页';
-                const sub = document.createElement('span');
-                sub.className = 'field-row-sub';
-                sub.textContent = f.placeholder || '(未命名)';
-                sub.title = f.placeholder || '';
+                const labelInput = document.createElement('input');
+                labelInput.type = 'text';
+                labelInput.className = 'field-row-label-input';
+                labelInput.value = f.placeholder != null ? String(f.placeholder) : '';
+                labelInput.placeholder = '标签 / 占位说明';
+                labelInput.addEventListener('click', ev => ev.stopPropagation());
+                labelInput.addEventListener('mousedown', ev => ev.stopPropagation());
+                labelInput.addEventListener('input', () => {
+                    f.placeholder = labelInput.value;
+                    syncFieldLabelToCanvas(f);
+                });
                 const idSpan = document.createElement('span');
                 idSpan.className = 'field-row-id';
                 idSpan.textContent = f.id;
                 textCol.appendChild(title);
-                textCol.appendChild(sub);
+                textCol.appendChild(labelInput);
                 textCol.appendChild(idSpan);
                 main.appendChild(badge);
                 main.appendChild(textCol);
@@ -549,7 +604,7 @@
                 row.appendChild(main);
                 row.appendChild(actions);
                 row.addEventListener('click', ev => {
-                    if (ev.target.closest('button')) return;
+                    if (ev.target.closest('button') || ev.target.closest('.field-row-label-input')) return;
                     clearAllRowHighlights();
                     setRowHighlightForField(f.id, true);
                     scrollFieldIntoView(f.id);
@@ -646,6 +701,7 @@
                 f.wrap = wrap;
                 f.el = box;
                 updateFieldBadges();
+                syncFieldLabelToCanvas(f);
                 return;
             }
 
@@ -657,7 +713,7 @@
                     img.src = f.imageData;
                     box.appendChild(img);
                 } else {
-                    box.textContent = '点击上传图片';
+                    box.textContent = (f.placeholder && String(f.placeholder).trim()) ? f.placeholder : '点击上传图片';
                 }
                 box.onclick = () => {
                     pendingImageField = f;
@@ -669,6 +725,7 @@
                 f.wrap = wrap;
                 f.el = box;
                 updateFieldBadges();
+                syncFieldLabelToCanvas(f);
                 return;
             }
 
@@ -687,6 +744,7 @@
             f.wrap = wrap;
             f.el = i;
             updateFieldBadges();
+            syncFieldLabelToCanvas(f);
             requestAnimationFrame(() => fitInputStyle(i));
         }
 
@@ -872,6 +930,20 @@
             fieldIdSeq = fields.length ? Math.max(...fields.map(f => parseInt(f.id.slice(1)) || 0)) + 1 : 1;
             fields.forEach(f => mountField(f));
             refreshFieldList();
+            const tm = (d && d.template_meta && typeof d.template_meta === 'object') ? d.template_meta : {};
+            const fs = (d && d.form_schema && typeof d.form_schema === 'object') ? d.form_schema : {};
+            templateContext = {
+                templateId: d.templateId || tm.templateId || templateContext.templateId || '',
+                templateName: d.templateName || tm.templateName || templateContext.templateName || '',
+                version: d.version || tm.version || templateContext.version || '1.0.0',
+                reportType: d.reportType || tm.reportType || templateContext.reportType || '',
+                standard: d.standard || tm.standard || templateContext.standard || '',
+                pdfUrl: d.pdfUrl || tm.pdfUrl || templateContext.pdfUrl || '',
+                locale: d.locale || tm.locale || templateContext.locale || 'zh-CN',
+                constants: (d.constants && typeof d.constants === 'object') ? d.constants : ((fs.constants && typeof fs.constants === 'object') ? fs.constants : templateContext.constants || {}),
+                enums: (d.enums && typeof d.enums === 'object') ? d.enums : ((fs.enums && typeof fs.enums === 'object') ? fs.enums : templateContext.enums || {}),
+                steps: Array.isArray(d.steps) ? d.steps : (Array.isArray(fs.steps) ? fs.steps : (templateContext.steps || []))
+            };
         }
 
         function importContentPayload(d) {
@@ -1007,7 +1079,23 @@
                 body: JSON.stringify({
                     type: 'merged',
                     name,
-                    fields: buildFieldsPayload()
+                    fields: buildFieldsPayload(),
+                    meta: {
+                        templateId: templateContext.templateId || '',
+                        templateName: templateContext.templateName || '',
+                        version: templateContext.version || '1.0.0',
+                        reportType: templateContext.reportType || '',
+                        standard: templateContext.standard || '',
+                        pdfUrl: templateContext.pdfUrl || '',
+                        locale: templateContext.locale || 'zh-CN'
+                    },
+                    report_type: templateContext.reportType || '',
+                    standard: templateContext.standard || '',
+                    form_schema: {
+                        constants: templateContext.constants || {},
+                        enums: templateContext.enums || {},
+                        steps: templateContext.steps || []
+                    }
                 })
             }).then(async r => {
                 const d = await r.json();
@@ -1020,6 +1108,43 @@
         }
 
         document.getElementById('saveTemplate').onclick = exportJsonMerged;
+        function saveFrontendTemplate(exportMode = 'rule') {
+            const baseName = document.getElementById('templateName').value.trim() || 'template';
+            const name = baseName.endsWith('.json') ? baseName.replace(/\.json$/i, '_frontend.json') : (baseName + '_frontend.json');
+            fetch('/files/htmlpdf/api/export-frontend-json/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name,
+                    export_mode: exportMode,
+                    fields: buildFieldsPayload(),
+                    templateId: templateContext.templateId || '',
+                    templateName: templateContext.templateName || '',
+                    version: templateContext.version || '1.0.0',
+                    reportType: templateContext.reportType || '',
+                    standard: templateContext.standard || '',
+                    pdfUrl: templateContext.pdfUrl || '',
+                    locale: templateContext.locale || 'zh-CN',
+                    constants: templateContext.constants || {},
+                    enums: templateContext.enums || {},
+                    steps: templateContext.steps || [],
+                    formSchema: {
+                        constants: templateContext.constants || {},
+                        enums: templateContext.enums || {},
+                        steps: templateContext.steps || []
+                    }
+                })
+            }).then(async r => {
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.error || '保存前端JSON失败');
+                alert('前端渲染 JSON 已保存到文件库「模板」分类');
+                if (d.file && d.file.library_url) {
+                    window.open(d.file.library_url, '_blank');
+                }
+            }).catch(err => alert(err.message));
+        }
+        document.getElementById('saveFrontendTemplate').onclick = () => saveFrontendTemplate('rule');
+        document.getElementById('saveFrontendTemplateAI').onclick = () => saveFrontendTemplate('llm');
 
         document.getElementById('btnSave').onclick = () => {
             const outputCategory = document.getElementById('outputCategory')?.value || 'site_record';

@@ -122,12 +122,12 @@
                     {% if role_perm.perm_assign_tasks %}
                     <a href="{% url 'library_task_management' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
                         <i class="ri-clipboard-line text-lg"></i>
-                        <span>任务管理</span>
+                        <span>项目分配管理</span>
                     </a>
                     {% elif role_perm.perm_file_library %}
                     <a href="{% url 'library_task_management' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
                         <i class="ri-inbox-line text-lg"></i>
-                        <span>我的任务</span>
+                        <span>我的项目任务</span>
                     </a>
                     {% endif %}
                 </div>

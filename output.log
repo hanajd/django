@@ -1,0 +1,239 @@
+nohup: ignoring input
+Watching for file changes with StatReloader
+[23/Apr/2026 13:54:37] "GET /files/?tab=ocr HTTP/1.1" 200 34253
+[23/Apr/2026 13:54:39] "GET /files/htmlpdf/ HTTP/1.1" 200 13532
+[23/Apr/2026 13:54:39] "GET /files/process/ HTTP/1.1" 200 18442
+[23/Apr/2026 13:54:39] "GET /files/projects/ HTTP/1.1" 200 15885
+[23/Apr/2026 13:54:40] "GET /files/task-management/ HTTP/1.1" 200 27007
+[23/Apr/2026 13:54:42] "GET /files/task-management/?manage_task=7 HTTP/1.1" 200 32462
+[23/Apr/2026 13:54:44] "GET /files/task-management/?manage_task=8 HTTP/1.1" 200 32551
+[23/Apr/2026 13:54:45] "GET /files/task-management/?manage_task=6 HTTP/1.1" 200 35001
+[23/Apr/2026 13:54:47] "GET /files/task-management/?manage_task=7 HTTP/1.1" 200 32462
+[23/Apr/2026 13:54:50] "GET /files/task-management/?manage_task=6 HTTP/1.1" 200 35001
+[23/Apr/2026 13:54:51] "GET /files/task-management/?manage_task=8 HTTP/1.1" 200 32551
+[23/Apr/2026 13:54:53] "GET /files/task-management/?manage_task=6 HTTP/1.1" 200 35001
+[23/Apr/2026 13:54:54] "GET /files/task-management/?manage_task=7 HTTP/1.1" 200 32462
+[23/Apr/2026 13:54:57] "GET /files/task-management/?manage_task=8 HTTP/1.1" 200 32551
+[23/Apr/2026 13:54:58] "GET /files/task-management/?manage_task=7 HTTP/1.1" 200 32462
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+April 23, 2026 - 13:54:33
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+April 23, 2026 - 13:56:49
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+April 23, 2026 - 13:56:58
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+April 23, 2026 - 13:57:05
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+[23/Apr/2026 13:57:37] "GET /files/task-management/?manage_task=8 HTTP/1.1" 200 31471
+[23/Apr/2026 13:57:39] "GET /files/task-management/?manage_task=6 HTTP/1.1" 200 33921
+[23/Apr/2026 13:57:40] "GET /files/task-management/?manage_task=7 HTTP/1.1" 200 31382
+[23/Apr/2026 13:57:48] "GET /files/task-management/?manage_task=6 HTTP/1.1" 200 33921
+[23/Apr/2026 13:57:50] "GET /files/task-management/?manage_task=8 HTTP/1.1" 200 31471
+[23/Apr/2026 13:57:51] "GET /files/task-management/?manage_task=6 HTTP/1.1" 200 33921
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+April 23, 2026 - 13:57:20
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+[23/Apr/2026 13:57:57] "GET /files/task-management/?manage_task=7 HTTP/1.1" 200 31382
+[23/Apr/2026 13:58:09] "GET /files/?tab=ocr HTTP/1.1" 200 34253
+[23/Apr/2026 13:58:10] "GET /files/?tab=inspection_submit HTTP/1.1" 200 85635
+[23/Apr/2026 13:58:22] "GET /files/task-management/ HTTP/1.1" 200 27007
+[23/Apr/2026 14:01:32] "GET /files/task-management/ HTTP/1.1" 200 27007
+[23/Apr/2026 14:01:34] "GET /files/task-management/?manage_task=7 HTTP/1.1" 200 31382
+[23/Apr/2026 14:01:44] "GET /files/projects/ HTTP/1.1" 200 15885
+[23/Apr/2026 14:01:47] "GET /files/projects/?project_id=2 HTTP/1.1" 200 32784
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+April 23, 2026 - 13:57:53
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+[23/Apr/2026 14:04:54] "POST /api/v2/auth/login/ HTTP/1.1" 200 608
+[23/Apr/2026 14:04:54] "GET /api/v2/inspections/projects HTTP/1.1" 200 205
+[23/Apr/2026 14:04:56] "GET /api/v2/inspections/projects/20260402/tasks HTTP/1.1" 200 1406
+[23/Apr/2026 14:05:13] "GET /files/projects/?project_id=2 HTTP/1.1" 200 33605
+[23/Apr/2026 14:05:20] "POST /files/projects/?project_id=2 HTTP/1.1" 302 0
+[23/Apr/2026 14:05:20] "GET /files/projects/?project_id=2&report_task_id=7 HTTP/1.1" 200 33964
+[23/Apr/2026 14:05:24] "GET /files/?tab=ocr HTTP/1.1" 200 34253
+[23/Apr/2026 14:05:25] "GET /files/?tab=report HTTP/1.1" 200 19891
+[23/Apr/2026 14:05:27] "GET /files/?tab=site_record HTTP/1.1" 200 26133
+[23/Apr/2026 14:05:28] "GET /files/?tab=report HTTP/1.1" 200 19891
+[23/Apr/2026 14:05:28] "GET /files/?tab=inspection_submit HTTP/1.1" 200 85635
+[23/Apr/2026 14:05:40] "GET /files/projects/ HTTP/1.1" 200 15885
+[23/Apr/2026 14:05:46] "GET /files/projects/?project_id=2 HTTP/1.1" 200 33619
+[23/Apr/2026 14:06:47] "GET /files/process/ HTTP/1.1" 200 18442
+[23/Apr/2026 14:06:47] "GET /files/htmlpdf/ HTTP/1.1" 200 13532
+[23/Apr/2026 14:06:48] "GET /files/task-management/ HTTP/1.1" 200 27007
+[23/Apr/2026 14:06:49] "GET /files/htmlpdf/ HTTP/1.1" 200 13532
+[23/Apr/2026 14:06:50] "GET /files/task-management/ HTTP/1.1" 200 27007
+[23/Apr/2026 14:06:52] "GET /files/task-management/?manage_task=8 HTTP/1.1" 200 31471
+[23/Apr/2026 14:06:59] "GET /files/task-management/?manage_task=6 HTTP/1.1" 200 33921
+[23/Apr/2026 14:07:50] "GET /api/v2/inspections/projects/20260402/tasks/01/export-frontend-json HTTP/1.1" 200 36219
+[23/Apr/2026 14:08:06] "GET /api/v2/inspections/projects/20260402/tasks/01/export-frontend-json HTTP/1.1" 200 36219
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+April 23, 2026 - 14:04:41
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+April 23, 2026 - 14:08:17
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+April 23, 2026 - 14:08:59
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+[23/Apr/2026 14:10:32] "GET /files/task-management/ HTTP/1.1" 200 27130
+[23/Apr/2026 14:10:34] "GET /files/task-management/ HTTP/1.1" 200 27130
+[23/Apr/2026 14:10:36] "GET /files/task-management/ HTTP/1.1" 200 27130
+[23/Apr/2026 14:10:37] "GET /files/task-management/?manage_task=6 HTTP/1.1" 200 31512
+[23/Apr/2026 14:10:38] "GET /files/task-management/?manage_task=7 HTTP/1.1" 200 31499
+[23/Apr/2026 14:10:40] "GET /files/task-management/?manage_task=8 HTTP/1.1" 200 31588
+[23/Apr/2026 14:10:41] "GET /files/task-management/?manage_task=6 HTTP/1.1" 200 31512
+[23/Apr/2026 14:11:27] "GET /files/?tab=ocr HTTP/1.1" 200 34253
+[23/Apr/2026 14:11:28] "GET /files/task-management/ HTTP/1.1" 200 27130
+[23/Apr/2026 14:11:30] "GET /files/task-management/?manage_task=6 HTTP/1.1" 200 31512
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+April 23, 2026 - 14:09:04
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+April 23, 2026 - 14:15:36
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+[23/Apr/2026 14:16:17] "GET /files/task-management/ HTTP/1.1" 200 27130
+[23/Apr/2026 14:16:18] "GET /files/htmlpdf/ HTTP/1.1" 200 13532
+[23/Apr/2026 14:16:19] "GET /files/task-management/ HTTP/1.1" 200 27130
+[23/Apr/2026 14:16:21] "GET /files/task-management/?manage_task=8 HTTP/1.1" 200 33129
+[23/Apr/2026 14:16:33] "POST /files/task-management/?manage_task=8 HTTP/1.1" 302 0
+[23/Apr/2026 14:16:33] "GET /files/task-management/?manage_task=8&export_project_id=2 HTTP/1.1" 200 34028
+[23/Apr/2026 14:16:35] "GET /files/?tab=ocr HTTP/1.1" 200 34253
+[23/Apr/2026 14:16:36] "GET /files/?tab=template HTTP/1.1" 200 44926
+[23/Apr/2026 14:16:38] "GET /files/?tab=site_record HTTP/1.1" 200 28219
+[23/Apr/2026 14:16:39] "GET /files/671/preview/ HTTP/1.1" 200 13459
+[23/Apr/2026 14:16:39] "GET /files/671/raw/ HTTP/1.1" 200 578742
+[23/Apr/2026 14:16:45] "GET /files/task-management/ HTTP/1.1" 200 27655
+[23/Apr/2026 14:16:48] "GET /files/task-management/?manage_task=6 HTTP/1.1" 200 33578
+[23/Apr/2026 14:16:52] "POST /files/task-management/?manage_task=6 HTTP/1.1" 302 0
+[23/Apr/2026 14:16:52] "GET /files/task-management/?manage_task=6&export_project_id=2 HTTP/1.1" 200 34475
+[23/Apr/2026 14:16:52] "GET /api/v2/inspections/projects/20260402/tasks HTTP/1.1" 200 1406
+[23/Apr/2026 14:16:53] "GET /files/?tab=ocr HTTP/1.1" 200 34253
+[23/Apr/2026 14:16:55] "GET /files/?tab=site_record HTTP/1.1" 200 30307
+[23/Apr/2026 14:16:57] "GET /files/672/preview/ HTTP/1.1" 200 13459
+[23/Apr/2026 14:16:57] "GET /files/672/raw/ HTTP/1.1" 200 26422867
+[23/Apr/2026 14:17:06] "GET /api/v2/inspections/projects/20260402/tasks HTTP/1.1" 200 1406
+[23/Apr/2026 14:20:35] "GET /files/task-management/ HTTP/1.1" 200 28180
+[23/Apr/2026 14:20:37] "GET /files/task-management/?manage_task=7 HTTP/1.1" 200 32562
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+April 23, 2026 - 14:15:54
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+[23/Apr/2026 14:23:06] "GET /api/v2/inspections/projects/20260402/tasks HTTP/1.1" 200 1406
+[23/Apr/2026 14:23:08] "GET /api/v2/inspections/projects/20260402/tasks/02/export-frontend-json HTTP/1.1" 200 79908
+[23/Apr/2026 14:39:13] "POST /api/v2/auth/login/ HTTP/1.1" 200 608
+[23/Apr/2026 14:39:14] "GET /api/v2/inspections/projects HTTP/1.1" 200 205
+[23/Apr/2026 14:39:15] "GET /api/v2/inspections/projects/20260402/tasks HTTP/1.1" 200 1406
+[23/Apr/2026 14:39:16] "GET /api/v2/inspections/projects/20260402/tasks/01/export-frontend-json HTTP/1.1" 200 36219
+[23/Apr/2026 14:42:42] "POST /api/v2/auth/login/ HTTP/1.1" 200 608
+[23/Apr/2026 14:42:42] "GET /api/v2/inspections/projects HTTP/1.1" 200 205
+[23/Apr/2026 14:42:45] "GET /api/v2/inspections/projects/20260402/tasks/01/export-frontend-json HTTP/1.1" 200 36219
+[23/Apr/2026 14:42:49] "GET /api/v2/inspections/projects/20260402/tasks/01/export-frontend-json HTTP/1.1" 200 36219
+[23/Apr/2026 14:42:51] "GET /api/v2/inspections/projects/20260402/tasks/01/export-frontend-json HTTP/1.1" 200 36219
+[23/Apr/2026 14:42:56] "POST /api/v2/auth/login/ HTTP/1.1" 200 608
+[23/Apr/2026 14:42:56] "GET /api/v2/inspections/projects HTTP/1.1" 200 205
+[23/Apr/2026 14:44:39] "GET /api/v2/inspections/projects/20260402/tasks/01/export-frontend-json HTTP/1.1" 200 36219
+[23/Apr/2026 15:02:22] "GET /files/?tab=ocr HTTP/1.1" 200 34253
+[23/Apr/2026 15:02:24] "GET /files/projects/ HTTP/1.1" 200 15885
+[23/Apr/2026 15:02:25] "GET /files/task-management/ HTTP/1.1" 200 28180
+[23/Apr/2026 15:10:21] "GET /files/665/preview/ HTTP/1.1" 200 13459
+[23/Apr/2026 15:10:22] "GET /files/665/raw/ HTTP/1.1" 200 26422867
+[23/Apr/2026 15:29:54] "POST /api/v2/auth/login/ HTTP/1.1" 200 608
+[23/Apr/2026 15:29:54] "GET /api/v2/inspections/projects HTTP/1.1" 200 205
+[23/Apr/2026 15:29:56] "GET /api/v2/inspections/projects/20260402/tasks HTTP/1.1" 200 1406
+[23/Apr/2026 15:29:58] "GET /api/v2/inspections/projects/20260402/tasks/01/export-frontend-json HTTP/1.1" 200 36219
+[23/Apr/2026 15:36:03] "GET /files/?tab=ocr HTTP/1.1" 200 34253
+[23/Apr/2026 15:36:04] "GET /files/?tab=inspection_submit HTTP/1.1" 200 85635
+[23/Apr/2026 15:36:10] "GET /files/?tab=ocr HTTP/1.1" 200 34253
+[23/Apr/2026 15:36:12] "GET /files/?tab=inspection_submit HTTP/1.1" 200 85635
+[23/Apr/2026 15:36:37] "GET /api/v2/inspections/projects/20260402/tasks/01/export-frontend-json HTTP/1.1" 200 36219
+[23/Apr/2026 15:36:52] "GET /api/v2/inspections/projects/20260402/tasks/01/export-frontend-json HTTP/1.1" 200 36219
+[23/Apr/2026 15:37:09] "GET /api/v2/inspections/projects/20260402/tasks/01/export-frontend-json HTTP/1.1" 200 36219
+[23/Apr/2026 15:37:19] "GET /api/v2/inspections/history?page=1&pageSize=20 HTTP/1.1" 200 93
+[23/Apr/2026 15:37:26] "GET /api/v2/inspections/projects/20260402/tasks/01/export-frontend-json HTTP/1.1" 200 36219
+[23/Apr/2026 15:37:36] "GET /api/v2/inspections/projects/20260402/tasks/01/export-frontend-json HTTP/1.1" 200 36219

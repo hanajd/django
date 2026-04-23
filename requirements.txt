@@ -1,13 +1,20 @@
+# Runtime target: Python 3.12.x
 Django==4.2.16
 djangorestframework==3.14.0
 djangorestframework-simplejwt==5.3.1
 django-cors-headers==4.3.1
 django-filter==23.5
-Pillow==10.4.0
+Pillow==10.2.0
 python-decouple==3.8
-ollama>=0.3.0
-outlines>=0.0.46
+
+# AI / document processing
+mineru>=3.1.2
+ollama>=0.6.1
+outlines>=1.2.12
 pypdf>=4.0.0
 PyPDF2>=3.0.0
 pdf2image>=1.17.0
 pymupdf>=1.24.0
+
+# Ollama model is configured by env var:
+# EQUIPMENT_MODEL_NAME=qwen3:14b-q4_K_M

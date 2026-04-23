@@ -1,27 +1,27 @@
 {% extends "base.html" %}
-{% block title %}任务管理{% endblock %}
-{% block page_title %}任务管理{% endblock %}
+{% block title %}项目分配管理{% endblock %}
+{% block page_title %}项目分配管理{% endblock %}
 
 {% block content %}
 <div class="space-y-8">
     <p class="text-sm text-gray-600">
-        <strong>项目</strong>与<strong>任务</strong>为多对多：在「项目管理」中把任务挂到项目；App 用户在文件库中按<strong>项目</strong>筛选。分配任务后，任务上的文件会同步到项目。
+        <strong>项目</strong>与<strong>任务模板</strong>为多对多：在「项目管理」中把任务模板挂到项目；App 用户在文件库中按<strong>项目</strong>筛选。分配项目后，项目下所有模板文件会同步可见。
     </p>
 
     {% if can_assign %}
     <div class="bg-white rounded-lg shadow p-6 space-y-8">
         <div>
-            <h2 class="text-lg font-semibold text-gray-800 mb-2">任务</h2>
-            <p class="text-xs text-gray-500 mb-4">先在下拉框中选择任务，下方会列出该任务已关联的文件；需要增删库内关联时点击「编辑任务」。删除任务将一并解除其文件与分配记录。</p>
+            <h2 class="text-lg font-semibold text-gray-800 mb-2">任务模板</h2>
+            <p class="text-xs text-gray-500 mb-4">先在下拉框中选择任务模板，下方会列出该模板已关联的模板文件（不展示导出结果文件）；需要增删库内关联时点击「编辑任务模板」。删除模板将一并解除其文件与分配记录。</p>
 
             <div class="flex flex-wrap items-end gap-3 mb-4">
                 <form method="get" class="flex flex-wrap items-end gap-3 flex-1 min-w-0">
                     <div>
-                        <label for="toolbar_manage_task" class="block text-xs text-gray-600 mb-1">选择任务</label>
+                        <label for="toolbar_manage_task" class="block text-xs text-gray-600 mb-1">选择任务模板</label>
                         <select name="manage_task" id="toolbar_manage_task"
                                 class="px-3 py-2 border border-gray-300 rounded-md text-sm min-w-[16rem]"
                                 onchange="this.form.submit()">
-                            <option value="">请选择任务</option>
+                            <option value="">请选择任务模板</option>
                             {% for t in tasks %}
                             <option value="{{ t.id }}" {% if manage_task_id_val == t.id %}selected{% endif %}>{{ t.code }} · {{ t.name }}（{{ t.get_output_target_display }}）</option>
                             {% endfor %}
@@ -30,20 +30,20 @@
                 </form>
                 <div class="flex flex-wrap gap-2 shrink-0 pb-0.5">
                     <a href="{% url 'library_task_management' %}?new_task=1"
-                       class="inline-flex items-center px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">新建任务</a>
+                       class="inline-flex items-center px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">新建任务模板</a>
                     {% if manage_task_id_val %}
                     <a href="{% url 'library_task_management' %}?manage_task={{ manage_task_id_val }}&edit_task=1&task_tab={{ task_mgmt_tab }}"
-                       class="inline-flex items-center px-3 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">编辑任务</a>
+                       class="inline-flex items-center px-3 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">编辑任务模板</a>
                     {% else %}
-                    <span class="inline-flex items-center px-3 py-2 bg-gray-100 text-gray-400 text-sm rounded-lg cursor-not-allowed" title="请先在左侧选择任务">编辑任务</span>
+                    <span class="inline-flex items-center px-3 py-2 bg-gray-100 text-gray-400 text-sm rounded-lg cursor-not-allowed" title="请先在左侧选择任务模板">编辑任务模板</span>
                     {% endif %}
-                    <form method="post" class="inline" onsubmit="return {% if manage_task_id_val %}confirm('确定删除当前选中的任务？此操作不可恢复。'){% else %}false{% endif %};">
+                    <form method="post" class="inline" onsubmit="return {% if manage_task_id_val %}confirm('确定删除当前选中的任务模板？此操作不可恢复。'){% else %}false{% endif %};">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="delete_task">
                         <input type="hidden" name="task_id" value="{{ manage_task_id_val|default:'' }}">
                         <button type="submit"
                                 class="inline-flex items-center px-3 py-2 text-sm rounded-lg {% if manage_task_id_val %}bg-red-600 text-white hover:bg-red-700{% else %}bg-gray-100 text-gray-400 cursor-not-allowed{% endif %}"
-                                {% if not manage_task_id_val %}disabled{% endif %}>删除任务</button>
+                                {% if not manage_task_id_val %}disabled{% endif %}>删除任务模板</button>
                     </form>
                 </div>
             </div>
@@ -66,17 +66,43 @@
                 </div>
                 <button type="submit" class="px-4 py-2 bg-gray-800 text-white text-sm rounded-lg hover:bg-gray-900 shrink-0">保存输出目标</button>
             </form>
+            {% if manage_task.output_target == 'site_record' or manage_task.output_target == 'report' %}
+            <form method="post" class="flex flex-wrap items-end gap-3 mt-3 p-4 border border-emerald-200 rounded-lg bg-emerald-50/50">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="export_task_template_pdf">
+                <input type="hidden" name="manage_task_id" value="{{ manage_task.id }}">
+                {% if task_edit_mode %}<input type="hidden" name="edit_task" value="1">{% endif %}
+                <input type="hidden" name="task_tab" value="{{ task_mgmt_tab }}">
+                <div class="min-w-[14rem]">
+                    <label for="export_project_id" class="block text-xs text-gray-600 mb-1">导出所属项目</label>
+                    {% if manage_task.output_target == 'report' %}
+                    <p class="text-xs text-gray-500 mb-1">先选择项目，再按该项目最新 submit 记录定位案件，并聚合已绑定的现场记录 JSON 导出报告 PDF。</p>
+                    {% else %}
+                    <p class="text-xs text-gray-500 mb-1">先选择项目，再按该项目最新 submit JSON 回填并导出现场记录 PDF。</p>
+                    {% endif %}
+                    <select name="export_project_id" id="export_project_id" required class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+                        <option value="">请选择项目</option>
+                        {% for p in projects %}
+                        <option value="{{ p.id }}" {% if export_project_id_val == p.id|stringformat:"s" %}selected{% endif %}>{{ p.code }} · {{ p.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="submit" class="px-4 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 shrink-0">
+                    {% if manage_task.output_target == 'report' %}导出报告 PDF{% else %}导出现场记录 PDF{% endif %}
+                </button>
+            </form>
+            {% endif %}
             {% endif %}
 
             {% if show_new_task_form %}
             <div class="mb-6 p-4 border border-blue-100 rounded-lg bg-blue-50/40">
-                <h3 class="text-sm font-semibold text-gray-800 mb-3">创建新任务</h3>
+                <h3 class="text-sm font-semibold text-gray-800 mb-3">创建任务模板</h3>
                 <form method="post" class="flex flex-wrap items-end gap-3 max-w-4xl">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="create_task">
                     <input type="hidden" name="new_task" value="1">
                     <div class="flex-1 min-w-[12rem]">
-                        <label for="task_name" class="block text-xs text-gray-600 mb-1">任务名称 <span class="text-red-500">*</span></label>
+                        <label for="task_name" class="block text-xs text-gray-600 mb-1">任务模板名称 <span class="text-red-500">*</span></label>
                         <input type="text" name="name" id="task_name" required maxlength="128"
                                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
                                placeholder="例如：性能验收检测">
@@ -104,7 +130,7 @@
             {% if manage_task and not task_edit_mode %}
             <div class="border border-gray-200 rounded-lg overflow-hidden">
                 <div class="px-3 py-2 bg-gray-50 border-b border-gray-200 text-sm font-medium text-gray-700">
-                    当前任务：<span class="font-mono text-xs text-gray-600">{{ manage_task.code }}</span> · {{ manage_task.name }}
+                    当前任务模板：<span class="font-mono text-xs text-gray-600">{{ manage_task.code }}</span> · {{ manage_task.name }}
                     <span class="ml-2 text-xs px-2 py-0.5 rounded bg-indigo-100 text-indigo-700">{{ manage_task.get_output_target_display }}</span>
                     <span class="text-gray-400 font-normal">（已关联 {{ task_linked_files|length }} 个文件）</span>
                 </div>
@@ -132,25 +158,25 @@
                                 </td>
                             </tr>
                             {% empty %}
-                            <tr><td colspan="3" class="px-3 py-8 text-center text-gray-400">该任务尚未关联任何文件，可点击「编辑任务」从文件库中添加。</td></tr>
+                            <tr><td colspan="3" class="px-3 py-8 text-center text-gray-400">该任务模板尚未关联任何模板文件，可点击「编辑任务模板」从文件库中添加。</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
                 </div>
             </div>
             {% elif not manage_task %}
-            <p class="text-sm text-gray-500">请在上方下拉框中选择一个任务，以查看其关联文件。</p>
+            <p class="text-sm text-gray-500">请在上方下拉框中选择一个任务模板，以查看其关联模板文件。</p>
             {% endif %}
         </div>
 
         {% if manage_task and task_edit_mode %}
         <div class="border-t border-gray-100 pt-6">
             <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-                <h2 class="text-lg font-semibold text-gray-800">任务文件管理</h2>
+                <h2 class="text-lg font-semibold text-gray-800">任务模板文件管理</h2>
                 <a href="{% url 'library_task_management' %}?manage_task={{ manage_task.id }}&task_tab={{ task_mgmt_tab }}"
                    class="text-sm text-gray-600 hover:text-gray-900 underline">退出编辑</a>
             </div>
-            <p class="text-xs text-gray-500 mb-4">按分类浏览文件库，勾选后加入或移出当前任务；切换分类后列表会自动刷新。</p>
+            <p class="text-xs text-gray-500 mb-4">按分类浏览文件库，勾选后加入或移出当前任务模板；此处不维护导出产物（现场记录/报告）。</p>
             <form method="get" class="flex flex-wrap items-end gap-3 mb-4">
                 <input type="hidden" name="manage_task" value="{{ manage_task.id }}">
                 <input type="hidden" name="edit_task" value="1">
@@ -170,10 +196,10 @@
                 <input type="hidden" name="manage_task_id" value="{{ manage_task.id }}">
                 <input type="hidden" name="task_tab" value="{{ task_mgmt_tab }}">
                 <input type="hidden" name="edit_task" value="1">
-                <p class="text-sm text-indigo-800 mb-2">正在编辑：<strong>{{ manage_task.code }}</strong> · {{ manage_task.name }}（{{ task_mgmt_tab }}）</p>
+                <p class="text-sm text-indigo-800 mb-2">正在编辑任务模板：<strong>{{ manage_task.code }}</strong> · {{ manage_task.name }}（{{ task_mgmt_tab }}）</p>
                 <div class="flex flex-wrap gap-2 mb-2">
-                    <button type="submit" name="action" value="bind_task_files" class="px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700">将勾选文件加入任务</button>
-                    <button type="submit" name="action" value="unbind_task_files" class="px-3 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700">从任务移除勾选文件</button>
+                    <button type="submit" name="action" value="bind_task_files" class="px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700">将勾选文件加入任务模板</button>
+                    <button type="submit" name="action" value="unbind_task_files" class="px-3 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700">从任务模板移除勾选文件</button>
                 </div>
                 <div class="overflow-x-auto border border-gray-200 rounded-lg max-h-96 overflow-y-auto">
                     <table class="min-w-full text-sm text-left text-gray-700">
@@ -217,7 +243,7 @@
         {% endif %}
 
         <div class="border-t border-gray-100 pt-6">
-            <h2 class="text-lg font-semibold text-gray-800 mb-4">分配任务</h2>
+            <h2 class="text-lg font-semibold text-gray-800 mb-4">分配项目</h2>
             {% if not app_users %}
             <p class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">系统中没有已启用且角色为 App 用户的账号。</p>
             {% endif %}
@@ -243,7 +269,7 @@
                     </select>
                 </div>
                 <button type="submit" class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                        {% if not app_users %}disabled{% endif %}>分配任务</button>
+                        {% if not app_users %}disabled{% endif %}>分配项目</button>
             </form>
         </div>
     </div>
@@ -256,9 +282,10 @@
                 <thead class="bg-gray-50 text-gray-600 uppercase text-xs">
                     <tr>
                         <th class="px-3 py-2">项目</th>
-                        <th class="px-3 py-2">任务</th>
+                        <th class="px-3 py-2">任务模板</th>
                         {% if can_assign %}<th class="px-3 py-2">接收用户</th>{% endif %}
                         {% if can_assign %}<th class="px-3 py-2">分配人</th>{% endif %}
+                        {% if can_assign %}<th class="px-3 py-2">操作</th>{% endif %}
                         <th class="px-3 py-2">文件</th>
                         <th class="px-3 py-2">时间</th>
                     </tr>
@@ -272,13 +299,26 @@
                                 {% for t in a.tasks %}
                                 <li><span class="font-mono text-xs text-gray-500">{{ t.code }}</span> · {{ t.name }}（{{ t.get_output_target_display }}）</li>
                                 {% empty %}
-                                <li class="text-gray-400 list-none">（项目尚未关联任务）</li>
+                                <li class="text-gray-400 list-none">（项目尚未关联任务模板）</li>
                                 {% endfor %}
                             </ul>
                         </td>
                         {% if can_assign %}
                         <td class="px-3 py-2">{% if a.assignee %}{{ a.assignee.username }}{% else %}—{% endif %}</td>
                         <td class="px-3 py-2">{% if a.assigned_by %}{{ a.assigned_by.username }}{% else %}—{% endif %}</td>
+                        <td class="px-3 py-2 whitespace-nowrap">
+                            {% if a.assignee %}
+                            <form method="post" class="inline" onsubmit="return confirm('确定撤回该用户在此项目上的分配？');">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="unassign_project">
+                                <input type="hidden" name="project_id" value="{{ a.project.id }}">
+                                <input type="hidden" name="assignee_id" value="{{ a.assignee.id }}">
+                                <button type="submit" class="px-2.5 py-1.5 text-xs rounded bg-red-600 text-white hover:bg-red-700">撤回分配</button>
+                            </form>
+                            {% else %}
+                            <span class="text-gray-400">—</span>
+                            {% endif %}
+                        </td>
                         {% endif %}
                         <td class="px-3 py-2">
                             <ul class="list-disc list-inside space-y-1 text-blue-700">
@@ -301,7 +341,7 @@
                         <td class="px-3 py-2 whitespace-nowrap">{{ a.created_at|date:"Y-m-d H:i" }}</td>
                     </tr>
                     {% empty %}
-                    <tr><td colspan="{% if can_assign %}6{% else %}4{% endif %}" class="px-3 py-8 text-center text-gray-400">暂无记录</td></tr>
+                    <tr><td colspan="{% if can_assign %}7{% else %}4{% endif %}" class="px-3 py-8 text-center text-gray-400">暂无记录</td></tr>
                     {% endfor %}
                 </tbody>
             </table>

@@ -7,7 +7,9 @@
 单条规则（除 key 外）由 kind 决定：
 - path: path=[...] 嵌套读取；可选 cast=str|round|eq|not|bool
 - const: value=固定字符串
-- test_date: part=year|month|day（来自 testResult.testDate）
+- 模板键 commissionNo（委托编号）、testnumber（受检编号）不在此表配置，由 PDF 填充时的派生映射写入（与任务/项目 API 一致）
+- test_date: part=year|month|day；可选 from=testDate（默认，testResult.testDate）或 updatedAt（根字段 updatedAt ISO）
+  来自 updatedAt 时：月、日为该日期的月、日；年为公历四位去掉前缀「202」（如 2026→6）；非 202 开头年份则取末两位
 - concat: parts=[子规则, ...] 按顺序拼接为字符串
 """
 from __future__ import annotations
@@ -77,7 +79,30 @@ def _parse_source_test_date(source_data: dict) -> datetime | None:
         return None
 
 
-def _resolve_spec(source_data: dict, test_date: datetime | None, spec: dict[str, Any]) -> Any:
+def _parse_source_updated_at(source_data: dict) -> datetime | None:
+    """解析提交 JSON 根字段 updatedAt（如 2026-04-20T17:08:17.696570）。"""
+    raw = source_data.get("updatedAt")
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        return raw
+    text = str(raw).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _resolve_spec(
+    source_data: dict,
+    test_date: datetime | None,
+    updated_at: datetime | None,
+    spec: dict[str, Any],
+) -> Any:
     kind = spec["kind"]
     if kind == "path":
         raw = _nested_get(source_data, spec["path"], "")
@@ -96,34 +121,55 @@ def _resolve_spec(source_data: dict, test_date: datetime | None, spec: dict[str,
     if kind == "const":
         return spec.get("value", "")
     if kind == "test_date":
-        if not test_date:
+        src = spec.get("from") or "testDate"
+        if src == "updatedAt":
+            dt = updated_at
+            use_short_year = True
+        elif src in ("testDate", ""):
+            dt = test_date
+            use_short_year = False
+        else:
+            raise ValueError(f"unknown test_date from: {src!r}")
+        if not dt:
             return ""
         part = spec["part"]
         if part == "year":
-            return str(test_date.year)
+            if use_short_year:
+                ys = str(dt.year)
+                if ys.startswith("202"):
+                    return ys[3:]
+                return f"{dt.year % 100:02d}"
+            return str(dt.year)
         if part == "month":
-            return str(test_date.month)
+            return str(dt.month)
         if part == "day":
-            return str(test_date.day)
+            return str(dt.day)
         raise ValueError(f"unknown test_date part: {part!r}")
     if kind == "concat":
         pieces = []
         for p in spec.get("parts") or []:
-            v = _resolve_spec(source_data, test_date, p)
+            v = _resolve_spec(source_data, test_date, updated_at, p)
             pieces.append("" if v is None else str(v))
         return "".join(pieces)
     raise ValueError(f"unknown mapping kind: {kind!r}")
 
 
-def build_submit_value_mapping(source_data: dict, map_id: str = DEFAULT_SUBMIT_PLACEHOLDER_MAP_ID) -> dict[str, Any]:
-    rules = SUBMIT_PLACEHOLDER_MAPS[map_id]
+def resolve_mapping_rules(source_data: dict, rules: list[dict[str, Any]]) -> dict[str, Any]:
     test_date = _parse_source_test_date(source_data)
+    updated_at = _parse_source_updated_at(source_data)
     out: dict[str, Any] = {}
-    for row in rules:
+    for row in (rules or []):
+        if not isinstance(row, dict):
+            continue
         key = row["key"]
         spec = {k: v for k, v in row.items() if k != "key"}
-        out[key] = _resolve_spec(source_data, test_date, spec)
+        out[key] = _resolve_spec(source_data, test_date, updated_at, spec)
     return out
+
+
+def build_submit_value_mapping(source_data: dict, map_id: str = DEFAULT_SUBMIT_PLACEHOLDER_MAP_ID) -> dict[str, Any]:
+    rules = SUBMIT_PLACEHOLDER_MAPS[map_id]
+    return resolve_mapping_rules(source_data, rules)
 
 
 # # 原 inspection_views._build_submit_value_mapping 的默认映射（逐条等价）
@@ -170,7 +216,7 @@ def build_submit_value_mapping(source_data: dict, map_id: str = DEFAULT_SUBMIT_P
 #     {"key": "highContrast_kv", "kind": "path", "path": ["testResult", "highContrast", "kv"], "cast": "str"},
 #     {"key": "highContrast_ma", "kind": "path", "path": ["testResult", "highContrast", "ma"], "cast": "str"},
 #     {"key": "highContrast_size", "kind": "path", "path": ["testResult", "highContrast", "size"], "cast": "str"},
-#     {"key": "hightContrast_result", "kind": "path", "path": ["testResult", "highContrast", "result"], "cast": "str"},
+#     {"key": "highContrast_result", "kind": "path", "path": ["testResult", "highContrast", "result"], "cast": "str"},
 #     {
 #         "key": "highContrast_accept",
 #         "kind": "path",
@@ -212,11 +258,10 @@ def build_submit_value_mapping(source_data: dict, map_id: str = DEFAULT_SUBMIT_P
 # 原文本映射 + 新增勾选框映射（完整版）
 _RULES_DEFAULT: list[dict[str, Any]] = [
     # ==================== 原有文本字段映射（已完成） ====================
-    {"key": "commissionNo", "kind": "path", "path": ["reportInfo", "commissionNo"]},
-    {"key": "testnumber", "kind": "path", "path": ["reportInfo", "reportNo"]},
-    {"key": "year", "kind": "test_date", "part": "year"},
-    {"key": "month", "kind": "test_date", "part": "month"},
-    {"key": "day", "kind": "test_date", "part": "day"},
+    # commissionNo / testnumber 由服务端 _build_submit_derived_value_mapping 注入（项目 API 编号与任务号，非上传 JSON）
+    {"key": "year", "kind": "test_date", "from": "updatedAt", "part": "year"},
+    {"key": "month", "kind": "test_date", "from": "updatedAt", "part": "month"},
+    {"key": "day", "kind": "test_date", "from": "updatedAt", "part": "day"},
     {"key": "temperature", "kind": "path", "path": ["testResult", "temperature"]},
     {"key": "RH","kind": "path", "path": ["testResult", "humidity"]},
     {"key": "hospitalname", "kind": "path", "path": ["hospitalInfo", "name"]},
@@ -264,7 +309,7 @@ _RULES_DEFAULT: list[dict[str, Any]] = [
     {"key": "highContrast_kv", "kind": "path", "path": ["testResult", "highContrast", "kv"], "cast": "str"},
     {"key": "highContrast_ma", "kind": "path", "path": ["testResult", "highContrast", "ma"], "cast": "str"},
     {"key": "highContrast_size", "kind": "path", "path": ["testResult", "highContrast", "size"], "cast": "str"},
-    {"key": "hightContrast_result", "kind": "path", "path": ["testResult", "highContrast", "measuredValue"], "cast": "str"},
+    {"key": "highContrast_result", "kind": "path", "path": ["testResult", "highContrast", "result"], "cast": "str"},
     {
         "key": "highContrast_accept",
         "kind": "path",

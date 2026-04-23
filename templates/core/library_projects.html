@@ -88,6 +88,51 @@
             {% endif %}
         </div>
 
+        {% if has_report_source_task_column %}
+        <div class="mb-2 mt-4 p-4 border border-violet-100 rounded-lg bg-violet-50/30">
+            <h3 class="text-sm font-semibold text-gray-800 mb-2">报告与现场记录任务关联</h3>
+            <p class="text-xs text-gray-600 mb-3">先选择一个报告任务，再勾选其来源现场记录任务。保存后，手动导出报告会聚合这些现场记录 JSON。</p>
+            {% if not project_report_tasks %}
+            <p class="text-sm text-gray-500">当前项目暂无输出目标为「报告」的任务。</p>
+            {% else %}
+            <form method="get" class="flex flex-wrap items-end gap-3 mb-3">
+                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                <div>
+                    <label class="block text-xs text-gray-600 mb-1">选择报告任务</label>
+                    <select name="report_task_id" class="px-3 py-2 border border-gray-300 rounded-md text-sm min-w-[18rem]" onchange="this.form.submit()">
+                        {% for rt in project_report_tasks %}
+                        <option value="{{ rt.id }}" {% if selected_report_task_id == rt.id|stringformat:"s" %}selected{% endif %}>
+                            {{ rt.code }} · {{ rt.name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </form>
+
+            <form method="post" class="space-y-3">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="update_project_report_sources">
+                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                <input type="hidden" name="report_task_id" value="{{ selected_report_task_id }}">
+                <div class="border border-gray-200 rounded-lg bg-white">
+                    {% if project_site_tasks %}
+                        {% for st in project_site_tasks %}
+                        <label class="flex items-center gap-3 px-3 py-2 border-b last:border-b-0 border-gray-100 hover:bg-gray-50 cursor-pointer text-sm">
+                            <input type="checkbox" name="source_site_task_ids" value="{{ st.id }}" class="rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                                   {% if st.id in selected_report_source_ids %}checked{% endif %}>
+                            <span><span class="font-mono text-xs text-gray-500">{{ st.code }}</span> · {{ st.name }}</span>
+                        </label>
+                        {% endfor %}
+                    {% else %}
+                    <div class="px-3 py-6 text-sm text-gray-500">当前项目暂无可选的现场记录任务。</div>
+                    {% endif %}
+                </div>
+                <button type="submit" class="px-3 py-2 bg-violet-600 text-white text-sm rounded-lg hover:bg-violet-700">保存报告来源任务关联</button>
+            </form>
+            {% endif %}
+        </div>
+        {% endif %}
+
         <div class="mb-2 mt-4 p-4 border border-emerald-100 rounded-lg bg-emerald-50/30">
             <h3 class="text-sm font-semibold text-gray-800 mb-2">项目文件管理</h3>
             <p class="text-xs text-gray-600 mb-3">可按分类浏览文件库并把文件加入当前项目，或从当前项目移除。该操作只影响项目关联，不影响文件本体。</p>
