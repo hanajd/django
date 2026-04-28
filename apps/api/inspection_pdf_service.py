@@ -1,6 +1,7 @@
 """检测提交 -> 模板填充 -> PDF 落库服务（与接口流水线解耦）。"""
 from __future__ import annotations
 
+import base64
 import json as json_std
 import os
 import re
@@ -13,6 +14,7 @@ from django.utils.dateparse import parse_datetime
 from apps.api.inspection_submit_placeholder_maps import (
     DEFAULT_SUBMIT_PLACEHOLDER_MAP_ID,
     SUBMIT_PLACEHOLDER_MAPS,
+    build_dynamic_value_mapping,
     build_submit_value_mapping,
     resolve_mapping_rules,
 )
@@ -106,6 +108,10 @@ def _build_submit_value_mapping(source_data: dict, map_id: str | None = None):
     if mid not in SUBMIT_PLACEHOLDER_MAPS:
         mid = DEFAULT_SUBMIT_PLACEHOLDER_MAP_ID
     return build_submit_value_mapping(source_data, mid)
+
+
+def _build_dynamic_value_mapping(source_data: dict):
+    return build_dynamic_value_mapping(source_data)
 
 
 def _build_submit_derived_value_mapping(source_data: dict, project=None, task_no: str = ""):
@@ -276,6 +282,8 @@ def _fill_template_fields_with_submit_legacy(
     value_mapping = _build_template_binding_value_mapping(source_data, bindings or {})
     if not value_mapping:
         value_mapping = _build_submit_value_mapping(source_data, map_id)
+    # 新版 submit 支持 dynamicData 直连，键通常为 source.pdfFieldId。
+    value_mapping.update(_build_dynamic_value_mapping(source_data))
     value_mapping.update(_build_submit_derived_value_mapping(source_data, project=project, task_no=task_no))
     signature_map = {}
     if isinstance(bindings, dict):
@@ -335,6 +343,93 @@ def _field_candidate_keys(field: dict) -> list[str]:
     ]
 
 
+def _is_signature_image_text(v) -> bool:
+    if not isinstance(v, str):
+        return False
+    text = v.strip()
+    if not text:
+        return False
+    if text.startswith("data:image/png;base64,"):
+        text = text.split(",", 1)[1]
+    try:
+        base64.b64decode(text, validate=True)
+        return True
+    except Exception:
+        return False
+
+
+def _collect_signature_values(source_data: dict) -> dict[str, str]:
+    """
+    从 submit payload 中收集签名值：
+    1) 顶层 signatures 对象（兼容 author/reviewer/approver 及扩展角色）
+    2) 前端回传的 schema 字段（type=signature）中提取 value/defaultValue，并按 submitPath 归并
+    """
+    out: dict[str, str] = {}
+
+    # 1) 顶层 signatures
+    signatures = source_data.get("signatures")
+    if isinstance(signatures, dict):
+        for k, v in signatures.items():
+            key = str(k or "").strip()
+            if key and _is_signature_image_text(v):
+                out[key] = v
+
+    # 2) schema fields where type=signature
+    steps = source_data.get("steps")
+    if isinstance(steps, list):
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            sections = step.get("sections")
+            if not isinstance(sections, list):
+                continue
+            for sec in sections:
+                if not isinstance(sec, dict):
+                    continue
+                fields = sec.get("fields")
+                if not isinstance(fields, list):
+                    continue
+                for fld in fields:
+                    if not isinstance(fld, dict):
+                        continue
+                    if str(fld.get("type") or "").lower() != "signature":
+                        continue
+                    val = fld.get("value")
+                    if not _is_signature_image_text(val):
+                        val = fld.get("defaultValue")
+                    if not _is_signature_image_text(val):
+                        continue
+                    src = fld.get("source") if isinstance(fld.get("source"), dict) else {}
+                    submit_path = str(src.get("submitPath") or "").strip()
+                    # signatures.xxx -> xxx
+                    if submit_path.startswith("signatures."):
+                        k = submit_path.split(".", 1)[1].strip()
+                        if k:
+                            out[k] = val
+                    fid = str(fld.get("id") or "").strip()
+                    if fid:
+                        out[fid] = val
+
+    # 3) dynamicData 直连签名（常见为 f76/f77/f78）
+    dynamic_data = source_data.get("dynamicData")
+    if isinstance(dynamic_data, dict):
+        for k, v in dynamic_data.items():
+            key = str(k or "").strip()
+            if not key:
+                continue
+            if _is_signature_image_text(v):
+                out[key] = v
+
+    # 常见角色别名兜底
+    if "author" not in out and "inspector" in out:
+        out["author"] = out["inspector"]
+    if "reviewer" not in out and "checker" in out:
+        out["reviewer"] = out["checker"]
+    if "approver" not in out and "authorizedSignatory" in out:
+        out["approver"] = out["authorizedSignatory"]
+    return out
+
+
 def _fill_template_fields_with_submit_enhanced(
     source_data: dict,
     template_fields: list,
@@ -349,10 +444,12 @@ def _fill_template_fields_with_submit_enhanced(
     - 支持 field_to_pdf 反查 fieldId
     - 签名支持 direct map + 结构化 signature_map
     """
-    signatures = source_data.get("signatures") or {}
+    signature_values = _collect_signature_values(source_data)
     value_mapping = _build_template_binding_value_mapping(source_data, bindings or {})
     if not value_mapping:
         value_mapping = _build_submit_value_mapping(source_data, map_id)
+    dynamic_mapping = _build_dynamic_value_mapping(source_data)
+    value_mapping.update(dynamic_mapping)
     value_mapping.update(_build_submit_derived_value_mapping(source_data, project=project, task_no=task_no))
     signature_map = {}
     if isinstance(bindings, dict):
@@ -362,6 +459,10 @@ def _fill_template_fields_with_submit_enhanced(
     reverse_field_map = _build_field_to_pdf_reverse_index(bindings)
 
     def _pick_value_for_field(field: dict):
+        # 新版优先：若 dynamicData 中存在 pdfFieldId 对应值，直接命中。
+        pdf_field_id = str(field.get("pdfFieldId") or "").strip()
+        if pdf_field_id and pdf_field_id in dynamic_mapping:
+            return dynamic_mapping.get(pdf_field_id, "")
         candidates = _field_candidate_keys(field)
         for k in candidates:
             if k and k in value_mapping:
@@ -380,7 +481,9 @@ def _fill_template_fields_with_submit_enhanced(
                     continue
                 mapped = signature_map.get(key)
                 if isinstance(mapped, str) and mapped:
-                    return signatures.get(mapped) or ""
+                    picked = signature_values.get(mapped) or ""
+                    if picked:
+                        return picked
 
         if isinstance(signature_map, dict):
             for _, row in signature_map.items():
@@ -410,11 +513,30 @@ def _fill_template_fields_with_submit_enhanced(
                 else:
                     sig_key = image_path
                 if sig_key:
-                    return signatures.get(sig_key) or ""
+                    picked = signature_values.get(sig_key) or ""
+                    if picked:
+                        return picked
+
+        # 优先按模板字段候选键直接命中签名池（支持 f76/f77/f78、中文 id、语义 id）
+        for key in candidates:
+            if not key:
+                continue
+            picked = signature_values.get(key) or ""
+            if picked:
+                return picked
 
         for key in candidates:
-            if key in ("author", "reviewer", "approver"):
-                return signatures.get(key) or ""
+            if key in (
+                "author",
+                "reviewer",
+                "approver",
+                "inspector",
+                "mainInspector",
+                "checker",
+                "authorizedSignatory",
+                "accompanyingPerson",
+            ):
+                return signature_values.get(key) or ""
         return ""
 
     for field in template_fields:

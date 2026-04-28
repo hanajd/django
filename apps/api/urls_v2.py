@@ -58,6 +58,7 @@ from apps.api.registry_views import (
     BizContactViewSet,
     BizDeviceViewSet,
     InspectionCaseViewSet,
+    InstrumentCatalogViewSet,
     InspectedOrganizationViewSet,
     RegistryLinkedFileUploadAPIView,
     ReportViewSet,
@@ -71,6 +72,7 @@ router.register(r"menus", MenuViewSet, basename="menu")
 router.register(r"registry/organizations", InspectedOrganizationViewSet, basename="registry-organization")
 router.register(r"registry/contacts", BizContactViewSet, basename="registry-contact")
 router.register(r"registry/devices", BizDeviceViewSet, basename="registry-device")
+router.register(r"registry/instruments", InstrumentCatalogViewSet, basename="registry-instrument")
 router.register(r"registry/cases", InspectionCaseViewSet, basename="registry-case")
 router.register(r"registry/site-records", SiteRecordViewSet, basename="registry-site-record")
 router.register(r"registry/reports", ReportViewSet, basename="registry-report")

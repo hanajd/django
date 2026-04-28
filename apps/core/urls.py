@@ -15,6 +15,7 @@ urlpatterns = [
     path('', views.dashboard, name='dashboard'),
     
     # 用户管理路由
+    path('database/devices/', views.database_device_list, name='database_device_list'),
     path('users/', views.user_list, name='user_list'),
     path('users/create/', views.user_create, name='user_create'),
     path('users/<int:user_id>/edit/', views.user_edit, name='user_edit'),

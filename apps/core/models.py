@@ -951,3 +951,26 @@ class InspectionSubmissionInstrument(models.Model):
 
     def __str__(self):
         return f"{self.submission.task_no} / {self.name}"
+
+
+class InstrumentCatalog(models.Model):
+    """仪器主数据：维护仪器编号、名称、型号及检定/校准信息。"""
+
+    code = models.CharField(max_length=64, unique=True, db_index=True, verbose_name=_("仪器编号"))
+    name = models.CharField(max_length=255, db_index=True, verbose_name=_("仪器设备名称"))
+    model = models.CharField(max_length=255, blank=True, default="", verbose_name=_("型号"))
+    calibration_org = models.CharField(max_length=255, blank=True, default="", verbose_name=_("检定/校准单位"))
+    certificate_no = models.CharField(max_length=128, blank=True, default="", verbose_name=_("证书编号"))
+    certificate_valid_until = models.DateField(null=True, blank=True, verbose_name=_("证书有效期"))
+    remarks = models.TextField(blank=True, default="", verbose_name=_("备注说明"))
+    is_active = models.BooleanField(default=True, db_index=True, verbose_name=_("启用"))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("创建时间"))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_("更新时间"))
+
+    class Meta:
+        verbose_name = _("仪器主数据")
+        verbose_name_plural = verbose_name
+        ordering = ["code"]
+
+    def __str__(self):
+        return f"{self.code} - {self.name}"

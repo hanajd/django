@@ -18,6 +18,7 @@ from apps.core.models import (
     BizContact,
     BizDevice,
     InspectionCase,
+    InstrumentCatalog,
     InspectedOrganization,
     LibraryFile,
     LibraryProject,
@@ -28,6 +29,7 @@ from apps.core.serializers_registry import (
     BizContactSerializer,
     BizDeviceSerializer,
     InspectionCaseSerializer,
+    InstrumentCatalogSerializer,
     InspectedOrganizationSerializer,
     ReportSerializer,
     SiteRecordSerializer,
@@ -110,6 +112,15 @@ class BizDeviceViewSet(RegistryViewMixin, viewsets.ModelViewSet):
     search_fields = ("name", "model", "serial_no", "manufacturer")
     ordering_fields = ("id", "name", "updated_at")
     ordering = ("-updated_at",)
+
+
+class InstrumentCatalogViewSet(RegistryViewMixin, viewsets.ReadOnlyModelViewSet):
+    queryset = InstrumentCatalog.objects.all()
+    serializer_class = InstrumentCatalogSerializer
+    filter_backends = (filters.SearchFilter, filters.OrderingFilter)
+    search_fields = ("code", "name", "model", "certificate_no", "calibration_org", "remarks")
+    ordering_fields = ("id", "code", "name", "certificate_valid_until", "updated_at", "created_at")
+    ordering = ("code",)
 
 
 class InspectionCaseViewSet(RegistryViewMixin, viewsets.ModelViewSet):

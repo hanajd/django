@@ -140,6 +140,15 @@
         </a>
         {% endif %}
         {% if role_perm.perm_manage_users %}
+        <a href="{% url 'database_device_list' %}" class="flex items-center p-4 bg-gradient-to-r from-slate-50 to-slate-100 rounded-lg hover:from-slate-100 hover:to-slate-200 transition-all group">
+            <div class="w-12 h-12 bg-slate-600 rounded-lg flex items-center justify-center mr-4 group-hover:scale-110 transition-transform">
+                <i class="ri-database-2-line text-xl text-white"></i>
+            </div>
+            <div>
+                <p class="font-medium text-gray-800">数据库管理</p>
+                <p class="text-xs text-gray-500">检测仪器数据维护</p>
+            </div>
+        </a>
         <a href="{% url 'user_list' %}" class="flex items-center p-4 bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg hover:from-blue-100 hover:to-blue-200 transition-all group">
             <div class="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center mr-4 group-hover:scale-110 transition-transform">
                 <i class="ri-user-line text-xl text-white"></i>

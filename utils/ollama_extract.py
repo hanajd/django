@@ -53,6 +53,37 @@ class OllamaClientGpuPreference(Client):
 def build_devices_prompt(md: str, source_file_hint: int) -> str:
     struct = json.dumps(pipeline_config.SINGLE_DEVICE_STRUCT, ensure_ascii=False, indent=2)
     return f"""你是设备铭牌提取专家，从文本中提取所有独立设备铭牌，输出**严格JSON数组**，无其他内容。文本中可能有部分拼写错误或者识别错误，请根据上下文进行简单修正，避免改动过大。
+===== 提取规则（必须逐条遵守） =====
+【1. 设备名称】
+- 定义：文本里直接说明设备是什么的短语/英文，比如“X-RAY TUBE HOUSING ASSEMBLY”“X射线管组件”
+- 匹配关键词：找文本里大写的设备功能/部件名词，比如TUBE、ASSEMBLY、SYSTEM、SCANNER等
+- 示例：如果文本里有“X-RAY TUBE HOUSING ASSEMBLY”，设备名称尽量翻译成中文名称
+- 注意：不要把厂家名、型号号当成设备名称
+
+【2. 设备型号】
+- 定义：厂家给设备/部件的型号代码，通常是字母+数字的组合
+- 匹配关键词：前面通常跟着“Model:”“型号:”“REF:”，格式类似“XXX 1234”“ABC-123/45”
+- 示例：文本里“Model MRC 200 0407 ROT-GS 1004”“REF 9890 000 86502”都是型号相关内容
+- 注意：要把所有标注为Model/REF的内容都列出来，区分“组件型号”和“核心部件型号”
+
+【3. 设备编号/序列号（SN号）】
+- 定义：设备唯一的出厂编号，通常是一串数字+字母
+- 匹配关键词：前面跟着“SN:”“Serial No.:”“序列号:”，格式类似“72320M168874”“168874”
+- 示例：文本里“SN 72320M168874”就是序列号
+- 注意：序列号是唯一的串号，不是型号代码
+
+【4. 生产厂家】
+- 定义：设备的制造商全称+地址+国别
+- 匹配关键词：找文本开头/上方的公司名，通常包含“Medical Systems”“GmbH”“Co., Ltd”，后面跟着地址、城市、国家
+- 示例：文本里“Philips Medical Systems DMC GmbH, Röntgenstraße 24, 22335 Hamburg / GERMANY”就是厂家信息
+- 注意：不要只写“Philips”，要写完整识别到的内容
+
+【5. 额定参数】
+- 定义：设备的核心工作参数，通常是kV/mA/mAs/mAs范围
+- 匹配关键词：前面跟着“Rated kV:”“额定kV:”“Rated mA:”“额定mA:”“Rated mAs:”“额定mAs:”，格式类似“100 kV”“200 mA”
+- 示例：文本里“Rated kV 100”“Rated mA 200”都是额定参数
+- 注意：要把所有标注为Rated的内容都列出来，区分kV/mA/mAs
+
 格式：
 {struct}
 
@@ -108,6 +139,19 @@ def build_frontend_template_prompt(
 10) computed 必须包含 formula 与 dependsOn；verdict 必须包含 rule。
 11) constants/enums 如无数据必须返回空对象；steps不能为空。
 12) 输出必须可被Flutter动态表单直接读取渲染。
+
+人员签名类字段 ID 命名字典（强制执行）：
+- 执行层：“检测员 / 测试员” -> id: "inspector"
+- 检验主责：“主检 / 主检人” -> id: "mainInspector"
+- 复核层：“校核员 / 校核人 / 复核人” -> id: "checker"（不可与审核混淆）
+- 审批层：“审核员 / 审核人” -> id: "reviewer"
+- 终审层：“批准人 / 授权签字人” -> id: "approver" 或 "authorizedSignatory"
+- 外部人员：“受检单位陪同人” -> id: "accompanyingPerson"
+
+警告：
+- 遇到“校核员及校核日期”这类组合文本，必须判定为 signature，id 使用 "checker"；
+- 严禁将此类签字字段命名为 dateDay/date 或混合多个角色语义；
+- source.pdfFieldId 必须使用 PDF 原生唯一物理占位符（如 f78/f79），不得用语义字段名替代。
 
 参考标准样板JSON：
 {sample_compact}

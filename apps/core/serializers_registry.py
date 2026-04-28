@@ -7,6 +7,7 @@ from apps.core.models import (
     BizContact,
     BizDevice,
     InspectionCase,
+    InstrumentCatalog,
     InspectedOrganization,
     LibraryTaskAssignment,
     Report,
@@ -88,6 +89,25 @@ class BizDeviceSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data["created_by"] = self.context["request"].user
         return super().create(validated_data)
+
+
+class InstrumentCatalogSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InstrumentCatalog
+        fields = (
+            "id",
+            "code",
+            "name",
+            "model",
+            "calibration_org",
+            "certificate_no",
+            "certificate_valid_until",
+            "remarks",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("created_at", "updated_at")
 
 
 class InspectionCaseSerializer(serializers.ModelSerializer):

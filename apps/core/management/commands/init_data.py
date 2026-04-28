@@ -60,31 +60,38 @@ class Command(BaseCommand):
                 'roles': [super_admin, admin, app_user]
             },
             {
+                'name': '数据库管理',
+                'path': '',
+                'icon': 'database-2',
+                'sort_order': 2,
+                'roles': [super_admin, admin]
+            },
+            {
                 'name': '用户管理',
                 'path': '',
                 'icon': 'users',
-                'sort_order': 2,
+                'sort_order': 3,
                 'roles': [super_admin, admin]
             },
             {
                 'name': '角色管理',
                 'path': '/roles/',
                 'icon': 'shield',
-                'sort_order': 3,
+                'sort_order': 4,
                 'roles': [super_admin, admin]
             },
             {
                 'name': '菜单管理',
                 'path': '/menus/',
                 'icon': 'menu',
-                'sort_order': 4,
+                'sort_order': 5,
                 'roles': [super_admin]
             },
             {
                 'name': '文件与提取',
                 'path': '',
                 'icon': 'folder',
-                'sort_order': 5,
+                'sort_order': 6,
                 'roles': [super_admin, admin, app_user]
             },
         ]
@@ -107,8 +114,37 @@ class Command(BaseCommand):
             else:
                 self.stdout.write(f'菜单已存在: {menu.name}')
         
+        database_management = Menu.objects.filter(name='数据库管理', parent__isnull=True).first()
         user_management = Menu.objects.filter(name='用户管理', parent__isnull=True).first()
         file_parent_menu = Menu.objects.filter(name='文件与提取', parent__isnull=True).first()
+
+        if database_management:
+            database_menu_data = [
+                {
+                    'name': '检测仪器',
+                    'path': '/database/devices/',
+                    'icon': 'database-2',
+                    'sort_order': 1,
+                    'parent': database_management,
+                    'roles': [super_admin, admin]
+                }
+            ]
+            for menu_data in database_menu_data:
+                menu, created = Menu.objects.get_or_create(
+                    name=menu_data['name'],
+                    parent=menu_data['parent'],
+                    defaults={
+                        'path': menu_data['path'],
+                        'icon': menu_data['icon'],
+                        'sort_order': menu_data['sort_order']
+                    }
+                )
+                menu.roles.set(menu_data['roles'])
+                menu.save()
+                if created:
+                    self.stdout.write(f'创建子菜单: {menu.name}')
+                else:
+                    self.stdout.write(f'子菜单已存在: {menu.name}')
         
         # 创建用户管理的子菜单
         if user_management:

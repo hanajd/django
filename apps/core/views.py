@@ -4,6 +4,7 @@ Web 视图
 """
 import json as json_std
 import os
+import re
 import uuid
 from datetime import date
 from mimetypes import guess_type
@@ -54,6 +55,7 @@ from apps.core.library_access import (
 from apps.core.models import (
     InspectionCase,
     InspectionSubmission,
+    InstrumentCatalog,
     LibraryFile,
     LibraryProject,
     LibraryProjectUserRevocation,
@@ -64,7 +66,7 @@ from apps.core.models import (
     UserProfile,
 )
 from utils.ollama_extract import generate_frontend_template_with_ollama
-from utils.frontend_schema_rule_engine import build_frontend_schema_by_rules
+from utils.frontend_schema_rule_engine import build_frontend_schema_by_rules, normalize_field_text_by_underscore_rules
 
 _LIBRARYTASK_HAS_REPORT_SOURCE_RELATION = None
 
@@ -84,8 +86,17 @@ def _librarytask_has_report_source_relation() -> bool:
 
 def _require_perm(request, perm: str):
     if not role_has(request.user, perm):
+        if request.path.startswith("/files/htmlpdf/api/"):
+            return JsonResponse({"error": "forbidden"}, status=403)
         messages.error(request, "无权访问该功能")
         return redirect(reverse("dashboard"))
+    return None
+
+
+def _require_api_login(request):
+    """HTMLPDF API 统一登录检查：未登录时返回 JSON，而不是重定向 HTML 登录页。"""
+    if not getattr(request, "user", None) or not request.user.is_authenticated:
+        return JsonResponse({"error": "unauthorized"}, status=401)
     return None
 
 
@@ -130,6 +141,94 @@ def dashboard(request):
         'library_json_count': library_json_count,
     }
     return render(request, 'dashboard.html', context)
+
+
+@login_required
+def database_device_list(request):
+    """数据库管理：检测仪器台账。"""
+    r = _require_perm(request, "perm_manage_users")
+    if r:
+        return r
+
+    action = (request.POST.get("action") or "").strip()
+    if request.method == "POST" and action:
+        code = (request.POST.get("code") or "").strip()
+        name = (request.POST.get("name") or "").strip()
+        model = (request.POST.get("model") or "").strip()
+        calibration_org = (request.POST.get("calibration_org") or "").strip()
+        certificate_no = (request.POST.get("certificate_no") or "").strip()
+        certificate_valid_until = (request.POST.get("certificate_valid_until") or "").strip()
+        remarks = (request.POST.get("remarks") or "").strip()
+
+        if action == "create":
+            if not code or not name:
+                messages.error(request, "仪器编号和仪器设备名称不能为空")
+                return redirect("database_device_list")
+            if InstrumentCatalog.objects.filter(code=code).exists():
+                messages.error(request, "仪器编号已存在")
+                return redirect("database_device_list")
+            InstrumentCatalog.objects.create(
+                code=code,
+                name=name,
+                model=model,
+                calibration_org=calibration_org,
+                certificate_no=certificate_no,
+                certificate_valid_until=certificate_valid_until or None,
+                remarks=remarks,
+                is_active=True,
+            )
+            messages.success(request, "检测仪器创建成功")
+            return redirect("database_device_list")
+
+        if action == "update":
+            device_id = (request.POST.get("device_id") or "").strip()
+            try:
+                device = InstrumentCatalog.objects.get(id=int(device_id))
+            except (ValueError, InstrumentCatalog.DoesNotExist):
+                messages.error(request, "仪器不存在")
+                return redirect("database_device_list")
+            if not code or not name:
+                messages.error(request, "仪器编号和仪器设备名称不能为空")
+                return redirect("database_device_list")
+            if InstrumentCatalog.objects.filter(code=code).exclude(id=device.id).exists():
+                messages.error(request, "仪器编号已存在")
+                return redirect("database_device_list")
+            device.code = code
+            device.name = name
+            device.model = model
+            device.calibration_org = calibration_org
+            device.certificate_no = certificate_no
+            device.certificate_valid_until = certificate_valid_until or None
+            device.remarks = remarks
+            device.save(update_fields=["code", "name", "model", "calibration_org", "certificate_no", "certificate_valid_until", "remarks", "updated_at"])
+            messages.success(request, "检测仪器更新成功")
+            return redirect("database_device_list")
+
+        if action == "delete":
+            device_id = (request.POST.get("device_id") or "").strip()
+            try:
+                device = InstrumentCatalog.objects.get(id=int(device_id))
+            except (ValueError, InstrumentCatalog.DoesNotExist):
+                messages.error(request, "仪器不存在")
+                return redirect("database_device_list")
+            device.delete()
+            messages.success(request, "检测仪器删除成功")
+            return redirect("database_device_list")
+
+    editing_device = None
+    edit_id = (request.GET.get("edit") or "").strip()
+    if edit_id:
+        try:
+            editing_device = InstrumentCatalog.objects.get(id=int(edit_id))
+        except (ValueError, InstrumentCatalog.DoesNotExist):
+            editing_device = None
+
+    devices = InstrumentCatalog.objects.all()
+    context = {
+        "devices": devices,
+        "editing_device": editing_device,
+    }
+    return render(request, "core/database_device_list.html", context)
 
 
 @login_required
@@ -2154,9 +2253,11 @@ def htmlpdf_api_import_json(request):
 
 
 @csrf_exempt
-@login_required
 @require_POST
 def htmlpdf_api_export_json(request):
+    auth_resp = _require_api_login(request)
+    if auth_resp:
+        return auth_resp
     gx = _require_perm(request, "perm_process_pipeline")
     if gx:
         return JsonResponse({"error": "forbidden"}, status=403)
@@ -2164,7 +2265,7 @@ def htmlpdf_api_export_json(request):
         data = json_std.loads(request.body.decode("utf-8"))
     except Exception:
         return JsonResponse({"error": "请求体不是合法JSON"}, status=400)
-    fields = data.get("fields", [])
+    fields = _sanitize_pdf_field_texts(data.get("fields", []))
     form_schema = data.get("form_schema") if isinstance(data.get("form_schema"), dict) else {}
     bindings = data.get("bindings") if isinstance(data.get("bindings"), dict) else {}
     template_meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
@@ -2184,6 +2285,30 @@ def htmlpdf_api_export_json(request):
     constants = form_schema.get("constants") if isinstance(form_schema.get("constants"), dict) else {}
     enums = form_schema.get("enums") if isinstance(form_schema.get("enums"), dict) else {}
     steps = form_schema.get("steps") if isinstance(form_schema.get("steps"), list) else []
+    # 模板保存统一走规则引擎，保证分桶与排序稳定：
+    # reportInfo/hospitalInfo/equipmentInfo/instruments/testResult/signatures
+    rule_template_obj = {
+        "templateId": template_meta.get("templateId") or name.rsplit(".", 1)[0],
+        "templateName": template_meta.get("templateName") or name,
+        "version": template_meta.get("version") or "1.0.0",
+        "reportType": report_type,
+        "standard": standard,
+        "pdfUrl": str(template_meta.get("pdfUrl") or ""),
+        "locale": str(template_meta.get("locale") or "zh-CN"),
+        "constants": constants,
+        "enums": enums,
+        "steps": steps,
+        "pdf": {"fields": normalized_fields},
+        "meta": template_meta,
+    }
+    try:
+        rule_payload = build_frontend_schema_by_rules(rule_template_obj, merge_split_dates=False)
+    except Exception:
+        rule_payload = {}
+    if isinstance(rule_payload, dict) and isinstance(rule_payload.get("steps"), list) and rule_payload.get("steps"):
+        constants = rule_payload.get("constants") if isinstance(rule_payload.get("constants"), dict) else constants
+        enums = rule_payload.get("enums") if isinstance(rule_payload.get("enums"), dict) else enums
+        steps = rule_payload.get("steps") or steps
     payload = {
         # Unified template schema (v2): frontend format first, backend adds PDF anchors/mappings.
         "schema": "unified_form_template/v2",
@@ -2297,22 +2422,45 @@ def _normalize_pdf_fields_for_unified_template(fields, form_schema: dict, bindin
         if not isinstance(item, dict):
             continue
         row = dict(item)
-        old_pdf_id = str(row.get("id") or f"f{idx + 1}").strip()
+        # Preserve physical placeholder id from PDF (e.g. f78) as top priority.
+        # 优先保证 pdfFieldId 仍是 f 序号，避免被语义 id（如 委托单位_委托单位）覆盖。
+        raw_pdf_id = str(row.get("pdfFieldId") or "").strip()
         old_placeholder = str(row.get("placeholder") or "").strip()
-        link = by_pdf_id.get(old_pdf_id) or by_placeholder.get(old_placeholder) or {}
+        link = by_pdf_id.get(raw_pdf_id) or by_placeholder.get(old_placeholder) or {}
+        link_pdf_id = str(link.get("pdfFieldId") or "").strip() if isinstance(link, dict) else ""
+        id_fallback = str(row.get("id") or "").strip()
+        candidates = [raw_pdf_id, link_pdf_id, id_fallback]
+        old_pdf_id = next((c for c in candidates if re.match(r"^f\d+$", c)), f"f{idx + 1}")
         field_id = str(link.get("fieldId") or old_placeholder or old_pdf_id).strip()
-        title = str(
-            link.get("title")
-            or form_meta.get(field_id, {}).get("label")
-            or row.get("title")
-            or old_placeholder
-            or field_id
-        ).strip()
+        title = normalize_field_text_by_underscore_rules(
+            str(
+                link.get("title")
+                or form_meta.get(field_id, {}).get("label")
+                or row.get("title")
+                or old_placeholder
+                or field_id
+            ).strip()
+        )
         row["pdfFieldId"] = old_pdf_id
-        row["id"] = field_id
-        row["title"] = title
+        row["id"] = normalize_field_text_by_underscore_rules(field_id) or field_id
+        row["title"] = title or field_id
         # Keep legacy key for compatibility with old pipeline readers.
-        row["placeholder"] = field_id
+        row["placeholder"] = normalize_field_text_by_underscore_rules(field_id) or field_id
+        out.append(row)
+    return out
+
+
+def _sanitize_pdf_field_texts(fields):
+    out = []
+    for item in fields or []:
+        if not isinstance(item, dict):
+            continue
+        row = dict(item)
+        for key in ("id", "title", "placeholder"):
+            if key in row:
+                val = row.get(key)
+                if isinstance(val, str):
+                    row[key] = normalize_field_text_by_underscore_rules(val)
         out.append(row)
     return out
 
@@ -2347,7 +2495,9 @@ def _build_frontend_field_items(fields):
                 "required": False,
                 "defaultValue": None,
                 "source": {
-                    "key": field_id_raw or placeholder or field_id,
+                    # 新版约定：前后端直连优先使用 pdfFieldId 作为绑定键。
+                    "key": pdf_field_id,
+                    "bindKey": pdf_field_id,
                     "pdfFieldId": pdf_field_id,
                     "page": page,
                     "anchorType": anchor_type,
@@ -2358,9 +2508,11 @@ def _build_frontend_field_items(fields):
 
 
 @csrf_exempt
-@login_required
 @require_POST
 def htmlpdf_api_export_frontend_json(request):
+    auth_resp = _require_api_login(request)
+    if auth_resp:
+        return auth_resp
     gx = _require_perm(request, "perm_process_pipeline")
     if gx:
         return JsonResponse({"error": "forbidden"}, status=403)
@@ -2391,6 +2543,7 @@ def htmlpdf_api_export_frontend_json(request):
     steps = data.get("steps") if isinstance(data.get("steps"), list) else []
     if not steps:
         steps = form_schema.get("steps") if isinstance(form_schema.get("steps"), list) else []
+    input_fields = _sanitize_pdf_field_texts(data.get("fields") if isinstance(data.get("fields"), list) else [])
     payload = {
         "templateId": template_id or name.rsplit(".", 1)[0],
         "templateName": template_name or name,
@@ -2403,6 +2556,40 @@ def htmlpdf_api_export_frontend_json(request):
         "enums": enums,
         "steps": steps,
     }
+    # 先以规则引擎生成标准结构（分桶 + 坐标排序），再按模式决定是否被 LLM 覆盖。
+    try:
+        base_rule_payload = build_frontend_schema_by_rules(
+            {
+                "templateId": payload["templateId"],
+                "templateName": payload["templateName"],
+                "version": payload["version"],
+                "reportType": payload["reportType"],
+                "standard": payload["standard"],
+                "pdfUrl": payload["pdfUrl"],
+                "locale": payload["locale"],
+                "constants": payload["constants"],
+                "enums": payload["enums"],
+                "steps": payload["steps"],
+                "pdf": {"fields": input_fields},
+                "meta": meta,
+            }
+        )
+    except Exception:
+        base_rule_payload = {}
+    if isinstance(base_rule_payload, dict) and isinstance(base_rule_payload.get("steps"), list) and base_rule_payload.get("steps"):
+        payload = {
+            "templateId": str(base_rule_payload.get("templateId") or payload["templateId"]),
+            "templateName": str(base_rule_payload.get("templateName") or payload["templateName"]),
+            "version": str(base_rule_payload.get("version") or payload["version"]),
+            "reportType": str(base_rule_payload.get("reportType") or payload["reportType"]),
+            "standard": str(base_rule_payload.get("standard") or payload["standard"]),
+            "pdfUrl": str(base_rule_payload.get("pdfUrl") or payload["pdfUrl"]),
+            "locale": str(base_rule_payload.get("locale") or payload["locale"]),
+            "constants": base_rule_payload.get("constants") if isinstance(base_rule_payload.get("constants"), dict) else payload["constants"],
+            "enums": base_rule_payload.get("enums") if isinstance(base_rule_payload.get("enums"), dict) else payload["enums"],
+            "steps": base_rule_payload.get("steps") or payload["steps"],
+        }
+
     # 保存前端 JSON 支持三种导出模式：
     # - rule: 纯规则引擎（不经过大模型）
     # - llm: 强制大模型（失败回退规则引擎）
@@ -2410,7 +2597,6 @@ def htmlpdf_api_export_frontend_json(request):
     export_mode = str(data.get("export_mode") or "auto").strip().lower()
     if export_mode not in {"auto", "llm", "rule"}:
         export_mode = "auto"
-    input_fields = data.get("fields") if isinstance(data.get("fields"), list) else []
     llm_auto = str(os.environ.get("ENABLE_LLM_FRONTEND_EXPORT", "1")).strip().lower() in {"1", "true", "yes", "on"}
     llm_force = str(data.get("force_llm_steps") or "").strip().lower() in {"1", "true", "yes", "on"}
     need_llm = export_mode == "llm" or (export_mode == "auto" and llm_auto and (llm_force or not payload.get("steps")))
@@ -2525,9 +2711,11 @@ def htmlpdf_api_export_frontend_json(request):
 
 
 @csrf_exempt
-@login_required
 @require_POST
 def htmlpdf_api_save_pdf(request):
+    auth_resp = _require_api_login(request)
+    if auth_resp:
+        return auth_resp
     gx = _require_perm(request, "perm_process_pipeline")
     if gx:
         return JsonResponse({"error": "forbidden"}, status=403)

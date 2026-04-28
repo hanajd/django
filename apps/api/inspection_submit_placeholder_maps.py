@@ -172,6 +172,25 @@ def build_submit_value_mapping(source_data: dict, map_id: str = DEFAULT_SUBMIT_P
     return resolve_mapping_rules(source_data, rules)
 
 
+def build_dynamic_value_mapping(source_data: dict) -> dict[str, Any]:
+    """
+    动态载荷直连映射：
+    - 直接读取 submit 顶层 dynamicData
+    - key/value 原样进入 value_mapping
+    - 用于新版本「前端 source.pdfFieldId -> submit.dynamicData -> 后端模板字段」直连回填
+    """
+    raw = source_data.get("dynamicData")
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for k, v in raw.items():
+        key = str(k or "").strip()
+        if not key:
+            continue
+        out[key] = v
+    return out
+
+
 # # 原 inspection_views._build_submit_value_mapping 的默认映射（逐条等价）
 # _RULES_DEFAULT: list[dict[str, Any]] = [
 #     {"key": "commissionNo", "kind": "path", "path": ["reportInfo", "commissionNo"]},
@@ -408,8 +427,8 @@ _RULES_DEFAULT: list[dict[str, Any]] = [
     {"key": "sameHospital", "kind": "const", "value": True},
     {"key": "diffHospital", "kind": "const", "value": False},
     # 2. 检测类型
-    {"key": "isStatusTest", "kind": "const", "value": True},
-    {"key": "isAcceptanceTest", "kind": "const", "value": False},
+    {"key": "isStatusTest", "kind": "path", "path": ["hospitalInfo", "testType"], "cast": "eq", "value": "status"},
+    {"key": "isAcceptanceTest", "kind": "path", "path": ["hospitalInfo", "testType"], "cast": "eq", "value": "acceptance"},
     # 3. 测试项目勾选
     {"key": "isTest1", "kind": "const", "value": True},
     {"key": "isTest2", "kind": "const", "value": False},

@@ -11,7 +11,7 @@ from django.core.paginator import Paginator
 from django.db import transaction
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import status
@@ -96,6 +96,169 @@ def _build_accessible_projects_payload(user, *, include_legacy_task_no: bool = F
             item["taskNo"] = row["code"]
         data.append(item)
     return {"count": len(data), "list": data}
+
+
+def _inject_frontend_context_defaults(frontend_obj: dict, *, project_id: str, task_no: str) -> dict:
+    """
+    在导出的前端模板中注入任务上下文默认值：
+    - commissionNo / 委托编号 <- project_id
+    - testnumber / 受检编号 <- task_no
+    """
+    if not isinstance(frontend_obj, dict):
+        return frontend_obj
+    steps = frontend_obj.get("steps")
+    if not isinstance(steps, list):
+        return frontend_obj
+
+    value_map = {
+        "commissionNo": project_id,
+        "委托编号": project_id,
+        "entrustNo": project_id,
+        "projectId": project_id,
+        "inspectionNo": task_no,
+        "testnumber": task_no,
+        "受检编号": task_no,
+        "inspectedNo": task_no,
+        "taskNo": task_no,
+    }
+
+    def _pick_field_keys(field: dict):
+        keys = set()
+        for raw in (
+            field.get("id"),
+            field.get("label"),
+            field.get("title"),
+            field.get("placeholder"),
+        ):
+            s = str(raw or "").strip()
+            if s:
+                keys.add(s)
+        source = field.get("source")
+        if isinstance(source, dict):
+            for raw in (
+                source.get("key"),
+                source.get("bindKey"),
+                source.get("pdfFieldId"),
+            ):
+                s = str(raw or "").strip()
+                if s:
+                    keys.add(s)
+        return keys
+
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        sections = step.get("sections")
+        if not isinstance(sections, list):
+            continue
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            fields = section.get("fields")
+            if not isinstance(fields, list):
+                continue
+            for field in fields:
+                if not isinstance(field, dict):
+                    continue
+                for key in _pick_field_keys(field):
+                    if key in value_map:
+                        field["defaultValue"] = value_map[key]
+                        break
+
+    return frontend_obj
+
+
+def _inject_frontend_payload_defaults(frontend_obj: dict, payload: dict) -> dict:
+    """
+    按字段 source.submitPath 从后端已有 payload 注入 defaultValue。
+    支持后续任意预填字段，无需再逐个硬编码。
+    """
+    if not isinstance(frontend_obj, dict) or not isinstance(payload, dict):
+        return frontend_obj
+    steps = frontend_obj.get("steps")
+    if not isinstance(steps, list):
+        return frontend_obj
+
+    def _get_by_path(data: dict, path: str):
+        cur = data
+        for seg in (path or "").split("."):
+            key = str(seg or "").strip()
+            if not key:
+                continue
+            if not isinstance(cur, dict):
+                return None
+            cur = cur.get(key)
+            if cur is None:
+                return None
+        return cur
+
+    def _coerce_field_default(field: dict, raw_value):
+        field_type = str(field.get("type") or "").strip().lower()
+        if field_type == "boolean":
+            if isinstance(raw_value, bool):
+                return raw_value
+            if isinstance(raw_value, (int, float)):
+                return bool(raw_value)
+            if isinstance(raw_value, str):
+                text = raw_value.strip().lower()
+                if text in {"1", "true", "yes", "on", "y"}:
+                    return True
+                if text in {"0", "false", "no", "off", "n"}:
+                    return False
+            return None
+        if field_type in {"number"}:
+            if isinstance(raw_value, (int, float)):
+                return raw_value
+            if isinstance(raw_value, str):
+                text = raw_value.strip()
+                if not text:
+                    return None
+                try:
+                    return float(text) if "." in text else int(text)
+                except ValueError:
+                    return None
+            return None
+        if field_type in {"text", "textarea", "date", "signature"}:
+            if isinstance(raw_value, (dict, list)):
+                return None
+            return raw_value
+        # 其余类型保持原值（table/complex 等）
+        return raw_value
+
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        sections = step.get("sections")
+        if not isinstance(sections, list):
+            continue
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            fields = section.get("fields")
+            if not isinstance(fields, list):
+                continue
+            for field in fields:
+                if not isinstance(field, dict):
+                    continue
+                source = field.get("source") if isinstance(field.get("source"), dict) else {}
+                submit_path = str(source.get("submitPath") or "").strip()
+                if not submit_path:
+                    continue
+                v = _get_by_path(payload, submit_path)
+                if v in (None, "", []):
+                    continue
+                coerced = _coerce_field_default(field, v)
+                if coerced is None and str(field.get("type") or "").strip().lower() in {
+                    "boolean",
+                    "number",
+                    "text",
+                    "textarea",
+                    "date",
+                    "signature",
+                }:
+                    continue
+                field["defaultValue"] = coerced
+    return frontend_obj
 
 
 def _resolve_task_template_json(task_obj):
@@ -261,6 +424,43 @@ class _InspectionTaskAccessMixin:
         except ValueError:
             return None
         return LibraryProject.objects.filter(pk=pid, is_active=True).first()
+
+    def _build_file_download_url(self, request, *, task_no: str, pk: int, category: str, project: LibraryProject | None = None) -> str:
+        """
+        生成文件下载 URL，优先使用 project+task 的 v2 路由，兼容旧 task 路由。
+        避免路由名变更导致的 NoReverseMatch -> HTML 500 页面。
+        """
+        project_id = ""
+        if project is not None:
+            try:
+                project_id = self._project_public_id(project)
+            except Exception:
+                project_id = ""
+        if project_id:
+            try:
+                return request.build_absolute_uri(
+                    reverse(
+                        "api_inspection_project_task_file_download",
+                        kwargs={"project_id": project_id, "task_no": task_no, "pk": pk, "category": category},
+                    )
+                )
+            except NoReverseMatch:
+                pass
+            try:
+                return request.build_absolute_uri(
+                    reverse(
+                        "api_v2_inspection_project_task_file_download",
+                        kwargs={"project_id": project_id, "task_no": task_no, "pk": pk, "category": category},
+                    )
+                )
+            except NoReverseMatch:
+                pass
+        return request.build_absolute_uri(
+            reverse(
+                "api_inspection_task_file_download",
+                kwargs={"task_no": task_no, "pk": pk, "category": category},
+            )
+        )
 
     @staticmethod
     def _build_project_task_no(project: LibraryProject, library_task: LibraryTask) -> str:
@@ -1064,6 +1264,12 @@ class InspectionTaskFrontendJsonExportAPIView(_InspectionTaskAccessMixin, APIVie
         except Exception as exc:
             logger.warning("rule frontend export failed, fallback to extract_frontend_template: %s", exc)
             frontend_obj = extract_frontend_template(template_obj)
+        frontend_obj = _inject_frontend_context_defaults(
+            frontend_obj,
+            project_id=self._project_public_id(project),
+            task_no=task_no,
+        )
+        frontend_obj = _inject_frontend_payload_defaults(frontend_obj, payload)
         ts = timezone.localtime().strftime("%Y%m%d%H%M%S")
         filename = f"{task_no}_frontend_{ts}.json".replace("/", "_")
         raw = json_std.dumps(frontend_obj, ensure_ascii=False, indent=2).encode("utf-8")
@@ -1149,11 +1355,12 @@ class InspectionTaskManualExportReportAPIView(_InspectionTaskAccessMixin, APIVie
             payload["reportFile"] = {
                 "id": latest_file.id,
                 "name": latest_file.original_name,
-                "downloadUrl": request.build_absolute_uri(
-                    reverse(
-                        "api_inspection_task_file_download",
-                        kwargs={"task_no": task_no, "pk": latest_file.pk, "category": LibraryFile.CATEGORY_REPORT},
-                    )
+                "downloadUrl": self._build_file_download_url(
+                    request,
+                    task_no=task_no,
+                    pk=latest_file.pk,
+                    category=LibraryFile.CATEGORY_REPORT,
+                    project=project,
                 ),
             }
         return _ok("报告导出成功", payload)
@@ -1383,11 +1590,12 @@ class InspectionTaskFileUploadAPIView(_InspectionTaskAccessMixin, APIView):
         )
         for row in created:
             row["taskNo"] = task_no
-            row["download_url"] = request.build_absolute_uri(
-                reverse(
-                    "api_inspection_task_file_download",
-                    kwargs={"task_no": task_no, "pk": row["id"], "category": category},
-                )
+            row["download_url"] = self._build_file_download_url(
+                request,
+                task_no=task_no,
+                pk=row["id"],
+                category=category,
+                project=project,
             )
         return Response({"taskNo": task_no, "created": created, "skipped": skipped})
 
@@ -1427,11 +1635,12 @@ class InspectionTaskFileListAPIView(_InspectionTaskAccessMixin, APIView):
                     "link_entity": lf.link_entity,
                     "link_object_id": lf.link_object_id,
                     "created_at": lf.created_at.isoformat(),
-                    "download_url": request.build_absolute_uri(
-                        reverse(
-                            "api_inspection_task_file_download",
-                            kwargs={"task_no": task_no, "pk": lf.pk, "category": lf.category},
-                        )
+                    "download_url": self._build_file_download_url(
+                        request,
+                        task_no=task_no,
+                        pk=lf.pk,
+                        category=lf.category,
+                        project=project,
                     ),
                 }
             )
@@ -1503,15 +1712,12 @@ class InspectionTaskOCRUploadAPIView(_InspectionTaskAccessMixin, APIView):
         ).start()
         for row in created:
             row["taskNo"] = task_no
-            row["download_url"] = request.build_absolute_uri(
-                reverse(
-                    "api_inspection_task_file_download",
-                    kwargs={
-                        "task_no": task_no,
-                        "pk": row["id"],
-                        "category": LibraryFile.CATEGORY_UPLOAD,
-                    },
-                )
+            row["download_url"] = self._build_file_download_url(
+                request,
+                task_no=task_no,
+                pk=row["id"],
+                category=LibraryFile.CATEGORY_UPLOAD,
+                project=project,
             )
         return _ok(
             "OCR 任务已创建",
@@ -1524,18 +1730,61 @@ class InspectionTaskOCRUploadAPIView(_InspectionTaskAccessMixin, APIView):
                     "id": task.pk,
                     "status": task.status,
                     "statusUrl": request.build_absolute_uri(
-                        reverse("api_inspection_task_ocr_status", kwargs={"task_no": task_no, "ocr_task_id": task.pk})
+                        self._resolve_ocr_url(
+                            request,
+                            ocr_task_id=task.pk,
+                            task_no=task_no,
+                            project=project,
+                            kind="status",
+                        )
                     ),
                     "autofillUrl": request.build_absolute_uri(
-                        reverse(
-                            "api_inspection_task_ocr_autofill",
-                            kwargs={"task_no": task_no, "ocr_task_id": task.pk},
+                        self._resolve_ocr_url(
+                            request,
+                            ocr_task_id=task.pk,
+                            task_no=task_no,
+                            project=project,
+                            kind="autofill",
                         )
                     ),
                 },
             },
             http_status=status.HTTP_202_ACCEPTED if created else status.HTTP_200_OK,
         )
+
+    def _resolve_ocr_url(self, request, *, ocr_task_id: int, task_no: str, project, kind: str) -> str:
+        """
+        OCR 跳转 URL 兼容 v1/v2 与 project-task 两套路由命名，避免 reverse 失败导致 500。
+        """
+        project_id = ""
+        if project is not None:
+            try:
+                project_id = self._project_public_id(project)
+            except Exception:
+                project_id = ""
+        if kind == "status":
+            candidates = [
+                ("api_inspection_project_task_ocr_status", {"project_id": project_id, "task_no": task_no, "ocr_task_id": ocr_task_id}),
+                ("api_v2_inspection_project_task_ocr_status", {"project_id": project_id, "task_no": task_no, "ocr_task_id": ocr_task_id}),
+                ("api_inspection_task_ocr_status", {"task_no": task_no, "ocr_task_id": ocr_task_id}),
+                ("api_v2_inspection_task_ocr_status_legacy", {"task_no": task_no, "ocr_task_id": ocr_task_id}),
+            ]
+        else:
+            candidates = [
+                ("api_inspection_project_task_ocr_autofill", {"project_id": project_id, "task_no": task_no, "ocr_task_id": ocr_task_id}),
+                ("api_v2_inspection_project_task_ocr_autofill", {"project_id": project_id, "task_no": task_no, "ocr_task_id": ocr_task_id}),
+                ("api_inspection_task_ocr_autofill", {"task_no": task_no, "ocr_task_id": ocr_task_id}),
+                ("api_v2_inspection_task_ocr_autofill_legacy", {"task_no": task_no, "ocr_task_id": ocr_task_id}),
+            ]
+        for name, kwargs in candidates:
+            if ("project_id" in kwargs) and not kwargs.get("project_id"):
+                continue
+            try:
+                return reverse(name, kwargs=kwargs)
+            except NoReverseMatch:
+                continue
+        # 理论兜底：若全部路由名都不可用，返回当前请求路径，避免抛 500。
+        return request.path
 
 
 class InspectionTaskOCRStatusAPIView(_InspectionTaskAccessMixin, APIView):
@@ -1556,15 +1805,12 @@ class InspectionTaskOCRStatusAPIView(_InspectionTaskAccessMixin, APIView):
             .values("id", "original_name", "size", "created_at")
         )
         for f in files:
-            f["download_url"] = request.build_absolute_uri(
-                reverse(
-                    "api_inspection_task_file_download",
-                    kwargs={
-                        "task_no": task_no,
-                        "pk": f["id"],
-                        "category": LibraryFile.CATEGORY_JSON,
-                    },
-                )
+            f["download_url"] = self._build_file_download_url(
+                request,
+                task_no=task_no,
+                pk=f["id"],
+                category=LibraryFile.CATEGORY_JSON,
+                project=project,
             )
         return _ok(
             "获取成功",
@@ -1637,15 +1883,12 @@ class InspectionTaskOCRAutofillAPIView(_InspectionTaskAccessMixin, APIView):
                 {
                     "id": lf.pk,
                     "name": lf.original_name,
-                    "downloadUrl": request.build_absolute_uri(
-                        reverse(
-                            "api_inspection_task_file_download",
-                            kwargs={
-                                "task_no": task_no,
-                                "pk": lf.pk,
-                                "category": LibraryFile.CATEGORY_JSON,
-                            },
-                        )
+                    "downloadUrl": self._build_file_download_url(
+                        request,
+                        task_no=task_no,
+                        pk=lf.pk,
+                        category=LibraryFile.CATEGORY_JSON,
+                        project=project,
                     ),
                 }
             )
@@ -1676,15 +1919,12 @@ class InspectionTaskOCRAutofillAPIView(_InspectionTaskAccessMixin, APIView):
                 "jsonFile": {
                     "id": lf_payload.pk,
                     "name": lf_payload.original_name,
-                    "downloadUrl": request.build_absolute_uri(
-                        reverse(
-                            "api_inspection_task_file_download",
-                            kwargs={
-                                "task_no": task_no,
-                                "pk": lf_payload.pk,
-                                "category": LibraryFile.CATEGORY_JSON,
-                            },
-                        )
+                    "downloadUrl": self._build_file_download_url(
+                        request,
+                        task_no=task_no,
+                        pk=lf_payload.pk,
+                        category=LibraryFile.CATEGORY_JSON,
+                        project=project,
                     ),
                 },
                 "generatedJsonFiles": generated_json_files,

@@ -293,6 +293,48 @@
             pointer-events: none;
             animation: field-flash 0.9s ease-out 2;
         }
+        .pdf-container.hide-fields .field-wrap {
+            display: none !important;
+        }
+        .keyword-mark {
+            position: absolute;
+            z-index: 25;
+            border: 2px dashed #722ED1;
+            background: rgba(114, 46, 209, 0.12);
+            border-radius: 4px;
+            pointer-events: none;
+        }
+        .keyword-mark-label {
+            position: absolute;
+            left: 0;
+            top: 0;
+            transform: translateY(-100%);
+            margin-top: -4px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: #722ED1;
+            color: #fff;
+            font-size: 11px;
+            line-height: 1.2;
+            white-space: nowrap;
+            max-width: 260px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .keyword-mark.type-right {
+            border-color: #EB0AA4;
+            background: rgba(235, 10, 164, 0.12);
+        }
+        .keyword-mark.type-right .keyword-mark-label {
+            background: #EB0AA4;
+        }
+        .keyword-mark.type-left {
+            border-color: #0FC6C2;
+            background: rgba(15, 198, 194, 0.12);
+        }
+        .keyword-mark.type-left .keyword-mark-label {
+            background: #0FC6C2;
+        }
         .input-box {
             position: absolute;
             z-index: 30;
@@ -350,6 +392,21 @@
             color: #165DFF;
             background: rgba(22, 93, 255, 0.08);
         }
+        #btnMarkPrefix {
+            border-color: #722ED1;
+            color: #722ED1;
+            background: rgba(114, 46, 209, 0.08);
+        }
+        #btnFillRight {
+            border-color: #EB0AA4;
+            color: #EB0AA4;
+            background: rgba(235, 10, 164, 0.08);
+        }
+        #btnFillLeft {
+            border-color: #0FC6C2;
+            color: #0FC6C2;
+            background: rgba(15, 198, 194, 0.08);
+        }
         #btnAddCheck {
             border-color: #F53F3F;
             color: #F53F3F;
@@ -364,6 +421,21 @@
             background: #165DFF;
             color: #fff;
             border-color: #165DFF;
+        }
+        #btnMarkPrefix.active {
+            background: #722ED1;
+            color: #fff;
+            border-color: #722ED1;
+        }
+        #btnFillRight.active {
+            background: #EB0AA4;
+            color: #fff;
+            border-color: #EB0AA4;
+        }
+        #btnFillLeft.active {
+            background: #0FC6C2;
+            color: #fff;
+            border-color: #0FC6C2;
         }
         #btnAddCheck.active {
             background: #F53F3F;
@@ -407,6 +479,10 @@
         <button id="saveFrontendTemplateAI">保存前端JSON(AI)</button>
         </div>
         <div class="toolbar-group">
+        <button id="btnToggleFields">隐藏输入框</button>
+        <button id="btnMarkPrefix">定位前缀</button>
+        <button id="btnFillRight">向右填</button>
+        <button id="btnFillLeft">向左填</button>
         <button id="btnAddText">添加输入框</button>
         <button id="btnAddCheck">添加打勾</button>
         <button id="btnAddImage">添加图片框</button>
@@ -441,11 +517,16 @@
             fieldIdSeq = 1;
         let pdfReady = false;
         const DEFAULT_FONT_PT = 10.5; // 五号字
+        const KEYWORD_ROW_TOLERANCE_PX = 10;
         // 最小文本框：至少容纳一个五号汉字宽度，且高度可正常显示五号字单行
         const MIN_FIELD_WIDTH = Math.ceil((DEFAULT_FONT_PT * 1.05) + 10);
         const MIN_FIELD_HEIGHT = Math.ceil((DEFAULT_FONT_PT * 1.2) + 6);
         const pdfContainer = document.getElementById('pdfContainer');
         const pdfScroll = document.querySelector('.pdf-scroll');
+        const btnToggleFields = document.getElementById('btnToggleFields');
+        const btnMarkPrefix = document.getElementById('btnMarkPrefix');
+        const btnFillRight = document.getElementById('btnFillRight');
+        const btnFillLeft = document.getElementById('btnFillLeft');
         const btnAddText = document.getElementById('btnAddText');
         const btnAddCheck = document.getElementById('btnAddCheck');
         const btnAddImage = document.getElementById('btnAddImage');
@@ -458,6 +539,9 @@
             drawStart = null,
             bandEl = null,
             pendingImageField = null;
+        let showFieldsOnCanvas = true;
+        let markerSeq = 1;
+        let marks = [];
         let templateContext = {
             templateId: '',
             templateName: '',
@@ -473,6 +557,27 @@
 
         function nextId() {
             return 'f' + fieldIdSeq++;
+        }
+
+        function normalizeFieldId(rawId, fallbackIndex) {
+            const id = String(rawId == null ? '' : rawId).trim();
+            if (id) return id;
+            return 'f' + (fallbackIndex + 1);
+        }
+
+        function ensureUniqueFieldIds(fieldList) {
+            const used = new Set();
+            (fieldList || []).forEach((f, idx) => {
+                let base = normalizeFieldId(f && f.id, idx);
+                let candidate = base;
+                let seq = 2;
+                while (used.has(candidate)) {
+                    candidate = `${base}__${seq++}`;
+                }
+                if (f) f.id = candidate;
+                used.add(candidate);
+            });
+            return fieldList;
         }
 
         function normalizeFieldSize(field) {
@@ -581,6 +686,7 @@
                 labelInput.addEventListener('mousedown', ev => ev.stopPropagation());
                 labelInput.addEventListener('input', () => {
                     f.placeholder = labelInput.value;
+                    f.originalPlaceholder = labelInput.value;
                     syncFieldLabelToCanvas(f);
                 });
                 const idSpan = document.createElement('span');
@@ -624,6 +730,7 @@
             else item.el?.remove();
             fields.splice(idx, 1);
             refreshFieldList();
+            applyAllNamingMarks();
         }
 
         function fitInputStyle(input) {
@@ -750,8 +857,17 @@
 
         function renderPdfAndFields(pdfUrl, loadedFields = []) {
             pdfReady = false;
-            fields = (loadedFields || []).map(f => normalizeFieldSize(f));
+            fields = (loadedFields || []).map(f => {
+                const normalized = normalizeFieldSize(f);
+                if (!Object.prototype.hasOwnProperty.call(normalized, 'originalPlaceholder')) {
+                    normalized.originalPlaceholder = normalized.placeholder || '';
+                }
+                return normalized;
+            });
+            ensureUniqueFieldIds(fields);
             fieldIdSeq = fields.length ? Math.max(...fields.map(f => parseInt(f.id.slice(1)) || 0)) + 1 : 1;
+            marks = [];
+            markerSeq = 1;
             pdfContainer.innerHTML = '';
             pageMeta = {};
 
@@ -788,10 +904,30 @@
                         realWidth: baseViewport.width,
                         realHeight: baseViewport.height
                     };
+                    const textContent = await page.getTextContent();
+                    const textItems = [];
+                    textContent.items.forEach(it => {
+                        if (!it || !it.str) return;
+                        const tx = pdfjsLib.Util.transform(vp.transform, it.transform);
+                        const x = tx[4] / scale;
+                        const yBottom = tx[5] / scale;
+                        const h = (Math.abs(tx[3]) / scale) || Number(it.height || 0);
+                        const w = Number(it.width || 0) / scale;
+                        const y = yBottom - h;
+                        textItems.push({
+                            str: String(it.str || '').trim(),
+                            x, y, w, h,
+                            cx: x + (w / 2),
+                            cy: y + (h / 2)
+                        });
+                    });
+                    pageMeta[p].textItems = textItems;
                     div.addEventListener('mousedown', e => startDraw(e, p));
                 }
                 fields.forEach(f => mountField(f));
+                renderMarks();
                 refreshFieldList();
+                applyFieldsVisibility();
                 setDrawMode(false);
                 pdfReady = true;
             });
@@ -800,10 +936,215 @@
         function setDrawMode(on, fieldType = 'text') {
             drawMode = on;
             currentFieldType = fieldType;
+            btnMarkPrefix.classList.toggle('active', on && fieldType === 'prefix');
+            btnFillRight.classList.toggle('active', on && fieldType === 'fillRight');
+            btnFillLeft.classList.toggle('active', on && fieldType === 'fillLeft');
             btnAddText.classList.toggle('active', on && fieldType === 'text');
             btnAddCheck.classList.toggle('active', on && fieldType === 'check');
             btnAddImage.classList.toggle('active', on && fieldType === 'image');
             Object.values(pageMeta).forEach(m => m.pageDiv.classList.toggle('draw-mode', on));
+        }
+
+        function applyFieldsVisibility() {
+            pdfContainer.classList.toggle('hide-fields', !showFieldsOnCanvas);
+            btnToggleFields.textContent = showFieldsOnCanvas ? '隐藏输入框' : '显示输入框';
+        }
+
+        function renderMarks() {
+            document.querySelectorAll('.keyword-mark').forEach(el => el.remove());
+            marks.forEach(mark => {
+                const meta = pageMeta[mark.page];
+                if (!meta || !meta.pageDiv) return;
+                const el = document.createElement('div');
+                const markerTypeClass = mark.type === 'fillRight' ? 'type-right' : (mark.type === 'fillLeft' ? 'type-left' : 'type-prefix');
+                el.className = 'keyword-mark ' + markerTypeClass;
+                el.style.left = (mark.x * meta.scale) + 'px';
+                el.style.top = (mark.y * meta.scale) + 'px';
+                el.style.width = (mark.w * meta.scale) + 'px';
+                el.style.height = (mark.h * meta.scale) + 'px';
+                const label = document.createElement('span');
+                label.className = 'keyword-mark-label';
+                const title = mark.type === 'fillRight' ? '向右填' : (mark.type === 'fillLeft' ? '向左填' : '前缀');
+                label.textContent = `${title}: ${mark.text || ''}`;
+                el.appendChild(label);
+                meta.pageDiv.appendChild(el);
+                mark.el = el;
+            });
+        }
+
+        function getKeywordTextInRect(pageNo, realX, realY, realW, realH) {
+            const meta = pageMeta[pageNo];
+            if (!meta || !Array.isArray(meta.textItems) || !meta.textItems.length) return '';
+            const x2 = realX + realW;
+            const y2 = realY + realH;
+            const hits = meta.textItems.filter(t => {
+                const tx2 = t.x + t.w;
+                const ty2 = t.y + t.h;
+                return !(tx2 < realX || t.x > x2 || ty2 < realY || t.y > y2);
+            });
+            hits.sort((a, b) => (Math.abs(a.cy - b.cy) <= 2 ? a.cx - b.cx : a.cy - b.cy));
+            return hits.map(t => t.str).join('').replace(/\s+/g, '').trim();
+        }
+
+        function normalizeNamePiece(text) {
+            const raw = String(text || '').trim().replace(/^_+|_+$/g, '');
+            if (!raw) return '';
+            // 有些场景文字会带历史占位符，定位命名时只取首段，避免残留“_原名”
+            return raw.split('_')[0].trim();
+        }
+
+        function extractLocatorNumber(text) {
+            const raw = String(text || '').trim();
+            if (!raw) return null;
+            const normalized = raw.replace(/[０-９]/g, ch => String(ch.charCodeAt(0) - 65248));
+            const m = normalized.match(/\d+/);
+            if (!m) return null;
+            const n = Number(m[0]);
+            if (!Number.isInteger(n) || n <= 0) return null;
+            return n;
+        }
+
+        function getFieldsInReadingOrder() {
+            return [...fields].sort((a, b) => {
+                const ap = Number(a.page) || 0;
+                const bp = Number(b.page) || 0;
+                if (ap !== bp) return ap - bp;
+                const ay = Number(a.y) || 0;
+                const by = Number(b.y) || 0;
+                if (Math.abs(ay - by) > 1e-6) return ay - by;
+                const ax = Number(a.x) || 0;
+                const bx = Number(b.x) || 0;
+                if (Math.abs(ax - bx) > 1e-6) return ax - bx;
+                return String(a.id).localeCompare(String(b.id));
+            });
+        }
+
+        function getFieldByOrdinal(ordinal) {
+            const idx = Number(ordinal) - 1;
+            if (!Number.isInteger(idx) || idx < 0) return null;
+            const ordered = getFieldsInReadingOrder();
+            if (idx >= ordered.length) return null;
+            return ordered[idx] || null;
+        }
+
+        function getFieldCenter(f) {
+            return {
+                x: Number(f.x) + Number(f.w) / 2,
+                y: Number(f.y) + Number(f.h) / 2
+            };
+        }
+
+        function isFieldCenterInMarkYRange(field, mark) {
+            const meta = pageMeta[field.page];
+            if (!meta) return false;
+            const centerShowY = getFieldCenter(field).y * Number(meta.scale);
+            const markTopShow = Number(mark.y) * Number(meta.scale);
+            const markBottomShow = (Number(mark.y) + Number(mark.h)) * Number(meta.scale);
+            return centerShowY >= (markTopShow - KEYWORD_ROW_TOLERANCE_PX)
+                && centerShowY <= (markBottomShow + KEYWORD_ROW_TOLERANCE_PX);
+        }
+
+        function pickTargetFieldByDirection(mark, direction) {
+            const markCenterX = Number(mark.x) + Number(mark.w) / 2;
+            const markTolerance = 1;
+            const candidates = fields
+                .filter(f => Number(f.page) === Number(mark.page))
+                // 向左/向右填需要同时支持文本框与勾选框命名
+                .filter(f => {
+                    const t = f.fieldType || 'text';
+                    return t === 'text' || t === 'check';
+                })
+                .filter(f => isFieldCenterInMarkYRange(f, mark))
+                .filter(f => {
+                    const left = Number(f.x);
+                    const right = Number(f.x) + Number(f.w);
+                    return direction === 'right'
+                        ? left >= (markCenterX - markTolerance)
+                        : right <= (markCenterX + markTolerance);
+                })
+                .sort((a, b) => {
+                    const aLeft = Number(a.x);
+                    const aRight = Number(a.x) + Number(a.w);
+                    const bLeft = Number(b.x);
+                    const bRight = Number(b.x) + Number(b.w);
+                    const aGap = direction === 'right' ? Math.max(0, aLeft - markCenterX) : Math.max(0, markCenterX - aRight);
+                    const bGap = direction === 'right' ? Math.max(0, bLeft - markCenterX) : Math.max(0, markCenterX - bRight);
+                    if (aGap !== bGap) return aGap - bGap;
+                    // gap 相同场景下再按中心点距离兜底，保证排序稳定
+                    const aCenter = getFieldCenter(a).x;
+                    const bCenter = getFieldCenter(b).x;
+                    return Math.abs(aCenter - markCenterX) - Math.abs(bCenter - markCenterX);
+                });
+            return candidates[0] || null;
+        }
+
+        function applyAllNamingMarks() {
+            if (!marks.length) {
+                let restored = 0;
+                fields.forEach((f, idx) => {
+                    const fallback = f.originalPlaceholder != null ? String(f.originalPlaceholder) : ('栏位' + idx);
+                    if (f.placeholder !== fallback) {
+                        f.placeholder = fallback;
+                        syncFieldLabelToCanvas(f);
+                        restored += 1;
+                    }
+                });
+                if (restored) refreshFieldList();
+                return restored;
+            }
+            const prefixByField = new Map();
+            const rightByField = new Map();
+            const leftByField = new Map();
+            marks.forEach(mark => {
+                const text = normalizeNamePiece(mark.text);
+                if (!text) return;
+                if (mark.type === 'prefix') {
+                    fields.forEach(f => {
+                        if (Number(f.page) !== Number(mark.page)) return;
+                        if (!isFieldCenterInMarkYRange(f, mark)) return;
+                        if (!prefixByField.has(f.id)) prefixByField.set(f.id, []);
+                        prefixByField.get(f.id).push({ x: Number(mark.x), text });
+                    });
+                    return;
+                }
+                if (mark.type === 'fillRight' || mark.type === 'fillLeft') {
+                    let target = null;
+                    if (mark.targetFieldId) {
+                        target = fields.find(f => f.id === mark.targetFieldId) || null;
+                    }
+                    if (!target && mark.targetFieldNo) {
+                        target = getFieldByOrdinal(mark.targetFieldNo);
+                        if (target) mark.targetFieldId = target.id;
+                    }
+                    // 兼容历史标记：首次应用时自动绑定一次目标输入框，后续不再漂移
+                    if (!target) {
+                        target = pickTargetFieldByDirection(mark, mark.type === 'fillRight' ? 'right' : 'left');
+                        if (target) mark.targetFieldId = target.id;
+                    }
+                    if (!target) return;
+                    const mapRef = mark.type === 'fillRight' ? rightByField : leftByField;
+                    if (!mapRef.has(target.id)) mapRef.set(target.id, []);
+                    mapRef.get(target.id).push({ x: Number(mark.x), text });
+                }
+            });
+
+            let changed = 0;
+            fields.forEach((f) => {
+                const prefixParts = (prefixByField.get(f.id) || []).sort((a, b) => a.x - b.x).map(x => x.text);
+                const rightParts = (rightByField.get(f.id) || []).sort((a, b) => a.x - b.x).map(x => x.text);
+                const leftParts = (leftByField.get(f.id) || []).sort((a, b) => a.x - b.x).map(x => x.text);
+                const finalParts = [...prefixParts, ...rightParts, ...leftParts].map(normalizeNamePiece).filter(Boolean);
+                // 仅修改命中过至少一个规则的输入框；未命中保持当前名称
+                if (!finalParts.length) return;
+                const next = finalParts.join('_');
+                if (f.placeholder !== next) {
+                    f.placeholder = next;
+                    syncFieldLabelToCanvas(f);
+                    changed += 1;
+                }
+            });
+            if (changed) refreshFieldList();
+            return changed;
         }
 
         function clientToPage(div, x, y) {
@@ -829,6 +1170,7 @@
                     w: realSize,
                     h: realSize,
                     placeholder: '勾选' + fields.length,
+                    originalPlaceholder: '勾选' + fields.length,
                     fieldType: 'check',
                     value: '',
                     checked: false,
@@ -838,6 +1180,7 @@
                 fields.push(f);
                 mountField(f);
                 refreshFieldList();
+                applyAllNamingMarks();
                 e.preventDefault();
                 return;
             }
@@ -880,6 +1223,57 @@
             bandEl.remove();
             drawActive = false;
             if (showW >= 15 && showH >= 15) {
+                if (currentFieldType === 'prefix' || currentFieldType === 'fillRight' || currentFieldType === 'fillLeft') {
+                    const text = getKeywordTextInRect(drawPage, realX, realY, realW, realH);
+                    if (!text) {
+                        alert('未识别到文字，请扩大定位框后重试');
+                        return;
+                    }
+                    let targetFieldId = null;
+                    let targetFieldNo = null;
+                    const locatorNo = extractLocatorNumber(text);
+                    if (locatorNo) {
+                        const byNo = getFieldByOrdinal(locatorNo);
+                        if (byNo) {
+                            targetFieldId = byNo.id;
+                            targetFieldNo = locatorNo;
+                        }
+                    }
+                    if (currentFieldType === 'fillRight' || currentFieldType === 'fillLeft') {
+                        const direction = currentFieldType === 'fillRight' ? 'right' : 'left';
+                        if (!targetFieldId) {
+                            const target = pickTargetFieldByDirection(
+                                { page: drawPage, x: realX, y: realY, w: realW, h: realH },
+                                direction
+                            );
+                            if (!target) {
+                                alert('当前定位未命中可更新的输入框');
+                                return;
+                            }
+                            targetFieldId = target.id;
+                        }
+                    }
+                    if (currentFieldType === 'prefix') {
+                        targetFieldId = null;
+                        targetFieldNo = null;
+                    }
+                    marks.push({
+                        id: 'mk' + (markerSeq++),
+                        type: currentFieldType,
+                        page: drawPage,
+                        x: realX,
+                        y: realY,
+                        w: realW,
+                        h: realH,
+                        text,
+                        targetFieldId,
+                        targetFieldNo
+                    });
+                    renderMarks();
+                    const changed = applyAllNamingMarks();
+                    if (!changed) alert('当前定位未命中可更新的输入框');
+                    return;
+                }
                 const f = {
                     id: nextId(),
                     page: drawPage,
@@ -888,6 +1282,7 @@
                     w: realW,
                     h: realH,
                     placeholder: '栏位' + fields.length,
+                    originalPlaceholder: '栏位' + fields.length,
                     fieldType: currentFieldType,
                     value: '',
                     checked: false,
@@ -897,9 +1292,17 @@
                 fields.push(f);
                 mountField(f);
                 refreshFieldList();
+                applyAllNamingMarks();
             }
         }
 
+        btnToggleFields.onclick = () => {
+            showFieldsOnCanvas = !showFieldsOnCanvas;
+            applyFieldsVisibility();
+        };
+        btnMarkPrefix.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'prefix'), 'prefix');
+        btnFillRight.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'fillRight'), 'fillRight');
+        btnFillLeft.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'fillLeft'), 'fillLeft');
         btnAddText.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'text'), 'text');
         btnAddCheck.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'check'), 'check');
         btnAddImage.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'image'), 'image');
@@ -917,11 +1320,13 @@
                 w: f.w,
                 h: f.h,
                 placeholder: f.placeholder || ('栏位' + idx),
+                originalPlaceholder: (f.originalPlaceholder != null ? f.originalPlaceholder : (f.placeholder || ('栏位' + idx))),
                 fieldType: f.fieldType || 'text',
                 value: '',
                 checked: false,
                 imageData: ''
             })).map(item => normalizeFieldSize(item));
+            ensureUniqueFieldIds(loadedFields);
             fields.forEach(item => {
                 if (item.wrap) item.wrap.remove();
                 else item.el?.remove();
@@ -1071,11 +1476,29 @@
             }));
         }
 
+        async function parseJsonResponseOrThrow(response, defaultErrorMessage) {
+            const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+            if (response.redirected && response.url && response.url.includes('/login/')) {
+                throw new Error('登录已过期，请重新登录后再保存');
+            }
+            if (!contentType.includes('application/json')) {
+                const text = await response.text();
+                if (text && text.includes('<!DOCTYPE')) {
+                    throw new Error('接口返回了登录页或错误页，请重新登录后重试');
+                }
+                throw new Error(defaultErrorMessage || '接口返回非 JSON 内容');
+            }
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || defaultErrorMessage || '请求失败');
+            return data;
+        }
+
         function exportJsonMerged() {
             const name = document.getElementById('templateName').value.trim() || 'template';
             fetch('/files/htmlpdf/api/export-json/', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
                 body: JSON.stringify({
                     type: 'merged',
                     name,
@@ -1098,8 +1521,7 @@
                     }
                 })
             }).then(async r => {
-                const d = await r.json();
-                if (!r.ok) throw new Error(d.error || '保存模板失败');
+                const d = await parseJsonResponseOrThrow(r, '保存模板失败');
                 alert('模板已保存到文件库「模板」分类');
                 if (d.file && d.file.library_url) {
                     window.open(d.file.library_url, '_blank');
@@ -1114,6 +1536,7 @@
             fetch('/files/htmlpdf/api/export-frontend-json/', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
                 body: JSON.stringify({
                     name,
                     export_mode: exportMode,
@@ -1135,8 +1558,7 @@
                     }
                 })
             }).then(async r => {
-                const d = await r.json();
-                if (!r.ok) throw new Error(d.error || '保存前端JSON失败');
+                const d = await parseJsonResponseOrThrow(r, '保存前端JSON失败');
                 alert('前端渲染 JSON 已保存到文件库「模板」分类');
                 if (d.file && d.file.library_url) {
                     window.open(d.file.library_url, '_blank');
@@ -1167,10 +1589,10 @@
                 headers: {
                     'Content-Type': 'application/json'
                 },
+                credentials: 'same-origin',
                 body: JSON.stringify(payload)
             }).then(async r => {
-                const d = await r.json();
-                if (!r.ok) throw new Error(d.error || '保存PDF失败');
+                const d = await parseJsonResponseOrThrow(r, '保存PDF失败');
                 const where = d.saved_to === 'report' ? '报告' : '现场记录';
                 alert(`填写 PDF 已保存到文件库「${where}」分类`);
                 if (d.file && d.file.library_url) {
