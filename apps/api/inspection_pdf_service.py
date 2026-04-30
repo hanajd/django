@@ -409,6 +409,17 @@ def _collect_signature_values(source_data: dict) -> dict[str, str]:
                     fid = str(fld.get("id") or "").strip()
                     if fid:
                         out[fid] = val
+                    # 一对多签名框：将同一签名值扩展到所有关联 pdfFieldId，
+                    # 以便模板回填阶段命中每个 image 字段。
+                    src_pdf_id = str(src.get("pdfFieldId") or "").strip()
+                    if src_pdf_id:
+                        out[src_pdf_id] = val
+                    src_pdf_ids = src.get("pdfFieldIds")
+                    if isinstance(src_pdf_ids, list):
+                        for pid in src_pdf_ids:
+                            p = str(pid or "").strip()
+                            if p:
+                                out[p] = val
 
     # 3) dynamicData 直连签名（常见为 f76/f77/f78）
     dynamic_data = source_data.get("dynamicData")
@@ -471,6 +482,18 @@ def _fill_template_fields_with_submit_enhanced(
             mapped_fid = reverse_field_map.get(k)
             if mapped_fid and mapped_fid in value_mapping:
                 return value_mapping.get(mapped_fid, "")
+        # 语义兜底：设备编号(SN/序列号/产品编号) 等同义标题统一回填 equipmentInfo.serialNo。
+        joined = " ".join([k for k in candidates if k]).replace("（", "(").replace("）", ")")
+        if (
+            ("设备编号" in joined and ("SN" in joined or "序列号" in joined or "产品编号" in joined))
+            or ("serialno" in joined.lower())
+        ):
+            serial_no = (
+                value_mapping.get("serialNo")
+                or (source_data.get("equipmentInfo") or {}).get("serialNo")
+                or ""
+            )
+            return serial_no
         return ""
 
     def _pick_signature_for_field(field: dict):
@@ -537,6 +560,21 @@ def _fill_template_fields_with_submit_enhanced(
                 "accompanyingPerson",
             ):
                 return signature_values.get(key) or ""
+
+        # 无显式映射时按中文语义兜底，确保多页同类签名框都能命中。
+        joined = " ".join([k for k in candidates if k]).strip()
+        if joined:
+            if ("校核" in joined) or ("复核" in joined):
+                return signature_values.get("checker") or signature_values.get("reviewer") or ""
+            if ("检测员" in joined) or ("检验员" in joined):
+                return (
+                    signature_values.get("inspector")
+                    or signature_values.get("author")
+                    or signature_values.get("mainInspector")
+                    or ""
+                )
+            if ("陪同" in joined) or ("受检单位" in joined):
+                return signature_values.get("accompanyingPerson") or ""
         return ""
 
     for field in template_fields:

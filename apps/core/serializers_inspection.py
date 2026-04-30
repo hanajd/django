@@ -67,8 +67,12 @@ class InspectionSubmitSerializer(serializers.Serializer):
     conclusion = serializers.DictField(required=False, allow_null=True, default=dict)
 
     def validate(self, attrs):
-        if attrs.get("reportType") != "xray_fluoroscopy":
-            raise serializers.ValidationError({"reportType": "必须为 xray_fluoroscopy"})
+        allowed_report_types = {"xray_fluoroscopy", "ct_qc"}
+        report_type = str(attrs.get("reportType") or "").strip()
+        if report_type not in allowed_report_types:
+            raise serializers.ValidationError(
+                {"reportType": "reportType 必须为 xray_fluoroscopy 或 ct_qc"}
+            )
         # 兼容前端传 null：提交阶段按空对象处理，避免 422 中断流程。
         for key in ("reportInfo", "hospitalInfo", "equipmentInfo", "testResult", "conclusion"):
             if attrs.get(key) is None:

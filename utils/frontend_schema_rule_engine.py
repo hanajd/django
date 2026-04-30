@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import re
 from typing import Any, Dict, List, Tuple
@@ -599,6 +600,12 @@ def _normalize_pdf_field(item: Dict[str, Any], idx: int) -> Dict[str, Any]:
 
 
 def _strip_coordinate_keys(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _strip_field_obj(field: Dict[str, Any]) -> None:
+        for key in ("pdfAnchor", "page", "x", "y", "w", "h", "pdfFieldId"):
+            field.pop(key, None)
+        field.pop("__order", None)
+        field.pop("__bbox", None)
+
     for step in payload.get("steps", []):
         if not isinstance(step, dict):
             continue
@@ -608,10 +615,22 @@ def _strip_coordinate_keys(payload: Dict[str, Any]) -> Dict[str, Any]:
             for field in section.get("fields", []):
                 if not isinstance(field, dict):
                     continue
-                for key in ("pdfAnchor", "page", "x", "y", "w", "h", "pdfFieldId"):
-                    field.pop(key, None)
-                field.pop("__order", None)
-                field.pop("__bbox", None)
+                _strip_field_obj(field)
+            matrix = section.get("matrix")
+            if not isinstance(matrix, dict):
+                continue
+            for field in matrix.get("headerFields", []):
+                if isinstance(field, dict):
+                    _strip_field_obj(field)
+            for row in matrix.get("rows", []):
+                if not isinstance(row, dict):
+                    continue
+                cells = row.get("cells")
+                if not isinstance(cells, dict):
+                    continue
+                for cell in cells.values():
+                    if isinstance(cell, dict):
+                        _strip_field_obj(cell)
     return payload
 
 
@@ -804,6 +823,203 @@ def _replace_submit_path_leaf(path: str, leaf: str) -> str:
     return f"{head}.{leaf}"
 
 
+def _upgrade_sv_h_sections_to_matrix_table(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    将 DSA 术者位剂量率区块从多个 form section 升级为单个 matrixTable：
+    - sec_sv_h 作为 matrix.headerFields
+    - sec_sv_h_60cm_20cm ... 作为 matrix.rows
+    """
+    steps = payload.get("steps")
+    if not isinstance(steps, list):
+        return payload
+
+    row_id_re = re.compile(r"^sec_sv_h_(\d+cm)_(\d+cm)$")
+
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        sections = step.get("sections")
+        if not isinstance(sections, list) or not sections:
+            continue
+
+        header_sec = None
+        row_secs: List[Dict[str, Any]] = []
+        keep_secs: List[Dict[str, Any]] = []
+        for sec in sections:
+            if not isinstance(sec, dict):
+                keep_secs.append(sec)
+                continue
+            sid = str(sec.get("id") or "")
+            if sid == "sec_sv_h":
+                header_sec = sec
+                continue
+            if row_id_re.match(sid):
+                row_secs.append(sec)
+                continue
+            keep_secs.append(sec)
+
+        if not row_secs:
+            continue
+
+        def _first_order(sec_obj: Dict[str, Any]) -> Tuple[int, float, float]:
+            fields = sec_obj.get("fields") if isinstance(sec_obj.get("fields"), list) else []
+            orders = [f.get("__order") for f in fields if isinstance(f, dict) and isinstance(f.get("__order"), tuple)]
+            if not orders:
+                return (999, 999999.0, 999999.0)
+            p, y, x, *_ = orders[0]
+            return (int(p), float(y), float(x))
+
+        row_secs.sort(key=_first_order)
+
+        # --- headerFields ---
+        header_fields: List[Dict[str, Any]] = []
+        header_src_fields = header_sec.get("fields") if isinstance(header_sec, dict) and isinstance(header_sec.get("fields"), list) else []
+        header_key_map = {
+            "kv": ("kv", "kV"),
+            "ma": ("ma", "mA"),
+            "s": ("exposureTime", "s"),
+            "校准因子": ("calibrationFactorCf", ""),
+            "cf": ("calibrationFactorCf", ""),
+        }
+        for src in header_src_fields:
+            if not isinstance(src, dict):
+                continue
+            item = copy.deepcopy(src)
+            label = str(item.get("label") or "").strip()
+            low = label.lower()
+            semantic_key = ""
+            unit = ""
+            for token, mapped in header_key_map.items():
+                if token in low or token in label:
+                    semantic_key, unit = mapped
+                    break
+            if not semantic_key:
+                semantic_key = _camel_case(_to_english_id(label, str(item.get("id") or ""), "value"), "value")
+            item["id"] = f"sv_h_{semantic_key}"
+            if unit:
+                item["unit"] = unit
+            src_obj = item.get("source") if isinstance(item.get("source"), dict) else {}
+            legacy = str(src_obj.get("submitPath") or "")
+            src_obj["submitPath"] = f"testResult.svH.header.{semantic_key}"
+            if legacy:
+                src_obj["legacySubmitPath"] = legacy
+            src_obj["key"] = f"{step.get('id')}.sec_sv_h_matrix.header.{semantic_key}"
+            item["source"] = src_obj
+            header_fields.append(item)
+
+        # --- rows/cells ---
+        matrix_rows: List[Dict[str, Any]] = []
+        serial_by_position: Dict[str, int] = {}
+        serial_seq = 1
+        row_seq = 0
+
+        for sec in row_secs:
+            sid = str(sec.get("id") or "")
+            m = row_id_re.match(sid)
+            if not m:
+                continue
+            dist = m.group(1)        # 60cm / 120cm
+            height = m.group(2)      # 20cm / 80cm / ...
+
+            sec_title = str(sec.get("title") or "").strip()
+            title_parts = [p.strip() for p in sec_title.split("/") if p.strip()]
+            operator_position = title_parts[0] if title_parts else f"术者位{dist}"
+            height_type = title_parts[1] if len(title_parts) >= 2 else "距离地板高度"
+            point = title_parts[-1] if title_parts else f"{height}"
+
+            if operator_position not in serial_by_position:
+                serial_by_position[operator_position] = serial_seq
+                serial_seq += 1
+            serial_no = str(serial_by_position[operator_position])
+
+            measured_src = None
+            report_src = None
+            for f in (sec.get("fields") if isinstance(sec.get("fields"), list) else []):
+                if not isinstance(f, dict):
+                    continue
+                label = str(f.get("label") or "")
+                if "报出值" in label:
+                    report_src = f
+                elif "检测值" in label:
+                    measured_src = f
+
+            def _build_cell(src_field: Dict[str, Any] | None, cell_key: str) -> Dict[str, Any]:
+                item = copy.deepcopy(src_field) if isinstance(src_field, dict) else {
+                    "type": "number",
+                    "label": "检测值" if cell_key == "measuredValue" else "报出值",
+                    "required": False,
+                    "defaultValue": None,
+                    "precision": 1,
+                    "source": {},
+                }
+                # cells 必须保持完整 field schema，便于前端复用动态字段渲染器
+                item["type"] = str(item.get("type") or "number")
+                item["label"] = str(item.get("label") or ("检测值" if cell_key == "measuredValue" else "报出值"))
+                item["required"] = bool(item.get("required", False))
+                item["defaultValue"] = item.get("defaultValue", None)
+                item["precision"] = int(item.get("precision") or 1)
+                item["unit"] = str(item.get("unit") or "μSv/h")
+                item["id"] = f"sv_h_row_{row_seq}_{'measured_value' if cell_key == 'measuredValue' else 'report_value'}"
+                src_obj = item.get("source") if isinstance(item.get("source"), dict) else {}
+                legacy = str(src_obj.get("submitPath") or "")
+                src_obj["submitPath"] = f"testResult.svH.rows[{row_seq}].{cell_key}"
+                if legacy:
+                    src_obj["legacySubmitPath"] = legacy
+                src_obj["key"] = f"{step.get('id')}.sec_sv_h_matrix.rows[{row_seq}].{cell_key}"
+                item["source"] = src_obj
+                return item
+
+            row_id = f"sv_h_{dist}_{height}_{row_seq}"
+            matrix_rows.append(
+                {
+                    "id": row_id,
+                    "headers": {
+                        "serialNo": serial_no,
+                        "inspectionItem": "透视防护区检测平面上周围剂量当量率/(μSv/h)",
+                        "operatorPosition": operator_position,
+                        "heightType": height_type,
+                        "point": point,
+                    },
+                    "cells": {
+                        "measuredValue": _build_cell(measured_src, "measuredValue"),
+                        "reportValue": _build_cell(report_src, "reportValue"),
+                    },
+                }
+            )
+            row_seq += 1
+
+        matrix_section = {
+            "id": "sec_sv_h_matrix",
+            "title": "透视防护区检测平面上周围剂量当量率/(μSv/h)",
+            "layout": "matrixTable",
+            "matrix": {
+                "headerFields": header_fields,
+                "rowHeaderColumns": [
+                    {"id": "serialNo", "title": "序号", "merge": "auto", "width": 0.08},
+                    {"id": "inspectionItem", "title": "检测项目", "merge": "auto", "width": 0.18},
+                    {"id": "operatorPosition", "title": "检测位置", "merge": "auto", "width": 0.24},
+                    {"id": "heightType", "title": "距离地板高度", "merge": "auto", "width": 0.12},
+                    {"id": "point", "title": "检测点位", "merge": "none", "width": 0.16},
+                ],
+                "valueColumns": [
+                    {"id": "measuredValue", "title": "检测值", "fieldType": "number", "unit": "μSv/h", "width": 0.14},
+                    {"id": "reportValue", "title": "报出值", "fieldType": "number", "unit": "μSv/h", "width": 0.14},
+                ],
+                "rows": matrix_rows,
+            },
+        }
+
+        # 在原 sec_sv_h 位置插入 matrix section，保持阅读顺序稳定
+        if header_sec and isinstance(header_sec, dict):
+            insert_idx = next((i for i, s in enumerate(sections) if isinstance(s, dict) and s.get("id") == "sec_sv_h"), len(keep_secs))
+            keep_secs.insert(min(insert_idx, len(keep_secs)), matrix_section)
+        else:
+            keep_secs.append(matrix_section)
+        step["sections"] = keep_secs
+
+    return payload
+
+
 def _collapse_mutually_exclusive_checks_to_radio(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     将同一层级同一行内的互斥勾选项合并为 radio：
@@ -940,7 +1156,13 @@ def _collapse_mutually_exclusive_checks_to_radio(payload: Dict[str, Any]) -> Dic
                         radio_label = "控制方式"
                         value_by_label = {"自动控制": "auto", "手动控制": "manual"}
                         default_value = "auto"
-                        submit_path_leaf = "controlMode"
+                        # 关键：控制方式必须按组隔离，避免不同检测项目共享同一状态键/路径。
+                        # 若 group_name 退化为 controlMode/family，则追加行锚点避免串联。
+                        if group_name and group_name not in {"controlMode", "yesNo", "doseRateUnit", "testType"}:
+                            radio_id = _camel_case(f"{group_name}_controlMode", "controlMode")
+                        else:
+                            radio_id = _camel_case(f"controlMode_{row_key[0]}_{row_key[1]}", "controlMode")
+                        submit_path_leaf = radio_id
                     elif labels_set and all((lb in {"是", "否", "有", "无"}) for lb in labels_set):
                         enum_ref = "yesNo"
                         radio_label = "选项"
@@ -987,6 +1209,7 @@ def _collapse_mutually_exclusive_checks_to_radio(payload: Dict[str, Any]) -> Dic
                             "anchorType": "check",
                             "submitBucket": submit_bucket,
                             "submitPath": submit_path,
+                            "key": f"{step.get('id')}.{section.get('id')}.row{row_key[0]}_{row_key[1]}.{radio_id}",
                         },
                         "__order": first.get("__order", (999, 999999, 999999, 999999)),
                         "__bbox": first.get("__bbox", (0.0, 0.0, 0.0, 0.0)),
@@ -2075,6 +2298,7 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
     if merge_split_dates:
         result = _arrange_instruments_row_layout(result)
     result = _apply_width_by_coordinate_layout(result)
+    result = _upgrade_sv_h_sections_to_matrix_table(result)
     result = _inject_underscore_section_rules(result)
     result = _force_signature_step_last(result)
     result = _strip_coordinate_keys(result)

@@ -54,7 +54,7 @@
                         class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
                         <option value="">无（顶级菜单）</option>
-                        {% for m in menus %}
+                        {% for m in admin_menus %}
                         {% if menu and menu.id == m.id %}
                         <option value="{{ m.id }}" disabled>{{ m.name }}</option>
                         {% else %}

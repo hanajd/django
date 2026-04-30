@@ -447,6 +447,22 @@
             color: #fff;
             border-color: #00B42A;
         }
+        #btnAutoRedBoxes {
+            border-color: #c00000;
+            color: #c00000;
+            background: rgba(192, 0, 0, 0.06);
+        }
+        #btnAutoRedBoxes:hover {
+            border-color: #a30000;
+            color: #a30000;
+            background: rgba(192, 0, 0, 0.1);
+        }
+        .field-wrap.field-wrap--red-text .input-box {
+            color: #c00000 !important;
+        }
+        .field-wrap.field-wrap--red-text .field-badge {
+            background: #c00000;
+        }
         .input-box:focus {
             background: rgba(22, 93, 255, 0.1);
             border-style: solid;
@@ -475,6 +491,7 @@
         <button id="btnImportContent">导入内容</button>
         <input type="text" id="templateName" placeholder="导出文件名(可选)">
         <button id="saveTemplate">保存模板</button>
+        <button id="saveMatrixTemplate">保存固定表格模板JSON</button>
         <button id="saveFrontendTemplate">保存前端JSON(规则)</button>
         <button id="saveFrontendTemplateAI">保存前端JSON(AI)</button>
         </div>
@@ -484,6 +501,7 @@
         <button id="btnFillRight">向右填</button>
         <button id="btnFillLeft">向左填</button>
         <button id="btnAddText">添加输入框</button>
+        <button id="btnAutoRedBoxes" type="button" title="按 PDF 红色文本自动划框（与 full_text_coordinate_boxing 合并规则一致）">自动划框(红字)</button>
         <button id="btnAddCheck">添加打勾</button>
         <button id="btnAddImage">添加图片框</button>
         </div>
@@ -499,7 +517,7 @@
     <div class="main">
         <aside class="sidebar">
             <h3>输入框列表</h3>
-            <p class="sidebar-hint">序号与画布角标一致；悬停列表或控件会联动高亮；点击行内空白处可滚动定位到对应控件；标签可直接在下方输入框修改，画布会同步更新。</p>
+            <p class="sidebar-hint">序号与画布角标一致；悬停列表或控件会联动高亮；点击行内空白处可滚动定位到对应控件；标签可直接在下方输入框修改，画布会同步更新。「自动划框(红字)」仅识别 PDF 中红色字体区域，填写内容在画布上以红字显示。</p>
             <div id="fieldList"></div>
         </aside>
         <div class="pdf-scroll">
@@ -528,17 +546,21 @@
         const btnFillRight = document.getElementById('btnFillRight');
         const btnFillLeft = document.getElementById('btnFillLeft');
         const btnAddText = document.getElementById('btnAddText');
+        const btnAutoRedBoxes = document.getElementById('btnAutoRedBoxes');
         const btnAddCheck = document.getElementById('btnAddCheck');
         const btnAddImage = document.getElementById('btnAddImage');
+        const btnSaveMatrixTemplate = document.getElementById('saveMatrixTemplate');
         const imageFilePicker = document.getElementById('imageFilePicker');
         const templateJsonSelect = document.getElementById('templateJsonSelect');
         let drawMode = false,
             currentFieldType = 'text',
             drawActive = false,
+            drawPending = false,
             drawPage = null,
             drawStart = null,
             bandEl = null,
             pendingImageField = null;
+        const DRAW_START_THRESHOLD_PX = 5;
         let showFieldsOnCanvas = true;
         let markerSeq = 1;
         let marks = [];
@@ -782,6 +804,9 @@
 
             const wrap = document.createElement('div');
             wrap.className = 'field-wrap type-' + typeKey;
+            if (fieldType === 'text' && f.redText) {
+                wrap.classList.add('field-wrap--red-text');
+            }
             wrap.style.left = l;
             wrap.style.top = t;
             wrap.style.width = w;
@@ -1155,10 +1180,97 @@
             };
         }
 
-        function startDraw(e, p) {
+        async function pickTableCellAtPoint(pageNo, realX, realY) {
+            const res = await fetch('/files/htmlpdf/api/table-cell-at-point/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ page: pageNo, x: realX, y: realY })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '定位单元格失败');
+            return (data && data.found && data.cell) ? data.cell : null;
+        }
+
+        function tryApplyMarkByRect(markType, pageNo, realX, realY, realW, realH) {
+            const text = getKeywordTextInRect(pageNo, realX, realY, realW, realH);
+            if (!text) {
+                alert('未识别到文字，请扩大定位框后重试');
+                return true;
+            }
+            let targetFieldId = null;
+            let targetFieldNo = null;
+            const locatorNo = extractLocatorNumber(text);
+            if (locatorNo) {
+                const byNo = getFieldByOrdinal(locatorNo);
+                if (byNo) {
+                    targetFieldId = byNo.id;
+                    targetFieldNo = locatorNo;
+                }
+            }
+            if (markType === 'fillRight' || markType === 'fillLeft') {
+                const direction = markType === 'fillRight' ? 'right' : 'left';
+                if (!targetFieldId) {
+                    const target = pickTargetFieldByDirection(
+                        { page: pageNo, x: realX, y: realY, w: realW, h: realH },
+                        direction
+                    );
+                    if (!target) {
+                        alert('当前定位未命中可更新的输入框');
+                        return true;
+                    }
+                    targetFieldId = target.id;
+                }
+            }
+            if (markType === 'prefix') {
+                targetFieldId = null;
+                targetFieldNo = null;
+            }
+            marks.push({
+                id: 'mk' + (markerSeq++),
+                type: markType,
+                page: pageNo,
+                x: realX,
+                y: realY,
+                w: realW,
+                h: realH,
+                text,
+                targetFieldId,
+                targetFieldNo
+            });
+            renderMarks();
+            const changed = applyAllNamingMarks();
+            if (!changed) alert('当前定位未命中可更新的输入框');
+            return true;
+        }
+
+        function addTextFieldByRect(pageNo, realX, realY, realW, realH) {
+            const f = {
+                id: nextId(),
+                page: pageNo,
+                x: realX,
+                y: realY,
+                w: realW,
+                h: realH,
+                placeholder: '栏位' + fields.length,
+                originalPlaceholder: '栏位' + fields.length,
+                fieldType: 'text',
+                value: '',
+                checked: false,
+                imageData: ''
+            };
+            normalizeFieldSize(f);
+            fields.push(f);
+            mountField(f);
+            refreshFieldList();
+            applyAllNamingMarks();
+        }
+
+        async function startDraw(e, p) {
             if (!drawMode || e.button !== 0 || e.target.closest('.field-wrap')) return;
             const meta = pageMeta[p];
             const pt = clientToPage(meta.pageDiv, e.clientX, e.clientY);
+            const realX = pt.x / meta.scale;
+            const realY = pt.y / meta.scale;
             if (currentFieldType === 'check') {
                 const showSize = 18;
                 const realSize = showSize / meta.scale;
@@ -1185,19 +1297,29 @@
                 return;
             }
             drawPage = p;
-            drawActive = true;
+            drawPending = true;
+            drawActive = false;
             drawStart = pt;
-            bandEl = document.createElement('div');
-            bandEl.className = 'rubber-band';
-            pageMeta[p].pageDiv.appendChild(bandEl);
             window.addEventListener('mousemove', onDraw);
             window.addEventListener('mouseup', stopDraw);
             e.preventDefault();
         }
 
         function onDraw(e) {
-            if (!drawActive) return;
+            if (!drawPending && !drawActive) return;
             const pt = clientToPage(pageMeta[drawPage].pageDiv, e.clientX, e.clientY);
+            if (!drawActive) {
+                const dx = pt.x - drawStart.x;
+                const dy = pt.y - drawStart.y;
+                if ((dx * dx + dy * dy) < (DRAW_START_THRESHOLD_PX * DRAW_START_THRESHOLD_PX)) {
+                    return;
+                }
+                drawActive = true;
+                drawPending = false;
+                bandEl = document.createElement('div');
+                bandEl.className = 'rubber-band';
+                pageMeta[drawPage].pageDiv.appendChild(bandEl);
+            }
             const l = Math.min(drawStart.x, pt.x),
                 t = Math.min(drawStart.y, pt.y);
             const w = Math.abs(pt.x - drawStart.x),
@@ -1205,12 +1327,35 @@
             bandEl.style.cssText = `left:${l}px;top:${t}px;width:${w}px;height:${h}px`;
         }
 
-        function stopDraw(e) {
-            if (!drawActive) return;
+        async function stopDraw(e) {
+            if (!drawPending && !drawActive) return;
             window.removeEventListener('mousemove', onDraw);
             window.removeEventListener('mouseup', stopDraw);
-            const pt = clientToPage(pageMeta[drawPage].pageDiv, e.clientX, e.clientY);
             const meta = pageMeta[drawPage];
+            const pt = clientToPage(meta.pageDiv, e.clientX, e.clientY);
+            const clickRealX = pt.x / meta.scale;
+            const clickRealY = pt.y / meta.scale;
+
+            // 非拖动：仅执行“单击定位单元格”，不进入手动画框。
+            if (!drawActive) {
+                drawPending = false;
+                if (currentFieldType === 'text' || currentFieldType === 'prefix' || currentFieldType === 'fillRight' || currentFieldType === 'fillLeft') {
+                    try {
+                        const cell = await pickTableCellAtPoint(drawPage, clickRealX, clickRealY);
+                        if (cell) {
+                            if (currentFieldType === 'text') {
+                                addTextFieldByRect(drawPage, Number(cell.x), Number(cell.y), Number(cell.w), Number(cell.h));
+                            } else {
+                                tryApplyMarkByRect(currentFieldType, drawPage, Number(cell.x), Number(cell.y), Number(cell.w), Number(cell.h));
+                            }
+                        }
+                    } catch (err) {
+                        console.warn(err);
+                    }
+                }
+                return;
+            }
+
             const showX = Math.min(drawStart.x, pt.x);
             const showY = Math.min(drawStart.y, pt.y);
             const showW = Math.abs(pt.x - drawStart.x);
@@ -1220,58 +1365,17 @@
             const realW = showW / meta.scale;
             const realH = showH / meta.scale;
 
-            bandEl.remove();
+            if (bandEl) bandEl.remove();
+            bandEl = null;
             drawActive = false;
+            drawPending = false;
             if (showW >= 15 && showH >= 15) {
                 if (currentFieldType === 'prefix' || currentFieldType === 'fillRight' || currentFieldType === 'fillLeft') {
-                    const text = getKeywordTextInRect(drawPage, realX, realY, realW, realH);
-                    if (!text) {
-                        alert('未识别到文字，请扩大定位框后重试');
-                        return;
-                    }
-                    let targetFieldId = null;
-                    let targetFieldNo = null;
-                    const locatorNo = extractLocatorNumber(text);
-                    if (locatorNo) {
-                        const byNo = getFieldByOrdinal(locatorNo);
-                        if (byNo) {
-                            targetFieldId = byNo.id;
-                            targetFieldNo = locatorNo;
-                        }
-                    }
-                    if (currentFieldType === 'fillRight' || currentFieldType === 'fillLeft') {
-                        const direction = currentFieldType === 'fillRight' ? 'right' : 'left';
-                        if (!targetFieldId) {
-                            const target = pickTargetFieldByDirection(
-                                { page: drawPage, x: realX, y: realY, w: realW, h: realH },
-                                direction
-                            );
-                            if (!target) {
-                                alert('当前定位未命中可更新的输入框');
-                                return;
-                            }
-                            targetFieldId = target.id;
-                        }
-                    }
-                    if (currentFieldType === 'prefix') {
-                        targetFieldId = null;
-                        targetFieldNo = null;
-                    }
-                    marks.push({
-                        id: 'mk' + (markerSeq++),
-                        type: currentFieldType,
-                        page: drawPage,
-                        x: realX,
-                        y: realY,
-                        w: realW,
-                        h: realH,
-                        text,
-                        targetFieldId,
-                        targetFieldNo
-                    });
-                    renderMarks();
-                    const changed = applyAllNamingMarks();
-                    if (!changed) alert('当前定位未命中可更新的输入框');
+                    tryApplyMarkByRect(currentFieldType, drawPage, realX, realY, realW, realH);
+                    return;
+                }
+                if (currentFieldType === 'text') {
+                    addTextFieldByRect(drawPage, realX, realY, realW, realH);
                     return;
                 }
                 const f = {
@@ -1307,6 +1411,59 @@
         btnAddCheck.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'check'), 'check');
         btnAddImage.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'image'), 'image');
 
+        btnAutoRedBoxes.onclick = async () => {
+            if (!pdfDoc || !pdfReady) {
+                alert('模板 PDF 尚未加载完成，请稍后重试。');
+                return;
+            }
+            setDrawMode(false);
+            try {
+                const res = await fetch('/files/htmlpdf/api/auto-red-text-boxes/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({})
+                });
+                const data = await parseJsonResponseOrThrow(res, '自动划框失败');
+                const list = data.fields || [];
+                if (!list.length) {
+                    alert('未检测到红色文本区域。请确认 PDF 中待填项为红色字体，或改用「添加输入框」手动划框。');
+                    return;
+                }
+                list.forEach(raw => {
+                    const rawType = String(raw.fieldType || 'text').toLowerCase();
+                    const isCheck = rawType === 'check';
+                    const isImage = rawType === 'image';
+                    const f = normalizeFieldSize({
+                        id: nextId(),
+                        page: raw.page,
+                        x: raw.x,
+                        y: raw.y,
+                        w: raw.w,
+                        h: raw.h,
+                        placeholder: raw.placeholder || (isCheck ? '勾选' : (isImage ? '图片' : '红字')),
+                        originalPlaceholder: raw.originalPlaceholder != null ? raw.originalPlaceholder : (raw.placeholder || ''),
+                        fieldType: isCheck ? 'check' : (isImage ? 'image' : 'text'),
+                        redText: (isCheck || isImage) ? false : true,
+                        value: '',
+                        checked: false,
+                        imageData: '',
+                        checkboxPair: raw.checkboxPair && typeof raw.checkboxPair === 'object' ? raw.checkboxPair : null
+                    });
+                    fields.push(f);
+                    mountField(f);
+                });
+                refreshFieldList();
+                applyAllNamingMarks();
+                const checkCount = list.filter(x => String(x.fieldType || '').toLowerCase() === 'check').length;
+                const imageCount = list.filter(x => String(x.fieldType || '').toLowerCase() === 'image').length;
+                const textCount = list.length - checkCount - imageCount;
+                alert('已添加 ' + list.length + ' 个自动框（红字文本框 ' + textCount + '，勾选框 ' + checkCount + '，图片框 ' + imageCount + '）');
+            } catch (err) {
+                alert(err.message);
+            }
+        };
+
         function importTemplatePayload(d) {
             if (!pdfDoc || !pdfReady) {
                 alert('模板 PDF 尚未加载完成，请稍后重试。');
@@ -1322,9 +1479,11 @@
                 placeholder: f.placeholder || ('栏位' + idx),
                 originalPlaceholder: (f.originalPlaceholder != null ? f.originalPlaceholder : (f.placeholder || ('栏位' + idx))),
                 fieldType: f.fieldType || 'text',
+                redText: !!f.redText,
                 value: '',
                 checked: false,
-                imageData: ''
+                imageData: '',
+                checkboxPair: f.checkboxPair && typeof f.checkboxPair === 'object' ? f.checkboxPair : null
             })).map(item => normalizeFieldSize(item));
             ensureUniqueFieldIds(loadedFields);
             fields.forEach(item => {
@@ -1461,19 +1620,72 @@
         };
 
         function buildFieldsPayload() {
-            return fields.map(i => ({
-                id: i.id,
-                page: i.page,
-                x: i.x,
-                y: i.y,
-                w: i.w,
-                h: i.h,
-                placeholder: i.placeholder,
-                fieldType: i.fieldType || 'text',
-                content: i.value || '',
-                checked: !!i.checked,
-                imageData: i.imageData || ''
-            }));
+            return fields.map(i => {
+                const row = {
+                    id: i.id,
+                    page: i.page,
+                    x: i.x,
+                    y: i.y,
+                    w: i.w,
+                    h: i.h,
+                    placeholder: i.placeholder,
+                    fieldType: i.fieldType || 'text',
+                    content: i.value || '',
+                    checked: !!i.checked,
+                    imageData: i.imageData || ''
+                };
+                if (i.redText) row.redText = true;
+                if (i.checkboxPair && typeof i.checkboxPair === 'object') row.checkboxPair = i.checkboxPair;
+                return row;
+            });
+        }
+
+        function rectIoU(a, b) {
+            const ax0 = Number(a.x), ay0 = Number(a.y), ax1 = ax0 + Number(a.w), ay1 = ay0 + Number(a.h);
+            const bx0 = Number(b.x), by0 = Number(b.y), bx1 = bx0 + Number(b.w), by1 = by0 + Number(b.h);
+            const iw = Math.max(0, Math.min(ax1, bx1) - Math.max(ax0, bx0));
+            const ih = Math.max(0, Math.min(ay1, by1) - Math.max(ay0, by0));
+            const inter = iw * ih;
+            if (inter <= 0) return 0;
+            const areaA = Math.max(1e-6, (ax1 - ax0) * (ay1 - ay0));
+            const areaB = Math.max(1e-6, (bx1 - bx0) * (by1 - by0));
+            return inter / (areaA + areaB - inter);
+        }
+
+        async function syncAutoRedNamesBeforeSave() {
+            const redFields = fields.filter(f => (f.fieldType || 'text') === 'text' && !!f.redText);
+            if (!redFields.length) return;
+            try {
+                const res = await fetch('/files/htmlpdf/api/auto-red-text-boxes/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({})
+                });
+                const data = await parseJsonResponseOrThrow(res, '保存前同步红字命名失败');
+                const detected = Array.isArray(data.fields) ? data.fields : [];
+                if (!detected.length) return;
+                redFields.forEach(f => {
+                    const candidates = detected.filter(d => Number(d.page) === Number(f.page));
+                    let best = null;
+                    let bestScore = 0;
+                    candidates.forEach(d => {
+                        const score = rectIoU(f, d);
+                        if (score > bestScore) {
+                            bestScore = score;
+                            best = d;
+                        }
+                    });
+                    const nextName = best && bestScore >= 0.55 ? String(best.placeholder || '').trim() : '';
+                    if (!nextName) return;
+                    f.placeholder = nextName;
+                    f.originalPlaceholder = nextName;
+                    syncFieldLabelToCanvas(f);
+                });
+                refreshFieldList();
+            } catch (err) {
+                console.warn(err);
+            }
         }
 
         async function parseJsonResponseOrThrow(response, defaultErrorMessage) {
@@ -1529,7 +1741,46 @@
             }).catch(err => alert(err.message));
         }
 
-        document.getElementById('saveTemplate').onclick = exportJsonMerged;
+        function exportMatrixTemplateJson() {
+            const baseName = document.getElementById('templateName').value.trim() || 'template';
+            const name = baseName.endsWith('.json') ? baseName.replace(/\.json$/i, '_matrix.json') : (baseName + '_matrix.json');
+            fetch('/files/htmlpdf/api/export-matrix-json/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    type: 'matrix',
+                    name,
+                    fields: buildFieldsPayload(),
+                    meta: {
+                        templateId: templateContext.templateId || '',
+                        templateName: templateContext.templateName || '',
+                        version: templateContext.version || '1.0.0',
+                        reportType: templateContext.reportType || '',
+                        standard: templateContext.standard || '',
+                        pdfUrl: templateContext.pdfUrl || '',
+                        locale: templateContext.locale || 'zh-CN'
+                    },
+                    report_type: templateContext.reportType || '',
+                    standard: templateContext.standard || ''
+                })
+            }).then(async r => {
+                const d = await parseJsonResponseOrThrow(r, '保存固定表格模板JSON失败');
+                alert('固定表格后端 JSON 已保存到文件库「模板」分类');
+                if (d.file && d.file.library_url) {
+                    window.open(d.file.library_url, '_blank');
+                }
+            }).catch(err => alert(err.message));
+        }
+
+        document.getElementById('saveTemplate').onclick = async () => {
+            await syncAutoRedNamesBeforeSave();
+            exportJsonMerged();
+        };
+        btnSaveMatrixTemplate.onclick = async () => {
+            await syncAutoRedNamesBeforeSave();
+            exportMatrixTemplateJson();
+        };
         function saveFrontendTemplate(exportMode = 'rule') {
             const baseName = document.getElementById('templateName').value.trim() || 'template';
             const name = baseName.endsWith('.json') ? baseName.replace(/\.json$/i, '_frontend.json') : (baseName + '_frontend.json');
@@ -1565,8 +1816,14 @@
                 }
             }).catch(err => alert(err.message));
         }
-        document.getElementById('saveFrontendTemplate').onclick = () => saveFrontendTemplate('rule');
-        document.getElementById('saveFrontendTemplateAI').onclick = () => saveFrontendTemplate('llm');
+        document.getElementById('saveFrontendTemplate').onclick = async () => {
+            await syncAutoRedNamesBeforeSave();
+            saveFrontendTemplate('rule');
+        };
+        document.getElementById('saveFrontendTemplateAI').onclick = async () => {
+            await syncAutoRedNamesBeforeSave();
+            saveFrontendTemplate('llm');
+        };
 
         document.getElementById('btnSave').onclick = () => {
             const outputCategory = document.getElementById('outputCategory')?.value || 'site_record';

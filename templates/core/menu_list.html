@@ -29,12 +29,12 @@
             </tr>
         </thead>
         <tbody class="bg-white divide-y divide-gray-200">
-            {% for menu in menus %}
+            {% for menu in admin_menus %}
             <tr>
                 <td class="px-6 py-4 whitespace-nowrap">
                     <div class="flex items-center space-x-2">
                         {% if menu.icon %}
-                        <i class="ri-{{ menu.icon }}-line text-lg text-gray-500"></i>
+                        <i class="ri-{% if menu.icon == 'users' %}team{% else %}{{ menu.icon }}{% endif %}-line text-lg text-gray-500"></i>
                         {% endif %}
                         <div class="text-sm font-medium text-gray-900">{{ menu.name }}</div>
                     </div>

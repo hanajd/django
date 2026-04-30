@@ -121,6 +121,36 @@ def _inject_frontend_context_defaults(frontend_obj: dict, *, project_id: str, ta
         "inspectedNo": task_no,
         "taskNo": task_no,
     }
+    state_ns = f"p:{project_id}|t:{task_no}|"
+
+    def _iter_all_fields(steps_obj):
+        for step in steps_obj:
+            if not isinstance(step, dict):
+                continue
+            sections = step.get("sections")
+            if not isinstance(sections, list):
+                continue
+            for section in sections:
+                if not isinstance(section, dict):
+                    continue
+                fields = section.get("fields")
+                if isinstance(fields, list):
+                    for field in fields:
+                        if isinstance(field, dict):
+                            yield field
+                matrix = section.get("matrix") if isinstance(section.get("matrix"), dict) else {}
+                header_fields = matrix.get("headerFields") if isinstance(matrix.get("headerFields"), list) else []
+                for field in header_fields:
+                    if isinstance(field, dict):
+                        yield field
+                rows = matrix.get("rows") if isinstance(matrix.get("rows"), list) else []
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    cells = row.get("cells") if isinstance(row.get("cells"), dict) else {}
+                    for cell in cells.values():
+                        if isinstance(cell, dict):
+                            yield cell
 
     def _pick_field_keys(field: dict):
         keys = set()
@@ -145,25 +175,20 @@ def _inject_frontend_context_defaults(frontend_obj: dict, *, project_id: str, ta
                     keys.add(s)
         return keys
 
-    for step in steps:
-        if not isinstance(step, dict):
-            continue
-        sections = step.get("sections")
-        if not isinstance(sections, list):
-            continue
-        for section in sections:
-            if not isinstance(section, dict):
-                continue
-            fields = section.get("fields")
-            if not isinstance(fields, list):
-                continue
-            for field in fields:
-                if not isinstance(field, dict):
+    for field in _iter_all_fields(steps):
+        for key in _pick_field_keys(field):
+            if key in value_map:
+                field["defaultValue"] = value_map[key]
+                break
+        source = field.get("source")
+        if isinstance(source, dict):
+            for k in ("key", "bindKey"):
+                raw = str(source.get(k) or "").strip()
+                if not raw:
                     continue
-                for key in _pick_field_keys(field):
-                    if key in value_map:
-                        field["defaultValue"] = value_map[key]
-                        break
+                if not raw.startswith(state_ns):
+                    source[k] = f"{state_ns}{raw}"
+            field["source"] = source
 
     return frontend_obj
 
@@ -225,39 +250,54 @@ def _inject_frontend_payload_defaults(frontend_obj: dict, payload: dict) -> dict
         # 其余类型保持原值（table/complex 等）
         return raw_value
 
-    for step in steps:
-        if not isinstance(step, dict):
-            continue
-        sections = step.get("sections")
-        if not isinstance(sections, list):
-            continue
-        for section in sections:
-            if not isinstance(section, dict):
+    def _iter_all_fields(steps_obj):
+        for step in steps_obj:
+            if not isinstance(step, dict):
                 continue
-            fields = section.get("fields")
-            if not isinstance(fields, list):
+            sections = step.get("sections")
+            if not isinstance(sections, list):
                 continue
-            for field in fields:
-                if not isinstance(field, dict):
+            for section in sections:
+                if not isinstance(section, dict):
                     continue
-                source = field.get("source") if isinstance(field.get("source"), dict) else {}
-                submit_path = str(source.get("submitPath") or "").strip()
-                if not submit_path:
-                    continue
-                v = _get_by_path(payload, submit_path)
-                if v in (None, "", []):
-                    continue
-                coerced = _coerce_field_default(field, v)
-                if coerced is None and str(field.get("type") or "").strip().lower() in {
-                    "boolean",
-                    "number",
-                    "text",
-                    "textarea",
-                    "date",
-                    "signature",
-                }:
-                    continue
-                field["defaultValue"] = coerced
+                fields = section.get("fields")
+                if isinstance(fields, list):
+                    for field in fields:
+                        if isinstance(field, dict):
+                            yield field
+                matrix = section.get("matrix") if isinstance(section.get("matrix"), dict) else {}
+                header_fields = matrix.get("headerFields") if isinstance(matrix.get("headerFields"), list) else []
+                for field in header_fields:
+                    if isinstance(field, dict):
+                        yield field
+                rows = matrix.get("rows") if isinstance(matrix.get("rows"), list) else []
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    cells = row.get("cells") if isinstance(row.get("cells"), dict) else {}
+                    for cell in cells.values():
+                        if isinstance(cell, dict):
+                            yield cell
+
+    for field in _iter_all_fields(steps):
+        source = field.get("source") if isinstance(field.get("source"), dict) else {}
+        submit_path = str(source.get("submitPath") or "").strip()
+        if not submit_path:
+            continue
+        v = _get_by_path(payload, submit_path)
+        if v in (None, "", []):
+            continue
+        coerced = _coerce_field_default(field, v)
+        if coerced is None and str(field.get("type") or "").strip().lower() in {
+            "boolean",
+            "number",
+            "text",
+            "textarea",
+            "date",
+            "signature",
+        }:
+            continue
+        field["defaultValue"] = coerced
     return frontend_obj
 
 
@@ -266,19 +306,17 @@ def _resolve_task_template_json(task_obj):
     查找任务关联的最新 JSON 模板文件。
     返回: (template_file_id, template_file_name, error_message)
     """
-    template_lf = (
+    template_qs = (
         LibraryFile.objects.filter(
             category=LibraryFile.CATEGORY_TEMPLATE,
             library_tasks=task_obj,
         )
         .order_by("-created_at", "-id")
         .distinct()
-        .first()
     )
+    template_lf = next((lf for lf in template_qs if (lf.original_name or "").lower().endswith(".json")), None)
     if template_lf is None:
         return None, "", "任务下缺少 JSON 模板"
-    if not (template_lf.original_name or "").lower().endswith(".json"):
-        return template_lf.pk, template_lf.original_name, "任务模板不是 JSON 文件"
     return template_lf.pk, template_lf.original_name, ""
 
 
@@ -313,9 +351,9 @@ def _persist_submit_payload_file(user, task_no: str, case: InspectionCase, proje
 def _persist_submit_signature_files(user, task_no: str, case: InspectionCase, project, submission: InspectionSubmission):
     """将提交签名写入文件库「检测提交」分类，便于后台直接查看和下载。"""
     role_bytes_pairs = [
-        ("author", submission.sign_author_png),
-        ("reviewer", submission.sign_reviewer_png),
-        ("approver", submission.sign_approver_png),
+        ("inspector", submission.sign_author_png),
+        ("checker", submission.sign_reviewer_png),
+        ("accompanyingPerson", submission.sign_approver_png),
     ]
     wrapped_files = []
     ts = timezone.localtime().strftime("%Y%m%d%H%M%S")
@@ -490,6 +528,37 @@ class _InspectionTaskAccessMixin:
         return tasks[idx - 1]
 
     @staticmethod
+    def _has_project_membership(user, project: LibraryProject) -> bool:
+        if user is None or project is None:
+            return False
+        if role_has(user, "perm_assign_tasks"):
+            return True
+        return LibraryTaskAssignment.objects.filter(project=project, assignee=user).exists()
+
+    @staticmethod
+    def _get_or_create_project_task_assignment(*, project: LibraryProject, library_task: LibraryTask, user):
+        """
+        项目新增任务后，已拥有该项目访问权的用户可懒创建 assignment，避免列表/详情仍停留旧快照。
+        """
+        if project is None or library_task is None or user is None:
+            return None
+        if role_has(user, "perm_assign_tasks"):
+            return (
+                LibraryTaskAssignment.objects.filter(project=project, library_task=library_task)
+                .order_by("id")
+                .first()
+            )
+        if not _InspectionTaskAccessMixin._has_project_membership(user, project):
+            return None
+        assignment, _ = LibraryTaskAssignment.objects.get_or_create(
+            project=project,
+            library_task=library_task,
+            assignee=user,
+            defaults={"assigned_by": None},
+        )
+        return assignment
+
+    @staticmethod
     def _build_assignment_task_no(assignment: LibraryTaskAssignment) -> str:
         if assignment.project_id and assignment.library_task_id:
             project = getattr(assignment, "project", None)
@@ -521,6 +590,24 @@ class _InspectionTaskAccessMixin:
 
     def _ensure_case_for_assignment(self, assignment: LibraryTaskAssignment):
         task_no = self._build_assignment_task_no(assignment)
+        case = InspectionCase.objects.filter(case_no=task_no).first()
+        if case:
+            return case
+        return InspectionCase.objects.create(
+            case_no=task_no,
+            inspected_organization=self._default_org(),
+            notes=f"自动生成任务：{assignment.library_task.name}",
+            library_project=assignment.project,
+            primary_contact=None,
+            created_by=assignment.assigned_by or assignment.assignee,
+        )
+
+    def _ensure_case_for_assignment_internal(self, assignment: LibraryTaskAssignment):
+        """
+        使用全局唯一内部编号（ASG-<id>）确保 assignment 可稳定映射到唯一 case，
+        避免不同项目共用展示 taskNo（如 01）时触发 case_no 冲突。
+        """
+        task_no = f"{AUTO_TASK_PREFIX}{assignment.pk}"
         case = InspectionCase.objects.filter(case_no=task_no).first()
         if case:
             return case
@@ -669,30 +756,29 @@ class _InspectionTaskAccessMixin:
         library_task = self._resolve_project_task_by_no(project, task_no)
         if library_task is None:
             return None, None, _fail("taskNo 无效或不属于当前项目", status.HTTP_404_NOT_FOUND)
-        if role_has(request.user, "perm_assign_tasks"):
-            assignment = (
-                LibraryTaskAssignment.objects.filter(project=project, library_task=library_task)
-                .order_by("id")
-                .first()
-            )
-        else:
-            assignment = (
-                LibraryTaskAssignment.objects.filter(
-                    project=project,
-                    library_task=library_task,
-                    assignee=request.user,
-                )
-                .order_by("id")
-                .first()
-            )
+        assignment = self._get_or_create_project_task_assignment(
+            project=project,
+            library_task=library_task,
+            user=request.user,
+        )
         if assignment is None:
             return None, None, _fail("当前用户无权访问该项目任务", status.HTTP_403_FORBIDDEN)
         full_task_no = f"{AUTO_TASK_PREFIX}{assignment.pk}"
         case, resolved_project, err_resp = self._resolve_case_project(request, full_task_no)
         if err_resp is not None:
-            return None, None, err_resp
+            # 兜底：直接按 assignment 内部唯一编号创建/解析 case，规避展示 taskNo 冲突。
+            case = self._ensure_case_for_assignment_internal(assignment)
+            if case.library_project_id != project.pk:
+                case.library_project = project
+                case.save(update_fields=["library_project", "updated_at"])
+            return case, project, None
         if resolved_project.pk != project.pk:
-            return None, None, _fail("任务与项目不匹配", status.HTTP_403_FORBIDDEN)
+            # 兼容历史：当展示 taskNo（如 01）跨项目冲突导致解析到其他项目 case 时，回退内部编号。
+            case = self._ensure_case_for_assignment_internal(assignment)
+            if case.library_project_id != project.pk:
+                case.library_project = project
+                case.save(update_fields=["library_project", "updated_at"])
+            return case, project, None
         return case, resolved_project, None
 
 
@@ -1122,16 +1208,19 @@ class InspectionProjectTaskListAPIView(APIView):
         project = _InspectionTaskAccessMixin._resolve_project(project_id)
         if project is None:
             return _fail("projectId 无效", status.HTTP_400_BAD_REQUEST)
+        if not _InspectionTaskAccessMixin._has_project_membership(request.user, project):
+            return _fail("当前用户无权访问该项目任务", status.HTTP_403_FORBIDDEN)
         tasks = list(project.library_tasks.order_by("code", "id"))
         if not tasks:
             return _ok("获取成功", {"projectId": project.code, "count": 0, "list": []})
         rows = []
         template_cache = {}
         for idx, library_task in enumerate(tasks, start=1):
-            assignments_qs = LibraryTaskAssignment.objects.filter(project=project, library_task=library_task)
-            if not role_has(request.user, "perm_assign_tasks"):
-                assignments_qs = assignments_qs.filter(assignee=request.user)
-            assignment = assignments_qs.order_by("-created_at", "-id").first()
+            assignment = _InspectionTaskAccessMixin._get_or_create_project_task_assignment(
+                project=project,
+                library_task=library_task,
+                user=request.user,
+            )
             if assignment is None:
                 continue
             task_no = f"{idx:02d}"
@@ -1233,15 +1322,10 @@ class InspectionTaskFrontendJsonExportAPIView(_InspectionTaskAccessMixin, APIVie
         if not filled_fields:
             return _fail(fill_reason or "模板字段填充失败", status.HTTP_409_CONFLICT)
 
-        template_json_lf = (
-            LibraryFile.objects.filter(
-                category=LibraryFile.CATEGORY_TEMPLATE,
-                library_tasks=task_obj,
-            )
-            .order_by("-created_at")
-            .distinct()
-            .first()
-        )
+        template_json_id, _template_json_name, template_err = _resolve_task_template_json(task_obj)
+        if template_json_id is None:
+            return _fail(template_err or "任务下缺少 JSON 模板", status.HTTP_404_NOT_FOUND)
+        template_json_lf = LibraryFile.objects.filter(pk=template_json_id).first()
         if template_json_lf is None:
             return _fail("任务下缺少 JSON 模板", status.HTTP_404_NOT_FOUND)
 

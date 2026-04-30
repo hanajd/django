@@ -3,6 +3,7 @@ Web 视图
 使用 Django Template 渲染前后端不分离的页面
 """
 import json as json_std
+import importlib.util
 import os
 import re
 import uuid
@@ -480,15 +481,30 @@ def role_delete(request, role_id):
     return render(request, 'core/role_confirm_delete.html', context)
 
 
+# 侧栏已由 context_processors.menu_context 注入 `menus`（已排除「文件与提取」）。
+# 菜单管理页若仍使用键名 `menus`，会覆盖侧栏上下文，导致侧栏短暂出现多余项。
+_LEGACY_SIDEBAR_MENU_EXCLUDE = ("文件与提取",)
+
+
+def _menus_for_menu_admin():
+    """菜单管理 CRUD 使用的顶级菜单列表（与侧栏展示策略一致）。"""
+    return (
+        Menu.objects.filter(parent=None)
+        .exclude(name__in=_LEGACY_SIDEBAR_MENU_EXCLUDE)
+        .prefetch_related("children")
+        .order_by("sort_order", "id")
+    )
+
+
 @login_required
 def menu_list(request):
     """菜单列表视图"""
     r = _require_perm(request, "perm_manage_menus")
     if r:
         return r
-    menus = Menu.objects.filter(parent=None).prefetch_related('children')
+    admin_menus = _menus_for_menu_admin()
     context = {
-        'menus': menus,
+        "admin_menus": admin_menus,
     }
     return render(request, 'core/menu_list.html', context)
 
@@ -523,11 +539,11 @@ def menu_create(request):
         messages.success(request, '菜单创建成功')
         return redirect('menu_list')
     
-    menus = Menu.objects.filter(parent=None)
+    admin_menus = _menus_for_menu_admin()
     roles = Role.objects.all()
     context = {
-        'menus': menus,
-        'roles': roles,
+        "admin_menus": admin_menus,
+        "roles": roles,
     }
     return render(request, 'core/menu_form.html', context)
 
@@ -557,12 +573,12 @@ def menu_edit(request, menu_id):
         messages.success(request, '菜单更新成功')
         return redirect('menu_list')
     
-    menus = Menu.objects.filter(parent=None)
+    admin_menus = _menus_for_menu_admin()
     roles = Role.objects.all()
     context = {
-        'menu': menu,
-        'menus': menus,
-        'roles': roles,
+        "menu": menu,
+        "admin_menus": admin_menus,
+        "roles": roles,
     }
     return render(request, 'core/menu_form.html', context)
 
@@ -2341,7 +2357,12 @@ def htmlpdf_api_export_json(request):
         "fields": normalized_fields,
         "source_pdf": source_meta,
     }
-    raw = json_std.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    payload = _sanitize_json_payload_text(payload)
+    try:
+        raw = json_std.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    except UnicodeEncodeError:
+        payload = _sanitize_json_payload_text(payload)
+        raw = json_std.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     wrapped = type("UploadLike", (), {"read": lambda self: raw, "name": name})()
     created, skipped = save_library_binary_uploads(
         request.user,
@@ -2507,6 +2528,413 @@ def _build_frontend_field_items(fields):
     return out
 
 
+def _matrix_field_type_from_pdf(field_type: str) -> str:
+    ft = str(field_type or "").strip().lower()
+    if ft == "check":
+        return "boolean"
+    if ft == "image":
+        return "signature"
+    return "text"
+
+
+def _prefer_pdf_field_id_token(item: dict, fallback: str) -> str:
+    """
+    严格优先使用 pdfFieldId（f+序号），禁止回退到语义名称污染绑定键。
+    """
+    cands = [
+        str(item.get("pdfFieldId") or "").strip(),
+        str(item.get("id") or "").strip(),
+        str(item.get("placeholder") or "").strip(),
+    ]
+    for c in cands:
+        if re.match(r"^f\d+$", c):
+            return c
+    return fallback
+
+
+def _build_matrix_steps_from_auto_fields(fields, source_pdf_path, table_struct_by_page=None):
+    """
+    依据自动划框字段 + 表格单元格定位，生成 matrixTable steps。
+    目标是给后端统一模板 JSON 提供可结构化的固定表格骨架。
+    """
+    try:
+        hits = htmlpdf_service.detect_table_cells_for_field_boxes(source_pdf_path, fields)
+    except Exception:
+        hits = []
+    hit_by_idx = {int(x.get("index")): x for x in hits if isinstance(x, dict)}
+
+    mapped = []
+    for idx, f in enumerate(fields or []):
+        if not isinstance(f, dict):
+            continue
+        hit = hit_by_idx.get(idx) or {}
+        cell = hit.get("cell") if isinstance(hit.get("cell"), dict) else None
+        if not cell:
+            continue
+        page = int(hit.get("page") or f.get("page") or 1)
+        row = dict(f)
+        row["_page"] = page
+        row["_cell"] = cell
+        mapped.append(row)
+    if not mapped:
+        return []
+
+    all_sections = []
+    by_page = {}
+    for item in mapped:
+        by_page.setdefault(int(item.get("_page") or 1), []).append(item)
+
+    def _norm(s: str) -> str:
+        return normalize_field_text_by_underscore_rules(str(s or "")).lower()
+
+    value_col_tokens = ("检测值", "报出值", "计算结果", "检测结果", "measured", "report")
+    unit_candidates = ("μSv/h", "μGy/min", "μGy/s", "mGy/min")
+
+    for page in sorted(by_page.keys()):
+        items = by_page[page]
+        page_tables = (table_struct_by_page or {}).get(page) if isinstance(table_struct_by_page, dict) else None
+        if not isinstance(page_tables, list) or not page_tables:
+            continue
+
+        for tbl in page_tables:
+            cells = tbl.get("cells") if isinstance(tbl, dict) else []
+            if not cells:
+                continue
+
+            row_values = sorted(set(int(c.get("row") or 0) for c in cells))
+            col_values = sorted(set(int(c.get("col") or 0) for c in cells))
+            if not row_values or not col_values:
+                continue
+
+            text_grid = {}
+            bbox_grid = {}
+            for c in cells:
+                r = int(c.get("row") or 0)
+                k = int(c.get("col") or 0)
+                txt = str(c.get("text") or "").strip()
+                text_grid[(r, k)] = txt
+                bbox_grid[(r, k)] = (
+                    float(c.get("x") or 0.0),
+                    float(c.get("y") or 0.0),
+                    float(c.get("w") or 0.0),
+                    float(c.get("h") or 0.0),
+                )
+
+            # 字段映射到此表格 cell
+            field_grid = {}
+            for it in items:
+                cx = float((it.get("_cell") or {}).get("x") or 0.0) + float((it.get("_cell") or {}).get("w") or 0.0) / 2.0
+                cy = float((it.get("_cell") or {}).get("y") or 0.0) + float((it.get("_cell") or {}).get("h") or 0.0) / 2.0
+                for (r, k), bb in bbox_grid.items():
+                    x0, y0, w, h = bb
+                    if x0 <= cx <= x0 + w and y0 <= cy <= y0 + h:
+                        field_grid.setdefault((r, k), []).append(it)
+                        break
+            if not field_grid:
+                continue
+
+            data_rows = sorted(set(r for (r, _k) in field_grid.keys()))
+            if not data_rows:
+                continue
+            min_data_row = min(data_rows)
+
+            header_row = None
+            for r in range(min_data_row - 1, -1, -1):
+                row_txt = "".join(str(text_grid.get((r, c), "") or "") for c in col_values)
+                if row_txt.strip():
+                    header_row = r
+                    break
+
+            # 顶部参数区（headerFields）：数据行之前且该行存在输入框
+            header_fields = []
+            if min_data_row > 0:
+                for r in range(0, min_data_row):
+                    for c in col_values:
+                        arr = field_grid.get((r, c), [])
+                        if not arr:
+                            continue
+                        for slot, it in enumerate(arr, start=1):
+                            token = text_grid.get((r, c), "") or str(it.get("placeholder") or "")
+                            semantic = _norm(token) or f"header_{r}_{c}_{slot}"
+                            semantic = re.sub(r"[^a-z0-9_]+", "_", semantic).strip("_") or f"header_{r}_{c}_{slot}"
+                            fid = f"mx_p{page}_t{int(tbl.get('table_id') or 0)}_{semantic}"
+                            pdf_field_id = _prefer_pdf_field_id_token(it, f"f{len(header_fields)+1}")
+                            src_path = f"testResult.matrixAuto.page{page}.table{int(tbl.get('table_id') or 0)}.header.{semantic}"
+                            header_fields.append(
+                                {
+                                    "id": fid,
+                                    "type": _matrix_field_type_from_pdf(str(it.get("fieldType") or "text")),
+                                    "label": token or semantic,
+                                    "required": False,
+                                    "defaultValue": None,
+                                    "precision": 1,
+                                    "unit": "",
+                                    "source": {
+                                        "pdfFieldId": pdf_field_id,
+                                        "page": page,
+                                        "anchorType": str(it.get("fieldType") or "text"),
+                                        "submitBucket": "testResult",
+                                        "submitPath": src_path,
+                                        "legacySubmitPath": src_path,
+                                        "key": f"step_qc_items.sec_t{page}_{int(tbl.get('table_id') or 0)}_matrix.header.{semantic}",
+                                    },
+                                }
+                            )
+
+            # value 列优先按表头词识别，其次按有输入框列
+            value_cols = []
+            if header_row is not None:
+                for c in col_values:
+                    title = str(text_grid.get((header_row, c), "") or "")
+                    nt = _norm(title)
+                    if any(tok in title for tok in ("检测值", "报出值", "计算结果", "检测结果")) or any(tok in nt for tok in ("measured", "report", "result")):
+                        value_cols.append(c)
+            if not value_cols:
+                value_cols = sorted(set(c for (_r, c) in field_grid.keys()))
+            if not value_cols:
+                continue
+
+            row_header_cols = [c for c in col_values if c not in value_cols]
+            row_header_columns = []
+            for i, c in enumerate(row_header_cols):
+                title = str(text_grid.get((header_row, c), "") if header_row is not None else "").strip()
+                row_header_columns.append(
+                    {
+                        "id": f"h{i+1}",
+                        "title": title or f"行头{i+1}",
+                        "merge": "none" if ("点位" in title or "point" in _norm(title)) else "auto",
+                        "width": round(0.50 / max(1, len(row_header_cols)), 4),
+                    }
+                )
+            if not row_header_columns:
+                row_header_columns = [{"id": "serialNo", "title": "序号", "merge": "none", "width": 0.08}]
+
+            value_columns = []
+            for i, c in enumerate(value_cols):
+                title = str(text_grid.get((header_row, c), "") if header_row is not None else "").strip()
+                value_columns.append(
+                    {
+                        "id": "measuredValue" if i == 0 else ("reportValue" if i == 1 else f"value{i+1}"),
+                        "title": title or ("检测值" if i == 0 else ("报出值" if i == 1 else f"值{i+1}")),
+                        "fieldType": "number",
+                        "unit": "μSv/h" if any(u in "".join(text_grid.values()) for u in unit_candidates) else "",
+                        "width": round(0.46 / max(1, len(value_cols)), 4),
+                    }
+                )
+
+            matrix_rows = []
+            # 行信息全量保留：数据区从首个输入行开始，包含后续所有表格行（即使该行无输入框）
+            body_rows = [r for r in row_values if r >= min_data_row]
+            row_seq = 0
+            for r in body_rows:
+                headers = {}
+                if row_header_cols:
+                    for i, c in enumerate(row_header_cols):
+                        headers[f"h{i+1}"] = str(text_grid.get((r, c), "")).strip()
+                else:
+                    headers["serialNo"] = str(row_seq + 1)
+
+                row_cells = {}
+                static_cells = {}
+                for i, c in enumerate(value_cols):
+                    key = value_columns[i]["id"]
+                    arr = field_grid.get((r, c), [])
+                    if not arr:
+                        raw_txt = str(text_grid.get((r, c), "")).strip()
+                        # 兼容前端 matrix 渲染：即使无输入框，也输出完整 cell schema（只读占位）
+                        submit_path = f"testResult.matrixAuto.page{page}.table{int(tbl.get('table_id') or 0)}.rows[{row_seq}].{key}"
+                        legacy = f"testResult.legacy.page{page}.table{int(tbl.get('table_id') or 0)}.r{row_seq}.{key}"
+                        row_cells[key] = {
+                            "id": f"t{int(tbl.get('table_id') or 0)}_row_{row_seq}_{key}",
+                            "type": "text",
+                            "label": value_columns[i]["title"],
+                            "required": False,
+                            "defaultValue": raw_txt or None,
+                            "precision": 1,
+                            "unit": value_columns[i].get("unit") or "",
+                            "editable": False,
+                            "source": {
+                                "pdfFieldId": "",
+                                "page": page,
+                                "anchorType": "text",
+                                "submitBucket": "testResult",
+                                "submitPath": submit_path,
+                                "legacySubmitPath": legacy,
+                                "key": f"step_qc_items.sec_t{page}_{int(tbl.get('table_id') or 0)}_matrix.rows[{row_seq}].{key}",
+                            },
+                        }
+                        if raw_txt:
+                            static_cells[key] = {"text": raw_txt, "editable": False}
+                        continue
+                    it = arr[0]
+                    pdf_field_id = _prefer_pdf_field_id_token(it, "")
+                    legacy = f"testResult.legacy.page{page}.table{int(tbl.get('table_id') or 0)}.r{row_seq}.{key}"
+                    submit_path = f"testResult.matrixAuto.page{page}.table{int(tbl.get('table_id') or 0)}.rows[{row_seq}].{key}"
+                    row_cells[key] = {
+                        "id": f"t{int(tbl.get('table_id') or 0)}_row_{row_seq}_{key}",
+                        "type": "number" if str(it.get("fieldType") or "text").lower() == "text" else _matrix_field_type_from_pdf(str(it.get("fieldType") or "text")),
+                        "label": value_columns[i]["title"],
+                        "required": False,
+                        "defaultValue": None,
+                        "precision": 1,
+                        "unit": value_columns[i].get("unit") or "",
+                        "source": {
+                            "pdfFieldId": pdf_field_id,
+                            "page": page,
+                            "anchorType": str(it.get("fieldType") or "text"),
+                            "submitBucket": "testResult",
+                            "submitPath": submit_path,
+                            "legacySubmitPath": legacy,
+                            "key": f"step_qc_items.sec_t{page}_{int(tbl.get('table_id') or 0)}_matrix.rows[{row_seq}].{key}",
+                        },
+                    }
+                # 允许“纯静态行”存在，以便前端最大化还原 PDF 表格排版
+                if not row_cells and not static_cells and not any(str(v or "").strip() for v in headers.values()):
+                    continue
+                row_obj = {
+                    "id": f"t{int(tbl.get('table_id') or 0)}_row_{row_seq}",
+                    "headers": headers,
+                    "cells": row_cells,
+                }
+                if static_cells:
+                    row_obj["staticCells"] = static_cells
+                matrix_rows.append(row_obj)
+                row_seq += 1
+
+            if not matrix_rows:
+                continue
+            section_id = f"sec_t{page}_{int(tbl.get('table_id') or 0)}_matrix"
+            section_title = ""
+            if row_header_cols and matrix_rows:
+                section_title = matrix_rows[0].get("headers", {}).get("h2") or matrix_rows[0].get("headers", {}).get("h1") or ""
+            all_sections.append(
+                {
+                    "id": section_id,
+                    "title": section_title or f"固定表格(P{page}-T{int(tbl.get('table_id') or 0)})",
+                    "layout": "matrixTable",
+                    "matrix": {
+                        "headerFields": header_fields,
+                        "rowHeaderColumns": row_header_columns,
+                        "valueColumns": value_columns,
+                        "rows": matrix_rows,
+                        # 提供 PDF 表格全量单元格信息（含坐标+文本），输入框仍仅来自预设识别字段
+                        "sourceTable": {
+                            "page": page,
+                            "tableId": int(tbl.get("table_id") or 0),
+                            "cells": [
+                                {
+                                    "row": int(c.get("row") or 0),
+                                    "col": int(c.get("col") or 0),
+                                    "x": float(c.get("x") or 0.0),
+                                    "y": float(c.get("y") or 0.0),
+                                    "w": float(c.get("w") or 0.0),
+                                    "h": float(c.get("h") or 0.0),
+                                    "text": str(c.get("text") or ""),
+                                }
+                                for c in cells
+                            ],
+                        },
+                    },
+                }
+            )
+
+    if not all_sections:
+        return []
+    return [{"id": "step_qc_items", "title": "质控检测项目", "sections": all_sections}]
+
+
+def _clean_surrogate_text(value):
+    """
+    清理字符串中的孤立 surrogate，避免 json dumps -> utf-8 encode 时报错。
+    """
+    if not isinstance(value, str):
+        return value
+    # encode/decode with ignore 可移除非法代理字符，保留合法 UTF-8 文本
+    return value.encode("utf-8", errors="ignore").decode("utf-8", errors="ignore")
+
+
+def _sanitize_json_payload_text(value):
+    if isinstance(value, dict):
+        return {k: _sanitize_json_payload_text(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_json_payload_text(v) for v in value]
+    if isinstance(value, tuple):
+        return [_sanitize_json_payload_text(v) for v in value]
+    if isinstance(value, str):
+        return _clean_surrogate_text(value)
+    return value
+
+
+def _load_full_text_coordinate_boxing_module():
+    path = Path(settings.BASE_DIR) / "htmlpdf" / "full_text_coordinate_boxing.py"
+    if not path.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location("full_text_coordinate_boxing", path)
+    if spec is None or spec.loader is None:
+        return None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _extract_table_struct_from_full_text_boxing(source_pdf_path: Path):
+    """
+    直接复用 full_text_coordinate_boxing 的表格提取链路，输出按页结构化网格。
+    """
+    mod = _load_full_text_coordinate_boxing_module()
+    if mod is None or not source_pdf_path.exists():
+        return {}
+    out = {}
+    doc = mod.fitz.open(str(source_pdf_path))
+    try:
+        cfg = mod.Config()
+        for i in range(len(doc)):
+            page = doc[i]
+            page_no = i + 1
+            spans = mod.extract_text_spans(page)
+            table_cells = mod._filter_noise_tables(mod.extract_table_cells(page), cfg) + mod.extract_vector_rect_cells(page, page_no)
+            maps = mod._build_structured_cell_maps(page, table_cells, spans)
+            table_cells_by_rc = maps.get("table_cells") or {}
+            cell_texts = maps.get("cell_texts") or {}
+            page_tables = []
+            for table_id, cells_by_rc in table_cells_by_rc.items():
+                rows = []
+                cols = []
+                cells = []
+                for (r, c), cell in sorted(cells_by_rc.items(), key=lambda kv: (int(kv[0][0]), int(kv[0][1]))):
+                    rect = cell.get("rect")
+                    if rect is None:
+                        continue
+                    rows.append(int(r))
+                    cols.append(int(c))
+                    cells.append(
+                        {
+                            "row": int(r),
+                            "col": int(c),
+                            "x": float(rect.x0),
+                            "y": float(rect.y0),
+                            "w": float(rect.width),
+                            "h": float(rect.height),
+                            "text": str(cell_texts.get((int(table_id), int(r), int(c)), "") or ""),
+                        }
+                    )
+                if not cells:
+                    continue
+                page_tables.append(
+                    {
+                        "table_id": int(table_id),
+                        "rows": sorted(set(rows)),
+                        "cols": sorted(set(cols)),
+                        "cells": cells,
+                    }
+                )
+            if page_tables:
+                out[page_no] = page_tables
+    finally:
+        doc.close()
+    return out
+
+
 @csrf_exempt
 @require_POST
 def htmlpdf_api_export_frontend_json(request):
@@ -2544,6 +2972,8 @@ def htmlpdf_api_export_frontend_json(request):
     if not steps:
         steps = form_schema.get("steps") if isinstance(form_schema.get("steps"), list) else []
     input_fields = _sanitize_pdf_field_texts(data.get("fields") if isinstance(data.get("fields"), list) else [])
+    # 强制规范 pdfFieldId：必须为 f+序号，防止前端传入语义名称污染绑定键。
+    input_fields = _normalize_pdf_fields_for_unified_template(input_fields, {}, {})
     payload = {
         "templateId": template_id or name.rsplit(".", 1)[0],
         "templateName": template_name or name,
@@ -2556,39 +2986,53 @@ def htmlpdf_api_export_frontend_json(request):
         "enums": enums,
         "steps": steps,
     }
+    has_matrix_layout = False
+    for st in payload.get("steps") if isinstance(payload.get("steps"), list) else []:
+        if not isinstance(st, dict):
+            continue
+        for sec in st.get("sections") if isinstance(st.get("sections"), list) else []:
+            if not isinstance(sec, dict):
+                continue
+            if str(sec.get("layout") or "").strip().lower() == "matrixtable":
+                has_matrix_layout = True
+                break
+        if has_matrix_layout:
+            break
     # 先以规则引擎生成标准结构（分桶 + 坐标排序），再按模式决定是否被 LLM 覆盖。
-    try:
-        base_rule_payload = build_frontend_schema_by_rules(
-            {
-                "templateId": payload["templateId"],
-                "templateName": payload["templateName"],
-                "version": payload["version"],
-                "reportType": payload["reportType"],
-                "standard": payload["standard"],
-                "pdfUrl": payload["pdfUrl"],
-                "locale": payload["locale"],
-                "constants": payload["constants"],
-                "enums": payload["enums"],
-                "steps": payload["steps"],
-                "pdf": {"fields": input_fields},
-                "meta": meta,
+    base_rule_payload = {}
+    if not has_matrix_layout:
+        try:
+            base_rule_payload = build_frontend_schema_by_rules(
+                {
+                    "templateId": payload["templateId"],
+                    "templateName": payload["templateName"],
+                    "version": payload["version"],
+                    "reportType": payload["reportType"],
+                    "standard": payload["standard"],
+                    "pdfUrl": payload["pdfUrl"],
+                    "locale": payload["locale"],
+                    "constants": payload["constants"],
+                    "enums": payload["enums"],
+                    "steps": payload["steps"],
+                    "pdf": {"fields": input_fields},
+                    "meta": meta,
+                }
+            )
+        except Exception:
+            base_rule_payload = {}
+        if isinstance(base_rule_payload, dict) and isinstance(base_rule_payload.get("steps"), list) and base_rule_payload.get("steps"):
+            payload = {
+                "templateId": str(base_rule_payload.get("templateId") or payload["templateId"]),
+                "templateName": str(base_rule_payload.get("templateName") or payload["templateName"]),
+                "version": str(base_rule_payload.get("version") or payload["version"]),
+                "reportType": str(base_rule_payload.get("reportType") or payload["reportType"]),
+                "standard": str(base_rule_payload.get("standard") or payload["standard"]),
+                "pdfUrl": str(base_rule_payload.get("pdfUrl") or payload["pdfUrl"]),
+                "locale": str(base_rule_payload.get("locale") or payload["locale"]),
+                "constants": base_rule_payload.get("constants") if isinstance(base_rule_payload.get("constants"), dict) else payload["constants"],
+                "enums": base_rule_payload.get("enums") if isinstance(base_rule_payload.get("enums"), dict) else payload["enums"],
+                "steps": base_rule_payload.get("steps") or payload["steps"],
             }
-        )
-    except Exception:
-        base_rule_payload = {}
-    if isinstance(base_rule_payload, dict) and isinstance(base_rule_payload.get("steps"), list) and base_rule_payload.get("steps"):
-        payload = {
-            "templateId": str(base_rule_payload.get("templateId") or payload["templateId"]),
-            "templateName": str(base_rule_payload.get("templateName") or payload["templateName"]),
-            "version": str(base_rule_payload.get("version") or payload["version"]),
-            "reportType": str(base_rule_payload.get("reportType") or payload["reportType"]),
-            "standard": str(base_rule_payload.get("standard") or payload["standard"]),
-            "pdfUrl": str(base_rule_payload.get("pdfUrl") or payload["pdfUrl"]),
-            "locale": str(base_rule_payload.get("locale") or payload["locale"]),
-            "constants": base_rule_payload.get("constants") if isinstance(base_rule_payload.get("constants"), dict) else payload["constants"],
-            "enums": base_rule_payload.get("enums") if isinstance(base_rule_payload.get("enums"), dict) else payload["enums"],
-            "steps": base_rule_payload.get("steps") or payload["steps"],
-        }
 
     # 保存前端 JSON 支持三种导出模式：
     # - rule: 纯规则引擎（不经过大模型）
@@ -2599,8 +3043,10 @@ def htmlpdf_api_export_frontend_json(request):
         export_mode = "auto"
     llm_auto = str(os.environ.get("ENABLE_LLM_FRONTEND_EXPORT", "1")).strip().lower() in {"1", "true", "yes", "on"}
     llm_force = str(data.get("force_llm_steps") or "").strip().lower() in {"1", "true", "yes", "on"}
-    need_llm = export_mode == "llm" or (export_mode == "auto" and llm_auto and (llm_force or not payload.get("steps")))
-    need_rule = export_mode == "rule"
+    need_llm = (not has_matrix_layout) and (
+        export_mode == "llm" or (export_mode == "auto" and llm_auto and (llm_force or not payload.get("steps")))
+    )
+    need_rule = (export_mode == "rule") and (not has_matrix_layout)
     rule_template_obj = {
         "templateId": payload["templateId"],
         "templateName": payload["templateName"],
@@ -2685,7 +3131,11 @@ def htmlpdf_api_export_frontend_json(request):
                 "steps": rule_payload.get("steps") or payload["steps"],
             }
 
-    raw = json_std.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    try:
+        raw = json_std.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    except UnicodeEncodeError:
+        payload = _sanitize_json_payload_text(payload)
+        raw = json_std.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     wrapped = type("UploadLike", (), {"read": lambda self: raw, "name": name})()
     created, skipped = save_library_binary_uploads(
         request.user,
@@ -2706,6 +3156,106 @@ def htmlpdf_api_export_frontend_json(request):
                 "library_url": reverse("file_library") + "?tab=template",
                 "download_url": reverse("file_library_download", kwargs={"pk": row["id"]}),
             },
+        }
+    )
+
+
+@csrf_exempt
+@require_POST
+def htmlpdf_api_export_matrix_json(request):
+    auth_resp = _require_api_login(request)
+    if auth_resp:
+        return auth_resp
+    gx = _require_perm(request, "perm_process_pipeline")
+    if gx:
+        return JsonResponse({"error": "forbidden"}, status=403)
+    try:
+        data = json_std.loads(request.body.decode("utf-8"))
+    except Exception:
+        return JsonResponse({"error": "请求体不是合法JSON"}, status=400)
+    fields = _sanitize_pdf_field_texts(data.get("fields", []))
+    if not fields:
+        # 全自动模式：无需先点击自动划框，后端直接跑自动提取。
+        fields = _sanitize_pdf_field_texts(htmlpdf_service.htmlpdf_auto_red_text_fields_for_editor(request.user.id))
+    template_meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+    report_type = str(data.get("report_type") or "").strip()
+    standard = str(data.get("standard") or "").strip()
+    name = safe_library_basename((data.get("name") or "template_matrix").strip() or "template_matrix")
+    if not name.lower().endswith(".json"):
+        name = f"{name}.json"
+
+    source_meta = {}
+    meta_path = htmlpdf_service.htmlpdf_source_meta_path(request.user.id)
+    if meta_path.is_file():
+        try:
+            source_meta = json_std.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            source_meta = {}
+
+    normalized_fields = _normalize_pdf_fields_for_unified_template(fields, {}, {})
+    table_struct = _extract_table_struct_from_full_text_boxing(htmlpdf_service.htmlpdf_source_pdf_path(request.user.id))
+    steps = _build_matrix_steps_from_auto_fields(
+        normalized_fields,
+        htmlpdf_service.htmlpdf_source_pdf_path(request.user.id),
+        table_struct_by_page=table_struct,
+    )
+    if not steps:
+        return JsonResponse({"error": "未识别到可结构化的表格单元格，请先执行自动划框并确认字段落在表格中"}, status=409)
+
+    payload = {
+        "schema": "unified_form_template/v2",
+        "templateId": template_meta.get("templateId") or name.rsplit(".", 1)[0],
+        "templateName": template_meta.get("templateName") or name,
+        "version": template_meta.get("version") or "1.0.0",
+        "reportType": report_type,
+        "standard": standard,
+        "pdfUrl": str(template_meta.get("pdfUrl") or ""),
+        "locale": str(template_meta.get("locale") or "zh-CN"),
+        "constants": {},
+        "enums": {},
+        "steps": steps,
+        "meta": {
+            "templateId": template_meta.get("templateId") or name.rsplit(".", 1)[0],
+            "templateName": template_meta.get("templateName") or name,
+            "version": template_meta.get("version") or "1.0.0",
+            "reportType": report_type,
+            "standard": standard,
+            "pdfUrl": str(template_meta.get("pdfUrl") or ""),
+            "locale": str(template_meta.get("locale") or "zh-CN"),
+        },
+        "pdf": {"source_pdf": source_meta, "fields": normalized_fields},
+        "formSchema": {"constants": {}, "enums": {}, "steps": steps},
+        "bindings": {},
+        "fields": normalized_fields,
+        "source_pdf": source_meta,
+    }
+    payload = _sanitize_json_payload_text(payload)
+    try:
+        raw = json_std.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    except UnicodeEncodeError:
+        # 最终兜底：允许代理对透传，避免单个脏字符导致接口 500
+        raw = json_std.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8", errors="surrogatepass")
+    wrapped = type("UploadLike", (), {"read": lambda self: raw, "name": name})()
+    created, skipped = save_library_binary_uploads(
+        request.user,
+        [wrapped],
+        LibraryFile.CATEGORY_TEMPLATE,
+    )
+    if skipped and not created:
+        return JsonResponse({"error": "模板保存失败"}, status=500)
+    row = created[0]
+    return JsonResponse(
+        {
+            "ok": True,
+            "saved_to": "template",
+            "file": {
+                "id": row["id"],
+                "name": row["original_name"],
+                "category": row["category"],
+                "library_url": reverse("file_library") + "?tab=template",
+                "download_url": reverse("file_library_download", kwargs={"pk": row["id"]}),
+            },
+            "steps_count": len(steps),
         }
     )
 
@@ -2775,6 +3325,49 @@ def htmlpdf_api_save_pdf(request):
             },
         }
     )
+
+
+@csrf_exempt
+@require_POST
+def htmlpdf_api_table_cell_at_point(request):
+    auth_resp = _require_api_login(request)
+    if auth_resp:
+        return auth_resp
+    gx = _require_perm(request, "perm_process_pipeline")
+    if gx:
+        return JsonResponse({"error": "forbidden"}, status=403)
+    try:
+        data = json_std.loads(request.body.decode("utf-8"))
+    except Exception:
+        return JsonResponse({"error": "请求体不是合法JSON"}, status=400)
+    try:
+        page_no = int(data.get("page") or 0)
+        x = float(data.get("x"))
+        y = float(data.get("y"))
+    except Exception:
+        return JsonResponse({"error": "page/x/y 参数无效"}, status=400)
+    cell = htmlpdf_service.detect_table_cell_bbox_at_point(
+        htmlpdf_service.htmlpdf_source_pdf_path(request.user.id),
+        page_no,
+        x,
+        y,
+    )
+    if not cell:
+        return JsonResponse({"found": False, "cell": None})
+    return JsonResponse({"found": True, "cell": cell})
+
+
+@csrf_exempt
+@require_POST
+def htmlpdf_api_auto_red_text_boxes(request):
+    auth_resp = _require_api_login(request)
+    if auth_resp:
+        return auth_resp
+    gx = _require_perm(request, "perm_process_pipeline")
+    if gx:
+        return JsonResponse({"error": "forbidden"}, status=403)
+    rows = htmlpdf_service.htmlpdf_auto_red_text_fields_for_editor(request.user.id)
+    return JsonResponse({"fields": rows, "count": len(rows)})
 
 
 @login_required

@@ -55,7 +55,10 @@ urlpatterns = [
     path('files/htmlpdf/api/upload-pdf/', views.htmlpdf_api_upload_pdf, name='htmlpdf_api_upload_pdf'),
     path('files/htmlpdf/api/import-json/', views.htmlpdf_api_import_json, name='htmlpdf_api_import_json'),
     path('files/htmlpdf/api/export-json/', views.htmlpdf_api_export_json, name='htmlpdf_api_export_json'),
+    path('files/htmlpdf/api/export-matrix-json/', views.htmlpdf_api_export_matrix_json, name='htmlpdf_api_export_matrix_json'),
     path('files/htmlpdf/api/export-frontend-json/', views.htmlpdf_api_export_frontend_json, name='htmlpdf_api_export_frontend_json'),
     path('files/htmlpdf/api/save-pdf/', views.htmlpdf_api_save_pdf, name='htmlpdf_api_save_pdf'),
+    path('files/htmlpdf/api/table-cell-at-point/', views.htmlpdf_api_table_cell_at_point, name='htmlpdf_api_table_cell_at_point'),
+    path('files/htmlpdf/api/auto-red-text-boxes/', views.htmlpdf_api_auto_red_text_boxes, name='htmlpdf_api_auto_red_text_boxes'),
     path('files/temp/<str:batch_id>/', views.file_temp_batch, name='file_temp_batch'),
 ]

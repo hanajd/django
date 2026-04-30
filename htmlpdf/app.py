@@ -36,6 +36,72 @@ MIN_TEXT_FIELD_WIDTH = DEFAULT_FONT_PT + 2
 MIN_TEXT_FIELD_HEIGHT = (DEFAULT_FONT_PT * 1.2) + 2
 
 
+def _coerce_rect(raw_rect):
+    if raw_rect is None:
+        return None
+    if isinstance(raw_rect, fitz.Rect):
+        return raw_rect
+    if hasattr(raw_rect, "bbox"):
+        box = getattr(raw_rect, "bbox")
+        if box and len(box) >= 4:
+            return fitz.Rect(float(box[0]), float(box[1]), float(box[2]), float(box[3]))
+    if isinstance(raw_rect, (list, tuple)) and len(raw_rect) >= 4:
+        return fitz.Rect(float(raw_rect[0]), float(raw_rect[1]), float(raw_rect[2]), float(raw_rect[3]))
+    return None
+
+
+def _extract_table_cells(page: fitz.Page) -> list[fitz.Rect]:
+    cells: list[fitz.Rect] = []
+    if hasattr(page, "find_tables"):
+        try:
+            table_finder = page.find_tables()
+        except Exception:
+            table_finder = None
+        tables = getattr(table_finder, "tables", None) or []
+        for table in tables:
+            rows = getattr(table, "rows", None)
+            if rows:
+                for row in rows:
+                    for cell in (getattr(row, "cells", None) or []):
+                        rect = _coerce_rect(cell)
+                        if rect is not None and not rect.is_empty:
+                            cells.append(rect)
+                continue
+            for cell in (getattr(table, "cells", None) or []):
+                rect = _coerce_rect(cell)
+                if rect is not None and not rect.is_empty:
+                    cells.append(rect)
+
+    # 补充矢量矩形，兼容部分 find_tables 漏检场景
+    try:
+        drawings = page.get_drawings()
+    except Exception:
+        drawings = []
+    for d in drawings:
+        if d.get("type") not in ("s", "fs", "sf"):
+            continue
+        rect = _coerce_rect(d.get("rect"))
+        if rect is None or rect.is_empty:
+            continue
+        w, h = float(rect.width), float(rect.height)
+        if w < 18 or h < 10:
+            continue
+        if w > page.rect.width * 0.95 and h > page.rect.height * 0.95:
+            continue
+        cells.append(rect)
+    return cells
+
+
+def _pick_cell_at_point(page: fitz.Page, page_x: float, page_y: float):
+    point = fitz.Point(float(page_x), float(page_y))
+    containing = [r for r in _extract_table_cells(page) if r.contains(point)]
+    if not containing:
+        return None
+    # 同一点命中多个框时优先最小框，更接近具体单元格
+    containing.sort(key=lambda r: max(0.0, r.width * r.height))
+    return containing[0]
+
+
 def pick_times_font():
     for path in TIMES_FONT_CANDIDATES:
         if os.path.exists(path):
@@ -297,6 +363,41 @@ def save_pdf():
     doc.close()
     out.seek(0)
     return send_file(out, mimetype="application/pdf", as_attachment=True, download_name="填写完成.pdf")
+
+
+@app.post("/api/table-cell-at-point")
+def table_cell_at_point():
+    data = request.get_json() or {}
+    page_no = int(data.get("page") or 0)
+    x = float(data.get("x") or 0.0)
+    y = float(data.get("y") or 0.0)
+    pdf_path = os.path.join(TEMPLATE_ROOT, "_temp", "original.pdf")
+    if not os.path.exists(pdf_path):
+        return jsonify({"error": "请先上传或加载PDF"}), 400
+    if page_no <= 0:
+        return jsonify({"error": "页码无效"}), 400
+
+    doc = fitz.open(pdf_path)
+    try:
+        if page_no > len(doc):
+            return jsonify({"error": "页码超出范围"}), 400
+        page = doc[page_no - 1]
+        rect = _pick_cell_at_point(page, x, y)
+        if rect is None:
+            return jsonify({"found": False, "cell": None})
+        return jsonify(
+            {
+                "found": True,
+                "cell": {
+                    "x": float(rect.x0),
+                    "y": float(rect.y0),
+                    "w": float(rect.width),
+                    "h": float(rect.height),
+                },
+            }
+        )
+    finally:
+        doc.close()
 
 # 允许访问模板目录下的PDF
 @app.route("/pdf_templates/<path:filename>")

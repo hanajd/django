@@ -139,7 +139,8 @@
                     <div class="menu-header px-4 py-3 flex items-center justify-between text-gray-300 font-medium">
                         <div class="flex items-center space-x-3">
                             {% if menu.icon %}
-                            <i class="ri-{{ menu.icon }}-line text-lg"></i>
+                            {# Remix Icon 无 ri-users-line，历史数据 icon=users 映射为 team #}
+                            <i class="ri-{% if menu.icon == 'users' %}team{% else %}{{ menu.icon }}{% endif %}-line text-lg"></i>
                             {% else %}
                             <i class="ri-folder-line text-lg"></i>
                             {% endif %}
@@ -151,7 +152,7 @@
                         {% for child in menu.children.all %}
                         <a href="{{ child.path }}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-400 hover:text-white rounded-r-lg">
                             {% if child.icon %}
-                            <i class="ri-{{ child.icon }}-line text-sm"></i>
+                            <i class="ri-{% if child.icon == 'users' %}team{% else %}{{ child.icon }}{% endif %}-line text-sm"></i>
                             {% else %}
                             <i class="ri-file-list-line text-sm"></i>
                             {% endif %}
@@ -163,7 +164,7 @@
                     <!-- 无子菜单的菜单项 -->
                     <a href="{{ menu.path }}" class="sidebar-item flex items-center space-x-3 px-4 py-3 text-gray-300 hover:text-white rounded-r-lg">
                         {% if menu.icon %}
-                        <i class="ri-{{ menu.icon }}-line text-lg"></i>
+                        <i class="ri-{% if menu.icon == 'users' %}team{% else %}{{ menu.icon }}{% endif %}-line text-lg"></i>
                         {% else %}
                         <i class="ri-file-line text-lg"></i>
                         {% endif %}

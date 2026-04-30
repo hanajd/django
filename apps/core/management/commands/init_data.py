@@ -69,7 +69,7 @@ class Command(BaseCommand):
             {
                 'name': '用户管理',
                 'path': '',
-                'icon': 'users',
+                'icon': 'team',
                 'sort_order': 3,
                 'roles': [super_admin, admin]
             },
