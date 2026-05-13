@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Sequence, Tuple
 
 import fitz
 from django.conf import settings
+from utils.unified_template_fields import materialize_unified_pdf_fields
 
 DEFAULT_FONT_PT = 10.5
 # 最小文本框：至少容纳一个五号汉字宽度，且高度可正常显示五号字单行
@@ -319,6 +320,9 @@ def htmlpdf_auto_red_text_fields_for_editor(user_id: int) -> List[Dict[str, Any]
         cp = b.get("checkboxPair")
         if isinstance(cp, dict) and cp and is_check:
             row["checkboxPair"] = cp
+        jct = str(b.get("judgmentCriterionText") or "").strip()
+        if jct:
+            row["judgmentCriterionText"] = jct[:500]
         fields.append(row)
     return fields
 
@@ -422,8 +426,15 @@ def parse_template_json(raw_text: str) -> Dict[str, Any]:
                     "enums": data.get("enums", {}) if isinstance(data.get("enums"), dict) else {},
                     "steps": data.get("steps", []) if isinstance(data.get("steps"), list) else [],
                 }
+            else:
+                _fs_steps = form_schema.get("steps")
+                if not (isinstance(_fs_steps, list) and _fs_steps):
+                    _top_steps = data.get("steps") if isinstance(data.get("steps"), list) else []
+                    if _top_steps:
+                        form_schema = {**form_schema, "steps": _top_steps}
+            fields_out = materialize_unified_pdf_fields(pdf_block.get("fields") or [])
             return {
-                "fields": pdf_block.get("fields") or [],
+                "fields": fields_out,
                 "content": data.get("content", {}) if isinstance(data.get("content"), dict) else {},
                 "bindings": data.get("bindings", {}) if isinstance(data.get("bindings"), dict) else {},
                 "source_pdf": pdf_block.get("source_pdf", {}) if isinstance(pdf_block.get("source_pdf"), dict) else {},
@@ -450,7 +461,7 @@ def parse_template_json(raw_text: str) -> Dict[str, Any]:
                 "template_meta": data.get("meta", {}) if isinstance(data.get("meta"), dict) else {},
                 "schema": data.get("schema") or "",
             }
-        fields = data.get("fields", [])
+        fields = materialize_unified_pdf_fields(data.get("fields", []) if isinstance(data.get("fields"), list) else [])
         content_map = data.get("content", {})
         if not content_map and isinstance(fields, list):
             for item in fields:
@@ -465,6 +476,24 @@ def parse_template_json(raw_text: str) -> Dict[str, Any]:
             "schema": data.get("schema") or "",
         }
     raise ValueError("JSON structure unsupported")
+
+
+def _pdf_text_field_wants_justify_for_instrument_line(field: Dict[str, Any]) -> bool:
+    """检测仪器类占位格：回填 PDF 时用两端对齐（insert_textbox）。"""
+    parts: list[str] = []
+    for k in ("id", "placeholder", "originalPlaceholder", "title", "label", "fieldId", "pdfFieldId"):
+        v = field.get(k)
+        if isinstance(v, str) and v.strip():
+            parts.append(v.strip())
+    blob = " ".join(parts)
+    if "检测仪器" in blob:
+        return True
+    if re.search(r"仪器\s*[1-9]\d?", blob):
+        return True
+    val = str(field.get("value") or "")
+    if "有效期至" in val and "年" in val and "月" in val and "日" in val:
+        return True
+    return False
 
 
 def build_filled_pdf(fields: List[Dict[str, Any]], source_pdf: Path) -> bytes:
@@ -543,7 +572,12 @@ def build_filled_pdf(fields: List[Dict[str, Any]], source_pdf: Path) -> bytes:
             page.insert_font(fontname=font_name, fontfile=str(font_file))
             font_obj = fitz.Font(fontfile=str(font_file))
             wrapped_text, fs = fit_text_for_box(text, r, font_obj)
-            align = fitz.TEXT_ALIGN_LEFT if "\n" in wrapped_text else fitz.TEXT_ALIGN_CENTER
+            if _pdf_text_field_wants_justify_for_instrument_line(f):
+                align = getattr(fitz, "TEXT_ALIGN_JUSTIFY", fitz.TEXT_ALIGN_LEFT)
+            elif "\n" in wrapped_text:
+                align = fitz.TEXT_ALIGN_LEFT
+            else:
+                align = fitz.TEXT_ALIGN_CENTER
             line_count = max(1, wrapped_text.count("\n") + 1)
             text_h = line_count * fs * 1.2
             if text_h < r.height:

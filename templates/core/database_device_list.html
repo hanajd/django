@@ -3,83 +3,107 @@
 {% block page_title %}数据库管理{% endblock %}
 
 {% block content %}
-<div class="space-y-6">
-    <div class="flex items-center justify-between">
-        <div>
-            <h1 class="text-2xl font-bold text-gray-800">数据库管理</h1>
-            <p class="text-sm text-gray-500 mt-1">当前仅开放检测仪器台账管理</p>
-        </div>
+<div class="mx-auto max-w-7xl space-y-6">
+    <div>
+        <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">台账</p>
+        <h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-900">检测仪器</h1>
+        <p class="mt-1 text-sm text-slate-600">维护仪器编号、证书与有效期；列表支持就地编辑与删除。仪器编号与名称为必填。</p>
     </div>
 
-    <div class="bg-white rounded-lg shadow p-6">
-        <h2 class="text-lg font-semibold text-gray-800 mb-4">{% if editing_device %}编辑检测仪器{% else %}新增检测仪器{% endif %}</h2>
-        <form method="post" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-8">
+        <h2 class="text-base font-semibold text-slate-900">{% if editing_device %}编辑检测仪器{% else %}新增检测仪器{% endif %}</h2>
+        <form method="post" class="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
             {% csrf_token %}
             <input type="hidden" name="action" value="{% if editing_device %}update{% else %}create{% endif %}">
             {% if editing_device %}
             <input type="hidden" name="device_id" value="{{ editing_device.id }}">
             {% endif %}
-            <input name="code" required placeholder="仪器编号" value="{% if editing_device %}{{ editing_device.code }}{% endif %}" class="border rounded px-3 py-2">
-            <input name="name" required placeholder="仪器设备名称" value="{% if editing_device %}{{ editing_device.name }}{% endif %}" class="border rounded px-3 py-2">
-            <input name="model" placeholder="型号" value="{% if editing_device %}{{ editing_device.model }}{% endif %}" class="border rounded px-3 py-2">
-            <input name="calibration_org" placeholder="检定/校准单位" value="{% if editing_device %}{{ editing_device.calibration_org }}{% endif %}" class="border rounded px-3 py-2">
-            <input name="certificate_no" placeholder="证书编号" value="{% if editing_device %}{{ editing_device.certificate_no }}{% endif %}" class="border rounded px-3 py-2">
-            <input type="date" name="certificate_valid_until" value="{% if editing_device and editing_device.certificate_valid_until %}{{ editing_device.certificate_valid_until|date:'Y-m-d' }}{% endif %}" class="border rounded px-3 py-2">
-            <input name="remarks" placeholder="备注说明" value="{% if editing_device %}{{ editing_device.remarks }}{% endif %}" class="border rounded px-3 py-2 md:col-span-2">
-            <div class="lg:col-span-4">
-                <button type="submit" class="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700">{% if editing_device %}保存修改{% else %}新增{% endif %}</button>
+            <input name="code" required placeholder="仪器编号 *" value="{% if editing_device %}{{ editing_device.code }}{% endif %}"
+                class="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+            <input name="name" required placeholder="仪器设备名称 *" value="{% if editing_device %}{{ editing_device.name }}{% endif %}"
+                class="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+            <input name="model" placeholder="型号" value="{% if editing_device %}{{ editing_device.model }}{% endif %}"
+                class="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+            <input name="calibration_org" placeholder="检定/校准单位" value="{% if editing_device %}{{ editing_device.calibration_org }}{% endif %}"
+                class="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+            <input name="certificate_no" placeholder="证书编号" value="{% if editing_device %}{{ editing_device.certificate_no }}{% endif %}"
+                class="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+            <input type="date" name="certificate_valid_until" value="{% if editing_device and editing_device.certificate_valid_until %}{{ editing_device.certificate_valid_until|date:'Y-m-d' }}{% endif %}"
+                class="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-900 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+            <input name="remarks" placeholder="备注说明" value="{% if editing_device %}{{ editing_device.remarks }}{% endif %}"
+                class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 lg:col-span-2">
+            <div class="flex flex-wrap items-center gap-2 md:col-span-2 lg:col-span-4">
+                <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700">
+                    <i class="ri-save-3-line"></i>
+                    {% if editing_device %}保存修改{% else %}新增{% endif %}
+                </button>
                 {% if editing_device %}
-                <a href="{% url 'database_device_list' %}" class="ml-2 px-4 py-2 rounded bg-gray-200 text-gray-700 hover:bg-gray-300">取消编辑</a>
+                <a href="{% url 'database_device_list' %}" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50">
+                    取消编辑
+                </a>
                 {% endif %}
             </div>
         </form>
-    </div>
+    </section>
 
-    <div class="bg-white rounded-lg shadow overflow-x-auto">
-        <table class="min-w-full text-sm">
-            <thead class="bg-gray-50 text-gray-600">
-                <tr>
-                    <th class="text-left px-4 py-3">ID</th>
-                    <th class="text-left px-4 py-3">仪器编号</th>
-                    <th class="text-left px-4 py-3">仪器设备名称</th>
-                    <th class="text-left px-4 py-3">型号</th>
-                    <th class="text-left px-4 py-3">检定/校准单位</th>
-                    <th class="text-left px-4 py-3">证书编号</th>
-                    <th class="text-left px-4 py-3">证书有效期</th>
-                    <th class="text-left px-4 py-3">备注说明</th>
-                    <th class="text-left px-4 py-3">更新时间</th>
-                    <th class="text-left px-4 py-3">操作</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for d in devices %}
-                <tr class="border-t align-top">
-                    <td class="px-4 py-3 text-gray-500">{{ d.id }}</td>
-                    <td class="px-4 py-3">{{ d.code }}</td>
-                    <td class="px-4 py-3">{{ d.name }}</td>
-                    <td class="px-4 py-3">{{ d.model|default:"-" }}</td>
-                    <td class="px-4 py-3">{{ d.calibration_org|default:"-" }}</td>
-                    <td class="px-4 py-3">{{ d.certificate_no|default:"-" }}</td>
-                    <td class="px-4 py-3">{{ d.certificate_valid_until|date:"Y-m-d"|default:"-" }}</td>
-                    <td class="px-4 py-3">{{ d.remarks|default:"-" }}</td>
-                    <td class="px-4 py-3 text-gray-500 whitespace-nowrap">{{ d.updated_at|date:"Y-m-d H:i" }}</td>
-                    <td class="px-4 py-3 whitespace-nowrap">
-                        <a href="{% url 'database_device_list' %}?edit={{ d.id }}" class="px-3 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700">编辑</a>
-                        <form method="post" class="mt-2" onsubmit="return confirm('确认删除该检测仪器吗？');">
-                            {% csrf_token %}
-                            <input type="hidden" name="action" value="delete">
-                            <input type="hidden" name="device_id" value="{{ d.id }}">
-                            <button type="submit" class="px-3 py-1 rounded bg-red-600 text-white hover:bg-red-700">删除</button>
-                        </form>
-                    </td>
-                </tr>
-                {% empty %}
-                <tr>
-                    <td colspan="10" class="px-4 py-8 text-center text-gray-500">暂无检测仪器数据</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+    <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ring-1 ring-slate-900/[0.04]">
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-slate-100 text-left text-sm">
+                <thead class="bg-slate-50">
+                    <tr>
+                        <th class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">ID</th>
+                        <th class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">编号</th>
+                        <th class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">名称</th>
+                        <th class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">型号</th>
+                        <th class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">检定单位</th>
+                        <th class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">证书号</th>
+                        <th class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">有效期</th>
+                        <th class="min-w-[8rem] px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">备注</th>
+                        <th class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">更新</th>
+                        <th class="whitespace-nowrap px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">操作</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for d in devices %}
+                    <tr class="align-top transition hover:bg-slate-50/80">
+                        <td class="whitespace-nowrap px-4 py-3 text-slate-500 tabular-nums">{{ d.id }}</td>
+                        <td class="whitespace-nowrap px-4 py-3 font-medium text-slate-900">{{ d.code }}</td>
+                        <td class="px-4 py-3 text-slate-900">{{ d.name }}</td>
+                        <td class="px-4 py-3 text-slate-600">{{ d.model|default:"—" }}</td>
+                        <td class="max-w-[10rem] truncate px-4 py-3 text-slate-600" title="{{ d.calibration_org|default:'' }}">{{ d.calibration_org|default:"—" }}</td>
+                        <td class="px-4 py-3 text-slate-600">{{ d.certificate_no|default:"—" }}</td>
+                        <td class="whitespace-nowrap px-4 py-3 tabular-nums text-slate-600">{{ d.certificate_valid_until|date:"Y-m-d"|default:"—" }}</td>
+                        <td class="px-4 py-3 text-sm text-slate-600">{{ d.remarks|default:"—" }}</td>
+                        <td class="whitespace-nowrap px-4 py-3 text-slate-500 tabular-nums">{{ d.updated_at|date:"Y-m-d H:i" }}</td>
+                        <td class="whitespace-nowrap px-4 py-3 text-right">
+                            <div class="inline-flex flex-wrap items-center justify-end gap-2">
+                                <a href="{% url 'database_device_list' %}?edit={{ d.id }}" class="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-emerald-700">
+                                    <i class="ri-edit-line"></i> 编辑
+                                </a>
+                                <form method="post" class="inline" onsubmit="return confirm('确认删除该检测仪器吗？');">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="delete">
+                                    <input type="hidden" name="device_id" value="{{ d.id }}">
+                                    <button type="submit" class="inline-flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-red-700">
+                                        <i class="ri-delete-bin-line"></i> 删除
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="10" class="px-4 py-16 text-center text-slate-500">
+                            <span class="flex flex-col items-center gap-2">
+                                <i class="ri-database-2-line text-3xl text-slate-300"></i>
+                                <span>暂无检测仪器数据</span>
+                            </span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
 </div>
 {% endblock %}

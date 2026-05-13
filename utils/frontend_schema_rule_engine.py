@@ -3,6 +3,9 @@ import hashlib
 import re
 from typing import Any, Dict, List, Tuple
 
+from utils.unified_template_fields import materialize_unified_pdf_fields
+from utils.pdf_field_formulas import merge_field_formulas_into_frontend
+
 
 _TYPE_NUMBER_KEYWORDS = (
     "kv",
@@ -31,6 +34,9 @@ _INSTRUMENT_KEYWORDS = ("仪器", "检定", "有效期", "型号")
 _DEVICE_INFO_KEYWORDS = ("设备型号", "额定参数", "设备名称", "设备编号", "设备所在场所", "生产厂家", "设备场所")
 
 _UNIT_HINTS = (
+    ("%rh", "%RH"),
+    ("℃", "℃"),
+    ("°c", "℃"),
     ("温度", "℃"),
     ("湿度", "%RH"),
     ("kv", "kV"),
@@ -85,6 +91,8 @@ _TERM_MAP = {
     "自动": "auto",
     "控制": "control",
     "图像": "image",
+    "影增器": "imageIntensifier",
+    "平板": "flatPanel",
 }
 
 _DEFAULT_QC_CONSTANTS = {
@@ -122,6 +130,12 @@ _DEFAULT_QC_ENUMS = {
         {"value": "uGyPerMin", "label": "μGy/min"},
         {"value": "mGyPerMin", "label": "mGy/min"},
     ],
+    "kapAreaProductUnit": [
+        {"value": "mGy_cm2", "label": "mGycm^2"},
+        {"value": "mGy_m2", "label": "mGym^2"},
+        {"value": "uGy_m2", "label": "μGym^2"},
+        {"value": "uGy_cm2", "label": "μGycm^2"},
+    ],
     "commissionOrgMode": [
         {"value": "sameInspection", "label": "同受检单位"},
         {"value": "customCommission", "label": "委托单位"},
@@ -129,6 +143,11 @@ _DEFAULT_QC_ENUMS = {
 }
 
 _UNDERSCORE_SUFFIX_MAP = {
+    "℃": "environmentTempC",
+    "°c": "environmentTempC",
+    "°C": "environmentTempC",
+    "%rh": "environmentHumidity",
+    "%RH": "environmentHumidity",
     "kv": "kv",
     "ma": "ma",
     "ww": "ww",
@@ -138,13 +157,19 @@ _UNDERSCORE_SUFFIX_MAP = {
     "roi": "roi",
     "报出值": "reportValue",
     "判定": "verdict",
+    # 「计算结果」必须整段匹配：若走 _to_english_id，子串「结果」会误映射成 result，与单列「结果」混淆
+    "计算结果": "computedResult",
     "结果": "result",
     "测量值": "measureValue",
     "真实长度": "realLength",
     "测量长度": "measureLength",
+    "影增器": "imageIntensifier",
+    "平板": "flatPanel",
 }
 
 _UNDERSCORE_LABEL_MAP = {
+    "environmentTempC": "℃",
+    "environmentHumidity": "%RH",
     "kv": "kV",
     "ma": "mA",
     "ww": "WW",
@@ -154,10 +179,22 @@ _UNDERSCORE_LABEL_MAP = {
     "roi": "ROI",
     "reportValue": "报出值",
     "verdict": "判定",
+    "computedResult": "计算结果",
     "result": "结果",
     "measureValue": "测量值",
     "realLength": "真实长度",
     "measureLength": "测量长度",
+    "imageIntensifier": "影增器",
+    "flatPanel": "平板",
+}
+
+# KAP 指示偏离：同一格内多单位勾选（mGycm^2 / mGym^2 / μGym^2 / μGycm^2）合并为单选
+_KAP_AREA_UNIT_LABELS = frozenset({"mGycm^2", "mGym^2", "μGym^2", "μGycm^2"})
+_KAP_AREA_LABEL_TO_VALUE = {
+    "mGycm^2": "mGy_cm2",
+    "mGym^2": "mGy_m2",
+    "μGym^2": "uGy_m2",
+    "μGycm^2": "uGy_cm2",
 }
 
 _SUBMIT_BUCKET_ORDER = {
@@ -168,6 +205,92 @@ _SUBMIT_BUCKET_ORDER = {
     "testResult": 4,
     "signatures": 5,
 }
+
+# visibleWhen 与 Flutter FieldDef / ExpressionEngine 对齐（与「勾选控件配置」不是同一概念）：
+# - type==boolean：Checkbox 存 true/false；被其控制的字段写 controllerId == true / == false（字面量无引号）。
+#   普通勾选仅作输入时不要在勾选字段上写 visibleWhen；只有要「控制别的字段显隐」时，才在「被控字段」上写。
+# - type==radio + enum（如 yesNo、commissionOrgMode）：存枚举 value 字符串；被控字段写 == 'yes'、== 'customCommission' 等。
+# - 勿用 == 1 / == 0 代替 boolean（与 BooleanFieldWidget 的 bool 值不一致）。
+_VISIBLE_WHEN_KERMA_MAX_HIGH_SECTION = "hasAec == true"
+_VISIBLE_WHEN_KERMA_MAX_HIGH_FIELD = "hasHighDoseMode == true"
+# 委托单位名称：互斥合并后为 radio(enumRef=commissionOrgMode)，选「委托单位」时为 customCommission。
+_VISIBLE_WHEN_COMMISSION_ORG_NAME = "commissionOrgMode == 'customCommission'"
+
+
+def _field_is_commission_organization_name(field: Dict[str, Any]) -> bool:
+    """委托单位名称输入（非联系人/电话）。"""
+    if not isinstance(field, dict):
+        return False
+    fid = str(field.get("id") or "")
+    if fid in {"commissionname", "commissionName", "commissionOrganization"}:
+        return True
+    if "委托单位名称" in fid and "联系人" not in fid:
+        return True
+    src = field.get("source") if isinstance(field.get("source"), dict) else {}
+    sp = str(src.get("submitPath") or "")
+    if sp.endswith(("commissionname", "commissionName", "commissionOrganization")):
+        return True
+    hk = str(src.get("hierarchyKey") or "")
+    if "委托单位名称" in hk and "联系人" not in hk and "电话" not in hk:
+        return True
+    label = str(field.get("label") or "")
+    if "委托单位名称" in label and "联系人" not in label and "电话" not in label:
+        return True
+    return False
+
+
+def _basic_info_commission_visibility_controllers(
+    basic_step: Dict[str, Any],
+) -> Tuple[bool, str]:
+    """
+    返回 (是否存在 commissionOrgMode radio, 同受检单位 boolean 的字段 id)。
+    合并 radio 后通常仅有前者；未合并模板可能仍有后者。
+    """
+    has_radio = False
+    same_inspection_bool_id = ""
+    for sec in basic_step.get("sections", []):
+        if not isinstance(sec, dict):
+            continue
+        for f in sec.get("fields", []):
+            if not isinstance(f, dict):
+                continue
+            fid = str(f.get("id") or "")
+            ft = str(f.get("type") or "").lower()
+            if fid == "commissionOrgMode" and ft == "radio":
+                has_radio = True
+            if ft == "boolean":
+                src = f.get("source") if isinstance(f.get("source"), dict) else {}
+                hk = str(src.get("hierarchyKey") or "")
+                lb = str(f.get("label") or "").strip()
+                if fid == "委托单位_同受检单位" or "委托单位_同受检单位" in hk:
+                    same_inspection_bool_id = fid
+                elif lb == "同受检单位" and "委托单位" in fid:
+                    same_inspection_bool_id = fid
+    return has_radio, same_inspection_bool_id
+
+
+def _apply_commission_organization_name_visibility(steps: List[Dict[str, Any]]) -> None:
+    """委托单位名称：同受检单位时隐藏，选委托单位时显示。强制覆盖 visibleWhen 以免模板旧值导致一直隐藏。"""
+    basic = next((s for s in steps if isinstance(s, dict) and str(s.get("id") or "") == "step_basic_info"), None)
+    if not isinstance(basic, dict):
+        return
+    has_radio, same_bool_id = _basic_info_commission_visibility_controllers(basic)
+    if not has_radio and not same_bool_id:
+        return
+    expr = ""
+    if has_radio:
+        expr = _VISIBLE_WHEN_COMMISSION_ORG_NAME
+    elif same_bool_id:
+        # boolean：勾选「同受检单位」为 true 时隐藏名称 → 名称在 false 时显示
+        expr = f"{same_bool_id} == false"
+    if not expr:
+        return
+    for sec in basic.get("sections", []):
+        if not isinstance(sec, dict):
+            continue
+        for field in sec.get("fields", []):
+            if isinstance(field, dict) and _field_is_commission_organization_name(field):
+                field["visibleWhen"] = expr
 
 
 def _normalize_brackets_in_segment(text: str) -> str:
@@ -192,6 +315,32 @@ def _normalize_brackets_in_segment(text: str) -> str:
     elif right_count > left_count:
         s = f"{'(' * (right_count - left_count)}{s}"
     return s.strip()
+
+
+def _pick_hierarchy_underscore_key(label_key: str, raw_key: str) -> str:
+    """
+    下划线分层键：label 与 rawId（placeholder/title）可能一长一短，
+    优先取分段更多、更长的路径，避免「高对比…_状态_影增器」被截成「…_状态」导致 id 误为 status。
+    """
+    lk = str(label_key or "").strip()
+    rk = str(raw_key or "").strip()
+    has_l = "_" in lk
+    has_r = "_" in rk
+    if not has_l and not has_r:
+        return lk or rk
+    if has_l and not has_r:
+        return lk
+    if has_r and not has_l:
+        return rk
+    if rk.count("_") > lk.count("_"):
+        return rk
+    if lk.count("_") > rk.count("_"):
+        return lk
+    if len(rk) > len(lk) + 3:
+        return rk
+    if len(lk) > len(rk) + 3:
+        return lk
+    return lk
 
 
 def normalize_field_text_by_underscore_rules(text: str) -> str:
@@ -225,7 +374,15 @@ def _assign_submit_bucket(field_obj: Dict[str, Any]) -> Dict[str, str]:
     label = str(field_obj.get("label") or "")
     fid = str(field_obj.get("id") or "")
     ft = str(field_obj.get("type") or "").lower()
-    haystack = f"{label}|{fid}"
+    src0 = field_obj.get("source") if isinstance(field_obj.get("source"), dict) else {}
+    hierarchy_key = str(src0.get("hierarchyKey") or "")
+    haystack = f"{label}|{fid}|{hierarchy_key}"
+
+    # 与 inspection_submit_placeholder_maps / 报告回填一致：温湿度走 testResult.temperature、humidity
+    if fid == "environmentTempC":
+        return {"bucket": "testResult", "path": "testResult.temperature"}
+    if fid == "environmentHumidity":
+        return {"bucket": "testResult", "path": "testResult.humidity"}
 
     # signatures: 指定三项 + 所有签名语义字段
     if _contains_any(haystack, ("检测员", "受检单位陪同人", "校核员及校核日期")) or ft == "signature":
@@ -243,8 +400,10 @@ def _assign_submit_bucket(field_obj: Dict[str, Any]) -> Dict[str, str]:
     if _contains_any(haystack, ("受检单位", "委托单位", "受检单位地址", "检测依据", "联系人", "电话", "检测类型")):
         return {"bucket": "hospitalInfo", "path": f"hospitalInfo.{fid}"}
 
-    # equipmentInfo
+    # equipmentInfo（设备所在场所统一 equipmentInfo.location，与回填 _inject_hospital_equipment_cn_aliases 一致）
     if _contains_any(haystack, ("设备型号", "额定参数", "设备名称", "设备编号", "设备所在场所", "生产厂家")):
+        if _contains_any(haystack, ("设备所在场所",)):
+            return {"bucket": "equipmentInfo", "path": "equipmentInfo.location"}
         return {"bucket": "equipmentInfo", "path": f"equipmentInfo.{fid}"}
 
     # 默认归 testResult
@@ -302,11 +461,19 @@ def _underscore_stable_slug(label: str) -> str:
     """
     下划线分层里用作 step/section 的 id：优先 ASCII slug；纯中文等会塌成 id_/空时，
     对完整 label 做稳定哈希，使「前缀_字段」中每一层前缀互不合并。
+
+    含中文的路径若仅用 ASCII 抽槽，常会只剩 mgy/min 等单位片段，导致「典型值」与「最大」
+    等不同表头被误合并为同一 step/sec（例如 step_mgy_min / sec_mgy_min），故含 CJK 时一律
+    以完整字符串哈希为 id，不再采用抽槽结果。
     """
-    slug = _slug_ascii(label, "")
+    text = str(label or "").strip()
+    if re.search(r"[\u4e00-\u9fff]", text):
+        h = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+        return f"u{h}"
+    slug = _slug_ascii(text, "")
     if slug and slug != "id_" and len(slug) >= 2:
         return slug
-    h = hashlib.sha256((label or "").encode("utf-8")).hexdigest()[:12]
+    h = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
     return f"u{h}"
 
 
@@ -417,10 +584,287 @@ def _pick_unit(label: str) -> str:
     return ""
 
 
+# WS76 透视/DSA 原始记录：下划线首段为「检测大项」时统一归入质控步，避免每个大项独占一个 step_*。
+_QC_INS_EXCLUDE_FIRST_SEG = (
+    "委托",
+    "受检单位",
+    "设备型号",
+    "设备名称",
+    "设备编号",
+    "生产厂家",
+    "额定参数",
+    "设备所在",
+    "环境温度",
+    "环境湿度",
+    "检测日期",
+    "检测类型",
+    "检测仪器",
+    "医院",
+    "报告信息",
+    "综合结论",
+    "判定",
+    "合格",
+)
+_QC_INS_MARKERS_IN_FIRST_SEG = (
+    "比释动能率",
+    "分辨力",
+    "入射屏前空气比释动能率",
+    "自动亮度控制",
+    "周围剂量当量率",
+    "透视防护区",
+    "DSA动态范围",
+    "DSA对比灵敏度",
+    "以下仅为DSA",
+    "伪影",
+    "减影中是否有",
+)
+_SHORT_QC_HEADS = frozenset({"伪影"})
+
+# 编辑器常把 CT/WS521 分项拆成「一步」；标题较短时不满足 WS76 透视首段>=10 字规则，须显式并入质控步。
+_STEP_TITLES_ALWAYS_MERGE_TO_QC = frozenset(
+    {
+        "图像均匀性",
+        "测距误差",
+        "KAP指示偏离",
+    }
+)
+
+
+def _orphan_step_sections_only_test_result(st: Dict[str, Any]) -> bool:
+    """未在标题白名单时：仅当该步内各栏位均为 testResult（且无 matrix）时，视为质控子项，可并入 step_qc_items。"""
+    secs = st.get("sections")
+    if not isinstance(secs, list) or not secs:
+        return False
+    saw_field = False
+    for sec in secs:
+        if not isinstance(sec, dict):
+            continue
+        if isinstance(sec.get("matrix"), dict) and sec.get("matrix"):
+            return False
+        for fld in sec.get("fields") or []:
+            if not isinstance(fld, dict):
+                continue
+            if str(fld.get("type") or "").lower() == "signature":
+                return False
+            inner = fld.get("fields")
+            if isinstance(inner, list) and inner:
+                for sub in inner:
+                    if not isinstance(sub, dict):
+                        continue
+                    if str(sub.get("type") or "").lower() == "signature":
+                        return False
+                    src = sub.get("source") if isinstance(sub.get("source"), dict) else {}
+                    b = str(src.get("submitBucket") or "").strip()
+                    if not b or b != "testResult":
+                        return False
+                    saw_field = True
+                continue
+            src = fld.get("source") if isinstance(fld.get("source"), dict) else {}
+            b = str(src.get("submitBucket") or "").strip()
+            if not b or b != "testResult":
+                return False
+            saw_field = True
+    return saw_field
+
+
+def _underscore_first_segment_is_ws76_style_inspection_item(seg: str) -> bool:
+    s = str(seg or "").strip()
+    if not s:
+        return False
+    if s in _SHORT_QC_HEADS:
+        return True
+    if len(s) < 10:
+        return False
+    if any(x in s for x in _QC_INS_EXCLUDE_FIRST_SEG):
+        return False
+    if any(m in s for m in _QC_INS_MARKERS_IN_FIRST_SEG):
+        return True
+    if s.startswith("DSA") and len(s) <= 24:
+        return True
+    return False
+
+
+def _qc_semantic_rank_for_anchor_text(anchor: str) -> int:
+    """
+    质控步内「大项」阅读顺序：与 WS76 透视原始记录 PDF 常见栏目一致；未命中则 9000 退化为坐标排序。
+    """
+    s = str(anchor or "").strip()
+    if not s:
+        return 9000
+    tiers: List[int] = []
+    if "典型值" in s and "比释动能" in s:
+        tiers.append(10)
+    if "最大" in s and "比释动能" in s and "透视" in s:
+        tiers.append(20)
+    if ("高对比" in s and "分辨" in s) or "高对比度分辨力" in s:
+        tiers.append(30)
+    if ("低对比" in s and "分辨" in s) or "低对比度分辨力" in s:
+        tiers.append(40)
+    if "入射屏前空气比释动能率" in s or ("入射屏前" in s and "比释动能" in s):
+        tiers.append(50)
+    if "自动亮度" in s:
+        tiers.append(60)
+    if "透视防护区" in s or "周围剂量当量率" in s:
+        tiers.append(70)
+    # 防护区逐点表格行：标题常为「床侧…术者位…」，不含完整栏目名
+    if ("术者位" in s or "球管中心" in s) and "床侧" in s:
+        tiers.append(70)
+    if "以下仅为DSA" in s:
+        tiers.append(75)
+    if "DSA动态范围" in s:
+        tiers.append(80)
+    if "DSA对比灵敏度" in s:
+        tiers.append(90)
+    # 避免「帧/s 伪影_检测结果」等 DSA 子字段名命中泛化「伪影」栏
+    if "伪影" in s and ("减影" in s or "明显" in s or "是否有" in s or s.strip() == "伪影"):
+        tiers.append(100)
+    # WS521 CT / JS-117 等：分项标题短，不参与 WS76 透视长标题启发式，单独给序以便并入质控步与节内排序。
+    if "图像均匀性" in s:
+        tiers.append(200)
+    if "测距误差" in s or ("测距" in s and "误差" in s):
+        tiers.append(201)
+    if ("KAP" in s or "kap" in s.lower()) and ("指示" in s or "偏离" in s or "面积" in s):
+        tiers.append(202)
+    return min(tiers) if tiers else 9000
+
+
+def _first_segment_from_underscore_label(label: str) -> str:
+    nk = normalize_field_text_by_underscore_rules(str(label or ""))
+    if "_" not in nk:
+        return ""
+    return nk.split("_")[0]
+
+
+def _section_qc_semantic_rank(section: Dict[str, Any]) -> int:
+    """从节标题、matrix 行、字段下划线首段推断最小语义序。"""
+    if not isinstance(section, dict):
+        return 9000
+    candidates: List[str] = []
+    title = str(section.get("title") or "").strip()
+    if title:
+        candidates.append(title)
+    sid = str(section.get("id") or "")
+    if "sv_h" in sid.lower():
+        candidates.append("透视防护区检测平面上周围剂量当量率")
+    if _section_is_matrix_like(section):
+        m = section.get("matrix") if isinstance(section.get("matrix"), dict) else {}
+        for row in m.get("rows") or []:
+            if not isinstance(row, dict):
+                continue
+            hdr = row.get("headers") if isinstance(row.get("headers"), dict) else {}
+            ii = str(hdr.get("inspectionItem") or "").strip()
+            if ii:
+                candidates.append(ii)
+    for f in section.get("fields") or []:
+        if not isinstance(f, dict):
+            continue
+        src = f.get("source") if isinstance(f.get("source"), dict) else {}
+        hk = str(src.get("hierarchyKey") or "").strip()
+        if hk:
+            fs0 = _first_segment_from_underscore_label(hk)
+            if fs0:
+                candidates.append(fs0)
+        lab = str(f.get("label") or "")
+        fs = _first_segment_from_underscore_label(lab)
+        if fs:
+            candidates.append(fs)
+        elif lab:
+            candidates.append(lab)
+    ranks = [_qc_semantic_rank_for_anchor_text(c) for c in candidates if c]
+    known = [r for r in ranks if r < 9000]
+    if not known:
+        return 9000
+    # 仅「典型值」与「最大」两栏字段误入同一节时取较晚栏位；其它大项仍取 min，避免 DSA 节因个别伪影相关文案被抬到伪影层之后
+    dose_tiers = sorted({t for t in known if t in (10, 20)})
+    if len(dose_tiers) >= 2:
+        return max(dose_tiers)
+    if dose_tiers:
+        return dose_tiers[0]
+    return min(known)
+
+
+def _section_order_key(step_id: str, section: Dict[str, Any], stable_idx: int) -> Tuple[int, int, float, float, int]:
+    pyx = _section_min_pyx_for_sort(section)
+    rk = _section_qc_semantic_rank(section) if step_id == "step_qc_items" else 0
+    return (rk, pyx[0], pyx[1], pyx[2], stable_idx)
+
+
+def _consolidate_orphan_inspection_steps(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    将误生成的「一检测大项一步」合并回 step_qc_items（兼容旧导出）；正文结构以质控步 + 语义序为准。
+    """
+    steps = payload.get("steps")
+    if not isinstance(steps, list) or not steps:
+        return payload
+    fixed = frozenset({"step_basic_info", "step_instruments", "step_qc_items", "step_judgement", "step_signature"})
+    qc_step: Dict[str, Any] | None = None
+    out: List[Dict[str, Any]] = []
+    orphan_sections: List[Dict[str, Any]] = []
+
+    for st in steps:
+        if not isinstance(st, dict):
+            continue
+        sid = str(st.get("id") or "")
+        if sid == "step_qc_items":
+            qc_step = st
+            out.append(st)
+            continue
+        if sid in fixed:
+            out.append(st)
+            continue
+        st_title = str(st.get("title") or "").strip()
+        merge = (
+            _underscore_first_segment_is_ws76_style_inspection_item(st_title)
+            or _qc_semantic_rank_for_anchor_text(st_title) < 9000
+            or st_title in _STEP_TITLES_ALWAYS_MERGE_TO_QC
+            or (
+                bool(re.fullmatch(r"step_u[0-9a-f]{6,32}", sid, re.I))
+                and _orphan_step_sections_only_test_result(st)
+            )
+        )
+        if merge:
+            secs = st.get("sections") if isinstance(st.get("sections"), list) else []
+            for sec in secs:
+                if not isinstance(sec, dict):
+                    continue
+                sec_out = copy.deepcopy(sec)
+                subt = str(sec_out.get("title") or "").strip()
+                if st_title:
+                    if subt and st_title not in subt:
+                        sec_out["title"] = f"{st_title} / {subt}"
+                    elif not subt:
+                        sec_out["title"] = st_title
+                orphan_sections.append(sec_out)
+            continue
+        out.append(st)
+
+    if orphan_sections:
+        if qc_step is None:
+            ins_idx = next((i for i, s in enumerate(out) if isinstance(s, dict) and str(s.get("id") or "") == "step_instruments"), -1)
+            qc_step = {"id": "step_qc_items", "title": "质控检测项目", "sections": []}
+            insert_at = ins_idx + 1 if ins_idx >= 0 else len(out)
+            out.insert(insert_at, qc_step)
+        qsecs = qc_step.get("sections")
+        if not isinstance(qsecs, list):
+            qsecs = []
+            qc_step["sections"] = qsecs
+        qsecs.extend(orphan_sections)
+
+    payload["steps"] = out
+    return payload
+
+
 def _classify_group(label: str, field_type: str) -> Tuple[str, str, str, str, str]:
     title = label or ""
     if field_type == "signature" or any(k in title for k in _SIGNATURE_KEYWORDS):
         return ("step_signature", "综合结论与签字", "sec_signature", "签字与结论", "form")
+    # 含下划线的标题：与 build 阶段 hierarchyKey 缺失时兜底一致，优先走下划线分层，避免落进泛化「质控检测项目」
+    nt = normalize_field_text_by_underscore_rules(str(title).strip())
+    if "_" in nt:
+        uh = _classify_by_underscore(nt)
+        if uh is not None:
+            a, b, c, d = uh
+            return (a, b, c, d, "form")
     # 检测仪器优先：
     # - 日期/有效期类字段落到“检测仪器有效期”
     # - 其余仪器字段保留“检测仪器清单”
@@ -441,7 +885,10 @@ def _classify_group(label: str, field_type: str) -> Tuple[str, str, str, str, st
         return ("step_qc_items", "质控检测项目", "sec_image_uniformity", "图像均匀性", "form")
     if any(k in title for k in ("测距误差", "测距", "距离误差")):
         return ("step_qc_items", "质控检测项目", "sec_distance_error", "测距误差", "form")
-    if any(k in title for k in ("KAP", "ABC", "剂量", "分辨力", "误差", "比释动能率", "入射屏前空气比释动能率")):
+    if any(k in title for k in ("KAP", "ABC", "分辨力", "误差")):
+        return ("step_qc_items", "质控检测项目", "sec_qc_items", "检测项目", "form")
+    # 「剂量/比释动能率」等字样在长表头里极常见；仅当标题整体较短时才当作泛化质控项，避免整页透视表堆进同一节
+    if any(k in title for k in ("剂量", "比释动能率", "入射屏前空气比释动能率")) and len(str(title).strip()) < 36:
         return ("step_qc_items", "质控检测项目", "sec_qc_items", "检测项目", "form")
     if any(k in title for k in ("温度", "湿度", "环境")):
         return ("step_basic_info", "基本信息", "sec_environment", "环境条件", "form")
@@ -474,8 +921,10 @@ def _classify_by_underscore(raw_key: str) -> Tuple[str, str, str, str] | None:
     # 检测仪器分层强制落到检测仪器步骤
     if "检测仪器" in key or head in {"instrument", "instruments"}:
         return ("step_instruments", "检测仪器", "sec_instruments", "检测仪器")
-    # 委托单位互斥勾选不拆独立层级，固定并入基本信息-医院信息
-    if key.startswith("委托单位_") and any(token in key for token in ("同受检单位", "委托单位")):
+    # 委托单位_*（互斥勾选项、委托单位名称等）统一并入基本信息-医院信息。
+    # 勿用「委托单位」子串匹配：否则「委托单位_委托单位名称」等虽能命中，但条件易误读；
+    # 且与「同受检单位/委托单位」两枚勾选项的意图一致——全部落在医院信息节。
+    if key.startswith("委托单位_"):
         return ("step_basic_info", "基本信息", "sec_hospital_info", "医院信息")
     # 检测日期（含年月日分段）统一归入基本信息/报告信息
     if any(token in key for token in ("检测日期", "testdate", "test_date")) or (
@@ -485,6 +934,20 @@ def _classify_by_underscore(raw_key: str) -> Tuple[str, str, str, str] | None:
     # 设备信息关键项（含额定参数）固定归到基本信息/设备信息
     if any(token in key for token in ("设备型号", "额定参数", "设备名称", "设备编号", "设备所在场所", "生产厂家")):
         return ("step_basic_info", "基本信息", "sec_device_info", "设备信息")
+    # 环境温度/湿度：常见为表头「环境温度/湿度」+ 子字段（°C、%RH），勿拆成独立 step
+    env_anchor = f"{prefix}|{key}"
+    if any(t in env_anchor for t in ("环境温度", "环境湿度")) or (
+        "温度" in prefix and "湿度" in prefix.replace("/", "").replace("／", "")
+    ):
+        return ("step_basic_info", "基本信息", "sec_environment", "环境条件")
+    # 检测类型：状态/验收勾选项共享前缀「检测类型」，并入基本信息/报告信息
+    if "检测类型" in prefix or "检测类型" in key:
+        return ("step_basic_info", "基本信息", "sec_report_info", "报告信息")
+    # 透视/DSA 检测大项：首段即栏目名，统一并入「质控检测项目」，再按语义序 + 坐标排节内顺序
+    if len(parts) >= 2 and _underscore_first_segment_is_ws76_style_inspection_item(parts[0]):
+        section_slug = _underscore_stable_slug(prefix)
+        sec_id = f"sec_{section_slug}"
+        return ("step_qc_items", "质控检测项目", sec_id, section_display)
     # 下划线层级足够明确（>=3 段）时，优先按层级分组：
     # A_B_C -> step=A, section=B
     # A_B_C_D -> step=A, section=B / C
@@ -497,8 +960,11 @@ def _classify_by_underscore(raw_key: str) -> Tuple[str, str, str, str] | None:
         sec_title = section_display
         return step_id, step_title, sec_id, sec_title
 
-    # 质控检测类关键字统一归到 step_qc_items（仅低层级命名时生效）
-    if (
+    # 质控检测类关键字：仅命中「短表头 / 典型质控小节」时并入 step_qc_items。
+    # 不在此用「比释动能率/剂量」等做子串匹配：长中文表头（透视原始记录等）两段命名会误进泛化质控步。
+    p0 = parts[0]
+    long_zh_header = bool(re.search(r"[\u4e00-\u9fff]", p0)) and len(p0) >= 16
+    if not long_zh_header and (
         head in {"kerma", "contrast", "uniformity", "distance", "kap", "abc", "dose"}
         or any(
             token in joined
@@ -509,9 +975,6 @@ def _classify_by_underscore(raw_key: str) -> Tuple[str, str, str, str] | None:
                 "测距",
                 "kap",
                 "abc",
-                "剂量",
-                "比释动能率",
-                "入射屏前空气比释动能率",
                 "kerma",
                 "contrast",
                 "uniformity",
@@ -541,9 +1004,16 @@ def _underscore_field_id(hierarchy_key: str, fallback_id: str) -> str:
     if len(parts) < 2:
         return fallback_id
     suffix = parts[-1]
-    mapped = _UNDERSCORE_SUFFIX_MAP.get(suffix, "")
+    mapped = _UNDERSCORE_SUFFIX_MAP.get(suffix, "") or _UNDERSCORE_SUFFIX_MAP.get(suffix.lower(), "")
     if not mapped:
+        # 「…_状态」仅两段时，suffix「状态」会经 _TERM_MAP 变成全局 status，与检测类型等冲突
+        if suffix == "状态" and len(parts) == 2:
+            base_slug = _underscore_stable_slug(parts[0])
+            return _camel_case(f"fieldState_{base_slug}", fallback_id)
         mapped = _to_english_id(suffix, suffix, fallback_id)
+    # 映射表已为合法 camelCase id 时勿再经 _slug_ascii，否则会破坏大小写（如 environmentTempC）。
+    if mapped and re.match(r"^[a-z][A-Za-z0-9]*$", str(mapped)):
+        return str(mapped)
     out = _camel_case(mapped, fallback_id)
     return out or fallback_id
 
@@ -553,7 +1023,7 @@ def _underscore_field_label(hierarchy_key: str, fallback_label: str) -> str:
     if len(parts) < 2:
         return normalize_field_text_by_underscore_rules(fallback_label) or fallback_label
     suffix = parts[-1]
-    mapped = _UNDERSCORE_SUFFIX_MAP.get(suffix, "")
+    mapped = _UNDERSCORE_SUFFIX_MAP.get(suffix, "") or _UNDERSCORE_SUFFIX_MAP.get(suffix.lower(), "")
     if not mapped:
         mapped = _to_english_id(suffix, suffix, _camel_case(suffix, "value"))
     display = _UNDERSCORE_LABEL_MAP.get(mapped, "")
@@ -572,6 +1042,29 @@ def _ensure_pdf_field_id(raw: str, default_num: int = 900000) -> str:
     return ""
 
 
+def _best_semantic_underscore_key_from_pdf_item(item: Dict[str, Any], idx: int) -> str:
+    """
+    分层用：在 title / placeholder / id 中取「下划线分段最多、字符串最长」的一条。
+    避免 id 仅为 f 序号时盖住带完整语义路径的 title，导致互斥勾选落到 sec_qc_items 等泛化层级。
+    """
+    candidates: List[str] = []
+    for key in ("title", "placeholder", "id"):
+        raw = item.get(key)
+        if raw is None:
+            continue
+        s = normalize_field_text_by_underscore_rules(str(raw).strip())
+        if not s:
+            continue
+        if key == "id" and re.match(r"^f\d+$", s, re.I):
+            continue
+        candidates.append(s)
+    if not candidates:
+        return normalize_field_text_by_underscore_rules(
+            str(item.get("title") or item.get("placeholder") or item.get("id") or f"字段{idx}").strip()
+        )
+    return max(candidates, key=lambda t: (t.count("_"), len(t)))
+
+
 def _normalize_pdf_field(item: Dict[str, Any], idx: int) -> Dict[str, Any]:
     page = int(item.get("page") or 1)
     x = float(item.get("x") or 0)
@@ -585,7 +1078,7 @@ def _normalize_pdf_field(item: Dict[str, Any], idx: int) -> Dict[str, Any]:
     pdf_field_id = str(item.get("pdfFieldId") or item.get("id") or f"f{idx}").strip()
     if not re.match(r"^f\d+$", pdf_field_id):
         pdf_field_id = f"f{idx}"
-    return {
+    out: Dict[str, Any] = {
         "rawId": source_id,
         "label": label or source_id or f"字段{idx}",
         "fieldType": str(item.get("fieldType") or "text"),
@@ -597,6 +1090,11 @@ def _normalize_pdf_field(item: Dict[str, Any], idx: int) -> Dict[str, Any]:
         "h": h,
         "order": (page, y, x, idx),
     }
+    cp = item.get("checkboxPair")
+    if isinstance(cp, dict) and cp:
+        out["checkboxPair"] = cp
+    out["hierarchyKey"] = _best_semantic_underscore_key_from_pdf_item(item, idx)
+    return out
 
 
 def _strip_coordinate_keys(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -605,6 +1103,9 @@ def _strip_coordinate_keys(payload: Dict[str, Any]) -> Dict[str, Any]:
             field.pop(key, None)
         field.pop("__order", None)
         field.pop("__bbox", None)
+        src = field.get("source")
+        if isinstance(src, dict):
+            src.pop("hierarchyKey", None)
 
     for step in payload.get("steps", []):
         if not isinstance(step, dict):
@@ -632,6 +1133,94 @@ def _strip_coordinate_keys(payload: Dict[str, Any]) -> Dict[str, Any]:
                     if isinstance(cell, dict):
                         _strip_field_obj(cell)
     return payload
+
+
+def _coerce_radio_select_defaults_to_string(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Flutter 侧 radio/select 的 defaultValue 须为字符串；模板或合并若留下 bool 会导致 type cast 失败。"""
+
+    def _fix(field: Dict[str, Any]) -> None:
+        if not isinstance(field, dict):
+            return
+        ft = str(field.get("type") or "").lower()
+        if ft == "table":
+            for col in field.get("columns") or []:
+                if isinstance(col, dict):
+                    _fix(col)
+            return
+        if ft not in ("radio", "select"):
+            return
+        dv = field.get("defaultValue")
+        if dv is None:
+            return
+        if isinstance(dv, bool):
+            er = str(field.get("enumRef") or "")
+            if er == "yesNo":
+                field["defaultValue"] = "yes" if dv else "no"
+            else:
+                field["defaultValue"] = ""
+        elif not isinstance(dv, str):
+            field["defaultValue"] = str(dv)
+
+    for step in payload.get("steps", []):
+        if not isinstance(step, dict):
+            continue
+        for section in step.get("sections", []):
+            if not isinstance(section, dict):
+                continue
+            for field in section.get("fields", []):
+                if isinstance(field, dict):
+                    _fix(field)
+            matrix = section.get("matrix")
+            if not isinstance(matrix, dict):
+                continue
+            for field in matrix.get("headerFields", []):
+                if isinstance(field, dict):
+                    _fix(field)
+            for row in matrix.get("rows", []):
+                if not isinstance(row, dict):
+                    continue
+                cells = row.get("cells")
+                if not isinstance(cells, dict):
+                    continue
+                for cell in cells.values():
+                    if isinstance(cell, dict):
+                        _fix(cell)
+    return payload
+
+
+def _field_order_pyx(field: Dict[str, Any]) -> Tuple[int, float, float]:
+    """字段在 PDF 上的阅读序键：页码、y（上→下）、x（左→右）。"""
+    o = field.get("__order") if isinstance(field.get("__order"), tuple) else (999, 999999.0, 999999.0, 999999)
+    try:
+        return (int(o[0]), float(o[1]), float(o[2]))
+    except (TypeError, ValueError, IndexError):
+        return (999, 999999.0, 999999.0)
+
+
+def _section_is_matrix_like(section: Dict[str, Any]) -> bool:
+    if not isinstance(section, dict):
+        return False
+    if str(section.get("layout") or "").lower() == "matrixtable":
+        return True
+    return isinstance(section.get("matrix"), dict)
+
+
+def _section_min_pyx_for_sort(section: Dict[str, Any]) -> Tuple[int, float, float]:
+    """用于区块/初始组装的阅读序锚点：form 取 fields；matrix 取 headerFields。"""
+    if not isinstance(section, dict):
+        return (999, 999999.0, 999999.0)
+    if _section_is_matrix_like(section):
+        m = section.get("matrix") if isinstance(section.get("matrix"), dict) else {}
+        hf = m.get("headerFields") if isinstance(m.get("headerFields"), list) else []
+        pyx_m = [_field_order_pyx(f) for f in hf if isinstance(f, dict)]
+        if pyx_m:
+            return min(pyx_m)
+    flds = section.get("fields") if isinstance(section.get("fields"), list) else []
+    best = (999, 999999.0, 999999.0)
+    for f in flds:
+        if isinstance(f, dict):
+            best = min(best, _field_order_pyx(f))
+    return best
 
 
 def _sort_fields_by_coordinate_order(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -668,16 +1257,19 @@ def _sort_fields_by_coordinate_order(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(steps, list):
         return payload
 
-    step_min_order: Dict[int, Tuple[int, int, float]] = {}
+    step_min_order: Dict[int, Tuple[int, float, float]] = {}
     for step_idx, step in enumerate(steps):
         if not isinstance(step, dict):
             continue
         sections = step.get("sections")
         if not isinstance(sections, list):
             continue
-        section_min_order: Dict[int, Tuple[int, int, float]] = {}
+        section_min_order: Dict[int, Tuple[int, float, float]] = {}
         for sec_idx, section in enumerate(sections):
             if not isinstance(section, dict):
+                continue
+            if _section_is_matrix_like(section):
+                section_min_order[sec_idx] = _section_min_pyx_for_sort(section)
                 continue
             fields = section.get("fields")
             if not isinstance(fields, list):
@@ -686,36 +1278,51 @@ def _sort_fields_by_coordinate_order(payload: Dict[str, Any]) -> Dict[str, Any]:
             ordered_with_idx = sorted(
                 enumerate(fields),
                 key=lambda fi: (
-                    # 坐标排序：页码 -> 行(y 容差 10) -> x
-                    (fi[1].get("__order") or (999, 999999, 999999, 999999))[0] if isinstance(fi[1], dict) else 999,
+                    # 坐标排序：页码 -> 行(y 容差) -> 精细 y -> x -> 稳定序
+                    (_field_order_pyx(fi[1])[0] if isinstance(fi[1], dict) else 999),
                     row_index_map.get(fi[0], 999999),
-                    (fi[1].get("__order") or (999, 999999, 999999, 999999))[2] if isinstance(fi[1], dict) else 999999,
+                    (_field_order_pyx(fi[1])[1] if isinstance(fi[1], dict) else 999999.0),
+                    (_field_order_pyx(fi[1])[2] if isinstance(fi[1], dict) else 999999.0),
                     fi[0],
                 ),
             )
             section["fields"] = [x[1] for x in ordered_with_idx]
-            if ordered_with_idx:
-                first_field = ordered_with_idx[0][1]
-                first_order = first_field.get("__order") if isinstance(first_field, dict) else None
-                if isinstance(first_order, tuple) and len(first_order) >= 3:
-                    page_val = int(first_order[0])
-                    row_val = row_index_map.get(ordered_with_idx[0][0], 999999)
-                    x_val = float(first_order[2])
-                    section_min_order[sec_idx] = (page_val, row_val, x_val)
+            pyx_list = [_field_order_pyx(f) for f in section["fields"] if isinstance(f, dict)]
+            if pyx_list:
+                section_min_order[sec_idx] = min(pyx_list)
 
-        # section 顺序也按坐标：页码 -> y行 -> x
+        # section 顺序：按本节内所有字段的最早 (页,y,x)，贴近 PDF 从上到下的区块顺序
         if section_min_order:
-            steps[step_idx]["sections"] = [
-                sec
-                for _, sec in sorted(
-                    enumerate(steps[step_idx].get("sections", [])),
-                    key=lambda it: section_min_order.get(it[0], (999, 999999, 999999.0)),
-                )
-            ]
-            first_sec_order = min(section_min_order.values(), key=lambda v: (v[0], v[1], v[2]))
-            step_min_order[step_idx] = first_sec_order
+            step_id_cur = str(steps[step_idx].get("id") or "")
 
-    # step 顺序按首个 section 坐标排序（签字步骤仍由后续 _force_signature_step_last 兜底放末尾）
+            def _sec_sort_key(it: Tuple[int, Any]) -> Tuple[int, int, float, float, int]:
+                idx, sec = it
+                base = section_min_order.get(idx, (999, 999999.0, 999999.0))
+                rk = _section_qc_semantic_rank(sec) if step_id_cur == "step_qc_items" else 0
+                return (rk, base[0], base[1], base[2], idx)
+
+            steps[step_idx]["sections"] = [
+                sec for _, sec in sorted(enumerate(steps[step_idx].get("sections", [])), key=_sec_sort_key)
+            ]
+            # step 顺序：本步内全部字段的全局最早坐标（不再只用「第一节首字段」）
+            step_pyx: List[Tuple[int, float, float]] = []
+            for sec in steps[step_idx].get("sections", []):
+                if not isinstance(sec, dict):
+                    continue
+                if _section_is_matrix_like(sec):
+                    m = sec.get("matrix") if isinstance(sec.get("matrix"), dict) else {}
+                    hf = m.get("headerFields") if isinstance(m.get("headerFields"), list) else []
+                    for f in hf:
+                        if isinstance(f, dict):
+                            step_pyx.append(_field_order_pyx(f))
+                    continue
+                for f in sec.get("fields") or []:
+                    if isinstance(f, dict):
+                        step_pyx.append(_field_order_pyx(f))
+            if step_pyx:
+                step_min_order[step_idx] = min(step_pyx)
+
+    # step 顺序按本步内最早字段坐标排序（签字步骤仍由后续 _force_signature_step_last 兜底放末尾）
     if step_min_order:
         payload["steps"] = [
             st
@@ -724,6 +1331,131 @@ def _sort_fields_by_coordinate_order(payload: Dict[str, Any]) -> Dict[str, Any]:
                 key=lambda it: step_min_order.get(it[0], (999, 999999, 999999.0)),
             )
         ]
+    return payload
+
+
+_MUTEX_TABLE_PAIR_KINDS = frozenset({"dose_rate_unit", "自动/手动", "是/否", "有/无"})
+
+
+def _is_mutex_table_check_field(f: Dict[str, Any]) -> bool:
+    if not isinstance(f, dict):
+        return False
+    src = f.get("source") if isinstance(f.get("source"), dict) else {}
+    if str(src.get("anchorType") or "").lower() != "check":
+        return False
+    cp = src.get("checkboxPair")
+    if not isinstance(cp, dict):
+        return False
+    return str(cp.get("pairKind") or "") in _MUTEX_TABLE_PAIR_KINDS
+
+
+def _is_row_content_anchor_field(f: Dict[str, Any]) -> bool:
+    """版式行内用于判断主内容归属哪一节：数值/文本/日期（不含任意勾选/互斥勾选）。"""
+    if not isinstance(f, dict):
+        return False
+    t = str(f.get("type") or "").lower()
+    if t in {"table", "textarea", "signature", "computed", "verdict", "boolean"}:
+        return False
+    if _is_mutex_table_check_field(f):
+        return False
+    return t in {"number", "text", "date", "radio", "select"}
+
+
+def _rehome_mutex_pair_widgets_by_visual_row(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    将「单位 / 控制方式 / 是否」等表格互斥勾选挪到与其同一视觉行、且已有内容输入最多的 section，
+    以便后续在同节内合并为 radio，并与 kV、mA 等同前缀层级对齐。
+    """
+    y_tolerance = 10.0
+    skip_step_ids = frozenset({"step_basic_info", "step_instruments", "step_signature"})
+    steps = payload.get("steps")
+    if not isinstance(steps, list):
+        return payload
+
+    def _ord(ff: Dict[str, Any]) -> Tuple[int, float, float]:
+        o = ff.get("__order") if isinstance(ff.get("__order"), tuple) else (999, 999999.0, 999999.0)
+        try:
+            return (int(o[0]), float(o[1]), float(o[2]))
+        except (TypeError, ValueError, IndexError):
+            return (999, 999999.0, 999999.0)
+
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        if str(step.get("id") or "") in skip_step_ids:
+            continue
+        sections = step.get("sections")
+        if not isinstance(sections, list) or len(sections) < 2:
+            continue
+
+        flat: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+        for sec in sections:
+            if not isinstance(sec, dict):
+                continue
+            fields = sec.get("fields")
+            if not isinstance(fields, list):
+                continue
+            for f in fields:
+                if isinstance(f, dict):
+                    flat.append((sec, f))
+
+        if len(flat) < 2:
+            continue
+
+        flat.sort(key=lambda t: _ord(t[1]))
+        row_id = -1
+        anchor_y: float | None = None
+        indexed: List[Tuple[Dict[str, Any], Dict[str, Any], int]] = []
+        for sec, f in flat:
+            _p, y, _x = _ord(f)
+            if anchor_y is None or abs(y - float(anchor_y)) > y_tolerance:
+                row_id += 1
+                anchor_y = y
+            indexed.append((sec, f, row_id))
+
+        row_groups: Dict[int, List[Tuple[Dict[str, Any], Dict[str, Any]]]] = {}
+        for sec, f, rid in indexed:
+            row_groups.setdefault(rid, []).append((sec, f))
+
+        for _rid, members in row_groups.items():
+            anchor_counts: Dict[str, int] = {}
+            mutex_refs: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+            for sec, f in members:
+                sid = str(sec.get("id") or "")
+                if _is_mutex_table_check_field(f):
+                    mutex_refs.append((sec, f))
+                elif _is_row_content_anchor_field(f):
+                    anchor_counts[sid] = anchor_counts.get(sid, 0) + 1
+
+            if not mutex_refs or not anchor_counts:
+                continue
+
+            best = max(anchor_counts.values())
+            target_candidates = sorted([k for k, v in anchor_counts.items() if v == best])
+            target_sid = target_candidates[0]
+            target_sec = next(
+                (s for s in sections if isinstance(s, dict) and str(s.get("id") or "") == target_sid),
+                None,
+            )
+            if not isinstance(target_sec, dict):
+                continue
+
+            for sec, f in mutex_refs:
+                if str(sec.get("id") or "") == target_sid:
+                    continue
+                fl = sec.get("fields")
+                if not isinstance(fl, list):
+                    continue
+                try:
+                    fl.remove(f)
+                except ValueError:
+                    continue
+                tgt_fields = target_sec.get("fields")
+                if not isinstance(tgt_fields, list):
+                    tgt_fields = []
+                    target_sec["fields"] = tgt_fields
+                tgt_fields.append(f)
+
     return payload
 
 
@@ -801,14 +1533,20 @@ def _apply_width_by_coordinate_layout(payload: Dict[str, Any]) -> Dict[str, Any]
                     row.sort(key=lambda t: t[2])  # x ascending
                     positive_widths = [max(0.0, float(t[3])) for t in row if float(t[3]) > 0]
                     has_real_w = bool(positive_widths)
-                    total_w = sum(positive_widths) if has_real_w else float(len(row))
+                    # 无有效 PDF 宽度时（编辑器导出常无 __bbox 或 w=0）：保留既有 width，勿用 1/n 均分把栏位压得过窄
+                    if not has_real_w:
+                        continue
+                    total_w = sum(positive_widths)
                     if total_w <= 0:
-                        total_w = float(len(row) or 1)
+                        continue
                     for idx, _y, _x, w in row:
                         f = fields[idx]
                         if not isinstance(f, dict):
                             continue
-                        ratio = (float(w) / total_w) if has_real_w and w > 0 else (1.0 / float(len(row) or 1))
+                        wv = float(w)
+                        if wv <= 0:
+                            continue
+                        ratio = wv / total_w
                         f["width"] = _normalize_width_ratio_to_token(ratio)
     return payload
 
@@ -975,7 +1713,7 @@ def _upgrade_sv_h_sections_to_matrix_table(payload: Dict[str, Any]) -> Dict[str,
                     "id": row_id,
                     "headers": {
                         "serialNo": serial_no,
-                        "inspectionItem": "透视防护区检测平面上周围剂量当量率/(μSv/h)",
+                        "inspectionItem": "透视防护区检测平面上周围剂量当量率(μSv/h)",
                         "operatorPosition": operator_position,
                         "heightType": height_type,
                         "point": point,
@@ -990,7 +1728,7 @@ def _upgrade_sv_h_sections_to_matrix_table(payload: Dict[str, Any]) -> Dict[str,
 
         matrix_section = {
             "id": "sec_sv_h_matrix",
-            "title": "透视防护区检测平面上周围剂量当量率/(μSv/h)",
+            "title": "透视防护区检测平面上周围剂量当量率(μSv/h)",
             "layout": "matrixTable",
             "matrix": {
                 "headerFields": header_fields,
@@ -1016,6 +1754,219 @@ def _upgrade_sv_h_sections_to_matrix_table(payload: Dict[str, Any]) -> Dict[str,
         else:
             keep_secs.append(matrix_section)
         step["sections"] = keep_secs
+
+    return payload
+
+
+def _dose_rate_unit_radio_id_from_pair_id(pair_id: str) -> str:
+    m = re.match(r"^mutex_t(\d+)_r(\d+)_c(\d+)_rateUnit$", str(pair_id or "").strip())
+    if m:
+        return _camel_case(f"dose_rate_unit_t{m.group(1)}_r{m.group(2)}_c{m.group(3)}", "doseRateUnitCell")
+    slug = re.sub(r"[^0-9a-zA-Z]+", "_", str(pair_id or "").strip()).strip("_")
+    return _camel_case(slug or "doseRateUnitCell", "doseRateUnitCell")
+
+
+def _radio_label_without_trailing_unit(text: str, options: List[str]) -> str:
+    s = str(text or "").strip()
+    if not s:
+        return "单位"
+    opts = [str(x).strip() for x in options if str(x).strip()]
+    opts.sort(key=len, reverse=True)
+    for u in opts:
+        if s.endswith(u):
+            head = s[: -len(u)].rstrip("_").rstrip("-").strip()
+            return head if head else "单位"
+        suf = "_" + u
+        if s.endswith(suf):
+            head = s[: -len(suf)].strip()
+            return head if head else "单位"
+    return s
+
+
+def _dose_rate_unit_slug_from_checkbox_option(opt: str, field_label: str = "") -> str:
+    """将 checkboxPair.option 或字段 label 规范为 doseRateUnit 枚举 value slug；无法识别则空串。"""
+    raw = str(opt or "").strip()
+    if not raw:
+        raw = str(field_label or "").strip()
+    if not raw:
+        return ""
+    s = raw.strip().lower().replace("／", "/").replace(" ", "").replace("\u00b5", "μ")
+    # 常见 OCR：拉丁 micro 与希腊 mu 混用
+    if "ugy/" in s and "μ" not in s:
+        s = s.replace("ugy/", "μgy/")
+    aliases = {
+        "μgy/s": "uGyPerSec",
+        "μgy/min": "uGyPerMin",
+        "mgy/min": "mGyPerMin",
+    }
+    return aliases.get(s, "")
+
+
+def _field_order_tuple(f: Dict[str, Any]) -> Tuple[int, float, float, int]:
+    o = f.get("__order") if isinstance(f.get("__order"), tuple) else (999, 999999.0, 999999.0, 999999)
+    try:
+        return (int(o[0]), float(o[1]), float(o[2]), int(o[3]) if len(o) > 3 else 999999)
+    except (TypeError, ValueError, IndexError):
+        return (999, 999999.0, 999999.0, 999999)
+
+
+def _merge_dose_rate_unit_checkbox_pairs_to_radio(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    将带 source.checkboxPair（pairKind=dose_rate_unit、同 pairId）的布尔勾选合并为单选。
+    在整步（step）内按 pairId 聚合：避免互斥单位勾被拆到不同 section 后无法成组、残留单独 mGy/min。
+    """
+    steps = payload.get("steps")
+    if not isinstance(steps, list):
+        return payload
+
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        sections = step.get("sections")
+        if not isinstance(sections, list) or not sections:
+            continue
+
+        groups: Dict[str, List[Tuple[Dict[str, Any], Dict[str, Any]]]] = {}
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            fields = section.get("fields")
+            if not isinstance(fields, list):
+                continue
+            for f in fields:
+                if not isinstance(f, dict):
+                    continue
+                if str(f.get("type") or "").lower() != "boolean":
+                    continue
+                src = f.get("source") if isinstance(f.get("source"), dict) else {}
+                if str(src.get("anchorType") or "").lower() != "check":
+                    continue
+                cp = src.get("checkboxPair")
+                if not isinstance(cp, dict):
+                    continue
+                if str(cp.get("pairKind") or "") != "dose_rate_unit":
+                    continue
+                if str(cp.get("mode") or "") != "mutually_exclusive":
+                    continue
+                pid = str(cp.get("pairId") or "").strip()
+                if not pid:
+                    continue
+                groups.setdefault(pid, []).append((section, f))
+
+        for pid, members in groups.items():
+            if len(members) < 2:
+                continue
+
+            members.sort(key=lambda t: _field_order_tuple(t[1]))
+            first_sec, first = members[0]
+            src0 = first.get("source") if isinstance(first.get("source"), dict) else {}
+
+            label_to_slug: Dict[str, str] = {}
+            for _sec, ff in members:
+                sc = ff.get("source") if isinstance(ff.get("source"), dict) else {}
+                cp2 = sc.get("checkboxPair")
+                if not isinstance(cp2, dict):
+                    continue
+                opt_raw = str(cp2.get("option") or "").strip()
+                lb = str(ff.get("label") or "").strip()
+                slug = _dose_rate_unit_slug_from_checkbox_option(opt_raw, lb)
+                if not slug:
+                    continue
+                display_key = opt_raw or lb
+                if display_key:
+                    label_to_slug[display_key] = slug
+
+            if len(set(label_to_slug.values())) < 2:
+                continue
+
+            radio_id = _dose_rate_unit_radio_id_from_pair_id(pid)
+            fl = str(first.get("label") or first.get("id") or "")
+            exp0 = src0.get("checkboxPair")
+            exp_list: List[str] = []
+            if isinstance(exp0, dict):
+                raw_exp = exp0.get("expected")
+                if isinstance(raw_exp, list):
+                    exp_list = [str(x).strip() for x in raw_exp if str(x).strip()]
+            radio_label = _radio_label_without_trailing_unit(fl, list(label_to_slug.keys()) or exp_list)
+
+            picked_default = ""
+            for _sec, ff in members:
+                if not bool(ff.get("defaultValue")):
+                    continue
+                sc = ff.get("source") if isinstance(ff.get("source"), dict) else {}
+                cp2 = sc.get("checkboxPair")
+                if not isinstance(cp2, dict):
+                    continue
+                opt_raw = str(cp2.get("option") or "").strip()
+                lb = str(ff.get("label") or "").strip()
+                slug = _dose_rate_unit_slug_from_checkbox_option(opt_raw, lb)
+                if slug:
+                    picked_default = slug
+                    break
+            if not picked_default:
+                for disp, sl in label_to_slug.items():
+                    if "mgy" in disp.lower() and "min" in disp.lower():
+                        picked_default = sl
+                        break
+            if not picked_default:
+                picked_default = next(iter(label_to_slug.values()), "")
+
+            current_bucket = str(src0.get("submitBucket") or "").strip() or "testResult"
+            submit_path = _replace_submit_path_leaf(
+                str(src0.get("submitPath") or f"{current_bucket}.{radio_id}"),
+                radio_id,
+            )
+            try:
+                page = int(src0.get("page") or 1)
+            except (TypeError, ValueError):
+                page = 1
+            pdf_field_id = str(src0.get("pdfFieldId") or "")
+
+            target_sec = first_sec
+            sid_t = str(target_sec.get("id") or "")
+            radio_field: Dict[str, Any] = {
+                "id": radio_id,
+                "type": "radio",
+                "label": radio_label,
+                "enumRef": "doseRateUnit",
+                "required": bool(first.get("required", False)),
+                "defaultValue": picked_default,
+                "width": "half",
+                "source": {
+                    "pdfFieldId": pdf_field_id,
+                    "page": page,
+                    "anchorType": "check",
+                    "submitBucket": current_bucket,
+                    "submitPath": submit_path,
+                    "key": f"{step.get('id')}.{sid_t}.{radio_id}",
+                    "doseRateUnitPairId": pid,
+                },
+                "__order": first.get("__order", (999, 999999, 999999, 999999)),
+                "__bbox": first.get("__bbox", (0.0, 0.0, 0.0, 0.0)),
+            }
+
+            member_set = {id(ff) for _s, ff in members}
+            for section in sections:
+                if not isinstance(section, dict):
+                    continue
+                flist = section.get("fields")
+                if not isinstance(flist, list):
+                    continue
+                section["fields"] = [x for x in flist if not (isinstance(x, dict) and id(x) in member_set)]
+
+            tgt_fields = target_sec.get("fields")
+            if not isinstance(tgt_fields, list):
+                tgt_fields = []
+                target_sec["fields"] = tgt_fields
+            ro = _field_order_tuple(radio_field)
+            ins_pos = len(tgt_fields)
+            for i, tf in enumerate(tgt_fields):
+                if not isinstance(tf, dict):
+                    continue
+                if _field_order_tuple(tf) > ro:
+                    ins_pos = i
+                    break
+            tgt_fields.insert(ins_pos, radio_field)
 
     return payload
 
@@ -1053,6 +2004,9 @@ def _collapse_mutually_exclusive_checks_to_radio(payload: Dict[str, Any]) -> Dic
                 if not isinstance(f, dict):
                     continue
                 src = f.get("source") if isinstance(f.get("source"), dict) else {}
+                cp_skip = src.get("checkboxPair")
+                if isinstance(cp_skip, dict) and str(cp_skip.get("pairKind") or "") == "dose_rate_unit":
+                    continue
                 anchor = str(src.get("anchorType") or "").lower()
                 if anchor != "check":
                     continue
@@ -1102,6 +2056,8 @@ def _collapse_mutually_exclusive_checks_to_radio(payload: Dict[str, Any]) -> Dic
                         return "controlMode"
                     if lb in {"是", "否", "有", "无"}:
                         return "yesNo"
+                    if lb in _KAP_AREA_UNIT_LABELS:
+                        return "kapAreaProductUnit"
                     if lb.lower() in unit_label_map:
                         return "doseRateUnit"
                     return ""
@@ -1165,10 +2121,34 @@ def _collapse_mutually_exclusive_checks_to_radio(payload: Dict[str, Any]) -> Dic
                         submit_path_leaf = radio_id
                     elif labels_set and all((lb in {"是", "否", "有", "无"}) for lb in labels_set):
                         enum_ref = "yesNo"
-                        radio_label = "选项"
                         value_by_label = {lb: yes_no_map.get(lb, "no") for lb in labels_set}
                         default_value = "no"
-                        submit_path_leaf = "yesNo"
+                        sec_title = str(section.get("title") or "").strip()
+                        # 避免多组 是/否 共用 testResult.yesNo；PDF 勾选项常无下划线 id，需结合所在 section 标题识别 DSA 门槛
+                        if ("以下仅为DSA" in sec_title or ("DSA" in sec_title and "设备检测项目" in sec_title)) and group_key.startswith(
+                            "fam::"
+                        ):
+                            radio_id = "dsaEquipmentSectionApplicable"
+                            radio_label = "以下仅为DSA设备检测项目"
+                        elif group_key.startswith("pfx::"):
+                            stem = str(group_name or "").strip()
+                            if "以下仅为DSA" in stem or ("DSA" in stem and "设备检测项目" in stem):
+                                radio_id = "dsaEquipmentSectionApplicable"
+                                radio_label = "以下仅为DSA设备检测项目"
+                            else:
+                                radio_id = _camel_case(f"yesno_{_underscore_stable_slug(stem)}", "yesnoBranch")
+                                radio_label = "选项"
+                        else:
+                            radio_id = _camel_case(f"yesno_p{row_key[0]}_r{row_key[1]}", "yesnoRow")
+                            radio_label = "选项"
+                        submit_path_leaf = radio_id
+                    elif labels_set and labels_set <= _KAP_AREA_UNIT_LABELS and len(labels_set) >= 2:
+                        enum_ref = "kapAreaProductUnit"
+                        radio_label = "KAP 结果单位"
+                        value_by_label = {lb: _KAP_AREA_LABEL_TO_VALUE[lb] for lb in labels_set if lb in _KAP_AREA_LABEL_TO_VALUE}
+                        default_value = "mGy_m2"
+                        radio_id = "kapAreaProductUnit"
+                        submit_path_leaf = "kapAreaProductUnit"
                     elif labels_set and all((lb.lower() in unit_label_map) for lb in labels_set):
                         enum_ref = "doseRateUnit"
                         radio_label = "单位"
@@ -1183,7 +2163,17 @@ def _collapse_mutually_exclusive_checks_to_radio(payload: Dict[str, Any]) -> Dic
                     src0 = first.get("source") if isinstance(first.get("source"), dict) else {}
                     current_bucket = str(src0.get("submitBucket") or "").strip()
                     submit_bucket = submit_bucket or current_bucket or "testResult"
-                    submit_path = _replace_submit_path_leaf(str(src0.get("submitPath") or f"{submit_bucket}.{radio_id}"), submit_path_leaf or radio_id)
+                    # 检测类型/委托单位模式：原勾选框常在 testResult 桶，若仅替换 leaf 会得到错误的 testResult.testType
+                    if enum_ref == "testType":
+                        submit_path = "hospitalInfo.testType"
+                        submit_bucket = "hospitalInfo"
+                    elif enum_ref == "commissionOrgMode":
+                        submit_path = "hospitalInfo.commissionOrgMode"
+                        submit_bucket = "hospitalInfo"
+                    else:
+                        submit_path = _replace_submit_path_leaf(
+                            str(src0.get("submitPath") or f"{submit_bucket}.{radio_id}"), submit_path_leaf or radio_id
+                        )
                     page = int(src0.get("page") or row_key[0])
                     pdf_field_id = str(src0.get("pdfFieldId") or "")
 
@@ -1361,6 +2351,7 @@ def _remove_boolean_duplicates_after_radio(payload: Dict[str, Any]) -> Dict[str,
                 # 2) 语义命中互斥家族 -> 去掉 boolean
                 hit_by_family = (
                     label in {"状态检测", "验收检测", "同受检单位", "委托单位", "自动控制", "手动控制", "是", "否", "有", "无"}
+                    or label in _KAP_AREA_UNIT_LABELS
                     or label.lower() in {"μgy/s", "μgy/min", "mgy/min"}
                 )
                 if hit_by_path or hit_by_family:
@@ -1413,8 +2404,8 @@ def _normalize_basic_info_sections(payload: Dict[str, Any]) -> Dict[str, Any]:
             src = f.get("source") if isinstance(f.get("source"), dict) else {}
             submit_bucket = str(src.get("submitBucket") or "")
             if any(token in label for token in hospital_tokens) or submit_bucket == "hospitalInfo":
-                # 报告编号/委托编号/受检编号仍留在报告信息
-                if str(f.get("id") or "") in {"reportNo", "commissionNo", "inspectionNo"}:
+                # 报告编号/委托编号/受检编号/检测类型仍留在报告信息（与委托编号同区展示）
+                if str(f.get("id") or "") in {"reportNo", "commissionNo", "inspectionNo", "testType"}:
                     kept.append(f)
                 else:
                     move_to_hospital.append(f)
@@ -1537,8 +2528,9 @@ def _extract_instrument_index(field: Dict[str, Any]) -> int:
 def _arrange_instruments_row_layout(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     检测仪器区布局：
-    - 每个仪器占一行
-    - 顺序：boolean -> 名称(text) -> 有效期(date)
+    - 每台仪器封装为一个 type=group 的 slot（id=instrumentSlot{n}），子字段顺序 boolean -> text -> date，
+      子字段同一行展示、整条仪器信息不跨行（由 slot 上 slotNoWrap + section.instrumentSlotsWrap 提示前端）。
+    - section.instrumentSlotsWrap=true：多个 slot 横向流式换行，尽量填满一行后再折到下一行。
     """
     steps = payload.get("steps")
     if not isinstance(steps, list):
@@ -1607,7 +2599,7 @@ def _arrange_instruments_row_layout(payload: Dict[str, Any]) -> Dict[str, Any]:
                 has_bool = bool(row.get("boolean"))
                 has_text = bool(row.get("text"))
                 has_date = bool(row.get("date"))
-                # 检测仪器一行自适应宽度：
+                # slot 内子字段宽度（同一 Row 内分配，总和约 1）：
                 # - boolean + text + date: 0.1 / 0.5 / 0.3
                 # - boolean + text: 0.1 / 0.8
                 # - text + date: 0.5 / 0.3
@@ -1621,6 +2613,7 @@ def _arrange_instruments_row_layout(payload: Dict[str, Any]) -> Dict[str, Any]:
                     width_by_kind = {"boolean": 0.1, "text": 0.5, "date": 0.3}
                 elif has_text and (not has_bool) and (not has_date):
                     width_by_kind = {"boolean": 0.1, "text": "full", "date": 0.3}
+                inner_fields: List[Dict[str, Any]] = []
                 for kind in ("boolean", "text", "date"):
                     candidates = row.get(kind) or []
                     if not candidates:
@@ -1629,8 +2622,6 @@ def _arrange_instruments_row_layout(payload: Dict[str, Any]) -> Dict[str, Any]:
                     ff = candidates[0]
                     if not isinstance(ff, dict):
                         continue
-                    # 保留用户原始命名，不改 label。
-                    # 统一重建稳定 id，避免历史 id 与命名不一致导致后续再错位。
                     if kind == "boolean":
                         ff["id"] = f"instrument{idx}Enabled"
                     elif kind == "text":
@@ -1638,8 +2629,25 @@ def _arrange_instruments_row_layout(payload: Dict[str, Any]) -> Dict[str, Any]:
                     elif kind == "date":
                         ff["id"] = f"testDate{idx}"
                     ff["width"] = width_by_kind.get(kind, ff.get("width", "half"))
-                    rebuilt.append(ff)
+                    inner_fields.append(ff)
+                if not inner_fields:
+                    continue
+                rebuilt.append(
+                    {
+                        "id": f"instrumentSlot{idx}",
+                        "type": "group",
+                        "label": "",
+                        "layout": "row",
+                        "width": "auto",
+                        "instrumentSlot": True,
+                        "instrumentSlotIndex": idx,
+                        "slotNoWrap": True,
+                        "fields": inner_fields,
+                    }
+                )
             section["fields"] = rebuilt
+            if rebuilt:
+                section["instrumentSlotsWrap"] = True
 
     # 将误归到检测仪器区的非仪器字段回流到质控检测项目，避免干扰仪器行布局。
     if spillover_fields:
@@ -1693,7 +2701,7 @@ def _force_signature_step_last(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def _inject_underscore_section_rules(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    对下划线分层形成的 section 注入基础可见性规则：
+    对下划线分层形成的 section 注入基础可见性规则（控制项为 boolean，被控条件用 == true）：
     - sec_kerma_max_high -> section.visibleWhen = hasAec == true
     - 该 section 内除 hasHighDoseMode 外字段 -> visibleWhen = hasHighDoseMode == true
     """
@@ -1705,13 +2713,32 @@ def _inject_underscore_section_rules(payload: Dict[str, Any]) -> Dict[str, Any]:
                 continue
             sid = str(section.get("id") or "")
             if sid == "sec_kerma_max_high":
-                section.setdefault("visibleWhen", "hasAec == true")
+                section.setdefault("visibleWhen", _VISIBLE_WHEN_KERMA_MAX_HIGH_SECTION)
                 for field in section.get("fields", []):
                     if not isinstance(field, dict):
                         continue
                     if field.get("id") == "hasHighDoseMode":
                         continue
-                    field.setdefault("visibleWhen", "hasHighDoseMode == true")
+                    field.setdefault("visibleWhen", _VISIBLE_WHEN_KERMA_MAX_HIGH_FIELD)
+    return payload
+
+
+def _inject_visibility_conditional_rules(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    visibleWhen 仅加在「被联动展示」的字段上（见模块常量说明）。
+
+    - 委托单位名称：选「同受检单位」时隐藏，选「委托单位」时显示（commissionOrgMode == 'customCommission' 等）。
+    - 不在此注入 DSA 门槛以下的 visibleWhen：ExpressionEngine 与表单状态易不一致，导致部分输入框被误藏、回填看似异常；
+      需要时再在模板或 Flutter 侧按实际状态配置。
+
+    与 Flutter 对齐：boolean 用 == true/false；radio 枚举用带引号的 value。
+    """
+    steps = payload.get("steps")
+    if not isinstance(steps, list):
+        return payload
+
+    _apply_commission_organization_name_visibility(steps)
+
     return payload
 
 
@@ -1741,10 +2768,21 @@ def _split_date_base_from_field(field: Dict[str, Any]) -> str:
             if text.endswith(suffix) and len(text) > len(suffix):
                 return _clean_base(text[: -len(suffix)])
 
-    # 中文规则：检测日期年/月/日 -> 检测日期
-    for text in (key, label):
-        if text.endswith("年") or text.endswith("月") or text.endswith("日"):
-            return _clean_base(text[:-1])
+    # 中文规则：仅短标签或明确含日期语义，避免「……有效期至…年月日」等长句以「日」结尾被误合并
+    label_t = str(label or "").strip()
+    if label_t in ("年", "月", "日"):
+        return ""
+    date_hint = re.compile(r"(日期|年月|校准|有效|报告|检测|测试)")
+    for text in (fid, key):
+        t = str(text or "").strip()
+        if not t or re.match(r"^f\d+$", t, re.I):
+            continue
+        if t.endswith("年") or t.endswith("月") or t.endswith("日"):
+            if len(t) <= 28 and date_hint.search(t):
+                return _clean_base(t[:-1])
+    if label_t and (label_t.endswith("年") or label_t.endswith("月") or label_t.endswith("日")):
+        if len(label_t) <= 28 and date_hint.search(label_t):
+            return _clean_base(label_t[:-1])
 
     return ""
 
@@ -1763,10 +2801,18 @@ def _merge_split_date_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
             fields = section.get("fields")
             if not isinstance(fields, list) or not fields:
                 continue
+            has_standalone_test_date = any(
+                isinstance(f, dict) and str(f.get("id") or "").strip() == "testDate" for f in fields
+            )
+            sec_id = str(section.get("id") or "").strip()
             grouped: Dict[str, List[Dict[str, Any]]] = {}
             passthrough: List[Dict[str, Any]] = []
             for f in fields:
                 if not isinstance(f, dict):
+                    continue
+                src0 = f.get("source") if isinstance(f.get("source"), dict) else {}
+                if str(src0.get("anchorType") or "").lower() == "check":
+                    passthrough.append(f)
                     continue
                 base = _split_date_base_from_field(f)
                 if base:
@@ -1790,6 +2836,9 @@ def _merge_split_date_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
                 if not token:
                     remain_passthrough.append(f)
                     continue
+                if has_standalone_test_date and sec_id == "sec_report_info":
+                    # 已有独立 testDate 时不再参与「年/月/日」合并，直接省略拆分栏位，避免与 testDate 重复。
+                    continue
                 src = f.get("source") if isinstance(f.get("source"), dict) else {}
                 page = int(src.get("page") or 1)
                 ff = dict(f)
@@ -1800,7 +2849,10 @@ def _merge_split_date_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
             if loose_parts_by_page:
                 sec_title = str(section.get("title") or "").strip()
                 step_title = str(step.get("title") or "").strip()
-                base_label_seed = sec_title or step_title or "检测日期"
+                if sec_id == "sec_report_info":
+                    base_label_seed = "检测日期"
+                else:
+                    base_label_seed = sec_title or step_title or "检测日期"
                 base_id_seed = _camel_case(base_label_seed, "testDate")
                 for page, items in loose_parts_by_page.items():
                     # 同页按字段尾号再分组，避免把多个仪器有效期合并成一个。
@@ -1830,7 +2882,12 @@ def _merge_split_date_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
                 src = seed.get("source") if isinstance(seed.get("source"), dict) else {}
                 base_label = str(seed.get("label") or base).rstrip("年月日").rstrip("_-/:： ").strip() or base
                 if str(seed.get("label") or "").strip() in {"年", "月", "日"}:
-                    base_label = str(section.get("title") or step.get("title") or "检测日期").strip() or "检测日期"
+                    # 分区标题常为「报告信息」，不可用作合并日期标签，否则前端出现第二条「报告信息」日期项。
+                    st = str(section.get("title") or "").strip()
+                    if sec_id == "sec_report_info" or st in {"报告信息", "基本信息"}:
+                        base_label = "检测日期"
+                    else:
+                        base_label = str(step.get("title") or "检测日期").strip() or "检测日期"
                 if base_label in {"检测仪器", "instrument", "instruments", "检测仪器清单"}:
                     base_label = "检测仪器有效期"
                 if "检测仪器" in str(section.get("title") or "") or "检测仪器" in str(step.get("title") or ""):
@@ -1983,8 +3040,7 @@ def _post_optimize_js117(payload: Dict[str, Any]) -> Dict[str, Any]:
                 },
             },
         )
-    if "reportNo" not in existing_ids:
-        fields.insert(0, {"id": "reportNo", "type": "text", "label": "报告编号", "placeholder": "如：JS-117-2024-xxx", "required": True, "width": "half"})
+    # 不在此强制插入「报告编号」：现场/原始记录类模板由编辑器导出 steps，报告单字段应在模板中显式配置。
     for f in fields:
         if not isinstance(f, dict):
             continue
@@ -1996,6 +3052,39 @@ def _post_optimize_js117(payload: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
+def _finalize_frontend_schema_result(result: Dict[str, Any], *, merge_split_dates: bool) -> Dict[str, Any]:
+    """统一后处理链（从 PDF 规则拼装或从 formSchema.steps 直出后共用）。"""
+    tid = str(result.get("templateId") or "")
+    tnm = str(result.get("templateName") or "")
+    result = _ensure_basic_defaults(result)
+    if "js-117" in (tid.lower() + " " + tnm.lower()):
+        result = _post_optimize_js117(result)
+    result = _force_signature_semantics(result)
+    if merge_split_dates:
+        result = _merge_split_date_fields(result)
+    result = _sort_fields_by_coordinate_order(result)
+    result = _rehome_mutex_pair_widgets_by_visual_row(result)
+    result = _sort_fields_by_coordinate_order(result)
+    result = _merge_dose_rate_unit_checkbox_pairs_to_radio(result)
+    result = _collapse_mutually_exclusive_checks_to_radio(result)
+    result = _remove_boolean_duplicates_after_radio(result)
+    result = _relocate_equipment_fields_to_basic_info(result)
+    result = _normalize_basic_info_sections(result)
+    result = _prioritize_commission_fields_in_basic_info(result)
+    if merge_split_dates:
+        result = _arrange_instruments_row_layout(result)
+    result = _apply_width_by_coordinate_layout(result)
+    result = _upgrade_sv_h_sections_to_matrix_table(result)
+    result = _inject_underscore_section_rules(result)
+    result = _consolidate_orphan_inspection_steps(result)
+    result = _sort_fields_by_coordinate_order(result)
+    result = _force_signature_step_last(result)
+    result = _inject_visibility_conditional_rules(result)
+    result = _strip_coordinate_keys(result)
+    result = _coerce_radio_select_defaults_to_string(result)
+    return result
+
+
 def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_dates: bool = True) -> Dict[str, Any]:
     meta = template_obj.get("meta") if isinstance(template_obj.get("meta"), dict) else {}
     template_id = str(template_obj.get("templateId") or meta.get("templateId") or "").strip()
@@ -2005,21 +3094,47 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
     standard = str(template_obj.get("standard") or meta.get("standard") or "").strip() or _infer_standard(template_name)
     pdf_url = str(template_obj.get("pdfUrl") or meta.get("pdfUrl") or "").strip()
     locale = str(template_obj.get("locale") or meta.get("locale") or "zh-CN").strip() or "zh-CN"
+    form_schema_top = template_obj.get("formSchema") if isinstance(template_obj.get("formSchema"), dict) else {}
     constants = template_obj.get("constants") if isinstance(template_obj.get("constants"), dict) else {}
+    if not constants and isinstance(form_schema_top.get("constants"), dict):
+        constants = form_schema_top["constants"]
     enums = template_obj.get("enums") if isinstance(template_obj.get("enums"), dict) else {}
+    if not enums and isinstance(form_schema_top.get("enums"), dict):
+        enums = form_schema_top["enums"]
+
+    id_hay = (template_id + " " + template_name).lower()
+    editor_steps = form_schema_top.get("steps") if isinstance(form_schema_top.get("steps"), list) else None
+    if "js-117" in id_hay and editor_steps:
+        result = {
+            "templateId": template_id or "template_frontend",
+            "templateName": template_name or "template_frontend.json",
+            "version": version or "1.0.0",
+            "reportType": report_type,
+            "standard": standard,
+            "pdfUrl": pdf_url,
+            "locale": locale,
+            "constants": constants,
+            "enums": enums,
+            "steps": copy.deepcopy(editor_steps),
+        }
+        return merge_field_formulas_into_frontend(
+            _finalize_frontend_schema_result(result, merge_split_dates=merge_split_dates),
+            template_obj,
+        )
 
     pdf = template_obj.get("pdf") if isinstance(template_obj.get("pdf"), dict) else {}
     fields_raw = pdf.get("fields") if isinstance(pdf.get("fields"), list) else []
     if not fields_raw:
         fields_raw = template_obj.get("fields") if isinstance(template_obj.get("fields"), list) else []
+    fields_raw = materialize_unified_pdf_fields(fields_raw)
 
-    latest_by_key: Dict[str, Dict[str, Any]] = {}
+    # 保留模板中的每一条栏位。仅用 pdfFieldId 去重时，后出现的会覆盖先前的，导致例如「环境温度/湿度_°C」
+    # 与别处误标为同一 f6 的栏位被吃掉；编辑器重复分配序号时也应全部导出。
+    normalized_items: List[Dict[str, Any]] = []
     for idx, row in enumerate(fields_raw, start=1):
         if not isinstance(row, dict):
             continue
-        item = _normalize_pdf_field(row, idx)
-        key = item["pdfFieldId"] or item["rawId"] or f"f{idx}"
-        latest_by_key[key] = item
+        normalized_items.append(_normalize_pdf_field(row, idx))
 
     step_order = ["step_basic_info", "step_instruments", "step_qc_items", "step_judgement", "step_signature"]
     step_title_map = {
@@ -2034,7 +3149,7 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
     found_test_type_checks: Dict[str, str] = {}
     instrument_check_labels: List[str] = []
 
-    sorted_items = sorted(latest_by_key.values(), key=lambda it: it.get("order", (999, 999999, 999999, 999999)))
+    sorted_items = sorted(normalized_items, key=lambda it: it.get("order", (999, 999999, 999999, 999999)))
     for idx, item in enumerate(sorted_items, start=1):
         # 规则1：第一页勾选项归位（状态检测/验收检测）
         if item.get("page") == 1 and item.get("fieldType", "").lower() == "check":
@@ -2048,9 +3163,11 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
         ft = _infer_type(item["fieldType"], item["label"])
         signature_role = _signature_role_from_label(item["label"]) if ft == "signature" else None
         # 规则2：下划线自动分层优先（同前缀归同一层级）
-        label_key = normalize_field_text_by_underscore_rules(str(item.get("label") or "").strip())
-        raw_key = str(item.get("rawId") or "").strip()
-        hierarchy_key = label_key if "_" in label_key else raw_key
+        hierarchy_key = str(item.get("hierarchyKey") or "").strip()
+        if not hierarchy_key:
+            label_key = normalize_field_text_by_underscore_rules(str(item.get("label") or "").strip())
+            raw_key = normalize_field_text_by_underscore_rules(str(item.get("rawId") or "").strip())
+            hierarchy_key = _pick_hierarchy_underscore_key(label_key, raw_key)
         # 签名字段不参与下划线分层，避免被拆成多个独立 step/section。
         hierarchy = None if signature_role else _classify_by_underscore(hierarchy_key)
         if hierarchy:
@@ -2166,6 +3283,11 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
             "__order": item.get("order", (999, 999999, 999999, idx)),
             "__bbox": (item.get("x", 0.0), item.get("y", 0.0), item.get("w", 0.0), item.get("h", 0.0)),
         }
+        icp = item.get("checkboxPair")
+        if isinstance(icp, dict) and icp:
+            field_obj["source"]["checkboxPair"] = icp
+        if hierarchy and str(hierarchy_key or "").strip():
+            field_obj["source"]["hierarchyKey"] = str(hierarchy_key).strip()
         submit_binding = _assign_submit_bucket(field_obj)
         field_obj["source"]["submitBucket"] = submit_binding["bucket"]
         field_obj["source"]["submitPath"] = submit_binding["path"]
@@ -2176,7 +3298,8 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
             field_obj["precision"] = 1
         if field_obj.get("type") == "number":
             field_obj["precision"] = 1
-            unit = _pick_unit(item["label"])
+            # 用展示标签推断单位：全路径 label 常同时含「温度/湿度」，会误判（如 %RH 栏被标成 ℃）。
+            unit = _pick_unit(field_label)
             if unit:
                 field_obj["unit"] = unit
         if str(field_obj.get("source", {}).get("anchorType") or "").lower() == "check":
@@ -2264,8 +3387,9 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
         sections_map = section_bucket.get(sid, {})
         if not sections_map:
             continue
-        # 层级优先：section 按层级键稳定排序（同层级内字段再按坐标排序）。
-        sections = [sections_map[k] for k in sorted(sections_map.keys())]
+        # section：质控步内先按 WS76 栏目语义序，再按 PDF 坐标细分；其余步仍以坐标为主
+        sections_raw = list(sections_map.values())
+        sections = [sec for _, sec in sorted(enumerate(sections_raw), key=lambda it: _section_order_key(sid, it[1], it[0]))]
         steps.append({"id": sid, "title": step_title_map.get(sid, sid), "sections": sections})
 
     if not steps:
@@ -2283,24 +3407,8 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
         "enums": enums,
         "steps": steps,
     }
-    result = _ensure_basic_defaults(result)
-    if "js-117" in (result.get("templateId", "").lower() + " " + result.get("templateName", "").lower()):
-        result = _post_optimize_js117(result)
-    result = _force_signature_semantics(result)
-    if merge_split_dates:
-        result = _merge_split_date_fields(result)
-    result = _sort_fields_by_coordinate_order(result)
-    result = _collapse_mutually_exclusive_checks_to_radio(result)
-    result = _remove_boolean_duplicates_after_radio(result)
-    result = _relocate_equipment_fields_to_basic_info(result)
-    result = _normalize_basic_info_sections(result)
-    result = _prioritize_commission_fields_in_basic_info(result)
-    if merge_split_dates:
-        result = _arrange_instruments_row_layout(result)
-    result = _apply_width_by_coordinate_layout(result)
-    result = _upgrade_sv_h_sections_to_matrix_table(result)
-    result = _inject_underscore_section_rules(result)
-    result = _force_signature_step_last(result)
-    result = _strip_coordinate_keys(result)
-    return result
+    return merge_field_formulas_into_frontend(
+        _finalize_frontend_schema_result(result, merge_split_dates=merge_split_dates),
+        template_obj,
+    )
 

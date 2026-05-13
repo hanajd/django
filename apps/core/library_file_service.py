@@ -201,7 +201,7 @@ def detach_files_from_projects(file_ids: List[int], project_ids: List[int]) -> N
 
 
 def attach_files_to_tasks(file_ids: List[int], task_ids: List[int], user=None) -> None:
-    """将文件关联到任务（与 attach_files_to_projects 相同模式，支持全部分类）。"""
+    """将文件关联到任务模板（业务上仅应关联「模板」分类；其它分类请使用 attach_files_to_projects）。"""
     if not file_ids or not task_ids:
         return
     valid_tasks = list(LibraryTask.objects.filter(pk__in=task_ids).values_list("id", flat=True))

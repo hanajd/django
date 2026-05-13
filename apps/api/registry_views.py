@@ -115,7 +115,7 @@ class BizDeviceViewSet(RegistryViewMixin, viewsets.ModelViewSet):
 
 
 class InstrumentCatalogViewSet(RegistryViewMixin, viewsets.ReadOnlyModelViewSet):
-    queryset = InstrumentCatalog.objects.all()
+    queryset = InstrumentCatalog.objects.filter(is_active=True)
     serializer_class = InstrumentCatalogSerializer
     filter_backends = (filters.SearchFilter, filters.OrderingFilter)
     search_fields = ("code", "name", "model", "certificate_no", "calibration_org", "remarks")

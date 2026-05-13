@@ -143,7 +143,9 @@ PIPELINE_MINERU_MD = FILE_LIBRARY_TEMP_ROOT / 'mineru_md'
 # MINERU_BACKEND：未在环境中设置时 Django 默认 pipeline（避免 hybrid+vLLM 依赖 Triton/gcc 失败）。
 # 需要 MinerU2.5 hybrid 时在 shell 中 export MINERU_BACKEND=hybrid-auto-engine 后再启动。
 MINERU_BACKEND = os.environ.get('MINERU_BACKEND', 'pipeline')
-# OLLAMA_OPTIONS 为 JSON，例如 '{"num_gpu":999}'；不设则 utils.ollama_extract 内默认尽量用 GPU
+# OLLAMA_OPTIONS 为 JSON，例如 '{"num_gpu":999,"num_ctx":8192}'；不设则默认尽量用 GPU。
+# 多卡与动态显存：见 utils.gpu_scheduler（PIPELINE_GPU_AUTO_MINERU / PIPELINE_GPU_AUTO_OLLAMA、
+# MINERU_CUDA_VISIBLE_DEVICES、OLLAMA_PREFERRED_GPU_INDEX、PIPELINE_OLLAMA_NUM_CTX_* 等）。
 OLLAMA_HOST = os.environ.get('OLLAMA_HOST', 'http://127.0.0.1:11434')
 
 # 默认主键类型

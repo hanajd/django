@@ -13,6 +13,7 @@ urlpatterns = [
     
     # 主页和仪表盘
     path('', views.dashboard, name='dashboard'),
+    path('help/usage/', views.backend_usage_guide, name='backend_usage_guide'),
     
     # 用户管理路由
     path('database/devices/', views.database_device_list, name='database_device_list'),

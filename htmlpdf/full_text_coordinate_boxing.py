@@ -5,6 +5,9 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from functools import lru_cache
+from itertools import groupby
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 import fitz
@@ -517,6 +520,8 @@ def extract_text_spans(page: fitz.Page) -> List[Dict]:
                         or ("bold" in str(span.get("font") or "").lower()),
                         "is_italic": bool(int(span.get("flags") or 0) & 2),
                         "line_dir": [float(direction[0]), float(direction[1])],
+                        # 字符级 bbox：用于下划线槽位精确定位（避免整 span 按比例切分误差）
+                        "chars": list(span.get("chars") or []),
                     }
                 )
                 order += 1
@@ -864,6 +869,9 @@ def _normalize_common_label_noise(text: str) -> str:
     # 环境温度/湿度 常见丢分隔符
     if ("环境" in s and "温度" in s and "湿度" in s):
         return "环境温度/湿度"
+    # 透视防护区剂量当量率：PDF 常见「/(μSv/h)」「μSv/h（）」等噪声，统一为半角括号
+    if "透视防护区检测平面上周围剂量当量率" in s and "μSv" in s:
+        return "透视防护区检测平面上周围剂量当量率(μSv/h)"
     # 兜底：避免中文标签出现异常前导 /
     if s.startswith("/") and re.search(r"[\u4e00-\u9fff]", s):
         return s.lstrip("/")
@@ -883,12 +891,225 @@ def _sanitize_name_piece(text: str) -> str:
     return out or raw
 
 
+_UNDERLINE_UNITS_JSON = Path(__file__).resolve().parent / "data" / "underline_field_units.json"
+
+
+@lru_cache(maxsize=1)
+def _canonical_underline_units_sorted() -> tuple:
+    """规范单位表（路径 htmlpdf/data/underline_field_units.json），按字符串长度降序，便于前缀匹配。"""
+    default = (
+        "lp/mm",
+        "帧/s",
+        "%RH",
+        "μSv/h",
+        "μGy/min",
+        "μGy/s",
+        "mGy/min",
+        "cm²",
+        "m²",
+        "μm",
+        "μSv",
+        "mSv",
+        "μGy",
+        "mGy",
+        "mm",
+        "cm",
+        "nm",
+        "kV",
+        "mA",
+        "Hz",
+        "kHz",
+        "MHz",
+        "GHz",
+        "℃",
+        "°C",
+        "%",
+        "m",
+        "s",
+        "h",
+        "L",
+        "kg",
+        "g",
+    )
+    try:
+        if _UNDERLINE_UNITS_JSON.is_file():
+            raw = json.loads(_UNDERLINE_UNITS_JSON.read_text(encoding="utf-8"))
+            lst = raw.get("units") if isinstance(raw, dict) else raw
+            if isinstance(lst, list) and lst:
+                uniq: List[str] = []
+                seen: set = set()
+                for u in lst:
+                    t = str(u).strip()
+                    if t and t not in seen:
+                        seen.add(t)
+                        uniq.append(t)
+                return tuple(sorted(uniq, key=len, reverse=True))
+    except Exception:
+        pass
+    return tuple(sorted(default, key=len, reverse=True))
+
+
+_LETTER_EQ_BEFORE_UL = re.compile(r"([A-Za-zα-ωΑ-ΩΘθΛλμσΣπΠγΓηΔφΦΩ]+)\s*=\s*$")
+
+
+def _strip_unit_side_noise(s: str) -> str:
+    s = str(s or "")
+    s = re.sub(r"^[\s、，,．.;；:：]+", "", s)
+    s = re.sub(r"^[（(【\[]+\s*", "", s)
+    return s
+
+
+def _normalize_for_unit_match(s: str) -> str:
+    return (
+        str(s)
+        .replace("\u00b0C", "℃")
+        .replace("°C", "℃")
+        .replace("uGy/", "μGy/")
+        .replace("uSv/", "μSv/")
+        .replace("\u00b5", "μ")
+    )
+
+
+def _match_canonical_unit_prefix(right_text: str, units: Sequence[str]) -> str:
+    t = _strip_unit_side_noise(_normalize_for_unit_match(right_text))
+    if not t:
+        return ""
+    for u in units:
+        u_norm = _normalize_for_unit_match(u)
+        if t.startswith(u_norm):
+            return u
+    t_compact = re.sub(r"\s+", "", t)
+    for u in units:
+        u_compact = re.sub(r"\s+", "", _normalize_for_unit_match(u))
+        if t_compact.startswith(u_compact):
+            return u
+    return ""
+
+
+def _extract_letter_equals_prefix(left_text: str) -> str:
+    m = _LETTER_EQ_BEFORE_UL.search(left_text.rstrip())
+    return m.group(1) if m else ""
+
+
+def _collect_left_right_text_around_underline(
+    ub: Dict[str, Any],
+    spans: Sequence[Dict[str, Any]],
+) -> tuple:
+    ux0 = float(ub["x"])
+    uy0 = float(ub["y"])
+    uw = float(ub["w"])
+    uh = float(ub["h"])
+    ux1 = ux0 + uw
+    mid_y = uy0 + uh * 0.52
+    band = max(11.0, uh * 1.75)
+    x_tol = 2.5
+    left_parts: List[tuple] = []
+    right_parts: List[tuple] = []
+    for sp in spans:
+        bb = sp.get("bbox") or {}
+        if not bb:
+            continue
+        sx0 = float(bb["x"])
+        sy0 = float(bb["y"])
+        sw = float(bb["w"])
+        sh = float(bb["h"])
+        sx1 = sx0 + sw
+        sy1 = sy0 + sh
+        scy = (sy0 + sy1) / 2.0
+        if abs(scy - mid_y) > band:
+            continue
+        ovy = min(sy1, uy0 + uh) - max(sy0, uy0)
+        if ovy <= 0:
+            continue
+        tx = str(sp.get("text") or "")
+        if not tx.strip():
+            continue
+        if sx1 <= ux0 + x_tol:
+            left_parts.append((sx0, tx))
+        elif sx0 >= ux1 - x_tol:
+            right_parts.append((sx0, tx))
+    left_parts.sort(key=lambda z: z[0])
+    right_parts.sort(key=lambda z: z[0])
+    return "".join(p[1] for p in left_parts), "".join(p[1] for p in right_parts)
+
+
+def _unique_underline_field_name(base: str, used: set) -> str:
+    b = (base or "").strip() or "下划线"
+    if b not in used:
+        used.add(b)
+        return b
+    n = 2
+    while f"{b}{n}" in used:
+        n += 1
+    out = f"{b}{n}"
+    used.add(out)
+    return out
+
+
+def _clean_combined_field_name(s: str, max_len: int = 118) -> str:
+    """拼接单元格命名与下划线局部名时的清洗。"""
+    t = re.sub(r"\s+", "_", str(s or "").strip())
+    t = re.sub(r"_+", "_", t).strip("_")
+    if len(t) > max_len:
+        return t[:max_len]
+    return t
+
+
+def _cell_full_text_to_underline_part_name(cell_txt: str, max_len: int = 96) -> str:
+    """
+    无单位/字母=等规则时，用单元格内全部可见文本作下划线段名称（再与单元格语义前缀拼接）。
+    """
+    t = str(cell_txt or "").strip()
+    if not t:
+        return ""
+    t = _normalize_cell_text(t)
+    t = re.sub(r"[\s　\r\n\t]+", "_", t)
+    t = re.sub(r"_+", "_", t).strip("_")
+    piece = _sanitize_name_piece(t)
+    if not piece:
+        piece = re.sub(r"[^\w\u4e00-\u9fff（）().·/%-]+", "", t)[:max_len]
+    if len(piece) > max_len:
+        piece = piece[:max_len]
+    return piece.strip("_") or ""
+
+
+def _infer_underline_slot_name(
+    ub: Dict[str, Any],
+    spans: Sequence[Dict[str, Any]],
+    cell_full_text: Optional[str] = None,
+) -> str:
+    """
+    推断下划线槽位的「局部名」（不含单元格语义前缀）。
+    不在此做全局去重：前缀在整格探针命名之后再拼接，否则先加序号会导致「前缀_结果2」这类冗余；
+    最终唯一性在拼接 pref_ 后由 _unique_underline_field_name 统一处理。
+    """
+    units = _canonical_underline_units_sorted()
+    left_t, right_t = _collect_left_right_text_around_underline(ub, spans)
+    unit = _match_canonical_unit_prefix(right_t, units)
+    letter = _extract_letter_equals_prefix(left_t)
+    if letter and unit:
+        raw = f"{letter}（{unit}）"
+    elif unit:
+        raw = unit
+    elif letter:
+        raw = letter
+    else:
+        cell_piece = _cell_full_text_to_underline_part_name(cell_full_text or "")
+        if cell_piece:
+            raw = cell_piece
+        else:
+            tail = _sanitize_name_piece(str(ub.get("tail_name") or ""))
+            raw = tail if tail else "下划线"
+    return (raw or "下划线").strip() or "下划线"
+
+
 # 辐射/常用计量单位（长匹配优先），用于 □ 旁标签识别
 _RADIO_UNIT_LABELS: tuple = (
     "μGy/min",
     "μGy/s",
     "mGy/min",
     "mGy/s",
+    "nGy/s",
     "μGy",
     "mGy",
     "μSv",
@@ -898,7 +1119,7 @@ _RADIO_UNIT_LABELS: tuple = (
 
 
 def _normalize_unit_mu(s: str) -> str:
-    return (
+    t = (
         str(s or "")
         .replace("\u00b5", "μ")  # PDF 中常见 micro sign 与希腊字母 μ 混用
         .replace("uGy/", "μGy/")
@@ -906,6 +1127,71 @@ def _normalize_unit_mu(s: str) -> str:
         .replace("uSv/", "μSv/")
         .replace("uSv", "μSv")
     )
+    # 常见断字：μGy/s 与 μGy/min 粘连时漏印第二个 μ
+    t = t.replace("μGy/smGy", "μGy/sμGy")
+    return t
+
+
+def _radiation_unit_labels_longest_first() -> List[str]:
+    return sorted(_RADIO_UNIT_LABELS, key=len, reverse=True)
+
+
+def _consists_only_of_radiation_units(s: str) -> bool:
+    """整段是否仅由已知辐射单位首尾拼接而成（无中文等），用于行前缀中剔除单位列误当前缀。"""
+    t = _normalize_unit_mu(_normalize_cell_text(s))
+    if not t:
+        return False
+    labels = _radiation_unit_labels_longest_first()
+    pos = 0
+    while pos < len(t):
+        matched = False
+        for lab in labels:
+            if t.startswith(lab, pos):
+                pos += len(lab)
+                matched = True
+                break
+        if not matched:
+            return False
+    return True
+
+
+def _extract_ordered_radiation_units_from_text(text: str) -> List[str]:
+    """从左到右贪心剥离单位，得到顺序列表（如 □ 旁多单位同一格）。"""
+    t = _normalize_unit_mu(_normalize_cell_text(text))
+    if not t:
+        return []
+    labels = _radiation_unit_labels_longest_first()
+    out: List[str] = []
+    pos = 0
+    while pos < len(t):
+        matched = None
+        for lab in labels:
+            if t.startswith(lab, pos):
+                matched = lab
+                break
+        if matched:
+            out.append(matched)
+            pos += len(matched)
+            continue
+        if pos < len(t) and t[pos] in "□☐▢":
+            pos += 1
+            continue
+        if pos < len(t) and t[pos] in ",，;；、.":
+            pos += 1
+            continue
+        return []
+    return out
+
+
+def _single_radiation_unit_token(s: str) -> str:
+    """仅当整段恰好为一个已知单位时返回该单位，否则空串。"""
+    t = _normalize_unit_mu(_sanitize_name_piece(s) or s)
+    if not t:
+        return ""
+    for lab in _radiation_unit_labels_longest_first():
+        if t == lab:
+            return lab
+    return ""
 
 
 def _extract_checkbox_unit_label(span_text: str, char_idx: int) -> str:
@@ -917,24 +1203,19 @@ def _extract_checkbox_unit_label(span_text: str, char_idx: int) -> str:
     if char_idx < 0 or char_idx >= len(t):
         return ""
     right = _normalize_unit_mu(t[char_idx + 1 :].lstrip(" :：，,\t"))
-    for lab in _RADIO_UNIT_LABELS:
+    for lab in _radiation_unit_labels_longest_first():
         if right.startswith(lab):
             return lab
     left = _normalize_unit_mu(t[:char_idx].rstrip(" :：，,\t"))
-    for lab in _RADIO_UNIT_LABELS:
+    for lab in _radiation_unit_labels_longest_first():
         if left.endswith(lab):
             return lab
     return ""
 
 
 def _label_is_radiation_unit(label: str) -> bool:
-    s = _normalize_unit_mu(_sanitize_name_piece(label) or label)
-    if not s:
-        return False
-    for lab in _RADIO_UNIT_LABELS:
-        if s == lab or s.startswith(lab) or lab in s:
-            return True
-    return False
+    """必须为单一单位；粘连多单位串不得视为合法标签（避免三个 □ 同名）。"""
+    return bool(_single_radiation_unit_token(label))
 
 
 def _detect_binary_pair_option(a: str, b: str) -> Optional[Dict[str, Any]]:
@@ -957,7 +1238,7 @@ def _canonical_radiation_unit_label(u: str) -> str:
     s = _normalize_unit_mu(_sanitize_name_piece(u) or u)
     if not s:
         return ""
-    for lab in _RADIO_UNIT_LABELS:
+    for lab in _radiation_unit_labels_longest_first():
         if s == lab or s.startswith(lab):
             return lab
     return s
@@ -966,17 +1247,20 @@ def _canonical_radiation_unit_label(u: str) -> str:
 def _best_radiation_unit_token(u: str) -> str:
     """
     从一段合并文本中取出最可能的剂量/剂量率单位（兼容 □ 与单位不同 span、前后有杂字）。
+    若整段为多个单位粘连，不猜测「第一个」，返回空串，改由按序剥离逻辑处理。
     """
     if not u:
         return ""
     t = _normalize_unit_mu(_sanitize_name_piece(u) or u)
     if not t:
         return ""
-    for lab in _RADIO_UNIT_LABELS:
-        if t == lab or t.startswith(lab):
-            return lab
+    one = _single_radiation_unit_token(t)
+    if one:
+        return one
+    if _consists_only_of_radiation_units(t):
+        return ""
     best = ""
-    for lab in _RADIO_UNIT_LABELS:
+    for lab in _radiation_unit_labels_longest_first():
         if lab in t and len(lab) > len(best):
             best = lab
     return best
@@ -1064,7 +1348,25 @@ def _build_structured_cell_maps(page: fitz.Page, cells: Sequence[Dict], spans: S
             blacks.append(txt)
         cell_black_prefix_texts[key] = _sanitize_name_piece("".join(blacks))
 
-    return {"table_cells": table_cells, "cell_texts": cell_texts, "cell_black_prefix_texts": cell_black_prefix_texts}
+    cell_texts_non_red: Dict[tuple, str] = {}
+    for key, spans_in_cell in cell_spans.items():
+        spans_in_cell.sort(key=lambda s: (float(s["y"]), float(s["x"])))
+        nr_parts: List[str] = []
+        for sp in spans_in_cell:
+            txt = str(sp.get("text") or "")
+            if not txt:
+                continue
+            if is_span_red_rgb(sp.get("color_rgb") or []):
+                continue
+            nr_parts.append(txt)
+        cell_texts_non_red[key] = _normalize_cell_text("".join(nr_parts))
+
+    return {
+        "table_cells": table_cells,
+        "cell_texts": cell_texts,
+        "cell_black_prefix_texts": cell_black_prefix_texts,
+        "cell_texts_non_red": cell_texts_non_red,
+    }
 
 
 def _infer_table_header_map(table_id: int, cells_by_rc: Dict[tuple, Dict], cell_texts: Dict[tuple, str]) -> Dict[str, int]:
@@ -1102,6 +1404,27 @@ def _infer_table_header_map(table_id: int, cells_by_rc: Dict[tuple, Dict], cell_
     return mapping
 
 
+def _get_verdict_std_cell_text_for_row(
+    table_id: int,
+    row: int,
+    std_col: int,
+    cell_texts: Dict[tuple, str],
+    cell_black_prefix_texts: Dict[tuple, str],
+) -> str:
+    """
+    读取「判定标准」列单元格文本；若本行合并为空则向上追溯（与检测项目列合并行为一致）。
+    """
+    r = int(row)
+    while r >= 0:
+        t = str(cell_black_prefix_texts.get((table_id, r, std_col), "") or "").strip()
+        if not t:
+            t = str(cell_texts.get((table_id, r, std_col), "") or "").strip()
+        if t:
+            return t
+        r -= 1
+    return ""
+
+
 def _get_item_name_for_row(table_id: int, row: int, item_col: int, cell_texts: Dict[tuple, str]) -> str:
     txt = _sanitize_name_piece(cell_texts.get((table_id, row, item_col), ""))
     if txt:
@@ -1111,6 +1434,43 @@ def _get_item_name_for_row(table_id: int, row: int, item_col: int, cell_texts: D
         t = _sanitize_name_piece(cell_texts.get((table_id, r, item_col), ""))
         if t:
             return t
+        r -= 1
+    return ""
+
+
+def _prefix_cell_text_vertical_carry(
+    table_id: int,
+    row: int,
+    col: int,
+    item_col: int,
+    anchor_item_name: str,
+    cell_texts: Dict[tuple, str],
+    cell_black_prefix_texts: Dict[tuple, str],
+    red_cell_pos_set: set,
+    *,
+    max_up: int = 48,
+) -> str:
+    """
+    读取 (row,col) 用于前缀命名；本格为空时向上追溯，且仅在「检测项目」解析结果与 anchor 一致时继续，
+    以便合并单元格中上一行留下的「床侧第一术者位…」等列标题能落到后续高度行。
+    """
+    r = int(row)
+    steps = 0
+    anchor = (anchor_item_name or "").strip()
+    while r >= 0 and steps <= max_up:
+        steps += 1
+        if anchor:
+            row_item = (_get_item_name_for_row(table_id, r, item_col, cell_texts) or "").strip()
+            if row_item and row_item != anchor:
+                break
+        if (int(table_id), int(r), int(col)) in red_cell_pos_set:
+            r -= 1
+            continue
+        txt = _sanitize_name_piece(cell_black_prefix_texts.get((table_id, r, col), ""))
+        if not txt:
+            txt = _sanitize_name_piece(cell_texts.get((table_id, r, col), ""))
+        if txt:
+            return txt
         r -= 1
     return ""
 
@@ -1150,6 +1510,54 @@ def _checkbox_semantic_base_prefix(
     return "剂量"
 
 
+def _header_result_column_index(header_map: Dict[str, int]) -> Optional[int]:
+    """
+    取「检测结果 / 计算结果 / 报出值」中**最靠左**的列索引，作为前缀宽扫描上界：
+    避免仅按固定键优先级忽略更靠左的结果列，导致「计算结果」左侧的补充列未被扫入。
+    """
+    cols: List[int] = []
+    for k in ("检测结果", "计算结果", "报出值"):
+        c = header_map.get(k)
+        if c is not None:
+            cols.append(int(c))
+    return min(cols) if cols else None
+
+
+def _is_result_value_header_noise_piece(txt: str) -> bool:
+    """
+    表头或合并格里常见的「μSv/h检测值（）」占位，不应进入行前缀（会与真实检测位置、列类型重复）。
+    PDF 列索引若未与 header_map 中「检测结果」等完全对齐，仅靠列号跳过会漏网。
+    """
+    if not str(txt or "").strip():
+        return True
+    t = _normalize_unit_mu(_normalize_cell_text(str(txt)))
+    t = t.replace("（", "(").replace("）", ")").replace("　", "").strip()
+    t = re.sub(r"\s+", "", t)
+    if not t:
+        return True
+    if re.fullmatch(r"\(?μSv/h\)?检测值(\(\s*\))?", t, re.I):
+        return True
+    if re.fullmatch(r"μSv/h检测值(\(\s*\))?", t, re.I):
+        return True
+    if re.fullmatch(r"检测值(\(\s*\))?", t):
+        return True
+    if re.fullmatch(r"\(?μSv/h\)?(\(\s*\))?", t, re.I):
+        return True
+    if t in ("μSv/h", "检测值", "(μSv/h)", "μSv/h()", "检测值()"):
+        return True
+    if len(t) <= 20 and "检测值" in t and re.search(r"Sv/h", t, re.I):
+        return True
+    return False
+
+
+def _strip_noise_pieces_from_row_prefix(supplement: str) -> str:
+    """拼接后去掉仍夹带的噪声段（双保险）。"""
+    if not supplement:
+        return ""
+    parts = [p for p in str(supplement).split("_") if p and not _is_result_value_header_noise_piece(p)]
+    return "_".join(parts)
+
+
 def _get_row_prefix_text(
     table_id: int,
     row: int,
@@ -1160,30 +1568,60 @@ def _get_row_prefix_text(
     cell_black_prefix_texts: Dict[tuple, str],
     cells_by_rc: Dict[tuple, Dict],
     red_cell_pos_set: set,
+    *,
+    prefix_scan_exclusive_end: Optional[int] = None,
 ) -> str:
     """
-    前缀补充文本来源：从“检测项目列”右侧开始，且不能超过当前目标列。
-    如果该列是“判定标准”，则跳过，继续向右找最近非空文本。
+    前缀补充文本来源：从「检测项目列」右侧开始，扫描到开区间上界之前。
+    默认上界为 target_col（不含），即只取「检测项目」与当前目标列之间的列（不把当前格右侧的
+    「足部」等误当前缀）。若给定 prefix_scan_exclusive_end（常为**最靠左**的「检测结果/计算结果/报出值」列），
+    则上界为 max(target_col, prefix_scan_exclusive_end)，用于结果类列及其右侧的「单项判定」等
+    扫描其左侧全部「检测位置」文本（含「计算结果」列左侧、但位于「检测结果」列右侧的补充列）。
+    从左到右收集多段非空文本并以下划线拼接；合并格内本行无字时向上追溯（与检测项目同属一块时）。
+    「判定标准」列跳过。
     """
-    cols = sorted([int(col) for (_, col) in cells_by_rc.keys()])
+    cols = sorted({int(col) for (_, col) in cells_by_rc.keys()})
     if not cols:
         return ""
     std_col = header_map.get("判定标准")
+    exclusive_end = int(target_col)
+    if prefix_scan_exclusive_end is not None:
+        exclusive_end = max(exclusive_end, int(prefix_scan_exclusive_end))
+    anchor_item = _get_item_name_for_row(table_id, row, item_col, cell_texts) or ""
+    pieces: List[str] = []
     for c in cols:
         if c <= int(item_col):
             continue
-        if c >= int(target_col):
+        if c >= exclusive_end:
             continue
         if std_col is not None and int(c) == int(std_col):
             continue
-        if (int(table_id), int(row), int(c)) in red_cell_pos_set:
+        # 检测结果 / 计算结果 / 报出值列内是填数格或「μSv/h检测值」类表头，不是检测位置语义；
+        # 宽扫描时 exclusive_end 会扩到最左结果列，若不跳过会把该列文字拼进前缀（如 …足部_μSv/h检测值（）_计算结果）。
+        col_kw = _column_header_keyword(int(c), header_map)
+        if col_kw in ("检测结果", "计算结果", "报出值"):
             continue
-        txt = _sanitize_name_piece(cell_black_prefix_texts.get((table_id, row, c), ""))
+        txt = _prefix_cell_text_vertical_carry(
+            table_id,
+            row,
+            c,
+            item_col,
+            anchor_item,
+            cell_texts,
+            cell_black_prefix_texts,
+            red_cell_pos_set,
+        )
         if not txt:
-            txt = _sanitize_name_piece(cell_texts.get((table_id, row, c), ""))
-        if txt:
-            return txt
-    return ""
+            continue
+        if _is_result_value_header_noise_piece(txt):
+            continue
+        if _consists_only_of_radiation_units(txt):
+            continue
+        if pieces and pieces[-1] == txt:
+            continue
+        pieces.append(txt)
+    joined = "_".join(pieces) if pieces else ""
+    return _strip_noise_pieces_from_row_prefix(joined)
 
 
 def _resolve_semantic_type_by_col(col: int, header_map: Dict[str, int]) -> Optional[str]:
@@ -1263,11 +1701,595 @@ def _extract_unit_suffix(text: str) -> str:
     return m.group(1) if m else ""
 
 
+def _bbox_iou(a: Dict[str, float], b: Dict[str, float]) -> float:
+    ax0, ay0 = float(a["x"]), float(a["y"])
+    ax1, ay1 = ax0 + float(a["w"]), ay0 + float(a["h"])
+    bx0, by0 = float(b["x"]), float(b["y"])
+    bx1, by1 = bx0 + float(b["w"]), by0 + float(b["h"])
+    ix0, iy0 = max(ax0, bx0), max(ay0, by0)
+    ix1, iy1 = min(ax1, bx1), min(ay1, by1)
+    iw, ih = max(0.0, ix1 - ix0), max(0.0, iy1 - iy0)
+    inter = iw * ih
+    if inter <= 0:
+        return 0.0
+    aa = max(0.0, ax1 - ax0) * max(0.0, ay1 - ay0)
+    ab = max(0.0, bx1 - bx0) * max(0.0, by1 - by0)
+    union = aa + ab - inter
+    return inter / union if union > 0 else 0.0
+
+
+# 下划线槽位：长度须「超过约三个空格」或不少于 4 个连续 '_'；连续一段只出一个框。
+_MIN_UNDERLINE_SPACE_EQUIV = 3.0
+_UNDERLINE_SPACEWIDTH_FRAC = 0.33
+_MIN_ABS_UNDERLINE_WIDTH_PT = 6.5
+_MIN_UNDERSCORE_CHARS = 4  # 严格大于 3 个下划线字符
+_UNDERLINE_FILL_CHARS = frozenset("_＿ \t\u00a0\u3000")
+
+
+def _underline_min_width_pt(size: float) -> float:
+    fs = float(size or 10.0)
+    return max(
+        _MIN_ABS_UNDERLINE_WIDTH_PT,
+        _MIN_UNDERLINE_SPACE_EQUIV * _UNDERLINE_SPACEWIDTH_FRAC * fs,
+    )
+
+
+def _text_and_char_boxes_aligned(span: Dict[str, Any]) -> tuple:
+    """若 chars 与 text 等长，返回逐字 bbox 列表 [(x0,y0,x1,y1), ...]。"""
+    text = str(span.get("text") or "")
+    chars = span.get("chars") or []
+    if not text or len(chars) != len(text):
+        return text, []
+    boxes: List[tuple] = []
+    for ch in chars:
+        bb = ch.get("bbox")
+        if not bb or len(bb) < 4:
+            return text, []
+        boxes.append(tuple(float(v) for v in bb[:4]))
+    return text, boxes
+
+
+def _span_subbbox_for_range(boxes: Sequence[tuple], s0: int, s1: int) -> Optional[tuple]:
+    if s0 >= s1 or not boxes or s1 > len(boxes):
+        return None
+    xs0 = min(b[0] for b in boxes[s0:s1])
+    ys0 = min(b[1] for b in boxes[s0:s1])
+    xs1 = max(b[2] for b in boxes[s0:s1])
+    ys1 = max(b[3] for b in boxes[s0:s1])
+    if xs1 <= xs0 or ys1 <= ys0:
+        return None
+    return (xs0, ys0, xs1, ys1)
+
+
+def _underline_run_qualifies(text_run: str, width_pt: float, size: float) -> bool:
+    if width_pt < _MIN_ABS_UNDERLINE_WIDTH_PT:
+        return False
+    min_w = _underline_min_width_pt(size)
+    core = text_run.replace(" ", "").replace("\u3000", "").replace("\t", "").replace("\u00a0", "")
+    if core and all(c in "_＿" for c in core):
+        return len(core) >= _MIN_UNDERSCORE_CHARS or width_pt >= min_w
+    return width_pt >= min_w or len(text_run.replace("\u3000", " ")) >= _MIN_UNDERSCORE_CHARS
+
+
+def _merge_underline_box_lists(
+    primary: Sequence[Dict[str, Any]],
+    extra: Sequence[Dict[str, Any]],
+    iou_threshold: float = 0.52,
+) -> List[Dict[str, Any]]:
+    """先保留 primary（如连续 '_' 文本），extra 仅在与已有框 IoU 较低时追加。"""
+    merged: List[Dict[str, Any]] = list(primary)
+    for box in extra:
+        if any(_bbox_iou(box, k) > iou_threshold for k in merged):
+            continue
+        merged.append(box)
+    return merged
+
+
+# PyMuPDF extractRAWDICT：char / span 的 flags 中 bit1 表示下划线（见官方 TextPage 文档，1.25.2+）
+_CHAR_FLAG_UNDERLINE = 2
+
+
+def _append_underline_box_from_geom(
+    out: List[Dict[str, Any]],
+    page_no: int,
+    x0: float,
+    y0: float,
+    x1: float,
+    y1: float,
+    size: float,
+    utext: str,
+) -> None:
+    w, h = x1 - x0, y1 - y0
+    if w < _MIN_ABS_UNDERLINE_WIDTH_PT * 0.85:
+        return
+    box_h = max(min(h * 1.22, size * 1.42), 8.0)
+    box_h = min(box_h, 34.0)
+    box_y = y1 - box_h
+    out.append(
+        {
+            "page": page_no,
+            "x": float(x0),
+            "y": float(box_y),
+            "w": float(w),
+            "h": float(box_h),
+            "text": utext[:80],
+            "fieldType": "text",
+            "tail_name": "",
+            "unit": _extract_unit_suffix(utext),
+        }
+    )
+
+
+def _flush_char_ul_fill_subrun(
+    sub: List[Dict[str, Any]],
+    size: float,
+    page_no: int,
+    out: List[Dict[str, Any]],
+) -> None:
+    """仅输出「填空用」下划线子串（_、全角＿、空白），避免把 Nk 等字母整段框进来。"""
+    if not sub:
+        return
+    bbs: List[List[float]] = []
+    for ch in sub:
+        bb = ch.get("bbox")
+        if bb and len(bb) >= 4:
+            bbs.append([float(v) for v in bb[:4]])
+    if not bbs:
+        return
+    x0 = min(b[0] for b in bbs)
+    y0 = min(b[1] for b in bbs)
+    x1 = max(b[2] for b in bbs)
+    y1 = max(b[3] for b in bbs)
+    w = x1 - x0
+    utext = "".join(str(ch.get("c") or "") for ch in sub)
+    if not _underline_run_qualifies(utext, w, size):
+        return
+    _append_underline_box_from_geom(out, page_no, x0, y0, x1, y1, size, utext)
+
+
+def _build_underline_boxes_from_char_decorations(page: fitz.Page, page_no: int) -> List[Dict[str, Any]]:
+    """
+    Word/WPS 等导出 PDF 常在字符级标记下划线（非文本里的 '_'）。
+    依赖 rawdict 中 char['flags'] 或 span['char_flags']；旧版 PyMuPDF 无此字段时返回空列表。
+    同一装饰 run 内仅对「_／空白」子串划框，与文本层 '_' 规则一致（长度 > 约三个空格 或 ≥4 个 '_'）。
+    """
+    out: List[Dict[str, Any]] = []
+    try:
+        raw = page.get_text("rawdict")
+    except Exception:
+        return out
+
+    for blk in raw.get("blocks", []):
+        if blk.get("type") != 0:
+            continue
+        for line in blk.get("lines", []):
+            for span in line.get("spans", []):
+                size = float(span.get("size") or 10.0)
+                chars = span.get("chars") or []
+                runs: List[List[Dict[str, Any]]] = []
+
+                if chars:
+                    cur: List[Dict[str, Any]] = []
+                    for ch in chars:
+                        fl = ch.get("flags")
+                        u = bool(int(fl) & _CHAR_FLAG_UNDERLINE) if fl is not None else False
+                        if u:
+                            cur.append(ch)
+                        elif cur:
+                            runs.append(cur)
+                            cur = []
+                    if cur:
+                        runs.append(cur)
+                else:
+                    cf = span.get("char_flags")
+                    if cf is not None and int(cf) & _CHAR_FLAG_UNDERLINE:
+                        txt = str(span.get("text") or "").strip()
+                        bb = span.get("bbox")
+                        if bb and len(bb) >= 4 and txt:
+                            x0s, y0s, x1s, y1s = [float(v) for v in bb[:4]]
+                            sw = max(x1s - x0s, 1e-6)
+                            sh = y1s - y0s
+                            for m in re.finditer(r"[_＿]{4,}", txt):
+                                s0, s1 = m.start(), m.end()
+                                bx0 = x0s + s0 / max(1, len(txt)) * sw
+                                bx1 = x0s + s1 / max(1, len(txt)) * sw
+                                if bx1 <= bx0:
+                                    continue
+                                if not _underline_run_qualifies(txt[s0:s1], bx1 - bx0, size):
+                                    continue
+                                _append_underline_box_from_geom(
+                                    out, page_no, bx0, y0s, bx1, y1s, size, txt[s0:s1]
+                                )
+                    continue
+
+                for run in runs:
+                    if not run:
+                        continue
+                    sub: List[Dict[str, Any]] = []
+                    for ch in run:
+                        c = str(ch.get("c") or "")
+                        if c in _UNDERLINE_FILL_CHARS:
+                            sub.append(ch)
+                        else:
+                            _flush_char_ul_fill_subrun(sub, size, page_no, out)
+                            sub = []
+                    _flush_char_ul_fill_subrun(sub, size, page_no, out)
+    return out
+
+
+def _collect_horizontal_underline_marks_from_drawings(page: fitz.Page) -> List[Dict[str, float]]:
+    """
+    Word 另存为 PDF 时常把下划线画成水平描边或极扁的填充矩形，文本层无 '_'。
+    """
+    try:
+        drawings = page.get_drawings()
+    except Exception:
+        return []
+    marks: List[Dict[str, float]] = []
+    for d in drawings:
+        stroke_w = float(d.get("width") or 0.6)
+        for item in d.get("items", []) or []:
+            if not item:
+                continue
+            op = item[0]
+            if op == "l" and len(item) >= 3:
+                p0, p1 = item[1], item[2]
+                x0, y0, x1, y1 = float(p0.x), float(p0.y), float(p1.x), float(p1.y)
+                if abs(y1 - y0) <= 1.8 and abs(x1 - x0) >= 8:
+                    xa, xb = (x0, x1) if x0 <= x1 else (x1, x0)
+                    ymid = (y0 + y1) / 2.0
+                    marks.append({"x0": xa, "x1": xb, "y": ymid, "sw": stroke_w})
+            elif op == "c" and len(item) >= 5:
+                # 部分导出用近似水平的贝塞尔描边代替直线
+                p1, p2, p3, p4 = item[1], item[2], item[3], item[4]
+                xs = [float(p1.x), float(p2.x), float(p3.x), float(p4.x)]
+                ys = [float(p1.y), float(p2.y), float(p3.y), float(p4.y)]
+                xa, xb = min(xs), max(xs)
+                yspread = max(ys) - min(ys)
+                if yspread <= 2.4 and (xb - xa) >= 8:
+                    marks.append(
+                        {
+                            "x0": xa,
+                            "x1": xb,
+                            "y": sum(ys) / 4.0,
+                            "sw": stroke_w,
+                        }
+                    )
+            elif op == "re" and len(item) >= 2:
+                r = item[1]
+                try:
+                    rx0, ry0, rx1, ry1 = float(r.x0), float(r.y0), float(r.x1), float(r.y1)
+                except Exception:
+                    continue
+                rw, rh = rx1 - rx0, ry1 - ry0
+                if 0.08 < rh < 3.2 and rw >= 8:
+                    marks.append(
+                        {
+                            "x0": rx0,
+                            "x1": rx1,
+                            "y": (ry0 + ry1) / 2.0,
+                            "sw": max(rh, stroke_w),
+                        }
+                    )
+    return marks
+
+
+def _merge_colinear_horizontal_marks(
+    marks: Sequence[Dict[str, float]], y_tol: float = 1.35, gap_tol: float = 3.8
+) -> List[Dict[str, float]]:
+    if not marks:
+        return []
+    sorted_m = sorted(marks, key=lambda m: (m["y"], m["x0"]))
+    merged: List[Dict[str, float]] = []
+    cur = dict(sorted_m[0])
+    for m in sorted_m[1:]:
+        if abs(m["y"] - cur["y"]) <= y_tol and m["x0"] <= cur["x1"] + gap_tol:
+            cur["x1"] = max(cur["x1"], m["x1"])
+            cur["x0"] = min(cur["x0"], m["x0"])
+            cur["y"] = (cur["y"] + m["y"]) / 2.0
+            cur["sw"] = max(cur.get("sw", 0.5), m.get("sw", 0.5))
+        else:
+            merged.append(cur)
+            cur = dict(m)
+    merged.append(cur)
+    return merged
+
+
+def _hline_overlap_len(x0a: float, x1a: float, x0b: float, x1b: float) -> float:
+    return max(0.0, min(x1a, x1b) - max(x0a, x0b))
+
+
+def _colon_label_immediately_left_of_line(
+    lx0: float,
+    ly: float,
+    spans: Sequence[Dict[str, Any]],
+    y_band: float = 10.0,
+    max_gap: float = 6.0,
+) -> bool:
+    """横线左侧紧贴「…：」类标签 → 视为表单填空，不是分式。"""
+    for sp in spans:
+        t = str(sp.get("text") or "").strip()
+        if not t.endswith((":", "：")):
+            continue
+        bb = sp.get("bbox") or {}
+        if not bb:
+            continue
+        sx0 = float(bb["x"])
+        sy0 = float(bb["y"])
+        sx1 = sx0 + float(bb["w"])
+        sy1 = sy0 + float(bb["h"])
+        cy = (sy0 + sy1) / 2.0
+        if abs(cy - ly) > y_band:
+            continue
+        gap = lx0 - sx1
+        if -1.0 <= gap <= max_gap:
+            return True
+    return False
+
+
+def _drawing_line_looks_like_fraction_bar(
+    lx0: float,
+    lx1: float,
+    ly: float,
+    spans: Sequence[Dict[str, Any]],
+) -> bool:
+    """
+    分式中线：横线被「整块在上」的文本与「整块在下」的文本竖直紧夹，且三者水平方向对齐；
+    排除左侧紧贴冒号标签的表单下划线。
+    """
+    if _colon_label_immediately_left_of_line(lx0, ly, spans):
+        return False
+
+    wlin = lx1 - lx0
+    need = min(8.5, max(5.0, wlin * 0.22))
+    cx_line = (lx0 + lx1) / 2.0
+
+    above_cands: List[tuple] = []
+    below_cands: List[tuple] = []
+
+    for sp in spans:
+        bb = sp.get("bbox") or {}
+        if not bb:
+            continue
+        sx0 = float(bb["x"])
+        sy0 = float(bb["y"])
+        sx1 = sx0 + float(bb["w"])
+        sy1 = sy0 + float(bb["h"])
+        sh = sy1 - sy0
+        ovh = _hline_overlap_len(lx0, lx1, sx0, sx1)
+        if ovh < need:
+            continue
+        text = str(sp.get("text") or "").strip()
+        if len(text) > 42:
+            continue
+        fs = float(sp.get("size") or 11.0)
+        h_cap = min(24.0, max(14.0, fs * 2.15))
+        if sh > h_cap:
+            continue
+
+        # 分子：整体在横线上方，下缘贴近横线
+        if sy1 <= ly + 2.0 and sy0 < ly - 0.6:
+            gap_top = ly - sy1
+            if -0.8 <= gap_top <= 11.5:
+                above_cands.append((gap_top, sx0, sx1, sh, text))
+
+        # 分母：整体在横线下方，上缘贴近横线
+        if sy0 >= ly - 1.2 and sy1 > ly + 1.0:
+            gap_bot = sy0 - ly
+            if 0.15 <= gap_bot <= 14.5:
+                below_cands.append((gap_bot, sx0, sx1, sh, text))
+
+    if not above_cands or not below_cands:
+        return False
+
+    ag, ax0, ax1, _, atxt = min(above_cands, key=lambda z: z[0])
+    bg, bx0, bx1, _, btxt = min(below_cands, key=lambda z: z[0])
+
+    # 竖直「紧夹」：分子下缘与分母上缘不会离横线太远（避免误判上下两行正文）
+    if ag > 9.5 or bg > 12.0:
+        return False
+
+    # 横线几何中心落在分子/分母水平范围并集附近（分式列对齐）
+    span_x0 = min(ax0, bx0)
+    span_x1 = max(ax1, bx1)
+    core0 = max(ax0, bx0)
+    core1 = min(ax1, bx1)
+    pad = max(5.0, wlin * 0.12)
+    if core1 >= core0:
+        if not (core0 - pad <= cx_line <= core1 + pad):
+            return False
+    else:
+        if not (span_x0 - pad <= cx_line <= span_x1 + pad):
+            return False
+
+    # 分子/分母多为短片段（数字、符号、少量字母）；长串中文更像表头/说明而非分式
+    def _frac_like_chunk(s: str) -> bool:
+        s2 = s.replace(" ", "").replace("　", "")
+        if len(s2) > 22:
+            return False
+        if re.search(r"[\u4e00-\u9fff]{5,}", s2):
+            return False
+        return bool(re.match(r"^[\w\.\+\-±°'%/μµGySvkVma㎜㎝\u00b5]+$", s2, re.I))
+
+    if max(len(atxt), len(btxt)) > 14:
+        if not (_frac_like_chunk(atxt) and _frac_like_chunk(btxt)):
+            return False
+
+    return True
+
+
+def _drawing_line_aligns_with_table_grid(
+    lx0: float,
+    lx1: float,
+    ly: float,
+    table_cells: Optional[Sequence[Dict[str, Any]]],
+    tol_y: float = 2.8,
+) -> bool:
+    """
+    横线与某表格单元格顶边/底边重合，且长度覆盖该格宽度的大部分 → 视为表格格线。
+    """
+    if not table_cells:
+        return False
+    wlin = lx1 - lx0
+    for cell in table_cells:
+        r = cell.get("rect")
+        if r is None:
+            continue
+        try:
+            rx0, ry0, rx1, ry1 = float(r.x0), float(r.y0), float(r.x1), float(r.y1)
+        except Exception:
+            continue
+        cw = rx1 - rx0
+        ch = ry1 - ry0
+        if cw < 36 or ch < 14:
+            continue
+        if min(abs(ly - ry0), abs(ly - ry1)) > tol_y:
+            continue
+        if wlin < cw * 0.58:
+            continue
+        overlap = _hline_overlap_len(lx0, lx1, rx0, rx1)
+        if overlap >= cw * 0.74 and wlin >= cw * 0.70:
+            return True
+    return False
+
+
+def _drawing_line_has_fillin_label_left(
+    lx0: float,
+    ly: float,
+    spans: Sequence[Dict[str, Any]],
+    band: float = 16.0,
+    max_gap: float = 128.0,
+) -> bool:
+    """横线左邻、同一视觉行上有「标签：」类文字 → 更像表单填空下划线。"""
+    for sp in spans:
+        t = str(sp.get("text") or "").strip()
+        if not t:
+            continue
+        bb = sp.get("bbox") or {}
+        if not bb:
+            continue
+        sx0 = float(bb["x"])
+        sy0 = float(bb["y"])
+        sx1 = sx0 + float(bb["w"])
+        sy1 = sy0 + float(bb["h"])
+        cy = (sy0 + sy1) / 2.0
+        if abs(cy - ly) > band:
+            continue
+        if sx1 > lx0 + 4:
+            continue
+        if lx0 - sx1 > max_gap:
+            continue
+        if t.endswith((":", "：")):
+            return True
+        if re.search(
+            r"(?:单位|姓名|名称|地址|电话|手机|传真|邮编|编号|代码|日期|时间|签名|签章|盖章|经办|复核|批准|委托|受检|检测|备注|说明|结论|职务|职位|科室|部门|职务)[：:]\s*$",
+            t,
+        ):
+            return True
+    return False
+
+
+def _build_underline_boxes_from_drawings(
+    page: fitz.Page,
+    spans: Sequence[Dict[str, Any]],
+    page_no: int,
+    table_cells: Optional[Sequence[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """从矢量水平线推断「横线填空」区域（常见于 Word 下划线）；过滤表格格线与分式横线。"""
+    marks = _merge_colinear_horizontal_marks(_collect_horizontal_underline_marks_from_drawings(page))
+    if not marks:
+        return []
+    pw = float(page.rect.width)
+    page_area = max(1.0, float(page.rect.width) * float(page.rect.height))
+    out: List[Dict[str, Any]] = []
+
+    for mk in marks:
+        lx0, lx1, ly = float(mk["x0"]), float(mk["x1"]), float(mk["y"])
+        wlin = lx1 - lx0
+        if wlin < 8 or wlin > pw * 0.9:
+            continue
+        sw = float(mk.get("sw") or 0.5)
+        if sw > 4.0 and wlin > pw * 0.45:
+            continue
+
+        if _drawing_line_looks_like_fraction_bar(lx0, lx1, ly, spans):
+            continue
+        if _drawing_line_aligns_with_table_grid(lx0, lx1, ly, table_cells):
+            continue
+
+        nearby: List[Dict[str, Any]] = []
+        for sp in spans:
+            bb = sp.get("bbox") or {}
+            if not bb:
+                continue
+            sx0 = float(bb["x"])
+            sy0 = float(bb["y"])
+            sw = float(bb["w"])
+            sh = float(bb["h"])
+            sx1 = sx0 + sw
+            sy1 = sy0 + sh
+            span_bottom = sy1
+            v_near = span_bottom - 9.0 <= ly <= span_bottom + 22.0
+            v_mid = sy0 + sh * 0.38 <= ly <= sy1 + 12.0
+            if not (v_near or v_mid):
+                continue
+            ox0, ox1 = max(lx0, sx0), min(lx1, sx1)
+            if ox1 - ox0 < min(4.5, wlin * 0.11):
+                continue
+            nearby.append(sp)
+
+        fs = 10.0
+        tail_name = ""
+        if nearby:
+            fs = max(float(s.get("size") or 10.0) for s in nearby)
+            nearby.sort(key=lambda s: float(s["bbox"]["x"]))
+            combined = "".join(str(s.get("text") or "") for s in nearby).strip()
+            tail_name = _sanitize_name_piece(combined[:48]) if combined else ""
+        else:
+            if wlin < 9 or wlin > 320:
+                continue
+
+        longish = wlin > min(275.0, pw * 0.46)
+        if longish:
+            label_ok = _drawing_line_has_fillin_label_left(lx0, ly, spans)
+            nearby_colon = bool(nearby) and "".join(
+                str(s.get("text") or "") for s in nearby
+            ).strip().endswith((":", "："))
+            if not label_ok and not nearby_colon:
+                continue
+
+        box_h = min(max(fs * 1.32, 8.0), 34.0)
+        box_y = ly - box_h
+        if box_y < -2:
+            continue
+        if wlin * box_h > page_area * 0.11:
+            continue
+
+        out.append(
+            {
+                "page": page_no,
+                "x": float(lx0),
+                "y": float(box_y),
+                "w": float(wlin),
+                "h": float(box_h),
+                "text": "",
+                "fieldType": "text",
+                "tail_name": tail_name,
+                "unit": "",
+            }
+        )
+    return out
+
+
 def _build_underline_boxes_from_spans(spans: Sequence[Dict[str, Any]], page_no: int) -> List[Dict[str, Any]]:
+    """
+    文本中的连续 '_'／全角＿：只对该符号段划框（字符级 bbox 优先），
+    长度须超过约三个空格或不少于 4 个 '_'；连续一段合并为一个框。
+    """
     out: List[Dict[str, Any]] = []
     for sp in spans:
         text = str(sp.get("text") or "")
-        if not text or "_" not in text:
+        if not text or not re.search(r"[_＿]", text):
             continue
         bb = sp.get("bbox") or {}
         if not bb:
@@ -1278,24 +2300,39 @@ def _build_underline_boxes_from_spans(spans: Sequence[Dict[str, Any]], page_no: 
         h = float(bb["h"])
         if w <= 0 or h <= 0:
             continue
-        chars = list(text)
-        char_w = w / max(1, len(chars))
-        for m in re.finditer(r"_{2,}", text):
+        size = float(sp.get("size") or 10.0)
+        _, char_boxes = _text_and_char_boxes_aligned(sp)
+        for m in re.finditer(r"[_＿]+", text):
             s0, s1 = m.start(), m.end()
-            bx0 = x0 + s0 * char_w
-            bx1 = x0 + s1 * char_w
+            run_txt = text[s0:s1]
+            geom = _span_subbbox_for_range(char_boxes, s0, s1) if char_boxes else None
+            if geom:
+                bx0, by0, bx1, by1 = geom
+                ch = max(by1 - by0, 1e-6)
+            else:
+                char_w = w / max(1, len(text))
+                bx0 = x0 + s0 * char_w
+                bx1 = x0 + s1 * char_w
+                by1 = y0 + h
+                ch = h
             if bx1 <= bx0:
+                continue
+            run_w = bx1 - bx0
+            if not _underline_run_qualifies(run_txt, run_w, size):
                 continue
             before = _sanitize_name_piece(text[:s0])
             after = _sanitize_name_piece(text[s1:])
+            box_h = max(min(ch * 1.15, size * 1.38), 8.0)
+            box_h = min(box_h, 34.0)
+            box_y = by1 - box_h
             out.append(
                 {
                     "page": page_no,
                     "x": float(bx0),
-                    "y": float(y0),
+                    "y": float(box_y),
                     "w": float(bx1 - bx0),
-                    "h": float(h),
-                    "text": text[s0:s1],
+                    "h": float(box_h),
+                    "text": run_txt,
                     "fieldType": "text",
                     "tail_name": before or after,
                     "unit": _extract_unit_suffix(text[s1:]),
@@ -1341,6 +2378,34 @@ def _left_cell_plain_text(
     return t
 
 
+def _attach_dose_rate_unit_checkbox_mutex(
+    items: Sequence[Dict[str, Any]],
+    units_ordered: Sequence[str],
+    base: str,
+    table_id: int,
+    row: int,
+    col: int,
+) -> None:
+    """
+    同单元格内多个「剂量率等单位」勾选框：命名为 前缀_单位，并标记互斥组（pairId 按格唯一，不跨单元格）。
+    """
+    lst = list(items)
+    units = [str(u).strip() for u in units_ordered]
+    if len(lst) < 2 or len(units) != len(lst):
+        return
+    pair_id = f"mutex_t{table_id}_r{row}_c{col}_rateUnit"
+    for it, canon in zip(lst, units):
+        it["name"] = f"{base}_{canon}"
+        it["checkboxPair"] = {
+            "mode": "mutually_exclusive",
+            "pairId": pair_id,
+            "pairKind": "dose_rate_unit",
+            "expected": list(units),
+            "option": canon,
+            "matchOk": True,
+        }
+
+
 def _finalize_checkbox_names(
     raw_items: List[Dict[str, Any]],
     cell_texts: Dict[tuple, str],
@@ -1349,7 +2414,7 @@ def _finalize_checkbox_names(
     header_map_by_table: Dict[int, Dict[str, int]],
 ) -> None:
     """
-    委托单位右侧双框、检测仪器序号、检测类型/受检设备类型前缀、表头语义命名、左侧单元格兜底。
+    委托单位右侧双框、检测仪器序号、受检设备类型顺序名、检测类型、表头语义命名、左侧单元格兜底。
     """
     by_cell: Dict[tuple, List[Dict[str, Any]]] = {}
     for it in raw_items:
@@ -1384,18 +2449,10 @@ def _finalize_checkbox_names(
                 it["name"] = f"检测仪器_仪器{idx}"
             continue
 
-        # 受检设备类型：左侧表头，子项为 □ 旁文本（整格按 □ 切分，避免 □ 与「DSA设备」分属不同 span 时丢名）
+        # 受检设备类型：暂不根据 □ 旁文本自动匹配（版面切分易错），固定自上而下、从左到右 设备1…
         if "受检设备类型" in left_txt:
-            labels = _checkbox_option_labels_from_cell_full(cell_full)
-            if labels and len(labels) >= len(items):
-                for it, lab in zip(items, labels):
-                    it["name"] = f"受检设备类型_{lab}"
-            else:
-                for idx, it in enumerate(items):
-                    own = str(it.get("own_name") or "").strip()
-                    if not own and idx < len(labels):
-                        own = labels[idx]
-                    it["name"] = f"受检设备类型_{own}" if own else "受检设备类型"
+            for idx, it in enumerate(items, start=1):
+                it["name"] = f"受检设备类型_设备{idx}"
             continue
 
         # 成对互斥：有/无、是/否、自动/手动（命名统一前缀 + 后缀匹配校验）
@@ -1459,26 +2516,39 @@ def _finalize_checkbox_names(
                     it["name"] = "检测类型_状态检测"
 
         # 辐射剂量等单位：同一格多个 □ 仅单位不同（μGy/s、μGy/min、mGy/min 等）
-        # 整格按 □ 切分补全单位（□ 与单位常分属不同 span）
+        # 优先按整格非红文本顺序剥离单位；不得把「多单位粘连串」当作单一合法标签。
         if len(items) >= 2:
+            ordered = _extract_ordered_radiation_units_from_text(cell_full)
+            if len(ordered) >= len(items):
+                base = _checkbox_semantic_base_prefix(
+                    table_id, row, col, header_map, cell_texts, cell_black_prefix_texts, cells_by_rc, left_txt
+                )
+                _attach_dose_rate_unit_checkbox_mutex(
+                    items, ordered[: len(items)], base, table_id, row, col
+                )
+                continue
             cell_unit_pieces = _checkbox_option_labels_from_cell_full(cell_full)
             effective_units: List[str] = []
             for i, it in enumerate(items):
                 u = str(it.get("option_label") or "").strip()
-                if not u:
-                    u = str(it.get("own_name") or "").strip()
-                if not u and i < len(cell_unit_pieces):
-                    u = cell_unit_pieces[i]
-                token = _best_radiation_unit_token(u)
+                token = _single_radiation_unit_token(u)
+                if not token:
+                    u2 = str(it.get("own_name") or "").strip()
+                    token = _single_radiation_unit_token(u2)
+                if not token and i < len(cell_unit_pieces):
+                    token = _single_radiation_unit_token(cell_unit_pieces[i])
                 if not token and i < len(cell_unit_pieces):
                     token = _best_radiation_unit_token(cell_unit_pieces[i])
                 effective_units.append(token)
-            if effective_units and all(_label_is_radiation_unit(x) for x in effective_units):
+            if (
+                effective_units
+                and len(effective_units) == len(items)
+                and all(_label_is_radiation_unit(x) for x in effective_units)
+            ):
                 base = _checkbox_semantic_base_prefix(
                     table_id, row, col, header_map, cell_texts, cell_black_prefix_texts, cells_by_rc, left_txt
                 )
-                for it, canon in zip(items, effective_units):
-                    it["name"] = f"{base}({canon})"
+                _attach_dose_rate_unit_checkbox_mutex(items, effective_units, base, table_id, row, col)
                 continue
 
         # 表头语义（检测项目等）+ 前缀补充；未命中则用左侧单元格作前缀
@@ -1545,6 +2615,7 @@ def extract_checkbox_symbol_boxes(pdf_path: str) -> List[Dict[str, Any]]:
             table_cells_by_rc: Dict[int, Dict[tuple, Dict]] = maps["table_cells"]
             cell_texts: Dict[tuple, str] = maps["cell_texts"]
             cell_black_prefix_texts: Dict[tuple, str] = maps.get("cell_black_prefix_texts") or {}
+            cell_texts_non_red: Dict[tuple, str] = maps.get("cell_texts_non_red") or {}
             header_map_by_table: Dict[int, Dict[str, int]] = {}
             for t_id, cells_by_rc in table_cells_by_rc.items():
                 header_map_by_table[t_id] = _infer_table_header_map(t_id, cells_by_rc, cell_texts)
@@ -1579,8 +2650,12 @@ def extract_checkbox_symbol_boxes(pdf_path: str) -> List[Dict[str, Any]]:
                     cyc = (cy0 + cy1) / 2.0
                     bx = cxc - side / 2.0
                     by = cyc - side / 2.0
-                    own_name = _pick_checkbox_item_text(spans, sp, idx, symbols)
-                    option_label = _extract_checkbox_unit_label(text, idx)
+                    if is_span_red_rgb(sp.get("color_rgb") or []):
+                        own_name = ""
+                        option_label = ""
+                    else:
+                        own_name = _pick_checkbox_item_text(spans, sp, idx, symbols)
+                        option_label = _extract_checkbox_unit_label(text, idx)
                     cell = _pick_best_cell_for_span({"x": bx, "y": by, "w": side, "h": side}, table_cells)
                     table_id = row = col = None
                     cell_full = ""
@@ -1588,7 +2663,10 @@ def extract_checkbox_symbol_boxes(pdf_path: str) -> List[Dict[str, Any]]:
                         table_id = int(cell["table_id"])
                         row = int(cell["row"])
                         col = int(cell["col"])
-                        cell_full = _normalize_cell_text(cell_texts.get((table_id, row, col), ""))
+                        ck = (table_id, row, col)
+                        cell_full = _normalize_cell_text(
+                            cell_texts_non_red.get(ck) or cell_texts.get(ck, "")
+                        )
                     page_raw.append(
                         {
                             "page": page_no,
@@ -1634,33 +2712,97 @@ def extract_checkbox_symbol_boxes(pdf_path: str) -> List[Dict[str, Any]]:
     return raw_items
 
 
+def _v_overlap_len(y0a: float, y1a: float, y0b: float, y1b: float) -> float:
+    return max(0.0, min(y1a, y1b) - max(y0a, y0b))
+
+
+def _signature_slot_width_right_of_label(
+    spans: Sequence[Dict[str, Any]],
+    label_bb: Dict[str, Any],
+    page_w: float,
+    *,
+    gap: float = 3.0,
+    margin_right: float = 10.0,
+) -> float:
+    """
+    在标签右侧、与标签同一视觉行上，取到「下一个文字块」或页右缘之间的可用宽度（PDF 点）。
+    """
+    lx0 = float(label_bb["x"])
+    ly0 = float(label_bb["y"])
+    lw = float(label_bb["w"])
+    lh = max(float(label_bb["h"]), 4.0)
+    lx1 = lx0 + lw
+    band_y0 = ly0 - lh * 0.2
+    band_y1 = ly0 + lh * 1.35
+    min_left_of_blocker = page_w - margin_right
+    need_ov = min(lh * 0.28, 6.0)
+
+    for sp in spans:
+        ob = sp.get("bbox") or {}
+        if not ob:
+            continue
+        sx0 = float(ob["x"])
+        sy0 = float(ob["y"])
+        sw = float(ob["w"])
+        sh = float(ob["h"])
+        if sw <= 0 or sh <= 0:
+            continue
+        sy1 = sy0 + sh
+        if sx0 <= lx1 + gap:
+            continue
+        if _v_overlap_len(sy0, sy1, band_y0, band_y1) < need_ov:
+            continue
+        min_left_of_blocker = min(min_left_of_blocker, sx0)
+
+    return max(8.0, min_left_of_blocker - lx1 - gap)
+
+
+def _signature_image_box_size(
+    label_bb: Dict[str, Any],
+    span: Dict[str, Any],
+    spans: Sequence[Dict[str, Any]],
+    page_w: float,
+    default_w: float,
+) -> tuple[float, float]:
+    """高度随标签字号/box 高度变化；宽度优先用标签右侧到同行下一文字或页边的空隙。"""
+    lh = max(float(label_bb["h"]), 4.0)
+    fs = float(span.get("size") or 0.0) or lh * 0.92
+    h = max(28.0, min(56.0, max(lh * 1.85, fs * 2.35)))
+    avail = _signature_slot_width_right_of_label(spans, label_bb, page_w)
+    if avail >= 48.0:
+        w = avail
+    else:
+        w = max(36.0, min(default_w, page_w - float(label_bb["x"]) - float(label_bb["w"]) - 14.0))
+    margin = 6.0
+    max_w = page_w - (float(label_bb["x"]) + float(label_bb["w"])) - margin
+    w = max(32.0, min(w, max_w))
+    return w, h
+
+
 def extract_signature_image_boxes(pdf_path: str) -> List[Dict[str, Any]]:
     """
     自动识别签名标签文本，并在其右侧生成图片框。
     规则：
     - 图片框不与标签重叠（x 从标签右侧开始）
     - 上端与标签文本框上端对齐
-    - 高度统一 35
-    - 宽度：检测员 225；受检单位陪同人 85；校核员及校核日期 125
+    - 高度：按标签 span 的 bbox 高度与字号自适应（约 1.85×～2.35× 字号相关），并限制在合理区间
+    - 宽度：标签右侧到「同一行下一文字块」左缘或页右缘的空白；过窄时回退到各角色默认宽度
     """
     targets = [
         {
             "name": "检测员",
             "aliases": ["检测员", "检测员：", "检测员:"],
-            "w": 225.0,
-            "h": 40.0,
+            "default_w": 225.0,
         },
         {
             "name": "受检单位陪同人",
             "aliases": ["受检单位陪同人", "受检单位陪同人：", "受检单位陪同人:"],
-            "w": 83.0,
-            "h": 40.0,
+            "default_w": 83.0,
         },
         {
             "name": "校核员及校核日期",
             "aliases": ["校核员及校核日期", "校核员及校核日期：", "校核员及校核日期:"],
-            "w": 125.0,
-            "h": 40.0,
+            "default_w": 125.0,
         },
     ]
     doc = fitz.open(pdf_path)
@@ -1687,9 +2829,8 @@ def extract_signature_image_boxes(pdf_path: str) -> List[Dict[str, Any]]:
                 if not bb:
                     continue
                 label_right = float(bb["x"]) + float(bb["w"])
+                w, h = _signature_image_box_size(bb, hit, spans, page_w, float(item["default_w"]))
                 x = label_right
-                w = float(item["w"])
-                h = float(item["h"])
                 if x + w > page_w - 2:
                     x = max(0.0, page_w - w - 2)
                 y = max(0.0, min(float(bb["y"]), page_h - h))
@@ -1731,7 +2872,9 @@ def _get_left_cell_text_fallback(
 
 def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) -> List[Dict[str, Any]]:
     """
-    仅对红色文本划框：先按 extract_text_spans 取色，再复用 merge_tokens_to_blocks 做行内合并。
+    自动划框：红色文本、表内空单元格、下划线填空（连续 '_' / 字符下划线标记 / 矢量横线）。
+    含下划线的表格单元格：不输出整格框，红字也不再单独出框（仅保留下划线框）；用「整格」探针走语义/兜底命名后删除，
+    下划线框命名为「单元格命名_下划线局部名」（清洗截断）。非红下划线不依赖字体颜色。
     返回 [{"page","x","y","w","h","text"}, ...]，坐标为 PDF 点单位。
     """
     cfg = cfg or Config()
@@ -1747,10 +2890,27 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
             maps = _build_structured_cell_maps(page, table_cells, spans)
             table_cells_by_rc: Dict[int, Dict[tuple, Dict]] = maps["table_cells"]
             cell_texts: Dict[tuple, str] = maps["cell_texts"]
+            cell_texts_non_red: Dict[tuple, str] = maps.get("cell_texts_non_red") or {}
             cell_black_prefix_texts: Dict[tuple, str] = maps.get("cell_black_prefix_texts") or {}
             header_map_by_table: Dict[int, Dict[str, int]] = {}
             for t_id, cells_by_rc in table_cells_by_rc.items():
                 header_map_by_table[t_id] = _infer_table_header_map(t_id, cells_by_rc, cell_texts)
+
+            # 先检测下划线（红字/空白整格逻辑依赖「该格是否有下划线槽位」）
+            underline_boxes = _build_underline_boxes_from_spans(spans, page_no)
+            underline_boxes = _merge_underline_box_lists(
+                underline_boxes,
+                _build_underline_boxes_from_char_decorations(page, page_no),
+            )
+            underline_boxes = _merge_underline_box_lists(
+                underline_boxes,
+                _build_underline_boxes_from_drawings(page, spans, page_no, table_cells),
+            )
+            underline_cell_keys: set = set()
+            for ub in underline_boxes:
+                c = _pick_best_cell_for_span({"x": ub["x"], "y": ub["y"], "w": ub["w"], "h": ub["h"]}, table_cells)
+                if c is not None and c.get("row") is not None and c.get("col") is not None:
+                    underline_cell_keys.add((int(c["table_id"]), int(c["row"]), int(c["col"])))
 
             red_tokens: List[Dict] = []
             red_cell_targets: Dict[tuple, Dict[str, Any]] = {}
@@ -1764,10 +2924,16 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                 bb = sp["bbox"]
                 cell = _pick_best_cell_for_span(bb, table_cells)
                 if cell is not None:
+                    tr = int(cell.get("row")) if cell.get("row") is not None else -1
+                    tc = int(cell.get("col")) if cell.get("col") is not None else -1
+                    tt = int(cell.get("table_id", -1))
+                    if tr >= 0 and tc >= 0 and (tt, tr, tc) in underline_cell_keys:
+                        # 同格已有下划线精确定位：不再为红字单独出框
+                        continue
                     key = (
                         int(cell.get("table_id", -1)),
-                        int(cell.get("row")) if cell.get("row") is not None else -1,
-                        int(cell.get("col")) if cell.get("col") is not None else -1,
+                        tr,
+                        tc,
                         str(cell.get("cell_id") or ""),
                     )
                     if key not in red_cell_targets:
@@ -1796,11 +2962,13 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                         "page": page_no,
                     }
                 )
-            # 空白单元格自动框：单元格内无文字时加入文本框
+            # 空白单元格自动框：无文字且该格无下划线槽位时才整格框选
             for table_id, cells_by_rc in table_cells_by_rc.items():
                 for (row, col), cell in cells_by_rc.items():
                     cell_txt = _normalize_cell_text(cell_texts.get((table_id, row, col), ""))
                     if cell_txt:
+                        continue
+                    if (int(table_id), int(row), int(col)) in underline_cell_keys:
                         continue
                     key = (int(table_id), int(row), int(col), str(cell.get("cell_id") or ""))
                     if key in red_cell_targets:
@@ -1818,10 +2986,18 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                         "cell_id": str(cell.get("cell_id") or ""),
                         "fieldType": "text",
                     }
-            # 连续下划线自动框：同单元格多处按序号记录
-            underline_boxes = _build_underline_boxes_from_spans(spans, page_no)
             for ub in underline_boxes:
                 cell = _pick_best_cell_for_span({"x": ub["x"], "y": ub["y"], "w": ub["w"], "h": ub["h"]}, table_cells)
+                cell_txt_for_ul: Optional[str] = None
+                if cell is not None and cell.get("row") is not None and cell.get("col") is not None:
+                    tid_i = int(cell["table_id"])
+                    rw_i = int(cell["row"])
+                    co_i = int(cell["col"])
+                    merged = str(cell_texts_non_red.get((tid_i, rw_i, co_i), "") or "").strip()
+                    if not merged:
+                        merged = str(cell_texts.get((tid_i, rw_i, co_i), "") or "").strip()
+                    cell_txt_for_ul = merged or None
+                part_name = _infer_underline_slot_name(ub, spans, cell_txt_for_ul)
                 if cell is None or cell.get("row") is None or cell.get("col") is None:
                     key = (-1, -1, -1, f"ul_p{page_no}_{len(red_cell_targets)+1}")
                     red_cell_targets[key] = {
@@ -1839,6 +3015,9 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                         "tail_name": str(ub.get("tail_name") or ""),
                         "unit": str(ub.get("unit") or ""),
                         "slot_no": 1,
+                        "underline_slot": True,
+                        "underline_part_name": part_name,
+                        "name": "",
                     }
                     continue
                 table_id = int(cell["table_id"])
@@ -1863,10 +3042,38 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                     "tail_name": str(ub.get("tail_name") or ""),
                     "unit": str(ub.get("unit") or ""),
                     "slot_no": slot_no,
+                    "underline_slot": True,
+                    "underline_part_name": part_name,
+                    "name": "",
+                }
+            # 仅占位：走完整语义/兜底命名以得到「整格输入框」名称，输出前删除（有下划线的格不再输出整格框）
+            for ut, ur, uc in sorted(underline_cell_keys):
+                probe_key = (int(ut), int(ur), int(uc), "__cell_name__")
+                if probe_key in red_cell_targets:
+                    continue
+                cell_rec = (table_cells_by_rc.get(int(ut)) or {}).get((int(ur), int(uc)))
+                if cell_rec is None:
+                    continue
+                red_cell_targets[probe_key] = {
+                    "page": page_no,
+                    "x": float(cell_rec["rect"].x0),
+                    "y": float(cell_rec["rect"].y0),
+                    "w": float(cell_rec["rect"].width),
+                    "h": float(cell_rec["rect"].height),
+                    "text": "",
+                    "table_id": int(ut),
+                    "row": int(ur),
+                    "col": int(uc),
+                    "cell_id": str(cell_rec.get("cell_id") or ""),
+                    "fieldType": "text",
+                    "cell_name_probe": True,
+                    "name": "",
                 }
             red_cell_pos_set = {(int(t), int(r), int(c)) for (t, r, c, _) in red_cell_targets.keys() if int(r) >= 0 and int(c) >= 0}
             semantic_targets: List[Dict[str, Any]] = []
             for _, target in red_cell_targets.items():
+                if target.get("underline_slot"):
+                    continue
                 table_id = target.get("table_id")
                 row = target.get("row")
                 col = target.get("col")
@@ -1897,6 +3104,16 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                     continue
                 header_map = header_map_by_table.get(table_id) or {}
                 cells_by_rc = table_cells_by_rc.get(table_id) or {}
+                result_excl = _header_result_column_index(header_map)
+                sem_col = _resolve_semantic_type_by_col(col, header_map) or ""
+                col_kw = _column_header_keyword(col, header_map) or ""
+                # 「检测条件」格在版面中常位于「足部」等检测位置列的左侧：宽扫描会把右侧列名误当前缀。
+                # 「计算结果/报出值」若画在「检测结果」左侧，须与结果列同样宽扫描，否则会丢掉其右侧的补充列（如 20cm（足部））。
+                wide_to_result = sem_col in ("检测结果", "单项判定", "判定标准") or col_kw in (
+                    "计算结果",
+                    "报出值",
+                    "检测结果",
+                )
                 supplement = _get_row_prefix_text(
                     table_id=table_id,
                     row=row,
@@ -1907,6 +3124,7 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                     cell_black_prefix_texts=cell_black_prefix_texts,
                     cells_by_rc=cells_by_rc,
                     red_cell_pos_set=red_cell_pos_set,
+                    prefix_scan_exclusive_end=result_excl if wide_to_result else None,
                 )
                 row_prefix_cache[row_key] = f"{item_name}_{supplement}" if supplement else item_name
 
@@ -1922,28 +3140,47 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
 
             # 第一阶段：先产出“检测条件”，并记录每行最终前缀，供其他类型复用
             row_prefix_by_condition: Dict[tuple, str] = {}
-            for (table_id, item_name, type_name), targets in groups_by_item_type.items():
+            for (table_id, item_name, type_name), cond_targets in groups_by_item_type.items():
                 if type_name != "检测条件":
                     continue
-                targets.sort(key=lambda t: (int(t["row"]), float(t["y"]), float(t["x"])))
-                min_col = min(int(t["col"]) for t in targets)
-                seq_fallback = 0
-                for t in targets:
-                    row = int(t["row"])
-                    col = int(t["col"])
-                    if col == min_col:
-                        prefix_used = item_name
-                        t["name"] = f"{prefix_used}_{type_name}"
-                    else:
-                        prefix = row_prefix_cache.get((table_id, row, item_name, col), item_name)
-                        if prefix and prefix != item_name:
-                            prefix_used = prefix
+                cond_targets.sort(key=lambda t: (int(t["row"]), float(t["y"]), float(t["x"])))
+                for row, row_targets_iter in groupby(cond_targets, key=lambda t: int(t["row"])):
+                    row_targets = list(row_targets_iter)
+                    min_col = min(int(x["col"]) for x in row_targets)
+                    max_col = max(int(x["col"]) for x in row_targets)
+                    rich = row_prefix_cache.get((table_id, row, item_name, max_col), item_name)
+                    row_prefix_by_condition[(table_id, row, item_name)] = rich
+                    seq_fallback = 0
+                    for t in row_targets:
+                        col = int(t["col"])
+                        if col == min_col:
+                            prefix_used = rich
                             t["name"] = f"{prefix_used}_{type_name}"
                         else:
-                            seq_fallback += 1
-                            prefix_used = item_name
-                            t["name"] = f"{item_name}_{type_name}{seq_fallback}"
-                    row_prefix_by_condition[(table_id, row, item_name)] = prefix_used
+                            prefix = row_prefix_cache.get((table_id, row, item_name, col), item_name)
+                            if prefix and prefix != item_name:
+                                prefix_used = prefix
+                                t["name"] = f"{prefix_used}_{type_name}"
+                            else:
+                                seq_fallback += 1
+                                prefix_used = item_name
+                                t["name"] = f"{item_name}_{type_name}{seq_fallback}"
+
+            # 检测条件列用窄前缀；检测结果需「检测位置」时在更右列宽扫描得到更长前缀，在此合并。
+            for rk in list(row_prefix_by_condition.keys()):
+                tid, r, iname = rk
+                best = row_prefix_by_condition[rk]
+                for t in semantic_targets:
+                    if int(t["table_id"]) != tid or int(t["row"]) != r:
+                        continue
+                    if str(t["item_name"]) != iname:
+                        continue
+                    if str(t.get("type_name") or "") not in ("检测结果", "计算结果", "报出值"):
+                        continue
+                    p = row_prefix_cache.get((tid, r, iname, int(t["col"])), iname)
+                    if p and len(p) > len(best):
+                        best = p
+                row_prefix_by_condition[rk] = best
 
             # 第二阶段：检测结果/单项判定优先复用同一行检测条件前缀，确保命名对齐
             for (table_id, item_name, type_name), targets in groups_by_item_type.items():
@@ -1961,8 +3198,10 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                     if tail_name:
                         t["name"] = f"{t['name']}_{tail_name}"
 
-            # 兜底：未命中表头语义规则的单元格，使用左侧单元格文本命名
+            # 兜底：未命中表头语义规则的单元格，使用左侧单元格文本命名（下划线槽位已单独命名）
             for target in red_cell_targets.values():
+                if target.get("underline_slot"):
+                    continue
                 if str(target.get("name") or "").strip():
                     continue
                 table_id = target.get("table_id")
@@ -1993,8 +3232,10 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                 if unit and str(target.get("name") or "").strip():
                     target["name"] = f"{target['name']}({unit})"
 
-            # 单位后缀统一补充（语义命名分支）
+            # 单位后缀统一补充（语义命名分支；下划线已含「字母（单位）」或单位本体）
             for target in red_cell_targets.values():
+                if target.get("underline_slot"):
+                    continue
                 nm = str(target.get("name") or "").strip()
                 if not nm:
                     continue
@@ -2005,6 +3246,80 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                 if unit and not nm.endswith(f"({unit})"):
                     nm = f"{nm}({unit})"
                 target["name"] = nm
+
+            # 有下划线的单元格：取「整格」命名（探针走完全部规则后）再删除探针与其它整格目标，仅保留下划线框
+            cell_prefix_for_underline: Dict[tuple, str] = {}
+            for ut, ur, uc in underline_cell_keys:
+                pk = (int(ut), int(ur), int(uc), "__cell_name__")
+                if pk in red_cell_targets:
+                    cell_prefix_for_underline[(int(ut), int(ur), int(uc))] = str(
+                        red_cell_targets[pk].get("name") or ""
+                    ).strip()
+            for k in list(red_cell_targets.keys()):
+                t, r, c = int(k[0]), int(k[1]), int(k[2])
+                cid = str(k[3])
+                if r < 0 or c < 0:
+                    continue
+                if (t, r, c) not in underline_cell_keys:
+                    continue
+                if "__ul" in cid:
+                    continue
+                del red_cell_targets[k]
+
+            used_page_names: set = {
+                str(v.get("name") or "").strip()
+                for v in red_cell_targets.values()
+                if str(v.get("name") or "").strip() and not v.get("underline_slot")
+            }
+            for v in red_cell_targets.values():
+                if not v.get("underline_slot"):
+                    continue
+                tid, row, col = v.get("table_id"), v.get("row"), v.get("col")
+                part = str(v.get("underline_part_name") or "").strip() or "下划线"
+                pref = ""
+                if tid is not None and row is not None and col is not None:
+                    try:
+                        pref = cell_prefix_for_underline.get((int(tid), int(row), int(col)), "")
+                    except (TypeError, ValueError):
+                        pref = ""
+                raw = _clean_combined_field_name(f"{pref}_{part}" if pref else part)
+                v["name"] = _unique_underline_field_name(raw, used_page_names)[:120]
+
+            # 「单项判定」填格：抓取同行「判定标准」列静态文本，供回填时自动推断合格/不合格
+            for _, t in red_cell_targets.items():
+                if t.get("underline_slot"):
+                    continue
+                tid = t.get("table_id")
+                row = t.get("row")
+                col = t.get("col")
+                if tid is None or row is None or col is None:
+                    continue
+                try:
+                    tid_i = int(tid)
+                    row_i = int(row)
+                    col_i = int(col)
+                except (TypeError, ValueError):
+                    continue
+                header_map = header_map_by_table.get(tid_i) or {}
+                if not header_map:
+                    continue
+                if _column_header_keyword(col_i, header_map) != "单项判定":
+                    continue
+                std_col = header_map.get("判定标准")
+                if std_col is None:
+                    std_col = header_map.get("验收")
+                if std_col is None:
+                    std_col = header_map.get("状态")
+                if std_col is None:
+                    continue
+                crit = _get_verdict_std_cell_text_for_row(
+                    tid_i,
+                    row_i,
+                    int(std_col),
+                    cell_texts,
+                    cell_black_prefix_texts,
+                )
+                t["judgment_criterion_text"] = (crit or "")[:500]
 
             for _, t in sorted(red_cell_targets.items(), key=lambda kv: (kv[1]["y"], kv[1]["x"])):
                 w, h = float(t["w"]), float(t["h"])
@@ -2023,6 +3338,7 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                         "h": h,
                         "text": (t.get("text") or "")[:120],
                         "name": (t.get("name") or "")[:120],
+                        "judgmentCriterionText": str(t.get("judgment_criterion_text") or "")[:500],
                     }
                 )
             blocks = merge_tokens_to_blocks(red_tokens, cfg)

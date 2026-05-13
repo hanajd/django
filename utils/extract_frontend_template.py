@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from utils.ollama_extract import generate_frontend_template_with_ollama
+from utils.unified_template_fields import materialize_unified_pdf_fields
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -38,10 +39,10 @@ def _load_json(path: Path) -> dict[str, Any]:
 def _resolve_pdf_fields(template_obj: dict[str, Any]) -> list[dict[str, Any]]:
     pdf = template_obj.get("pdf")
     if isinstance(pdf, dict) and isinstance(pdf.get("fields"), list):
-        return [f for f in pdf.get("fields", []) if isinstance(f, dict)]
+        return materialize_unified_pdf_fields([f for f in pdf.get("fields", []) if isinstance(f, dict)])
     fields = template_obj.get("fields")
     if isinstance(fields, list):
-        return [f for f in fields if isinstance(f, dict)]
+        return materialize_unified_pdf_fields([f for f in fields if isinstance(f, dict)])
     return []
 
 

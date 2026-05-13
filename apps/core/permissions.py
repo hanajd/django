@@ -5,6 +5,8 @@
 from rest_framework import permissions
 from django.contrib.auth.models import User
 
+from apps.core.library_access import APP_SIDE_ROLE_CODES
+
 
 class IsSuperAdmin(permissions.BasePermission):
     """超级管理员权限"""
@@ -26,15 +28,15 @@ class IsAdminOrSuperAdmin(permissions.BasePermission):
 
 
 class IsAppUser(permissions.BasePermission):
-    """App 用户权限"""
-    
+    """检测业务侧参与人：旧版 app_user 或检测员/校核员/编制人/审核人/授权签字人。"""
+
     def has_permission(self, request, view):
         if not request.user.is_authenticated:
             return False
-        return (
-            hasattr(request.user, 'profile') and
-            request.user.profile.role.code == 'app_user'
-        )
+        if not hasattr(request.user, "profile") or request.user.profile.role is None:
+            return False
+        code = getattr(request.user.profile.role, "code", "") or ""
+        return code in APP_SIDE_ROLE_CODES
 
 
 class IsOwnerOrReadOnly(permissions.BasePermission):

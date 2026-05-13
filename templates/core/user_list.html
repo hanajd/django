@@ -3,145 +3,120 @@
 {% block page_title %}用户管理{% endblock %}
 
 {% block content %}
-<!-- 操作栏 -->
-<div class="mb-6 flex justify-between items-center">
-    <div>
-        <h3 class="text-lg font-semibold text-gray-800">用户列表</h3>
-        <p class="text-sm text-gray-500 mt-1">管理系统用户和权限</p>
+<div class="mx-auto max-w-7xl space-y-6">
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">系统管理</p>
+            <h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-900">用户列表</h1>
+            <p class="mt-1 text-sm text-slate-600">搜索、编辑账号与角色分配</p>
+        </div>
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
+            <form method="get" class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                <div class="relative min-w-0 sm:w-64">
+                    <i class="ri-search-line pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                    <input type="text" name="search" value="{{ search }}" placeholder="搜索用户名或邮箱…"
+                        class="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+                </div>
+                <button type="submit" class="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">
+                    <i class="ri-search-line"></i>
+                    搜索
+                </button>
+            </form>
+            <a href="{% url 'user_create' %}" class="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700">
+                <i class="ri-user-add-line"></i>
+                创建用户
+            </a>
+        </div>
     </div>
-    <div class="flex items-center space-x-4">
-        <form method="get" class="flex">
-            <div class="relative">
-                <i class="ri-search-line absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
-                <input 
-                    type="text" 
-                    name="search" 
-                    value="{{ search }}" 
-                    placeholder="搜索用户..." 
-                    class="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 w-64"
-                >
-            </div>
-            <button 
-                type="submit" 
-                class="ml-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
-            >
-                <i class="ri-search-line"></i>
-                <span>搜索</span>
-            </button>
-        </form>
-        <a href="{% url 'user_create' %}" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2">
-            <i class="ri-add-line"></i>
-            <span>创建用户</span>
-        </a>
-    </div>
-</div>
 
-<!-- 用户表格 -->
-<div class="bg-white rounded-lg shadow overflow-hidden">
-    <table class="min-w-full divide-y divide-gray-200">
-        <thead class="bg-gray-50">
-            <tr>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">用户名</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">邮箱</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">姓名</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">手机号</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">角色</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">状态</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
-            </tr>
-        </thead>
-        <tbody class="bg-white divide-y divide-gray-200">
-            {% for user in users %}
-            <tr class="hover:bg-gray-50 transition-colors">
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <div class="flex items-center space-x-3">
-                        <div class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                            <i class="ri-user-line text-blue-600"></i>
-                        </div>
-                        <div class="text-sm font-medium text-gray-900">{{ user.username }}</div>
-                    </div>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <div class="text-sm text-gray-500">{{ user.email|default:"-" }}</div>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <div class="text-sm text-gray-900">{{ user.first_name }} {{ user.last_name }}</div>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <div class="text-sm text-gray-500">{{ user.profile.phone|default:"-" }}</div>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    {% if user.profile.role %}
-                    <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800">
-                        {{ user.profile.role.name }}
-                    </span>
-                    {% else %}
-                    <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
-                        未分配
-                    </span>
-                    {% endif %}
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    {% if user.is_active %}
-                    <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                        启用
-                    </span>
-                    {% else %}
-                    <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
-                        禁用
-                    </span>
-                    {% endif %}
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <div class="flex items-center space-x-2">
-                        <a href="{% url 'user_edit' user.id %}" class="text-blue-600 hover:text-blue-900 flex items-center space-x-1">
-                            <i class="ri-edit-line"></i>
-                            <span>编辑</span>
-                        </a>
-                        <a href="{% url 'user_delete' user.id %}" class="text-red-600 hover:text-red-900 flex items-center space-x-1">
-                            <i class="ri-delete-bin-line"></i>
-                            <span>删除</span>
-                        </a>
-                    </div>
-                </td>
-            </tr>
-            {% empty %}
-            <tr>
-                <td colspan="7" class="px-6 py-12 text-center text-gray-500">
-                    <div class="flex flex-col items-center">
-                        <i class="ri-user-line text-4xl text-gray-300 mb-2"></i>
-                        <p>暂无用户</p>
-                    </div>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    
-    <!-- 分页 -->
-    {% if users.has_other_pages %}
-    <div class="px-6 py-4 border-t border-gray-200">
-        <div class="flex justify-between items-center">
-            <div class="text-sm text-gray-500">
-                第 {{ users.number }} 页，共 {{ users.paginator.num_pages }} 页（共 {{ users.paginator.count }} 条）
-            </div>
-            <div class="flex space-x-2">
+    <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ring-1 ring-slate-900/[0.04]">
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-slate-100 text-left text-sm">
+                <thead class="bg-slate-50">
+                    <tr>
+                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">用户</th>
+                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">邮箱</th>
+                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">姓名</th>
+                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">手机</th>
+                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">角色</th>
+                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">状态</th>
+                        <th class="px-5 py-3.5 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">操作</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 bg-white">
+                    {% for user in users %}
+                    <tr class="transition hover:bg-slate-50/80">
+                        <td class="whitespace-nowrap px-5 py-4">
+                            <div class="flex items-center gap-3">
+                                <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-100 text-blue-600">
+                                    <i class="ri-user-line text-lg"></i>
+                                </div>
+                                <span class="font-medium text-slate-900">{{ user.username }}</span>
+                            </div>
+                        </td>
+                        <td class="whitespace-nowrap px-5 py-4 text-slate-600">{{ user.email|default:"—" }}</td>
+                        <td class="whitespace-nowrap px-5 py-4 text-slate-800">{{ user.first_name }} {{ user.last_name }}</td>
+                        <td class="whitespace-nowrap px-5 py-4 text-slate-600">{{ user.profile.phone|default:"—" }}</td>
+                        <td class="whitespace-nowrap px-5 py-4">
+                            {% if user.profile.role %}
+                            <span class="inline-flex rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-medium text-violet-800">{{ user.profile.role.name }}</span>
+                            {% else %}
+                            <span class="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">未分配</span>
+                            {% endif %}
+                        </td>
+                        <td class="whitespace-nowrap px-5 py-4">
+                            {% if user.is_active %}
+                            <span class="inline-flex rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-800">启用</span>
+                            {% else %}
+                            <span class="inline-flex rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800">禁用</span>
+                            {% endif %}
+                        </td>
+                        <td class="whitespace-nowrap px-5 py-4 text-right">
+                            <div class="inline-flex flex-wrap items-center justify-end gap-1">
+                                <a href="{% url 'user_edit' user.id %}" class="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm font-medium text-blue-600 transition hover:bg-blue-50">
+                                    <i class="ri-edit-line"></i> 编辑
+                                </a>
+                                <a href="{% url 'user_delete' user.id %}" class="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm font-medium text-red-600 transition hover:bg-red-50">
+                                    <i class="ri-delete-bin-line"></i> 删除
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="px-5 py-16 text-center">
+                            <div class="mx-auto flex max-w-sm flex-col items-center text-slate-500">
+                                <span class="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+                                    <i class="ri-user-unfollow-line text-2xl"></i>
+                                </span>
+                                <p class="mt-4 font-medium text-slate-700">暂无用户</p>
+                                <p class="mt-1 text-sm">调整搜索条件或创建新用户</p>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if users.has_other_pages %}
+        <div class="flex flex-col gap-3 border-t border-slate-100 bg-slate-50/50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <p class="text-sm text-slate-600">第 <span class="font-medium text-slate-900">{{ users.number }}</span> 页，共 {{ users.paginator.num_pages }} 页（{{ users.paginator.count }} 条）</p>
+            <div class="flex flex-wrap items-center gap-2">
                 {% if users.has_previous %}
-                <a href="?page={{ users.previous_page_number }}&search={{ search }}" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center space-x-1">
-                    <i class="ri-arrow-left-s-line"></i>
-                    <span>上一页</span>
+                <a href="?page={{ users.previous_page_number }}&search={{ search }}" class="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50">
+                    <i class="ri-arrow-left-s-line"></i> 上一页
                 </a>
                 {% endif %}
-                <span class="px-4 py-2 text-sm text-gray-600">{{ users.number }} / {{ users.paginator.num_pages }}</span>
+                <span class="rounded-lg bg-white px-3 py-2 text-sm text-slate-600 ring-1 ring-slate-200">{{ users.number }} / {{ users.paginator.num_pages }}</span>
                 {% if users.has_next %}
-                <a href="?page={{ users.next_page_number }}&search={{ search }}" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center space-x-1">
-                    <span>下一页</span>
-                    <i class="ri-arrow-right-s-line"></i>
+                <a href="?page={{ users.next_page_number }}&search={{ search }}" class="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50">
+                    下一页 <i class="ri-arrow-right-s-line"></i>
                 </a>
                 {% endif %}
             </div>
         </div>
+        {% endif %}
     </div>
-    {% endif %}
 </div>
 {% endblock %}

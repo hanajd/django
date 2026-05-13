@@ -3,64 +3,103 @@
 {% block page_title %}角色管理{% endblock %}
 
 {% block content %}
-<!-- 操作栏 -->
-<div class="mb-6 flex justify-between items-center">
-    <div>
-        <h3 class="text-lg font-semibold text-gray-800">角色列表</h3>
-        <p class="text-sm text-gray-500 mt-1">管理系统角色和权限</p>
+<div class="mx-auto max-w-7xl space-y-6">
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">系统管理 · 企业权限</p>
+            <h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-900">角色列表</h1>
+            <p class="mt-1 max-w-3xl text-sm leading-relaxed text-slate-600">
+                角色代码与检测流程岗位对应；同一用户在同一项目中仅能担任一个流程岗位（在「项目工作台」中维护）。
+                仅标记为「App 检测侧」的角色可参与任务分配与检测相关 API。
+            </p>
+        </div>
+        <a href="{% url 'role_create' %}" class="inline-flex w-fit shrink-0 items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700">
+            <i class="ri-add-line text-lg"></i>
+            创建角色
+        </a>
     </div>
-    <a href="{% url 'role_create' %}" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2">
-        <i class="ri-add-line"></i>
-        <span>创建角色</span>
-    </a>
-</div>
 
-<!-- 角色表格 -->
-<div class="bg-white rounded-lg shadow overflow-hidden">
-    <table class="min-w-full divide-y divide-gray-200">
-        <thead class="bg-gray-50">
-            <tr>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">角色名称</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">角色代码</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">描述</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">创建时间</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
-            </tr>
-        </thead>
-        <tbody class="bg-white divide-y divide-gray-200">
-            {% for role in roles %}
-            <tr>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <div class="text-sm font-medium text-gray-900">{{ role.name }}</div>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
-                        {{ role.code }}
-                    </span>
-                </td>
-                <td class="px-6 py-4">
-                    <div class="text-sm text-gray-500">{{ role.description|default:"-" }}</div>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <div class="text-sm text-gray-500">{{ role.created_at|date:"Y-m-d H:i" }}</div>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <a href="{% url 'role_edit' role.id %}" class="text-blue-600 hover:text-blue-900 mr-4 flex items-center space-x-1">
-                        <i class="ri-edit-line"></i>
-                        <span>编辑</span>
-                    </a>
-                    <a href="{% url 'role_delete' role.id %}" class="text-red-600 hover:text-red-900 flex items-center space-x-1">
-                        <i class="ri-delete-bin-line"></i>
-                        <span>删除</span>
-                    </a>
-                </td>
-            </tr>
-            {% empty %}
-            <tr>
-                <td colspan="5" class="px-6 py-4 text-center text-gray-500">暂无角色</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 text-sm leading-relaxed text-slate-700 ring-1 ring-slate-900/[0.04] sm:p-5">
+        <div class="flex gap-3">
+            <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-blue-600 shadow-sm ring-1 ring-slate-200/80">
+                <i class="ri-booklet-line text-lg"></i>
+            </span>
+            <div>
+                <p class="font-medium text-slate-900">与《检测业务多角色与工作流说明》对齐</p>
+                <p class="mt-1 text-slate-600">检测员、校核员、编制人、审核人、授权签字人为流程岗；<code class="rounded bg-white px-1 py-0.5 text-xs font-mono text-slate-800 ring-1 ring-slate-200">super_admin</code> / <code class="rounded bg-white px-1 py-0.5 text-xs font-mono">admin</code> 侧重系统管理。编辑角色时权限按「基础操作 / 数据范围 / 流程与业务」三类分组配置。</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ring-1 ring-slate-900/[0.04]">
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-slate-100 text-left text-sm">
+                <thead class="bg-slate-50">
+                    <tr>
+                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">角色</th>
+                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">域</th>
+                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">App 检测侧</th>
+                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">代码</th>
+                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">描述</th>
+                        <th class="px-5 py-3.5 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">用户数</th>
+                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">更新</th>
+                        <th class="px-5 py-3.5 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">操作</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for role in roles %}
+                    <tr class="transition hover:bg-slate-50/80">
+                        <td class="whitespace-nowrap px-5 py-4 font-medium text-slate-900">{{ role.name }}</td>
+                        <td class="whitespace-nowrap px-5 py-4">
+                            <span class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium {{ role.enterprise.badge_class }}">{{ role.enterprise.kind_label }}</span>
+                        </td>
+                        <td class="whitespace-nowrap px-5 py-4">
+                            {% if role.enterprise.in_app_side %}
+                            <span class="inline-flex items-center gap-1 text-emerald-700" title="可参与项目任务分配与检测侧 API">
+                                <i class="ri-checkbox-circle-fill text-base text-emerald-500"></i>
+                                <span class="text-xs font-medium">是</span>
+                            </span>
+                            {% else %}
+                            <span class="inline-flex items-center gap-1 text-slate-400" title="不参与 App 检测流程与任务分配">
+                                <i class="ri-indeterminate-circle-line text-base"></i>
+                                <span class="text-xs">否</span>
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td class="whitespace-nowrap px-5 py-4">
+                            <code class="rounded-lg bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{{ role.code }}</code>
+                        </td>
+                        <td class="max-w-xs px-5 py-4 text-slate-600">
+                            <span class="line-clamp-2" title="{{ role.description|default:'' }}">{{ role.description|default:"—" }}</span>
+                        </td>
+                        <td class="whitespace-nowrap px-5 py-4 text-right tabular-nums text-slate-700">{{ role.user_count }}</td>
+                        <td class="whitespace-nowrap px-5 py-4 tabular-nums text-slate-500">{{ role.updated_at|date:"Y-m-d H:i" }}</td>
+                        <td class="whitespace-nowrap px-5 py-4 text-right">
+                            <a href="{% url 'role_edit' role.id %}" class="mr-2 inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm font-medium text-blue-600 transition hover:bg-blue-50">
+                                <i class="ri-edit-line"></i> 编辑
+                            </a>
+                            {% if role.code != 'super_admin' %}
+                            <a href="{% url 'role_delete' role.id %}" class="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm font-medium text-red-600 transition hover:bg-red-50">
+                                <i class="ri-delete-bin-line"></i> 删除
+                            </a>
+                            {% else %}
+                            <span class="inline-flex cursor-not-allowed items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm text-slate-400" title="内置角色不可删除">删除</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="8" class="px-5 py-16 text-center text-slate-500">
+                            <span class="flex flex-col items-center gap-2">
+                                <i class="ri-shield-line text-3xl text-slate-300"></i>
+                                <span>暂无角色，请先创建</span>
+                            </span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 {% endblock %}

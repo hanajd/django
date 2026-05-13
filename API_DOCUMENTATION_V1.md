@@ -43,6 +43,37 @@ Base URL: `http://localhost:11223/api/v1`
 - `POST /inspections/{taskNo}/submit`
 - `POST /inspections/submit`（兼容提交）
 - `GET /inspections/{taskNo}/export-frontend-json`
+- `POST /inspections/{taskNo}/manual-export-report`
+
+### 手动导出报告（现场记录回填）
+
+从**当前案件**关联的**现场记录 JSON**（按报告任务上配置的 `report_source_tasks` 顺序读取并深度合并）生成数据，填入**报告任务**的 HTMLPDF 模板，写入文件库 **report** 分类。行为与 v2 的 `manual-export-report` 一致，仅路径前缀为 `/api/v1`。
+
+- **方法 / 路径**：`POST /inspections/{taskNo}/manual-export-report`
+- **认证**：需登录。
+- **可选参数**：Query 或 JSON Body 中的 `placeholderMapId` / `placeholder_map_id`（二者等价，可省略，传空对象 `{}` 亦可）。
+- **前置条件**（不满足时返回 409）：项目下存在报告任务、案件下已有可用的现场记录 JSON 等（见后端 `_load_site_record_payload_for_report`）。
+- **说明**：**无需额外开关**；调用本接口即使用现场记录聚合结果填充报告。
+
+响应示例（成功，`downloadUrl` 在能解析到项目时可能为带 `projects/{projectId}/tasks/...` 的 v2 风格链接，否则为仅 `taskNo` 的旧路径）：
+
+```json
+{
+  "success": true,
+  "message": "报告导出成功",
+  "data": {
+    "taskNo": "ASG-24",
+    "projectId": "20260401",
+    "reportTask": { "id": 3, "code": "rpt001", "name": "检测报告" },
+    "sourceSiteRecordTasks": [{ "id": 5, "code": "site001", "name": "现场记录" }],
+    "reportFile": {
+      "id": 1201,
+      "name": "ASG-24-报告.pdf",
+      "downloadUrl": "http://localhost:11223/api/v1/inspections/ASG-24/files/1201/download/report"
+    }
+  }
+}
+```
 
 ### 待检测列表响应示例（旧）
 

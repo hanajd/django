@@ -1,28 +1,48 @@
-"""检测提交 -> 模板填充 -> PDF 落库服务（与接口流水线解耦）。"""
+"""检测提交数据合并、现场记录加载与任务解析；报告模板回填与 PDF 生成见 `inspection_report_make`。"""
 from __future__ import annotations
 
-import base64
+import copy
 import json as json_std
-import os
 import re
 from datetime import datetime
+from typing import Sequence
 
-from django.contrib.auth.models import User
+from django.db.models import Q
 from django.utils import timezone
-from django.utils.dateparse import parse_datetime
 
-from apps.api.inspection_submit_placeholder_maps import (
-    DEFAULT_SUBMIT_PLACEHOLDER_MAP_ID,
-    SUBMIT_PLACEHOLDER_MAPS,
-    build_dynamic_value_mapping,
-    build_submit_value_mapping,
-    resolve_mapping_rules,
+from apps.core import pipeline_service
+from apps.core.models import (
+    InspectionCase,
+    InspectionSubmission,
+    LibraryFile,
+    LibraryProject,
+    LibraryTask,
+    LibraryTaskAssignment,
 )
-from apps.core import htmlpdf_service, pipeline_service
-from apps.core.library_file_service import attach_files_to_tasks, save_library_binary_uploads
-from apps.core.models import InspectionCase, LibraryFile, LibraryProject, LibraryTask, LibraryTaskAssignment, SiteRecord
 
 AUTO_TASK_PREFIX = "ASG-"
+
+
+def site_record_task_count_for_project(project) -> int:
+    """
+    项目任务管理（library_project.library_tasks）中、输出目标为「现场记录」的任务数量。
+    与文件库勾选份数无关，表示该项目在后台配置的现场记录类任务槽位数。
+    """
+    if project is None:
+        return 0
+    return int(
+        project.library_tasks.filter(output_target=LibraryTask.OUTPUT_SITE_RECORD).distinct().count()
+    )
+
+
+def resolve_manual_report_device_count(distinct_inspection_case_count: int) -> int:
+    """
+    文件库多选合并导出**一份**报告 PDF 时的「受检设备台数」：
+    按勾选记录所关联的**不同 inspection 案件（报告/受检设备）份数**计；
+    与「每份报告对应一台受检设备、合成报告台数=合并的报告份数」一致。
+    可与 `site_record_task_count_for_project(project)` 对照，校验现场记录类任务配置是否覆盖案件规模。
+    """
+    return max(0, int(distinct_inspection_case_count))
 
 
 def _resolve_library_task_for_task_no(task_no: str, project=None):
@@ -75,6 +95,38 @@ def _display_task_no(task_no: str, project=None) -> str:
     return f"{idx:02d}"
 
 
+def _inspection_serial_for_case(inspection_case, project) -> str | None:
+    """
+    同一文件库项目下，本案件在「报告/受检设备」序列中的序号（01 起，按案件创建顺序）。
+    与项目内 library_tasks 列表位置脱钩，避免报告任务插在中间导致受检编号错位。
+    """
+    if inspection_case is None:
+        return None
+    lp_id = getattr(inspection_case, "library_project_id", None)
+    if lp_id is None and project is not None:
+        lp_id = getattr(project, "pk", None)
+    if lp_id is None:
+        return None
+    ids = list(
+        InspectionCase.objects.filter(library_project_id=lp_id)
+        .order_by("created_at", "id")
+        .values_list("id", flat=True)
+    )
+    try:
+        idx = ids.index(int(inspection_case.pk)) + 1
+    except (ValueError, TypeError):
+        return None
+    return f"{idx:02d}"
+
+
+def display_inspected_no_for_fill(inspection_case, project, task_no: str) -> str:
+    """模板/派生映射中的受检编号展示：优先项目内案件序号，否则回退为任务号展示规则。"""
+    serial = _inspection_serial_for_case(inspection_case, project)
+    if serial is not None:
+        return serial
+    return _display_task_no(task_no, project)
+
+
 def _display_project_id(project) -> str:
     if project is None:
         return ""
@@ -103,570 +155,6 @@ def _display_project_id(project) -> str:
     return f"{prefix}{idx:02d}"
 
 
-def _build_submit_value_mapping(source_data: dict, map_id: str | None = None):
-    mid = (map_id or "").strip() or DEFAULT_SUBMIT_PLACEHOLDER_MAP_ID
-    if mid not in SUBMIT_PLACEHOLDER_MAPS:
-        mid = DEFAULT_SUBMIT_PLACEHOLDER_MAP_ID
-    return build_submit_value_mapping(source_data, mid)
-
-
-def _build_dynamic_value_mapping(source_data: dict):
-    return build_dynamic_value_mapping(source_data)
-
-
-def _build_submit_derived_value_mapping(source_data: dict, project=None, task_no: str = ""):
-    def _s(v):
-        return "" if v is None else str(v)
-
-    report_info = source_data.get("reportInfo") or {}
-    hospital_info = source_data.get("hospitalInfo") or {}
-    equipment_info = source_data.get("equipmentInfo") or {}
-    test_result = source_data.get("testResult") or {}
-    hospital_name = str(hospital_info.get("name") or "")
-    model = str(equipment_info.get("model") or "")
-    device_name = str(equipment_info.get("deviceName") or "")
-    year = str(report_info.get("year") or "")
-    month = str(report_info.get("month") or "")
-    day = str(report_info.get("day") or "")
-    if not (year and month and day):
-        td = test_result.get("testDate")
-        if isinstance(td, str):
-            d = parse_datetime(td.strip())
-            if isinstance(d, datetime):
-                year, month, day = str(d.year), str(d.month), str(d.day)
-
-    def _test_line(block: dict):
-        if not isinstance(block, dict):
-            return ""
-        return (
-            f"{block.get('controlMode') or ''}：{block.get('kv') or ''}kV，{block.get('ma') or ''}mA，\n"
-            f"平板探测器尺寸D={block.get('size') or ''}mm \n标准水模"
-        )
-
-    kerma_typical = test_result.get("kermaTypical") or {}
-    kerma_max_normal = test_result.get("kermaMaxNormal") or {}
-    kerma_max_high = test_result.get("kermaMaxHigh") or {}
-    high_contrast = test_result.get("highContrast") or {}
-    low_contrast = test_result.get("lowContrast") or {}
-    screen_kerma = test_result.get("screenKerma") or {}
-    abc = test_result.get("abc") or {}
-    dsa = test_result.get("dsa") or {}
-
-    def _mv(block: dict, *fallback_keys: str) -> str:
-        if not isinstance(block, dict):
-            return ""
-        if "measuredValue" in block and block.get("measuredValue") not in (None, ""):
-            return _s(block.get("measuredValue"))
-        for k in fallback_keys:
-            if k in block and block.get(k) not in (None, ""):
-                return _s(block.get(k))
-        return ""
-
-    device_count = 0
-    testman = ""
-    if project is not None:
-        device_count = SiteRecord.objects.filter(case__library_project=project).count()
-        names = (
-            User.objects.filter(site_records__case__library_project=project)
-            .order_by("username")
-            .values_list("username", flat=True)
-            .distinct()
-        )
-        testman = "、".join([n for n in names if n])
-
-    project_code = _display_project_id(project)
-    task_no_val = _display_task_no(task_no, project=project)
-
-    return {
-        "projectId": project_code,
-        "entrustNo": project_code,
-        "委托编号": project_code,
-        "commissionNo": project_code,
-        "taskNo": task_no_val,
-        "inspectedNo": task_no_val,
-        "受检编号": task_no_val,
-        "testnumber": task_no_val,
-        "deviceCount": str(device_count) if device_count else "",
-        "testman": testman,
-        "assessment": (
-            f"应委托方要求，依据相关检测标准，对{hospital_name}放射诊疗设备（{model} 型{device_name}）"
-            "进行了质量控制检测（验收检测），结果表明：\n所检设备的质量控制相关参数均符合相关标准要求。"
-        ),
-        "testDate": f"{year}年{month}月{day}日" if year and month and day else "",
-        "kerma_test": _test_line(kerma_typical),
-        "kermaMax_test": _test_line({"controlMode": "最大比释动能", **(kerma_max_normal if isinstance(kerma_max_normal, dict) else {})}),
-        "kermaMaxNormal_test": _test_line(kerma_max_normal),
-        "kermaMaxHigh_test": _test_line(kerma_max_high),
-        "highContrast_test": _test_line(high_contrast),
-        "lowContrast_test": _test_line(low_contrast),
-        "screenKerma_test": _test_line(screen_kerma),
-        "abc_test": _test_line(abc),
-        "dsa_doseFirst_test": _test_line((dsa.get("doseFirst") or {}) if isinstance(dsa, dict) else {}),
-        "dsa_doseSecond_test": _test_line((dsa.get("doseSecond") or {}) if isinstance(dsa, dict) else {}),
-        "dsa_test": _test_line(dsa if isinstance(dsa, dict) else {}),
-        "kerma_result": _s(kerma_typical.get("calcValue")) if isinstance(kerma_typical, dict) and kerma_typical.get("calcValue") not in (None, "") else _mv(kerma_typical, "measuredValue", "result"),
-        "kermaMaxNormal_reult": _s(kerma_max_normal.get("calcValue")) if isinstance(kerma_max_normal, dict) and kerma_max_normal.get("calcValue") not in (None, "") else _mv(kerma_max_normal, "measuredValue", "result"),
-        "kermaMaxHigh_result": _s(kerma_max_high.get("calcValue")) if isinstance(kerma_max_high, dict) and kerma_max_high.get("calcValue") not in (None, "") else _mv(kerma_max_high, "measuredValue", "result"),
-        "abc_result": _s(abc.get("measuredValue", "")) if isinstance(abc, dict) else "",
-        # *_result 按你的要求优先使用 calcValue（缺失时回退 measuredValue/result）
-        "hightContrast_result": _s(high_contrast.get("calcValue")) if isinstance(high_contrast, dict) and high_contrast.get("calcValue") not in (None, "") else _mv(high_contrast, "measuredValue", "result"),
-        "lowContrast_result": _s(low_contrast.get("calcValue")) if isinstance(low_contrast, dict) and low_contrast.get("calcValue") not in (None, "") else _mv(low_contrast, "measuredValue", "result"),
-        "screenKerma_result": _s(screen_kerma.get("calcValue")) if isinstance(screen_kerma, dict) and screen_kerma.get("calcValue") not in (None, "") else _mv(screen_kerma, "measuredValue", "result"),
-    }
-
-
-def _build_template_binding_value_mapping(source_data: dict, bindings: dict[str, object]) -> dict[str, object]:
-    if not isinstance(bindings, dict):
-        return {}
-    rules = bindings.get("value_rules")
-    if not isinstance(rules, list):
-        return {}
-    normalized_rules = []
-    for row in rules:
-        if not isinstance(row, dict):
-            continue
-        key = row.get("key") or row.get("id") or row.get("fieldId") or row.get("placeholder")
-        if not key:
-            continue
-        normalized = {"key": key}
-        for k, v in row.items():
-            if k in ("key", "id", "fieldId", "placeholder"):
-                continue
-            normalized[k] = v
-        normalized_rules.append(normalized)
-    return resolve_mapping_rules(source_data, normalized_rules)
-
-
-def _fill_template_fields_with_submit(
-    source_data: dict,
-    template_fields: list,
-    map_id: str | None = None,
-    project=None,
-    task_no: str = "",
-    bindings: dict[str, object] | None = None,
-):
-    # 允许通过环境变量强制使用旧版回填逻辑，便于问题回滚定位。
-    if str(os.environ.get("INSPECTION_FILL_USE_LEGACY", "0")).strip().lower() in {"1", "true", "yes", "on"}:
-        return _fill_template_fields_with_submit_legacy(
-            source_data,
-            template_fields,
-            map_id=map_id,
-            project=project,
-            task_no=task_no,
-            bindings=bindings,
-        )
-    return _fill_template_fields_with_submit_enhanced(
-        source_data,
-        template_fields,
-        map_id=map_id,
-        project=project,
-        task_no=task_no,
-        bindings=bindings,
-    )
-
-
-def _fill_template_fields_with_submit_legacy(
-    source_data: dict,
-    template_fields: list,
-    map_id: str | None = None,
-    project=None,
-    task_no: str = "",
-    bindings: dict[str, object] | None = None,
-):
-    """
-    旧版回填逻辑（保留原行为）：
-    - 文本/勾选仅按 field.id 或 field.placeholder 取值
-    - 签名仅按 signature_map[field_key]，回退 author/reviewer/approver
-    """
-    signatures = source_data.get("signatures") or {}
-    value_mapping = _build_template_binding_value_mapping(source_data, bindings or {})
-    if not value_mapping:
-        value_mapping = _build_submit_value_mapping(source_data, map_id)
-    # 新版 submit 支持 dynamicData 直连，键通常为 source.pdfFieldId。
-    value_mapping.update(_build_dynamic_value_mapping(source_data))
-    value_mapping.update(_build_submit_derived_value_mapping(source_data, project=project, task_no=task_no))
-    signature_map = {}
-    if isinstance(bindings, dict):
-        raw_sig_map = bindings.get("signature_map")
-        if isinstance(raw_sig_map, dict):
-            signature_map = raw_sig_map
-
-    for field in template_fields:
-        if not isinstance(field, dict):
-            continue
-        field_key = field.get("id") or field.get("placeholder")
-        field_type = (field.get("fieldType") or "").lower()
-        if field_type == "text":
-            field["content"] = value_mapping.get(field_key, "")
-            continue
-        if field_type == "check":
-            field["checked"] = bool(value_mapping.get(field_key, False))
-            continue
-        if field_type == "image":
-            sig_key = signature_map.get(field_key) if isinstance(signature_map, dict) else None
-            if not isinstance(sig_key, str) or not sig_key:
-                sig_key = field_key if field_key in ("author", "reviewer", "approver") else ""
-            if sig_key:
-                field["imageData"] = signatures.get(sig_key) or ""
-    return template_fields
-
-
-def _build_field_to_pdf_reverse_index(bindings: dict[str, object] | None) -> dict[str, str]:
-    out: dict[str, str] = {}
-    if not isinstance(bindings, dict):
-        return out
-    raw_field_to_pdf = bindings.get("field_to_pdf")
-    if not isinstance(raw_field_to_pdf, list):
-        return out
-    for row in raw_field_to_pdf:
-        if not isinstance(row, dict):
-            continue
-        field_id = str(row.get("fieldId") or "").strip()
-        if not field_id:
-            continue
-        for key in (
-            str(row.get("pdfFieldId") or "").strip(),
-            str(row.get("placeholder") or "").strip(),
-            str(row.get("title") or "").strip(),
-        ):
-            if key:
-                out[key] = field_id
-    return out
-
-
-def _field_candidate_keys(field: dict) -> list[str]:
-    return [
-        str(field.get("id") or "").strip(),
-        str(field.get("placeholder") or "").strip(),
-        str(field.get("title") or "").strip(),
-        str(field.get("pdfFieldId") or "").strip(),
-    ]
-
-
-def _is_signature_image_text(v) -> bool:
-    if not isinstance(v, str):
-        return False
-    text = v.strip()
-    if not text:
-        return False
-    if text.startswith("data:image/png;base64,"):
-        text = text.split(",", 1)[1]
-    try:
-        base64.b64decode(text, validate=True)
-        return True
-    except Exception:
-        return False
-
-
-def _collect_signature_values(source_data: dict) -> dict[str, str]:
-    """
-    从 submit payload 中收集签名值：
-    1) 顶层 signatures 对象（兼容 author/reviewer/approver 及扩展角色）
-    2) 前端回传的 schema 字段（type=signature）中提取 value/defaultValue，并按 submitPath 归并
-    """
-    out: dict[str, str] = {}
-
-    # 1) 顶层 signatures
-    signatures = source_data.get("signatures")
-    if isinstance(signatures, dict):
-        for k, v in signatures.items():
-            key = str(k or "").strip()
-            if key and _is_signature_image_text(v):
-                out[key] = v
-
-    # 2) schema fields where type=signature
-    steps = source_data.get("steps")
-    if isinstance(steps, list):
-        for step in steps:
-            if not isinstance(step, dict):
-                continue
-            sections = step.get("sections")
-            if not isinstance(sections, list):
-                continue
-            for sec in sections:
-                if not isinstance(sec, dict):
-                    continue
-                fields = sec.get("fields")
-                if not isinstance(fields, list):
-                    continue
-                for fld in fields:
-                    if not isinstance(fld, dict):
-                        continue
-                    if str(fld.get("type") or "").lower() != "signature":
-                        continue
-                    val = fld.get("value")
-                    if not _is_signature_image_text(val):
-                        val = fld.get("defaultValue")
-                    if not _is_signature_image_text(val):
-                        continue
-                    src = fld.get("source") if isinstance(fld.get("source"), dict) else {}
-                    submit_path = str(src.get("submitPath") or "").strip()
-                    # signatures.xxx -> xxx
-                    if submit_path.startswith("signatures."):
-                        k = submit_path.split(".", 1)[1].strip()
-                        if k:
-                            out[k] = val
-                    fid = str(fld.get("id") or "").strip()
-                    if fid:
-                        out[fid] = val
-                    # 一对多签名框：将同一签名值扩展到所有关联 pdfFieldId，
-                    # 以便模板回填阶段命中每个 image 字段。
-                    src_pdf_id = str(src.get("pdfFieldId") or "").strip()
-                    if src_pdf_id:
-                        out[src_pdf_id] = val
-                    src_pdf_ids = src.get("pdfFieldIds")
-                    if isinstance(src_pdf_ids, list):
-                        for pid in src_pdf_ids:
-                            p = str(pid or "").strip()
-                            if p:
-                                out[p] = val
-
-    # 3) dynamicData 直连签名（常见为 f76/f77/f78）
-    dynamic_data = source_data.get("dynamicData")
-    if isinstance(dynamic_data, dict):
-        for k, v in dynamic_data.items():
-            key = str(k or "").strip()
-            if not key:
-                continue
-            if _is_signature_image_text(v):
-                out[key] = v
-
-    # 常见角色别名兜底
-    if "author" not in out and "inspector" in out:
-        out["author"] = out["inspector"]
-    if "reviewer" not in out and "checker" in out:
-        out["reviewer"] = out["checker"]
-    if "approver" not in out and "authorizedSignatory" in out:
-        out["approver"] = out["authorizedSignatory"]
-    return out
-
-
-def _fill_template_fields_with_submit_enhanced(
-    source_data: dict,
-    template_fields: list,
-    map_id: str | None = None,
-    project=None,
-    task_no: str = "",
-    bindings: dict[str, object] | None = None,
-):
-    """
-    增强回填逻辑（兼容新版前端字段改名）：
-    - 支持 id/placeholder/title/pdfFieldId 多键匹配
-    - 支持 field_to_pdf 反查 fieldId
-    - 签名支持 direct map + 结构化 signature_map
-    """
-    signature_values = _collect_signature_values(source_data)
-    value_mapping = _build_template_binding_value_mapping(source_data, bindings or {})
-    if not value_mapping:
-        value_mapping = _build_submit_value_mapping(source_data, map_id)
-    dynamic_mapping = _build_dynamic_value_mapping(source_data)
-    value_mapping.update(dynamic_mapping)
-    value_mapping.update(_build_submit_derived_value_mapping(source_data, project=project, task_no=task_no))
-    signature_map = {}
-    if isinstance(bindings, dict):
-        raw_sig_map = bindings.get("signature_map")
-        if isinstance(raw_sig_map, dict):
-            signature_map = raw_sig_map
-    reverse_field_map = _build_field_to_pdf_reverse_index(bindings)
-
-    def _pick_value_for_field(field: dict):
-        # 新版优先：若 dynamicData 中存在 pdfFieldId 对应值，直接命中。
-        pdf_field_id = str(field.get("pdfFieldId") or "").strip()
-        if pdf_field_id and pdf_field_id in dynamic_mapping:
-            return dynamic_mapping.get(pdf_field_id, "")
-        candidates = _field_candidate_keys(field)
-        for k in candidates:
-            if k and k in value_mapping:
-                return value_mapping.get(k, "")
-        for k in candidates:
-            mapped_fid = reverse_field_map.get(k)
-            if mapped_fid and mapped_fid in value_mapping:
-                return value_mapping.get(mapped_fid, "")
-        # 语义兜底：设备编号(SN/序列号/产品编号) 等同义标题统一回填 equipmentInfo.serialNo。
-        joined = " ".join([k for k in candidates if k]).replace("（", "(").replace("）", ")")
-        if (
-            ("设备编号" in joined and ("SN" in joined or "序列号" in joined or "产品编号" in joined))
-            or ("serialno" in joined.lower())
-        ):
-            serial_no = (
-                value_mapping.get("serialNo")
-                or (source_data.get("equipmentInfo") or {}).get("serialNo")
-                or ""
-            )
-            return serial_no
-        return ""
-
-    def _pick_signature_for_field(field: dict):
-        candidates = _field_candidate_keys(field)
-        if isinstance(signature_map, dict):
-            for key in candidates:
-                if not key:
-                    continue
-                mapped = signature_map.get(key)
-                if isinstance(mapped, str) and mapped:
-                    picked = signature_values.get(mapped) or ""
-                    if picked:
-                        return picked
-
-        if isinstance(signature_map, dict):
-            for _, row in signature_map.items():
-                if not isinstance(row, dict):
-                    continue
-                image_path = str(row.get("image") or "").strip()
-                name_path = str(row.get("name") or "").strip()
-                if not image_path:
-                    continue
-                # 仅在字段名命中 role/name 关键词时采用该映射
-                hit = False
-                for key in candidates:
-                    if not key:
-                        continue
-                    if key in ("author", "reviewer", "approver"):
-                        hit = True
-                    if "检测员" in key and ("preparedBy" in name_path or "author" in image_path):
-                        hit = True
-                    if "校核" in key and ("reviewedBy" in name_path or "reviewer" in image_path):
-                        hit = True
-                    if "批准" in key and ("approvedBy" in name_path or "approver" in image_path):
-                        hit = True
-                if not hit:
-                    continue
-                if image_path.startswith("signatures."):
-                    sig_key = image_path.split(".", 1)[1]
-                else:
-                    sig_key = image_path
-                if sig_key:
-                    picked = signature_values.get(sig_key) or ""
-                    if picked:
-                        return picked
-
-        # 优先按模板字段候选键直接命中签名池（支持 f76/f77/f78、中文 id、语义 id）
-        for key in candidates:
-            if not key:
-                continue
-            picked = signature_values.get(key) or ""
-            if picked:
-                return picked
-
-        for key in candidates:
-            if key in (
-                "author",
-                "reviewer",
-                "approver",
-                "inspector",
-                "mainInspector",
-                "checker",
-                "authorizedSignatory",
-                "accompanyingPerson",
-            ):
-                return signature_values.get(key) or ""
-
-        # 无显式映射时按中文语义兜底，确保多页同类签名框都能命中。
-        joined = " ".join([k for k in candidates if k]).strip()
-        if joined:
-            if ("校核" in joined) or ("复核" in joined):
-                return signature_values.get("checker") or signature_values.get("reviewer") or ""
-            if ("检测员" in joined) or ("检验员" in joined):
-                return (
-                    signature_values.get("inspector")
-                    or signature_values.get("author")
-                    or signature_values.get("mainInspector")
-                    or ""
-                )
-            if ("陪同" in joined) or ("受检单位" in joined):
-                return signature_values.get("accompanyingPerson") or ""
-        return ""
-
-    for field in template_fields:
-        if not isinstance(field, dict):
-            continue
-        field_type = (field.get("fieldType") or "").lower()
-        if field_type == "text":
-            field["content"] = _pick_value_for_field(field)
-            continue
-        if field_type == "check":
-            field["checked"] = bool(_pick_value_for_field(field))
-            continue
-        if field_type == "image":
-            field["imageData"] = _pick_signature_for_field(field)
-    return template_fields
-
-
-def _build_filled_template_fields_for_task(
-    task_obj, payload: dict, map_id: str | None = None, project=None, task_no: str = ""
-):
-    if task_obj is None:
-        return None, None, "未找到可用任务模板", ""
-    template_qs = (
-        LibraryFile.objects.filter(category=LibraryFile.CATEGORY_TEMPLATE, library_tasks=task_obj)
-        .order_by("-created_at")
-        .distinct()
-    )
-    template_json_rows = [row for row in template_qs if row.original_name.lower().endswith(".json")]
-    if not template_json_rows:
-        return None, None, "任务下缺少 JSON 模板", ""
-    candidates = []
-    for template_json_lf in template_json_rows:
-        try:
-            template_path = pipeline_service.library_absolute_path(template_json_lf.relative_path)
-            raw_text = template_path.read_text(encoding="utf-8", errors="replace")
-            parsed = htmlpdf_service.parse_template_json(raw_text)
-        except Exception:
-            continue
-        fields = parsed.get("fields") or []
-        if not isinstance(fields, list) or not fields:
-            continue
-        has_layout_field = any(
-            isinstance(f, dict)
-            and "page" in f
-            and (all(k in f for k in ("x0", "y0", "x1", "y1")) or all(k in f for k in ("x", "y", "w", "h")))
-            for f in fields
-        )
-        if not has_layout_field:
-            continue
-        source_pdf_template_id = None
-        source_pdf = parsed.get("source_pdf") or {}
-        if isinstance(source_pdf, dict):
-            raw_pdf_id = source_pdf.get("template_file_id")
-            try:
-                source_pdf_template_id = int(raw_pdf_id) if raw_pdf_id is not None else None
-            except (TypeError, ValueError):
-                source_pdf_template_id = None
-        template_bindings = parsed.get("bindings") or {}
-        candidates.append((template_json_lf, fields, source_pdf_template_id, template_bindings))
-    if not candidates:
-        return None, None, "任务下 JSON 模板不是 HTMLPDF 字段模板（fields 缺少 page 与坐标）", ""
-    if len(candidates) > 1:
-        return None, None, "任务下存在多个可用 HTMLPDF JSON 模板，请只保留一个", ""
-    template_json_lf, fields, source_pdf_template_id, template_bindings = candidates[0]
-    return (
-        _fill_template_fields_with_submit(
-            payload,
-            fields,
-            map_id,
-            project=project,
-            task_no=task_no,
-            bindings=template_bindings,
-        ),
-        source_pdf_template_id,
-        "",
-        template_json_lf.original_name,
-    )
-
-
-def _build_filled_template_fields_from_submit(task_no: str, project, payload: dict, map_id: str | None = None):
-    task_obj = _resolve_library_task_for_task_no(task_no, project)
-    if task_obj is None:
-        return None, None, "未找到对应任务，无法按任务模板导出", ""
-    return _build_filled_template_fields_for_task(
-        task_obj,
-        payload,
-        map_id=map_id,
-        project=project,
-        task_no=task_no,
-    )
-
-
 def _pick_submit_generation_tasks(task_no: str, project):
     assignment_task = _resolve_library_task_for_task_no(task_no, project)
     if assignment_task and assignment_task.output_target in (LibraryTask.OUTPUT_SITE_RECORD, LibraryTask.OUTPUT_REPORT):
@@ -684,57 +172,548 @@ def _pick_submit_generation_tasks(task_no: str, project):
     return [picked[k] for k in (LibraryTask.OUTPUT_SITE_RECORD, LibraryTask.OUTPUT_REPORT) if k in picked]
 
 
-def _resolve_report_task_for_case(task_no: str, project):
+def accumulate_inspection_payloads_first_wins(ordered_payloads: Sequence[dict]) -> dict:
     """
-    解析当前案件应使用的报告任务。
-    优先规则：
-    1) taskNo 直接对应且输出目标=report 的任务；
-    2) 项目中第一个输出目标=report 的任务。
+    多份现场记录/检测提交 JSON 按勾选顺序汇总：同一顶层键（如 hospitalInfo、testResult）
+    仅在首次出现时写入结果，后续文件中的同键整段丢弃，以便「映射到报告里同一业务对象」时
+    统一采用第一份现场记录的内容。未出现过的键仍由后续文件补齐（如首份缺省字段由后份补上仅限新键）。
     """
-    task_obj = _resolve_library_task_for_task_no(task_no, project)
-    if task_obj is not None and task_obj.output_target == LibraryTask.OUTPUT_REPORT:
-        return task_obj
-    return (
-        project.library_tasks.filter(output_target=LibraryTask.OUTPUT_REPORT)
-        .order_by("code", "id")
+    merged: dict = {}
+    for payload in ordered_payloads:
+        if not isinstance(payload, dict):
+            continue
+        for k, v in payload.items():
+            if k in merged:
+                continue
+            merged[k] = copy.deepcopy(v)
+    return merged
+
+
+def accumulate_inspection_payloads_ordered_merge(ordered_payloads: Sequence[dict]) -> dict:
+    """
+    多份检测提交 JSON 按勾选顺序合并为 **一份报告数据源**（与 first_wins 不同）：
+    - **dynamicData**：同键不得后勾覆盖先勾（不同模板下 f1、f2… 语义不同，覆盖会整表串位）；后份仅追加先份没有的键。
+    - **reportInfo / hospitalInfo / equipmentInfo**：先份非空优先，后份只补缺，与 taskNo 锚定第一份一致。
+    - **testResult**：嵌套 dict 仍按后勾覆盖先勾，便于拼多段检测结果。
+    - **signatures / conclusion / instruments**：后勾覆盖先勾。
+    - 其余顶层键仍按深度合并、后勾优先。
+    - 合并完成后写回第一份 **taskNo / projectId**，以及 **templateId / templateVersion / reportType / steps**（避免模板身份被最后一份覆盖）。
+    """
+    merged: dict = {}
+    first: dict | None = None
+    for payload in ordered_payloads:
+        if not isinstance(payload, dict):
+            continue
+        if first is None:
+            first = payload
+            merged = copy.deepcopy(payload)
+            continue
+        merged = _merge_inspection_payload_for_report_accumulator(merged, payload)
+    if isinstance(first, dict) and isinstance(merged, dict):
+        for key in ("taskNo", "projectId"):
+            if key in first and first[key] not in (None, ""):
+                merged[key] = copy.deepcopy(first[key])
+        for key in ("templateId", "templateVersion", "reportType", "steps"):
+            if key in first:
+                merged[key] = copy.deepcopy(first[key])
+    return merged
+
+
+def _deep_merge_payload_dicts(base: dict, incoming: dict) -> dict:
+    """深度合并字典：incoming 覆盖 base 同名字段；嵌套 dict 递归合并。"""
+    out: dict = dict(base) if isinstance(base, dict) else {}
+    for k, v in (incoming or {}).items():
+        if isinstance(v, dict):
+            cur = out.get(k) if isinstance(out.get(k), dict) else {}
+            if not isinstance(cur, dict):
+                cur = {}
+            out[k] = _deep_merge_payload_dicts(cur, v)
+            continue
+        if isinstance(v, list):
+            if v or k not in out:
+                out[k] = v
+            continue
+        if v in (None, "") and k in out:
+            continue
+        out[k] = v
+    return out
+
+
+def _merge_dynamic_data_preserve_first(base: dict | None, incoming: dict | None) -> dict:
+    """
+    dynamicData 以 pdfFieldId / 扁平键为主；不同模板（JS-001 / JS-117…）下同名的 f1、f14 语义不同。
+    多份提交若按深度合并「后勾覆盖先勾」，会把后一份模板的控件值写进先一份的域，导致报告回填完全串位。
+    策略：先勾选的键保留；后勾选仅追加先份中尚不存在的键（如带 task 前缀的矩阵键）。
+    """
+    out = copy.deepcopy(base) if isinstance(base, dict) else {}
+    inc = incoming if isinstance(incoming, dict) else {}
+    for k, v in inc.items():
+        if k not in out:
+            out[k] = copy.deepcopy(v)
+    return out
+
+
+def _deep_merge_dicts_fill_missing(base: dict | None, incoming: dict | None) -> dict:
+    """
+    嵌套 dict：incoming 只在 base 侧缺失或为空（None / \"\"）时写入；双方均有非空标量时保留 base。
+    与「taskNo 锚定第一份」一致，避免后一份受检单位/设备信息整体覆盖先份。
+    """
+    out = copy.deepcopy(base) if isinstance(base, dict) else {}
+    inc = incoming if isinstance(incoming, dict) else {}
+    for k, v in inc.items():
+        if k not in out:
+            out[k] = copy.deepcopy(v)
+            continue
+        cur = out[k]
+        if isinstance(v, dict) and isinstance(cur, dict):
+            out[k] = _deep_merge_dicts_fill_missing(cur, v)
+            continue
+        if isinstance(v, list):
+            if (not isinstance(cur, list) or len(cur) == 0) and v:
+                out[k] = copy.deepcopy(v)
+            continue
+        if cur in (None, "") and v not in (None, ""):
+            out[k] = copy.deepcopy(v)
+    return out
+
+
+def _merge_payload_test_result(base_tr, incoming_tr):
+    """与 _deep_merge_payload_dicts 在单键 testResult 上的行为一致（含 null 不冲掉已有块）。"""
+    if isinstance(incoming_tr, dict):
+        cur = base_tr if isinstance(base_tr, dict) else {}
+        return _deep_merge_payload_dicts(cur, copy.deepcopy(incoming_tr))
+    if incoming_tr in (None, ""):
+        return base_tr
+    return copy.deepcopy(incoming_tr)
+
+
+def _merge_inspection_payload_for_report_accumulator(base: dict, incoming: dict) -> dict:
+    """
+    将后一份检测提交并入已累积的 merged（第一份已整体拷贝在 base 中）。
+    与「全量 _deep_merge_payload_dicts」不同：隔离 dynamicData / 基本信息块，避免多模板混填。
+    """
+    out = copy.deepcopy(base)
+    out["dynamicData"] = _merge_dynamic_data_preserve_first(
+        out.get("dynamicData") if isinstance(out.get("dynamicData"), dict) else {},
+        incoming.get("dynamicData") if isinstance(incoming.get("dynamicData"), dict) else {},
+    )
+    for blk in ("reportInfo", "hospitalInfo", "equipmentInfo"):
+        if isinstance(incoming.get(blk), dict):
+            cur = out.get(blk) if isinstance(out.get(blk), dict) else {}
+            out[blk] = _deep_merge_dicts_fill_missing(cur, incoming[blk])
+    if "testResult" in incoming:
+        out["testResult"] = _merge_payload_test_result(out.get("testResult"), incoming["testResult"])
+    for blk in ("signatures", "conclusion", "instruments"):
+        if blk not in incoming:
+            continue
+        bi = incoming[blk]
+        bo = out.get(blk)
+        if isinstance(bi, dict):
+            bd = bo if isinstance(bo, dict) else {}
+            out[blk] = _deep_merge_payload_dicts(bd, copy.deepcopy(bi))
+        elif isinstance(bi, list):
+            if bi or blk not in out:
+                out[blk] = copy.deepcopy(bi)
+        elif bi not in (None, "") or blk not in out:
+            out[blk] = copy.deepcopy(bi)
+    skip = {
+        "dynamicData",
+        "reportInfo",
+        "hospitalInfo",
+        "equipmentInfo",
+        "testResult",
+        "signatures",
+        "conclusion",
+        "instruments",
+        "taskNo",
+        "projectId",
+    }
+    for k, v in incoming.items():
+        if k in skip:
+            continue
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge_payload_dicts(out[k], copy.deepcopy(v))
+            continue
+        if isinstance(v, list):
+            if v or k not in out:
+                out[k] = copy.deepcopy(v)
+            continue
+        if v in (None, "") and k in out:
+            continue
+        out[k] = copy.deepcopy(v)
+    return out
+
+
+def _task_no_strings_for_library_task(project, library_task: LibraryTask | None) -> list[str]:
+    """
+    项目内指向同一 LibraryTask 的 taskNo 可能为序号「01」…或分配号「ASG-{assignment_id}」。
+    用于将检测提交 JSON 文件名 `{taskNo}_submit_*.json` 与现场记录任务对齐。
+    """
+    if project is None or library_task is None:
+        return []
+    task_ids = list(project.library_tasks.order_by("code", "id").values_list("id", flat=True))
+    out: list[str] = []
+    try:
+        idx = task_ids.index(library_task.id) + 1
+        out.append(f"{idx:02d}")
+        out.append(str(idx))
+    except ValueError:
+        pass
+    for aid in LibraryTaskAssignment.objects.filter(
+        project_id=project.pk, library_task_id=library_task.pk
+    ).values_list("id", flat=True):
+        out.append(f"{AUTO_TASK_PREFIX}{aid}")
+    return list(dict.fromkeys([x for x in out if x]))
+
+
+def _site_record_json_files_for_task(
+    project,
+    site_task: LibraryTask,
+    candidates: Sequence[LibraryFile],
+) -> list[LibraryFile]:
+    """从候选文件中挑出属于现场记录任务 site_task 的 JSON（旧：task M2M；新：检测提交文件名含 taskNo）。"""
+    nos = [n.lower() for n in _task_no_strings_for_library_task(project, site_task)]
+    out: list[LibraryFile] = []
+    seen: set[int] = set()
+    for lf in candidates:
+        pk = int(lf.pk)
+        if pk in seen:
+            continue
+        nm = (lf.original_name or "").lower()
+        if not nm.endswith(".json"):
+            continue
+        if any(t.pk == site_task.pk for t in lf.library_tasks.all()):
+            seen.add(pk)
+            out.append(lf)
+            continue
+        if lf.category != LibraryFile.CATEGORY_INSPECTION_SUBMIT:
+            continue
+        if nos and any(nm.startswith(f"{tn}_submit_") for tn in nos):
+            seen.add(pk)
+            out.append(lf)
+    return out
+
+
+def _dedupe_inspection_cases_preserve_order(cases: Sequence[InspectionCase]) -> list[InspectionCase]:
+    seen: set[int] = set()
+    out: list[InspectionCase] = []
+    for c in cases:
+        if c.pk in seen:
+            continue
+        seen.add(int(c.pk))
+        out.append(c)
+    return out
+
+
+def _load_site_record_json_merged_only(
+    cases: Sequence[InspectionCase],
+    project,
+    report_task=None,
+) -> tuple[dict, bool, list, str]:
+    """
+    合并「现场记录类文件库任务」关联的 .json（按报告来源任务）。
+    判定依据是任务的 output_target=现场记录，而非文件库 category（文件库「现场记录」页主要存放导出的 PDF）。
+
+    可在同一项目下跨多个案件收集：每个来源任务下，合并其对应的检测提交 .json
+    （文件名 `{taskNo}_submit_*.json`，taskNo 与项目内该现场记录任务序号或分配号一致），
+    并兼容旧数据：仍挂在任务模板 M2M 上的 .json。
+
+    若按来源任务一条都匹配不到，则回退为：同案件/项目下所有检测提交类 .json 及仍带现场记录任务 M2M 的 .json。
+
+    返回 (merged, any_loaded, missing_task_codes, load_hint)。
+    load_hint 为给人看的说明（非错误码）。
+    """
+    cases_list = _dedupe_inspection_cases_preserve_order(cases)
+    if not cases_list:
+        return {}, False, [], ""
+    case_pks = [int(c.pk) for c in cases_list]
+    source_tasks = _report_site_record_source_tasks(project, report_task)
+    cand_qs = (
+        LibraryFile.objects.filter(
+            link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
+            link_object_id__in=case_pks,
+            projects=project,
+        )
+        .filter(
+            Q(category=LibraryFile.CATEGORY_INSPECTION_SUBMIT)
+            | Q(library_tasks__output_target=LibraryTask.OUTPUT_SITE_RECORD)
+        )
+        .order_by("created_at", "pk")
+        .distinct()
+        .prefetch_related("library_tasks")
+    )
+    candidates = list(cand_qs)
+    merged: dict = {}
+    used = False
+    missing_codes: list = []
+    load_hint = ""
+    for st in source_tasks:
+        rows = _site_record_json_files_for_task(project, st, candidates)
+        if not rows:
+            missing_codes.append(st.code)
+            continue
+        for lf in rows:
+            try:
+                p = pipeline_service.library_absolute_path(lf.relative_path)
+                payload = json_std.loads(p.read_text(encoding="utf-8", errors="replace"))
+            except Exception as exc:
+                return {}, False, [f"读取失败:{exc}"], ""
+            if not isinstance(payload, dict):
+                return {}, False, ["现场记录 JSON 结构无效"], ""
+            merged = _deep_merge_payload_dicts(merged, payload)
+            used = True
+    if not used:
+        loose_rows: list[LibraryFile] = []
+        seen_loose: set[int] = set()
+        for lf in candidates:
+            pk = int(lf.pk)
+            if pk in seen_loose:
+                continue
+            nm = (lf.original_name or "").lower()
+            if not nm.endswith(".json"):
+                continue
+            if lf.category == LibraryFile.CATEGORY_INSPECTION_SUBMIT:
+                loose_rows.append(lf)
+                seen_loose.add(pk)
+                continue
+            if any(t.output_target == LibraryTask.OUTPUT_SITE_RECORD for t in lf.library_tasks.all()):
+                loose_rows.append(lf)
+                seen_loose.add(pk)
+        if loose_rows:
+            for lf in loose_rows:
+                try:
+                    p = pipeline_service.library_absolute_path(lf.relative_path)
+                    payload = json_std.loads(p.read_text(encoding="utf-8", errors="replace"))
+                except Exception as exc:
+                    return {}, False, [f"读取失败:{exc}"], ""
+                if not isinstance(payload, dict):
+                    return {}, False, ["现场记录 JSON 结构无效"], ""
+                merged = _deep_merge_payload_dicts(merged, payload)
+                used = True
+            missing_codes = []
+            load_hint = (
+                "提示：未能按报告来源任务精确匹配 JSON，已合并所选案件下、"
+                "项目关联的检测提交 .json（及旧版挂在现场记录任务上的 .json）。"
+                "建议在项目中为各现场记录任务使用一致的 taskNo 提交，以便报告按来源任务拆分合并。"
+            )
+    return merged, used, missing_codes, load_hint
+
+
+SUBMIT_PAYLOAD_REQUIRED_KEYS = frozenset({"reportInfo", "hospitalInfo", "equipmentInfo", "testResult"})
+
+
+def resolve_submit_payload_for_report(task_no: str, case: InspectionCase, project) -> dict | None:
+    """
+    解析用于报告回填的检测提交正文：优先同 taskNo 的 InspectionSubmission，其次同案件最新检测提交 .json 文件。
+    """
+    tn = (task_no or "").strip()
+    if tn:
+        sub = (
+            InspectionSubmission.objects.filter(task_no=tn, case_id=case.pk, project_id=project.pk)
+            .order_by("-submitted_at", "-updated_at", "-id")
+            .first()
+        )
+        if sub is not None:
+            raw = sub.raw_payload if isinstance(sub.raw_payload, dict) else {}
+            if raw and SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(raw.keys()):
+                return raw
+            fb = {
+                "taskNo": sub.task_no,
+                "projectId": getattr(project, "code", "") or "",
+                "reportInfo": sub.report_info or {},
+                "hospitalInfo": sub.hospital_info or {},
+                "equipmentInfo": sub.equipment_info or {},
+                "testResult": sub.test_result or {},
+                "conclusion": sub.conclusion or {},
+            }
+            if sub.submitted_at:
+                fb["submittedAt"] = sub.submitted_at.isoformat()
+            if SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(fb.keys()):
+                return fb
+    for lf in (
+        LibraryFile.objects.filter(
+            category=LibraryFile.CATEGORY_INSPECTION_SUBMIT,
+            link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
+            link_object_id=case.pk,
+            projects=project,
+        )
+        .order_by("-created_at", "-id")
+        .distinct()
+    ):
+        if not (lf.original_name or "").lower().endswith(".json"):
+            continue
+        try:
+            p = pipeline_service.library_absolute_path(lf.relative_path)
+            data = json_std.loads(p.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            continue
+        if isinstance(data, dict) and SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(data.keys()):
+            return data
+    return None
+
+
+def _single_valid_submit_json_payload_for_case(case: InspectionCase, project) -> dict | None:
+    """同案件、项目下若仅有唯一一份完整检测提交 JSON，则返回其正文；多份或没有则 None。"""
+    found: dict | None = None
+    n = 0
+    for lf in (
+        LibraryFile.objects.filter(
+            category=LibraryFile.CATEGORY_INSPECTION_SUBMIT,
+            link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
+            link_object_id=case.pk,
+            projects=project,
+        )
+        .order_by("-created_at", "-id")
+        .distinct()
+    ):
+        if not (lf.original_name or "").lower().endswith(".json"):
+            continue
+        try:
+            p = pipeline_service.library_absolute_path(lf.relative_path)
+            data = json_std.loads(p.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            continue
+        if not isinstance(data, dict) or not SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(data.keys()):
+            continue
+        n += 1
+        found = data
+        if n > 1:
+            return None
+    return found
+
+
+def resolve_submit_payload_for_site_record_pdf_lf(lf: LibraryFile) -> tuple[dict | None, InspectionCase | None, str]:
+    """
+    从文件库「现场记录」中已回填导出的 PDF 定位案件与 taskNo，解析出与同 taskNo 检测提交 JSON 等效的数据。
+    优先从文件名解析 taskNo：支持旧版「{taskNo}-现场记录.pdf」与新版「…__task__{taskNo}-现场记录.pdf」
+    （与 build_exported_inspection_pdf_original_name / _persist_filled_pdf_from_submit 一致，taskNo 中「/」在文件名里为「_」）；
+    若仍无法匹配且该案件下仅有唯一一份合格检测提交 JSON，则回退使用该 JSON。
+    """
+    if lf.category != LibraryFile.CATEGORY_SITE_RECORD:
+        return None, None, "不是「现场记录」分类文件"
+    name = (lf.original_name or "").strip()
+    if not name.lower().endswith(".pdf"):
+        return None, None, "不是 PDF 文件"
+    if lf.link_entity != LibraryFile.LINK_ENTITY_INSPECTION_CASE or not lf.link_object_id:
+        return None, None, "未关联 inspection_case"
+    case = (
+        InspectionCase.objects.select_related("library_project")
+        .filter(pk=int(lf.link_object_id))
         .first()
     )
+    if case is None or not case.library_project_id:
+        return None, None, "关联案件或项目不存在"
+    project = case.library_project
+
+    marker = "-现场记录.pdf"
+    lower = name.lower()
+    idx = lower.rfind(marker.lower())
+    if idx >= 0:
+        base = name[:idx].strip()
+        if "__task__" in base:
+            tail = base.rsplit("__task__", 1)[-1].strip()
+            if tail:
+                base = tail
+        candidates: list[str] = []
+        if base:
+            candidates.append(base)
+            if "_" in base:
+                candidates.append(base.replace("_", "/"))
+        for tn in dict.fromkeys(candidates):
+            payload = resolve_submit_payload_for_report(tn, case, project)
+            if payload and SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(payload.keys()):
+                return payload, case, ""
+
+    fb = _single_valid_submit_json_payload_for_case(case, project)
+    if fb is not None:
+        return fb, case, ""
+
+    return (
+        None,
+        case,
+        "无法匹配检测提交数据：请使用系统导出的现场记录 PDF（文件名中含任务编号，"
+        "旧版形如「{taskNo}-现场记录.pdf」，新版在「__task__」之后为任务编号），"
+        "或确保该案件下仅有唯一一份检测提交 JSON。",
+    )
+
+
+def load_report_payload_for_manual_export(
+    cases: Sequence[InspectionCase],
+    project,
+    report_task,
+    submit_payload: dict,
+    *,
+    submit_merge_is_authoritative: bool = False,
+) -> tuple[dict | None, str]:
+    """
+    手动导出报告数据源：以检测提交 JSON（submit_payload）为基准，与同项目下若干案件的现场记录 JSON 深度合并；
+    同路径字段以检测提交为准（后合并覆盖）。
+    无现场记录 JSON 时，仅使用 submit_payload。
+
+    submit_merge_is_authoritative：为 True 时（文件库「手动导出报告」勾选多份现场记录 JSON 场景），
+    不再读取文件库中另行挂载到现场记录任务上的 .json，仅以 submit_payload（已按勾选顺序叠成一份）
+    作为报告填数来源；模板占位符与字段映射仍由报告任务及关联现场记录任务模板提供。
+    """
+    if not isinstance(submit_payload, dict) or not submit_payload:
+        return None, "检测提交 JSON 无效"
+    if not SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(submit_payload.keys()):
+        return None, "检测提交 JSON 缺少 reportInfo/hospitalInfo/equipmentInfo/testResult"
+    cases_list = _dedupe_inspection_cases_preserve_order(cases)
+    if not cases_list:
+        return None, "未指定检测案件"
+    if submit_merge_is_authoritative:
+        return dict(submit_payload), (
+            "已按勾选顺序将多份检测提交合并为单一数据源（testResult 等仍后份补全/覆盖先份；"
+            "报告回填时 dynamicData 按「每一份 + 其对应现场模板」单独解析为占位符/id 词条后再汇总，避免不同模板下 f 号混用串位；"
+            "reportInfo/hospitalInfo/equipmentInfo 先份非空优先；"
+            "taskNo/projectId/templateId 等仍以第一份为准）；未再读取文件库中另行挂载的现场记录任务 JSON。"
+        )
+    site_merged, site_loaded, missing_codes, site_load_hint = _load_site_record_json_merged_only(
+        cases_list, project, report_task
+    )
+    if missing_codes and any(str(x).startswith("读取失败") for x in missing_codes):
+        return None, missing_codes[0] if missing_codes else "现场记录读取失败"
+    if missing_codes and any(x == "现场记录 JSON 结构无效" for x in missing_codes):
+        return None, "现场记录 JSON 结构无效"
+    out = _deep_merge_payload_dicts(site_merged, submit_payload)
+    hints: list[str] = []
+    if site_load_hint:
+        hints.append(site_load_hint)
+    if site_loaded and missing_codes:
+        hints.append(f"部分来源任务缺少现场记录 JSON: {', '.join(str(x) for x in missing_codes[:10])}")
+    if site_loaded:
+        hints.append("已合并现场记录 JSON 与检测提交（提交内容优先）")
+        if len(cases_list) > 1:
+            hints.append(f"现场记录来源案件数：{len(cases_list)}")
+    return out, "; ".join(hints)
 
 
 def _load_site_record_payload_for_report(case: InspectionCase, project, report_task=None):
     """
-    读取用于生成报告的现场记录 JSON。
+    读取用于生成报告的数据（优先关联「输出目标=现场记录」任务的 .json，不按文件库 category 判定）。
     若报告任务配置了 report_source_tasks，则按来源任务逐个读取最新现场记录 JSON 并做深度整合。
-    """
-    def _deep_merge(base: dict, incoming: dict):
-        for k, v in (incoming or {}).items():
-            if isinstance(v, dict):
-                cur = base.get(k) if isinstance(base.get(k), dict) else {}
-                if not isinstance(cur, dict):
-                    cur = {}
-                base[k] = _deep_merge(cur, v)
-                continue
-            if isinstance(v, list):
-                if v or k not in base:
-                    base[k] = v
-                continue
-            if v in (None, "") and k in base:
-                continue
-            base[k] = v
-        return base
 
-    source_tasks = []
-    if report_task is not None:
-        source_tasks = list(
-            report_task.report_source_tasks.filter(output_target=LibraryTask.OUTPUT_SITE_RECORD).order_by("code", "id")
-        )
-    if not source_tasks:
-        source_tasks = list(
-            project.library_tasks.filter(output_target=LibraryTask.OUTPUT_SITE_RECORD).order_by("code", "id")
-        )
-    qs = (
+    说明：App 提交成功时通常会落库「检测提交」JSON 并生成现场记录 **PDF**（多归入文件库「现场记录」分类），
+    结构化 JSON 需绑定到现场记录类任务才会参与报告合并。
+    当没有任何可用的现场记录 JSON 时，依次回退：① 同案件最新检测提交 JSON 文件；② 数据库中最新已提交记录。
+    """
+    merged, used, missing_codes, load_hint = _load_site_record_json_merged_only((case,), project, report_task)
+    for mc in missing_codes:
+        mcs = str(mc)
+        if mcs.startswith("读取失败:"):
+            return None, mcs
+        if mcs == "现场记录 JSON 结构无效":
+            return None, "现场记录 JSON 结构无效"
+    if used:
+        parts = []
+        if load_hint:
+            parts.append(load_hint)
+        if missing_codes:
+            parts.append(f"部分来源任务缺少现场记录 JSON: {', '.join(str(x) for x in missing_codes[:10])}")
+        return merged, "; ".join(parts) if parts else ""
+    submit_qs = (
         LibraryFile.objects.filter(
-            category=LibraryFile.CATEGORY_SITE_RECORD,
+            category=LibraryFile.CATEGORY_INSPECTION_SUBMIT,
             link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
             link_object_id=case.pk,
             projects=project,
@@ -742,132 +721,213 @@ def _load_site_record_payload_for_report(case: InspectionCase, project, report_t
         .order_by("-created_at", "-id")
         .distinct()
     )
-    merged = {}
-    used = []
-    missing_codes = []
-    for st in source_tasks:
-        rows = [x for x in qs.filter(library_tasks=st) if (x.original_name or "").lower().endswith(".json")]
-        if not rows:
-            missing_codes.append(st.code)
+    for lf in submit_qs:
+        if not (lf.original_name or "").lower().endswith(".json"):
             continue
-        lf = rows[0]
         try:
             p = pipeline_service.library_absolute_path(lf.relative_path)
-            payload = json_std.loads(p.read_text(encoding="utf-8", errors="replace"))
+            fb = json_std.loads(p.read_text(encoding="utf-8", errors="replace"))
         except Exception as exc:
-            return None, f"现场记录 JSON 读取失败: {exc}"
-        if not isinstance(payload, dict):
-            return None, "现场记录 JSON 结构无效"
-        merged = _deep_merge(merged, payload)
-        used.append({"id": st.id, "code": st.code, "name": st.name})
-    if not used:
-        return None, "未找到可用的现场记录 JSON"
-    if missing_codes:
-        return merged, f"部分来源任务缺少现场记录 JSON: {', '.join(missing_codes[:10])}"
-    return merged, ""
+            return None, f"检测提交 JSON 回退读取失败: {exc}"
+        if not isinstance(fb, dict) or not fb:
+            continue
+        return fb, f"未找到现场记录 JSON，已回退使用检测提交文件：{lf.original_name}"
+    sub = (
+        InspectionSubmission.objects.filter(case_id=case.pk, project_id=project.pk)
+        .order_by("-submitted_at", "-updated_at", "-id")
+        .first()
+    )
+    if sub is not None:
+        raw = sub.raw_payload if isinstance(sub.raw_payload, dict) else {}
+        if raw:
+            return raw, "未找到现场记录 JSON，已回退使用数据库中的检测提交原始数据"
+        fb2 = {
+            "taskNo": sub.task_no,
+            "projectId": getattr(project, "code", "") or "",
+            "reportInfo": sub.report_info or {},
+            "hospitalInfo": sub.hospital_info or {},
+            "equipmentInfo": sub.equipment_info or {},
+            "testResult": sub.test_result or {},
+            "conclusion": sub.conclusion or {},
+        }
+        if sub.submitted_at:
+            fb2["submittedAt"] = sub.submitted_at.isoformat()
+        return fb2, "未找到现场记录 JSON，已回退使用数据库中的检测提交拆分字段"
+    return None, "未找到可用的现场记录 JSON（亦无检测提交可回退）"
 
 
-def _normalize_fields_for_htmlpdf(fields):
-    normalized = []
-    skipped = 0
-    for f in (fields or []):
-        if not isinstance(f, dict):
-            skipped += 1
-            continue
-        page = f.get("page")
-        if page in (None, ""):
-            skipped += 1
-            continue
-        if all(k in f for k in ("x0", "y0", "x1", "y1")):
-            try:
-                x0 = float(f.get("x0")); y0 = float(f.get("y0")); x1 = float(f.get("x1")); y1 = float(f.get("y1"))
-            except (TypeError, ValueError):
-                skipped += 1
-                continue
-        elif all(k in f for k in ("x", "y", "w", "h")):
-            try:
-                x = float(f.get("x")); y = float(f.get("y")); w = float(f.get("w")); h = float(f.get("h"))
-            except (TypeError, ValueError):
-                skipped += 1
-                continue
-            if w <= 0 or h <= 0:
-                skipped += 1
-                continue
-            x0, y0, x1, y1 = x, y, x + w, y + h
-        else:
-            skipped += 1
-            continue
-        text_val = f.get("value")
-        if text_val in (None, ""):
-            text_val = f.get("content", "")
-        normalized.append(
-            {
-                "page": page, "x0": x0, "y0": y0, "x1": x1, "y1": y1,
-                "fieldType": (f.get("fieldType") or "text"),
-                "value": text_val or "",
-                "checked": bool(f.get("checked", False)),
-                "imageData": f.get("imageData") or "",
-            }
+def _friendly_library_report_stem(original_name: str) -> str:
+    """去掉 .pdf 与文件库导出尾缀 ``__task__…-报告``，便于作合并用展示标题。"""
+    n = (original_name or "").strip()
+    if n.lower().endswith(".pdf"):
+        n = n[:-4]
+    m = re.search(r"__task__.+$", n)
+    if m:
+        n = n[: m.start()].strip("_")
+    return (n.strip() or (original_name or "").strip())[:200]
+
+
+def _resolve_submit_payload_for_report_merge(case: InspectionCase, project) -> dict | None:
+    """报告合并：为关联案件的报告 PDF 尽量解析出完整检测提交（库 JSON → DB → taskNo 回退）。"""
+    for lf in (
+        LibraryFile.objects.filter(
+            category=LibraryFile.CATEGORY_INSPECTION_SUBMIT,
+            link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
+            link_object_id=case.pk,
+            projects=project,
         )
-    return normalized, skipped
-
-
-def _persist_filled_pdf_from_submit(
-    user,
-    task_no: str,
-    case: InspectionCase,
-    project,
-    filled_fields: list,
-    template_pdf_id=None,
-    template_json_name: str = "",
-    task_obj=None,
-):
-    if not isinstance(filled_fields, list) or not filled_fields:
-        return False, "无可用填充字段"
-    normalized_fields, skipped_fields = _normalize_fields_for_htmlpdf(filled_fields)
-    if not normalized_fields:
-        return False, "模板字段缺少有效页码或坐标（支持 x/y/w/h 或 x0/y0/x1/y1）"
-    if task_obj is None:
-        task_obj = _resolve_library_task_for_task_no(task_no, project)
-    if task_obj is None:
-        return False, "未找到对应任务模板，无法导出"
-    template_pdf_lf = None
-    if template_pdf_id:
-        template_pdf_lf = (
-            LibraryFile.objects.filter(pk=template_pdf_id, category=LibraryFile.CATEGORY_TEMPLATE, projects=project)
-            .distinct()
-            .first()
-        )
-    template_qs = (
-        LibraryFile.objects.filter(category=LibraryFile.CATEGORY_TEMPLATE, library_tasks=task_obj)
-        .order_by("-created_at")
+        .order_by("-created_at", "-id")
         .distinct()
+    ):
+        if not (lf.original_name or "").lower().endswith(".json"):
+            continue
+        try:
+            p = pipeline_service.library_absolute_path(lf.relative_path)
+            data = json_std.loads(p.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            continue
+        if isinstance(data, dict) and SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(data.keys()):
+            return data
+    sub = (
+        InspectionSubmission.objects.filter(case_id=case.pk, project_id=project.pk)
+        .order_by("-submitted_at", "-updated_at", "-id")
+        .first()
     )
-    if template_pdf_lf is None:
-        template_pdf_rows = [row for row in template_qs if row.original_name.lower().endswith(".pdf")]
-        if not template_pdf_rows:
-            return False, "项目下缺少 PDF 模板"
-        if len(template_pdf_rows) > 1:
-            return False, "项目下存在多个 PDF 模板，请先保证每个任务项目仅有一个 PDF 模板"
-        template_pdf_lf = template_pdf_rows[0]
+    if sub is not None:
+        raw = sub.raw_payload if isinstance(sub.raw_payload, dict) else {}
+        if isinstance(raw, dict) and raw and SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(raw.keys()):
+            return raw
+        fb = {
+            "taskNo": sub.task_no,
+            "projectId": getattr(project, "code", "") or "",
+            "reportInfo": sub.report_info or {},
+            "hospitalInfo": sub.hospital_info or {},
+            "equipmentInfo": sub.equipment_info or {},
+            "testResult": sub.test_result or {},
+            "conclusion": sub.conclusion or {},
+        }
+        if sub.submitted_at:
+            fb["submittedAt"] = sub.submitted_at.isoformat()
+        if SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(fb.keys()):
+            return fb
+    tn = str(case.case_no or "").strip()
+    if tn:
+        got = resolve_submit_payload_for_report(tn, case, project)
+        if isinstance(got, dict) and SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(got.keys()):
+            return got
+    return None
+
+
+def collect_report_merge_source_rows(files_ordered: Sequence[LibraryFile]) -> list[dict]:
+    """
+    报告合并：按勾选顺序收集每份报告 PDF 的可溯源信息。
+    traced=True 表示已关联 inspection_case 且解析到完整检测提交 JSON。
+    """
+    rows: list[dict] = []
+    for lf in files_ordered:
+        row: dict = {
+            "file_id": int(lf.pk),
+            "original_name": lf.original_name or "",
+            "traced": False,
+            "submit": None,
+            "case_id": None,
+            "path": str(pipeline_service.library_absolute_path(lf.relative_path)),
+        }
+        if lf.link_entity == LibraryFile.LINK_ENTITY_INSPECTION_CASE and lf.link_object_id:
+            case = (
+                InspectionCase.objects.select_related("library_project")
+                .filter(pk=int(lf.link_object_id))
+                .first()
+            )
+            if case is not None and case.library_project_id:
+                project = case.library_project
+                payload = _resolve_submit_payload_for_report_merge(case, project)
+                if isinstance(payload, dict) and SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(payload.keys()):
+                    row["traced"] = True
+                    row["submit"] = payload
+                    row["case_id"] = int(case.pk)
+        row["title_line"] = _per_report_title_line_for_merge(row)
+        row["inspected_org_hint"] = _inspected_org_from_submit_row(row)
+        rows.append(row)
+    return rows
+
+
+def _inspected_org_from_submit_row(row: dict) -> str:
+    sub = row.get("submit")
+    if not isinstance(sub, dict):
+        return ""
+    hi = sub.get("hospitalInfo") or {}
+    if not isinstance(hi, dict):
+        return ""
+    # 多数模板「受检单位」在 inspection2，「委托/申请单位」在 inspection；优先取受检侧
+    for k in (
+        "inspection2",
+        "inspection",
+        "inspectedUnit",
+        "inspectedOrganization",
+        "hospitalName",
+        "entityName",
+        "commissionedUnit",
+    ):
+        v = hi.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return ""
+
+
+def _per_report_title_line_for_merge(row: dict) -> str:
+    """单份报告在合并命名中使用的「报告名称」候选串（用于抽取 DSA/DR/CT 等缩写）。"""
+    sub = row.get("submit")
+    if isinstance(sub, dict):
+        ei = sub.get("equipmentInfo") or {}
+        if isinstance(ei, dict):
+            for k in ("deviceName", "equipmentName", "deviceType", "model"):
+                v = ei.get(k)
+                if isinstance(v, str) and v.strip():
+                    t = v.strip()
+                    if "质量控制" in t:
+                        return t[:200]
+                    return f"{t}质量控制检测"[:200]
+    return _friendly_library_report_stem(row.get("original_name") or "")
+
+
+def build_report_merge_overlay(files_ordered: Sequence[LibraryFile], merge_time=None) -> tuple[dict, str]:
+    """
+    构造合并 PDF 封面/「一、项目基本情况」页叠印所需字段；返回 (overlay_dict, hint)。
+
+    ``files_ordered`` 须与合并 PDF 的 ``pdf_paths`` 顺序一致：**首项即「第一份小报告」**，
+    其前 3 页用作合并稿封面、声明、基本情况版式；叠印字段中的 ``project_name_combined`` 为
+    **受检单位名称 + 合并报告名称**（与封面两行项目名称总语义一致）。
+
+    overlay 键由 utils.pdf_merge.apply_merged_report_merge_overlay 消费。
+    """
+    from utils.pdf_merge import build_merged_report_overlay_fields
+
+    rows = collect_report_merge_source_rows(files_ordered)
+    if not rows:
+        return {}, "无有效报告行"
+    mt = merge_time if merge_time is not None else timezone.now()
     try:
-        source_pdf = pipeline_service.library_absolute_path(template_pdf_lf.relative_path)
-        pdf_bytes = htmlpdf_service.build_filled_pdf(normalized_fields, source_pdf)
-    except Exception as exc:
-        return False, f"PDF 渲染失败: {exc}"
-    output_category = LibraryFile.CATEGORY_REPORT if task_obj.output_target == LibraryTask.OUTPUT_REPORT else LibraryFile.CATEGORY_SITE_RECORD
-    safe_task_no = (task_no or "").replace("/", "_")
-    filename = f"{safe_task_no}-报告.pdf" if output_category == LibraryFile.CATEGORY_REPORT else f"{safe_task_no}-现场记录.pdf"
-    wrapped = type("UploadLike", (), {"read": lambda self: pdf_bytes, "name": filename})()
-    created, _ = save_library_binary_uploads(
-        user, [wrapped], output_category,
-        link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
-        link_object_id=case.pk, project_ids=[project.pk]
-    )
-    if task_obj and created:
-        attach_files_to_tasks([row["id"] for row in created if row.get("id")], [task_obj.pk], user)
-    if not created:
-        return False, "PDF 保存失败（save_library_binary_uploads 未创建记录）"
-    if skipped_fields:
-        return True, f"导出成功，但已跳过 {skipped_fields} 个不合法模板字段"
-    return True, ""
+        lt = timezone.localtime(mt)
+    except Exception:
+        lt = mt
+    merge_date_str = f"{lt.year}年{lt.month}月{lt.day}日"
+    traced_n = sum(1 for r in rows if r.get("traced"))
+    hint_parts: list[str] = []
+    if traced_n == len(rows):
+        hint_parts.append("封面与基本情况已按检测提交与任务模板溯源数据重写")
+    elif traced_n > 0:
+        hint_parts.append(f"部分报告已溯源检测提交（{traced_n}/{len(rows)}），其余自 PDF 文本识别补全")
+    else:
+        hint_parts.append("所选报告未关联案件或缺少检测提交 JSON，封面与基本情况已按 PDF 文本识别补全")
+    overlay = build_merged_report_overlay_fields(rows, merge_date_str=merge_date_str)
+    return overlay, "；".join(hint_parts)
+
+
+from apps.api.inspection_report_make import (  # noqa: E402
+    _build_filled_template_fields_for_task,
+    _build_filled_template_fields_from_submit,
+    _persist_filled_pdf_from_submit,
+    _report_site_record_source_tasks,
+    _resolve_report_task_for_case,
+)

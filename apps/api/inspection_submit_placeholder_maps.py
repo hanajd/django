@@ -293,8 +293,9 @@ _RULES_DEFAULT: list[dict[str, Any]] = [
     {"key": "contactPerson", "kind": "path", "path": ["hospitalInfo", "contactPerson"]},
     {"key": "contactPhone", "kind": "path", "path": ["hospitalInfo", "contactPhone"]},
     {"key": "model", "kind": "path", "path": ["equipmentInfo", "model"]},
-    {"key": "ratedkV", "kind": "const", "value": ""},
-    {"key": "ratedmA", "kind": "const", "value": ""},
+    # 额定 kV/mA：JS-117 等统一表单写在 equipmentInfo；旧版或专项字段可能在 testResult
+    {"key": "ratedkV", "kind": "path", "path": ["equipmentInfo", "kv"], "cast": "str"},
+    {"key": "ratedmA", "kind": "path", "path": ["equipmentInfo", "ma"], "cast": "str"},
     {"key": "deviceName", "kind": "path", "path": ["equipmentInfo", "deviceName"]},
     {"key": "serialNo", "kind": "path", "path": ["equipmentInfo", "serialNo"]},
     {"key": "location", "kind": "path", "path": ["equipmentInfo", "location"]},

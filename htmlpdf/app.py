@@ -36,6 +36,23 @@ MIN_TEXT_FIELD_WIDTH = DEFAULT_FONT_PT + 2
 MIN_TEXT_FIELD_HEIGHT = (DEFAULT_FONT_PT * 1.2) + 2
 
 
+def _pdf_text_field_wants_justify_for_instrument_line(field):
+    parts = []
+    for k in ("id", "placeholder", "originalPlaceholder", "title", "label", "fieldId", "pdfFieldId"):
+        v = field.get(k)
+        if isinstance(v, str) and v.strip():
+            parts.append(v.strip())
+    blob = " ".join(parts)
+    if "检测仪器" in blob:
+        return True
+    if re.search(r"仪器\s*[1-9]\d?", blob):
+        return True
+    val = str(field.get("value") or "")
+    if "有效期至" in val and "年" in val and "月" in val and "日" in val:
+        return True
+    return False
+
+
 def _coerce_rect(raw_rect):
     if raw_rect is None:
         return None
@@ -321,7 +338,6 @@ def save_pdf():
         if not text:
             continue
 
-        align = fitz.TEXT_ALIGN_CENTER
         # 中文字段优先宋体，纯英文数字优先 Times New Roman（若可用）
         use_simsun = contains_cjk(text) or not times_font_path
         font_name = "F_SIMSUN" if use_simsun else "F_TIMES"
@@ -329,8 +345,12 @@ def save_pdf():
         page.insert_font(fontname=font_name, fontfile=font_file)
         font_obj = fitz.Font(fontfile=font_file)
         wrapped_text, fs = fit_text_for_box(text, r, font_obj)
-        if "\n" in wrapped_text:
+        if _pdf_text_field_wants_justify_for_instrument_line(f):
+            align = getattr(fitz, "TEXT_ALIGN_JUSTIFY", fitz.TEXT_ALIGN_LEFT)
+        elif "\n" in wrapped_text:
             align = fitz.TEXT_ALIGN_LEFT
+        else:
+            align = fitz.TEXT_ALIGN_CENTER
 
         line_count = max(1, wrapped_text.count("\n") + 1)
         text_h = line_count * fs * 1.2

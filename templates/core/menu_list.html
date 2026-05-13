@@ -3,84 +3,85 @@
 {% block page_title %}菜单管理{% endblock %}
 
 {% block content %}
-<!-- 操作栏 -->
-<div class="mb-6 flex justify-between items-center">
-    <div>
-        <h3 class="text-lg font-semibold text-gray-800">菜单列表</h3>
-        <p class="text-sm text-gray-500 mt-1">管理侧边栏菜单和导航</p>
+<div class="mx-auto max-w-7xl space-y-6">
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">系统管理</p>
+            <h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-900">菜单列表</h1>
+            <p class="mt-1 text-sm text-slate-600">配置侧边栏分组、路由与可见性</p>
+        </div>
+        <a href="{% url 'menu_create' %}" class="inline-flex w-fit items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700">
+            <i class="ri-add-line text-lg"></i>
+            创建菜单
+        </a>
     </div>
-    <a href="{% url 'menu_create' %}" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2">
-        <i class="ri-add-line"></i>
-        <span>创建菜单</span>
-    </a>
-</div>
 
-<!-- 菜单表格 -->
-<div class="bg-white rounded-lg shadow overflow-hidden">
-    <table class="min-w-full divide-y divide-gray-200">
-        <thead class="bg-gray-50">
-            <tr>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">菜单名称</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">路由路径</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">图标</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">排序</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">状态</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
-            </tr>
-        </thead>
-        <tbody class="bg-white divide-y divide-gray-200">
-            {% for menu in admin_menus %}
-            <tr>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <div class="flex items-center space-x-2">
-                        {% if menu.icon %}
-                        <i class="ri-{% if menu.icon == 'users' %}team{% else %}{{ menu.icon }}{% endif %}-line text-lg text-gray-500"></i>
-                        {% endif %}
-                        <div class="text-sm font-medium text-gray-900">{{ menu.name }}</div>
-                    </div>
-                    {% if menu.children.all %}
-                    <div class="text-xs text-gray-500 ml-7">
-                        子菜单: {{ menu.children.all|join:", " }}
-                    </div>
-                    {% endif %}
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <div class="text-sm text-gray-500">{{ menu.path|default:"-" }}</div>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <div class="text-sm text-gray-500">{{ menu.icon|default:"-" }}</div>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    <div class="text-sm text-gray-500">{{ menu.sort_order }}</div>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                    {% if menu.is_visible %}
-                    <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                        可见
-                    </span>
-                    {% else %}
-                    <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
-                        隐藏
-                    </span>
-                    {% endif %}
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <a href="{% url 'menu_edit' menu.id %}" class="text-blue-600 hover:text-blue-900 mr-4 flex items-center space-x-1">
-                        <i class="ri-edit-line"></i>
-                        <span>编辑</span>
-                    </a>
-                    <a href="{% url 'menu_delete' menu.id %}" class="text-red-600 hover:text-red-900 flex items-center space-x-1">
-                        <i class="ri-delete-bin-line"></i>
-                        <span>删除</span>
-                    </a>
-                </td>
-            </tr>
-            {% empty %}
-            <tr>
-                <td colspan="6" class="px-6 py-4 text-center text-gray-500">暂无菜单</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ring-1 ring-slate-900/[0.04]">
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-slate-100 text-left text-sm">
+                <thead class="bg-slate-50">
+                    <tr>
+                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">菜单</th>
+                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">路由</th>
+                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">图标</th>
+                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">排序</th>
+                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">状态</th>
+                        <th class="px-5 py-3.5 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">操作</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for menu in admin_menus %}
+                    <tr class="transition hover:bg-slate-50/80">
+                        <td class="px-5 py-4">
+                            <div class="flex items-start gap-2">
+                                {% if menu.icon %}
+                                <i class="ri-{% if menu.icon == 'users' %}team{% else %}{{ menu.icon }}{% endif %}-line mt-0.5 text-lg text-slate-400"></i>
+                                {% endif %}
+                                <div>
+                                    <div class="font-medium text-slate-900">{{ menu.name }}</div>
+                                    {% if menu.children.all %}
+                                    <p class="mt-1 text-xs text-slate-500">
+                                        子菜单：
+                                        {% for c in menu.children.all %}
+                                        <span class="text-slate-700">{{ c.name }}</span>{% if not forloop.last %}、{% endif %}
+                                        {% endfor %}
+                                    </p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </td>
+                        <td class="whitespace-nowrap px-5 py-4 font-mono text-xs text-slate-600">{{ menu.path|default:"—" }}</td>
+                        <td class="whitespace-nowrap px-5 py-4 text-slate-600">{{ menu.icon|default:"—" }}</td>
+                        <td class="whitespace-nowrap px-5 py-4 tabular-nums text-slate-600">{{ menu.sort_order }}</td>
+                        <td class="whitespace-nowrap px-5 py-4">
+                            {% if menu.is_visible %}
+                            <span class="inline-flex rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-800">可见</span>
+                            {% else %}
+                            <span class="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">隐藏</span>
+                            {% endif %}
+                        </td>
+                        <td class="whitespace-nowrap px-5 py-4 text-right">
+                            <a href="{% url 'menu_edit' menu.id %}" class="mr-2 inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm font-medium text-blue-600 transition hover:bg-blue-50">
+                                <i class="ri-edit-line"></i> 编辑
+                            </a>
+                            <a href="{% url 'menu_delete' menu.id %}" class="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm font-medium text-red-600 transition hover:bg-red-50">
+                                <i class="ri-delete-bin-line"></i> 删除
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="6" class="px-5 py-16 text-center text-slate-500">
+                            <span class="flex flex-col items-center gap-2">
+                                <i class="ri-menu-unfold-line text-3xl text-slate-300"></i>
+                                <span>暂无菜单</span>
+                            </span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 {% endblock %}

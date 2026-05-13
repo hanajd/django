@@ -9,6 +9,7 @@ from urllib.parse import quote
 
 from django.core.paginator import Paginator
 from django.db import transaction
+from django.db.models import Q
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.urls import NoReverseMatch, reverse
@@ -22,6 +23,8 @@ from rest_framework.views import APIView
 
 from apps.core.library_access import (
     library_file_access_allowed,
+    library_inspection_act_on_all_projects,
+    library_user_can_assign_tasks_to_participants,
     role_can_upload_library_category,
     role_has,
 )
@@ -39,6 +42,7 @@ from apps.core.models import (
     LibraryFile,
     LibraryOCRProcessTask,
     LibraryProject,
+    LibraryProjectWorkflowMember,
     LibraryTask,
     LibraryTaskAssignment,
     Report,
@@ -50,6 +54,11 @@ from apps.core.serializers_inspection import (
     decode_png_data_url,
 )
 from apps.api.api_views import LibraryOCRUploadAPIView
+from apps.api.inspection_pdf_service import display_inspected_no_for_fill
+from apps.api.inspection_report_make import (
+    build_instruments_root_for_frontend_export,
+    merge_task_template_bound_instruments_into_payload,
+)
 from utils.extract_frontend_template import extract_frontend_template
 from utils.frontend_schema_rule_engine import build_frontend_schema_by_rules
 
@@ -71,10 +80,15 @@ def _fail(message: str, http_status=status.HTTP_400_BAD_REQUEST, errors=None):
 
 
 def _build_accessible_projects_payload(user, *, include_legacy_task_no: bool = False):
-    assignment_qs = LibraryTaskAssignment.objects.select_related("project").filter(project_id__isnull=False)
-    if not role_has(user, "perm_assign_tasks"):
-        assignment_qs = assignment_qs.filter(assignee=user)
-    project_ids = sorted(set(assignment_qs.values_list("project_id", flat=True)))
+    if library_inspection_act_on_all_projects(user) and not library_user_can_assign_tasks_to_participants(user):
+        project_ids = sorted(
+            set(LibraryProject.objects.filter(is_active=True).values_list("id", flat=True))
+        )
+    else:
+        assignment_qs = LibraryTaskAssignment.objects.select_related("project").filter(project_id__isnull=False)
+        if not library_user_can_assign_tasks_to_participants(user):
+            assignment_qs = assignment_qs.filter(assignee=user)
+        project_ids = sorted(set(assignment_qs.values_list("project_id", flat=True)))
     if not project_ids:
         return {"count": 0, "list": []}
     projects = list(
@@ -98,11 +112,14 @@ def _build_accessible_projects_payload(user, *, include_legacy_task_no: bool = F
     return {"count": len(data), "list": data}
 
 
-def _inject_frontend_context_defaults(frontend_obj: dict, *, project_id: str, task_no: str) -> dict:
+def _inject_frontend_context_defaults(
+    frontend_obj: dict, *, project_id: str, task_no: str, inspected_display_no: str | None = None
+) -> dict:
     """
     在导出的前端模板中注入任务上下文默认值：
     - commissionNo / 委托编号 <- project_id
-    - testnumber / 受检编号 <- task_no
+    - inspectionNo / testnumber / 受检编号 / inspectedNo <- 项目内报告(案件)序号（与 display_inspected_no_for_fill 一致），缺省回退 task_no
+    - taskNo 仍用真实任务/案件号 task_no，便于提交与路由
     """
     if not isinstance(frontend_obj, dict):
         return frontend_obj
@@ -110,15 +127,16 @@ def _inject_frontend_context_defaults(frontend_obj: dict, *, project_id: str, ta
     if not isinstance(steps, list):
         return frontend_obj
 
+    inspected = (str(inspected_display_no).strip() if inspected_display_no is not None else "") or task_no
     value_map = {
         "commissionNo": project_id,
         "委托编号": project_id,
         "entrustNo": project_id,
         "projectId": project_id,
-        "inspectionNo": task_no,
-        "testnumber": task_no,
-        "受检编号": task_no,
-        "inspectedNo": task_no,
+        "inspectionNo": inspected,
+        "testnumber": inspected,
+        "受检编号": inspected,
+        "inspectedNo": inspected,
         "taskNo": task_no,
     }
     state_ns = f"p:{project_id}|t:{task_no}|"
@@ -247,6 +265,31 @@ def _inject_frontend_payload_defaults(frontend_obj: dict, payload: dict) -> dict
             if isinstance(raw_value, (dict, list)):
                 return None
             return raw_value
+        if field_type in {"radio", "select"}:
+            # Flutter 侧枚举选项的 defaultValue 为 String；payload 中若为 bool（如历史勾选字段）
+            # 会导致 type 'bool' is not a subtype of type 'String' in type cast。
+            if isinstance(raw_value, bool):
+                enum_ref = str(field.get("enumRef") or "")
+                if enum_ref == "yesNo":
+                    return "yes" if raw_value else "no"
+                return None
+            if raw_value is None:
+                return None
+            if isinstance(raw_value, (dict, list)):
+                return None
+            s = str(raw_value).strip()
+            return s if s else None
+        if field_type == "instrument_select":
+            if isinstance(raw_value, str):
+                s = raw_value.strip()
+                return s if s else None
+            if isinstance(raw_value, dict):
+                sid = str(raw_value.get("id") or raw_value.get("instrumentId") or "").strip()
+                return sid or None
+            if raw_value is not None and not isinstance(raw_value, (dict, list)):
+                s = str(raw_value).strip()
+                return s if s else None
+            return None
         # 其余类型保持原值（table/complex 等）
         return raw_value
 
@@ -295,9 +338,27 @@ def _inject_frontend_payload_defaults(frontend_obj: dict, payload: dict) -> dict
             "textarea",
             "date",
             "signature",
+            "radio",
+            "select",
         }:
             continue
         field["defaultValue"] = coerced
+    return frontend_obj
+
+
+def _inject_instruments_root_into_frontend_export(
+    frontend_obj: dict, payload: dict, *, task_obj=None
+) -> dict:
+    """
+    导出给 App 的前端 JSON 根级带上检测仪器初值：
+    - instruments：已与任务模板绑定合并后的列表（与提交接口 submit 中 instruments 同形）；
+    - 不再写入 instrumentCatalogOptions；下拉数据由前端走登记/仪器台账 API。
+    """
+    if not isinstance(frontend_obj, dict):
+        return frontend_obj
+    frontend_obj.pop("instrumentCatalogOptions", None)
+    bundle = build_instruments_root_for_frontend_export(task_obj=task_obj, payload=payload)
+    frontend_obj.update(bundle)
     return frontend_obj
 
 
@@ -346,6 +407,7 @@ def _persist_submit_payload_file(user, task_no: str, case: InspectionCase, proje
         link_object_id=case.pk,
         project_ids=[project.pk],
     )
+    # 检测提交 JSON 仅通过项目/案件关联；报告合并按 taskNo 文件名与项目内任务序号匹配（见 inspection_pdf_service）。
 
 
 def _persist_submit_signature_files(user, task_no: str, case: InspectionCase, project, submission: InspectionSubmission):
@@ -380,11 +442,12 @@ def _persist_submit_signature_files(user, task_no: str, case: InspectionCase, pr
 
 from apps.api.inspection_pdf_service import (
     _build_filled_template_fields_for_task,
-    _load_site_record_payload_for_report,
     _pick_submit_generation_tasks,
     _persist_filled_pdf_from_submit,
     _resolve_library_task_for_task_no,
     _resolve_report_task_for_case,
+    load_report_payload_for_manual_export,
+    resolve_submit_payload_for_report,
 )
 
 
@@ -531,7 +594,9 @@ class _InspectionTaskAccessMixin:
     def _has_project_membership(user, project: LibraryProject) -> bool:
         if user is None or project is None:
             return False
-        if role_has(user, "perm_assign_tasks"):
+        if library_user_can_assign_tasks_to_participants(user):
+            return True
+        if library_inspection_act_on_all_projects(user):
             return True
         return LibraryTaskAssignment.objects.filter(project=project, assignee=user).exists()
 
@@ -542,7 +607,7 @@ class _InspectionTaskAccessMixin:
         """
         if project is None or library_task is None or user is None:
             return None
-        if role_has(user, "perm_assign_tasks"):
+        if library_user_can_assign_tasks_to_participants(user):
             return (
                 LibraryTaskAssignment.objects.filter(project=project, library_task=library_task)
                 .order_by("id")
@@ -556,6 +621,7 @@ class _InspectionTaskAccessMixin:
             assignee=user,
             defaults={"assigned_by": None},
         )
+        LibraryProjectWorkflowMember.ensure_for_project_assignment(project, user)
         return assignment
 
     @staticmethod
@@ -632,7 +698,7 @@ class _InspectionTaskAccessMixin:
             aid = mixin._parse_assignment_task_no(task_no)
             if aid:
                 aqs = LibraryTaskAssignment.objects.select_related("project", "assignee", "assigned_by", "library_task")
-                if role_has(request.user, "perm_assign_tasks"):
+                if library_user_can_assign_tasks_to_participants(request.user):
                     assignment = aqs.filter(pk=aid).first()
                 else:
                     assignment = aqs.filter(pk=aid, assignee=request.user).first()
@@ -642,7 +708,7 @@ class _InspectionTaskAccessMixin:
             return None, None, _fail("任务不存在", status.HTTP_404_NOT_FOUND)
         if not case.library_project_id:
             return None, None, _fail("该 taskNo 未绑定后台项目", status.HTTP_400_BAD_REQUEST)
-        if role_has(request.user, "perm_assign_tasks"):
+        if library_user_can_assign_tasks_to_participants(request.user):
             return case, case.library_project, None
         assigned = LibraryTaskAssignment.objects.filter(
             assignee=request.user, project_id=case.library_project_id
@@ -1141,7 +1207,12 @@ class InspectionSubmitByTaskAPIView(_InspectionTaskAccessMixin, APIView):
         generation_results = []
         for task_obj in _pick_submit_generation_tasks(task_no, project):
             filled_fields, template_pdf_id, fill_reason, template_json_name = _build_filled_template_fields_for_task(
-                task_obj, request.data, map_id=ph_map_id, project=project, task_no=task_no
+                task_obj,
+                request.data,
+                map_id=ph_map_id,
+                project=project,
+                task_no=task_no,
+                inspection_case=case,
             )
             if not filled_fields:
                 generation_results.append(
@@ -1153,7 +1224,7 @@ class InspectionSubmitByTaskAPIView(_InspectionTaskAccessMixin, APIView):
                     }
                 )
                 continue
-            ok, pdf_reason = _persist_filled_pdf_from_submit(
+            ok, pdf_reason, _pdf_lf = _persist_filled_pdf_from_submit(
                 request.user,
                 task_no,
                 case,
@@ -1313,11 +1384,18 @@ class InspectionTaskFrontendJsonExportAPIView(_InspectionTaskAccessMixin, APIVie
                 submission.updated_at_remote.isoformat() if submission.updated_at_remote else now_iso
             )
 
+        payload = merge_task_template_bound_instruments_into_payload(payload, task_obj)
+
         ph_map_id = (
             (request.GET.get("placeholderMapId") or request.GET.get("placeholder_map_id") or "").strip() or None
         )
         filled_fields, _template_pdf_id, fill_reason, _template_json_name = _build_filled_template_fields_for_task(
-            task_obj, payload, map_id=ph_map_id, project=project, task_no=task_no
+            task_obj,
+            payload,
+            map_id=ph_map_id,
+            project=project,
+            task_no=task_no,
+            inspection_case=case,
         )
         if not filled_fields:
             return _fail(fill_reason or "模板字段填充失败", status.HTTP_409_CONFLICT)
@@ -1352,8 +1430,10 @@ class InspectionTaskFrontendJsonExportAPIView(_InspectionTaskAccessMixin, APIVie
             frontend_obj,
             project_id=self._project_public_id(project),
             task_no=task_no,
+            inspected_display_no=display_inspected_no_for_fill(case, project, task_no),
         )
         frontend_obj = _inject_frontend_payload_defaults(frontend_obj, payload)
+        frontend_obj = _inject_instruments_root_into_frontend_export(frontend_obj, payload, task_obj=task_obj)
         ts = timezone.localtime().strftime("%Y%m%d%H%M%S")
         filename = f"{task_no}_frontend_{ts}.json".replace("/", "_")
         raw = json_std.dumps(frontend_obj, ensure_ascii=False, indent=2).encode("utf-8")
@@ -1368,7 +1448,7 @@ class InspectionTaskFrontendJsonExportAPIView(_InspectionTaskAccessMixin, APIVie
 
 
 class InspectionTaskManualExportReportAPIView(_InspectionTaskAccessMixin, APIView):
-    """按任务手动导出报告：使用现场记录 JSON 回填报告模板。"""
+    """按任务手动导出报告：以检测提交数据为主，并与同案件现场记录 JSON（若有）合并后回填报告模板。"""
 
     permission_classes = [IsAuthenticated]
 
@@ -1382,12 +1462,25 @@ class InspectionTaskManualExportReportAPIView(_InspectionTaskAccessMixin, APIVie
         if report_task is None:
             return _fail("项目下未找到报告任务", status.HTTP_409_CONFLICT)
 
-        source_payload, source_reason = _load_site_record_payload_for_report(case, project, report_task)
-        if not isinstance(source_payload, dict):
-            return _fail(source_reason or "未找到可用的现场记录 JSON", status.HTTP_409_CONFLICT)
+        submit_payload = resolve_submit_payload_for_report(task_no, case, project)
+        if not submit_payload:
+            return _fail("未找到该任务的检测提交数据，无法回填报告", status.HTTP_409_CONFLICT)
+
+        source_payload, source_reason = load_report_payload_for_manual_export(
+            (case,), project, report_task, submit_payload
+        )
+        if not isinstance(source_payload, dict) or not source_payload:
+            return _fail(source_reason or "报告数据源合并失败", status.HTTP_409_CONFLICT)
 
         ph_map_id = (
-            (request.data.get("placeholderMapId") or request.query_params.get("placeholderMapId") or "").strip() or None
+            (
+                request.data.get("placeholderMapId")
+                or request.data.get("placeholder_map_id")
+                or request.query_params.get("placeholderMapId")
+                or request.query_params.get("placeholder_map_id")
+                or ""
+            ).strip()
+            or None
         )
         filled_fields, template_pdf_id, fill_reason, template_json_name = _build_filled_template_fields_for_task(
             report_task,
@@ -1395,11 +1488,12 @@ class InspectionTaskManualExportReportAPIView(_InspectionTaskAccessMixin, APIVie
             map_id=ph_map_id,
             project=project,
             task_no=task_no,
+            inspection_case=case,
         )
         if not filled_fields:
             return _fail(fill_reason or "模板字段填充失败", status.HTTP_409_CONFLICT)
 
-        ok, pdf_reason = _persist_filled_pdf_from_submit(
+        ok, pdf_reason, created_report_lf = _persist_filled_pdf_from_submit(
             request.user,
             task_no,
             case,
@@ -1412,22 +1506,28 @@ class InspectionTaskManualExportReportAPIView(_InspectionTaskAccessMixin, APIVie
         if not ok:
             return _fail(pdf_reason or "报告导出失败", status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        latest_file = (
-            LibraryFile.objects.filter(
-                category=LibraryFile.CATEGORY_REPORT,
-                link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
-                link_object_id=case.pk,
-                projects=project,
-                library_tasks=report_task,
+        safe_tn = (task_no or "").replace("/", "_")
+        report_suffix = f"__task__{safe_tn}-报告.pdf"
+        legacy_name = f"{safe_tn}-报告.pdf"
+        latest_file = created_report_lf
+        if latest_file is None:
+            latest_file = (
+                LibraryFile.objects.filter(
+                    category=LibraryFile.CATEGORY_REPORT,
+                    link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
+                    link_object_id=case.pk,
+                    projects=project,
+                )
+                .filter(Q(original_name=legacy_name) | Q(original_name__endswith=report_suffix))
+                .order_by("-created_at", "-id")
+                .distinct()
+                .first()
             )
-            .order_by("-created_at", "-id")
-            .distinct()
-            .first()
-        )
         payload = {
             "taskNo": task_no,
             "projectId": self._project_public_id(project),
             "reportTask": {"id": report_task.id, "code": report_task.code, "name": report_task.name},
+            "mergeNote": source_reason or "",
             "sourceSiteRecordTasks": [
                 {"id": t.id, "code": t.code, "name": t.name}
                 for t in report_task.report_source_tasks.filter(output_target=LibraryTask.OUTPUT_SITE_RECORD).order_by(

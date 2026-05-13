@@ -175,6 +175,49 @@ paths:
                 $ref: '#/components/schemas/GenericSuccess'
         '422':
           description: 参数校验失败
+  /inspections/{taskNo}/manual-export-report:
+    post:
+      tags: [Inspections]
+      summary: 手动导出报告（现场记录回填）
+      description: |
+        使用案件关联的现场记录 JSON 填充报告任务模板并生成报告 PDF，写入文件库 report 分类。
+        可选 placeholderMapId 或 placeholder_map_id（query 或 JSON body，二者等价）。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/taskNo'
+        - in: query
+          name: placeholderMapId
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: placeholder_map_id
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                placeholderMapId:
+                  type: string
+                placeholder_map_id:
+                  type: string
+      responses:
+        '200':
+          description: 成功，data 含 taskNo、projectId、reportTask、sourceSiteRecordTasks，可选 reportFile（含 downloadUrl）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericSuccess'
+        '409':
+          description: 无报告任务、无现场记录 JSON 或填充失败等业务冲突
+        '500':
+          description: 报告持久化失败
   /inspections/submit:
     post:
       tags: [Inspections]

@@ -12,19 +12,30 @@ from outlines.types import json_schema
 
 from utils import pipeline_config
 from utils.json_utils import validate_json
+from utils.unified_template_fields import materialize_unified_pdf_fields
 
 logger = logging.getLogger(__name__)
 
 
 def _ollama_default_runner_options() -> dict:
     raw = os.environ.get("OLLAMA_OPTIONS", "").strip()
+    opts: Dict[str, Any] = {"num_gpu": 999}
     if raw:
         try:
-            return json.loads(raw)
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                opts = parsed
+            else:
+                logger.warning("OLLAMA_OPTIONS 须为 JSON 对象，已使用默认 num_gpu")
         except json.JSONDecodeError:
             logger.warning("OLLAMA_OPTIONS 不是合法 JSON，已忽略: %s", raw)
-            return {}
-    return {"num_gpu": 999}
+    try:
+        from utils.gpu_scheduler import merge_ollama_options_for_gpu_headroom
+
+        opts = merge_ollama_options_for_gpu_headroom(opts)
+    except Exception as e:
+        logger.debug("Ollama GPU 动态选项合并跳过: %s", e)
+    return opts
 
 
 class OllamaClientGpuPreference(Client):
@@ -79,7 +90,7 @@ def build_devices_prompt(md: str, source_file_hint: int) -> str:
 - 注意：不要只写“Philips”，要写完整识别到的内容
 
 【5. 额定参数】
-- 定义：设备的核心工作参数，通常是kV/mA/mAs/mAs范围
+- 定义：设备的核心工作参数，通常是kV/mA/mAs/mAs范围，当前表单中的额定参数主要是球管参数，如果没有球管参数，则不用填入内容
 - 匹配关键词：前面跟着“Rated kV:”“额定kV:”“Rated mA:”“额定mA:”“Rated mAs:”“额定mAs:”，格式类似“100 kV”“200 mA”
 - 示例：文本里“Rated kV 100”“Rated mA 200”都是额定参数
 - 注意：要把所有标注为Rated的内容都列出来，区分kV/mA/mAs
@@ -203,7 +214,7 @@ def _load_standard_sample_template() -> Dict[str, Any]:
 def _build_pdf_field_map(template_obj: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     out: Dict[str, Dict[str, Any]] = {}
     pdf = template_obj.get("pdf") if isinstance(template_obj.get("pdf"), dict) else {}
-    pdf_fields = pdf.get("fields") if isinstance(pdf.get("fields"), list) else []
+    pdf_fields = materialize_unified_pdf_fields(pdf.get("fields") if isinstance(pdf.get("fields"), list) else [])
     for row in pdf_fields:
         if not isinstance(row, dict):
             continue

@@ -96,6 +96,47 @@ Base URL: `http://localhost:11223/api/v2`
 - `POST /inspections/projects/{projectId}/tasks/{taskNo}/draft`
 - `POST /inspections/projects/{projectId}/tasks/{taskNo}/submit`
 - `GET /inspections/projects/{projectId}/tasks/{taskNo}/export-frontend-json`
+- `POST /inspections/projects/{projectId}/tasks/{taskNo}/manual-export-report`
+
+### 手动导出报告（现场记录回填）
+
+从**当前案件**关联的**现场记录 JSON**（按报告任务上配置的 `report_source_tasks` 顺序读取并深度合并）生成数据，填入**报告任务**的 HTMLPDF 模板，写入文件库 **report** 分类。
+
+- **方法 / 路径（推荐）**：`POST /inspections/projects/{projectId}/tasks/{taskNo}/manual-export-report`
+- **兼容路径（仅 taskNo，与 v2 旧链路一致）**：`POST /inspections/{taskNo}/manual-export-report`
+- **认证**：需登录（与其它 inspection 接口相同）。
+- **路径参数**：`projectId` 为项目 `code`；`taskNo` 为项目内任务序号（须属于该项目）。
+- **可选参数**：
+  - Query：`placeholderMapId` 或 `placeholder_map_id`
+  - JSON Body：同上字段名（与 submit 类似，可为空对象 `{}`）
+- **前置条件**（不满足时返回 409 及错误说明）：
+  - 项目下存在 `outputTarget === "report"` 的报告任务；
+  - 当前 `taskNo` 能解析到案件，且案件下已有可用的现场记录 JSON（含任务与文件库关联逻辑，见后端 `_load_site_record_payload_for_report`）。
+- **说明**：无需额外「开关」字段；**只要调用本接口**，服务端即使用现场记录聚合结果填充报告（与提交 body 中的业务数据无关）。
+
+响应示例（成功）：
+
+```json
+{
+  "success": true,
+  "message": "报告导出成功",
+  "data": {
+    "taskNo": "01",
+    "projectId": "20260401",
+    "reportTask": { "id": 3, "code": "rpt001", "name": "检测报告" },
+    "sourceSiteRecordTasks": [
+      { "id": 5, "code": "site001", "name": "现场记录" }
+    ],
+    "reportFile": {
+      "id": 1201,
+      "name": "01-报告.pdf",
+      "downloadUrl": "http://localhost:11223/api/v2/inspections/projects/20260401/tasks/01/files/1201/download/report"
+    }
+  }
+}
+```
+
+`reportFile` 在首次导出失败或未生成文件时可能省略，以实际响应为准。
 
 ### 提交接口示例
 
@@ -191,6 +232,7 @@ Base URL: `http://localhost:11223/api/v2`
   - `POST /inspections/{taskNo}/draft`
   - `POST /inspections/{taskNo}/submit`
   - `GET /inspections/{taskNo}/export-frontend-json`
+  - `POST /inspections/{taskNo}/manual-export-report`
   - `GET /inspections/{taskNo}/signatures/{role}`
   - `POST /inspections/{taskNo}/signatures/{character}/upload`
   - `POST /inspections/{taskNo}/files/upload`
@@ -214,6 +256,7 @@ Base URL: `http://localhost:11223/api/v2`
   - `POST /inspections/projects/{projectId}/tasks/{taskNo}/draft`
   - `POST /inspections/projects/{projectId}/tasks/{taskNo}/submit`
   - `GET /inspections/projects/{projectId}/tasks/{taskNo}/export-frontend-json`
+  - `POST /inspections/projects/{projectId}/tasks/{taskNo}/manual-export-report`
   - `GET /inspections/projects/{projectId}/tasks/{taskNo}/signatures/{role}`
   - `POST /inspections/projects/{projectId}/tasks/{taskNo}/signatures/{character}/upload`
   - `POST /inspections/projects/{projectId}/tasks/{taskNo}/files/upload`
@@ -239,6 +282,7 @@ Base URL: `http://localhost:11223/api/v2`
   - `POST /inspections/{taskNo}/draft`
   - `POST /inspections/{taskNo}/submit`
   - `GET /inspections/{taskNo}/export-frontend-json`
+  - `POST /inspections/{taskNo}/manual-export-report`
   - `GET /inspections/{taskNo}/signatures/{role}`
   - `POST /inspections/{taskNo}/signatures/{character}/upload`
   - `POST /inspections/{taskNo}/files/upload`

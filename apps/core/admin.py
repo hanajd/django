@@ -8,10 +8,12 @@ from apps.core.models import (
     BizContact,
     BizDevice,
     InspectionCase,
+    InspectionCaseWorkflowState,
     InspectedOrganization,
     LibraryFile,
     LibraryFileTask,
     LibraryProject,
+    LibraryProjectWorkflowMember,
     LibraryOCRProcessTask,
     LibraryTask,
     LibraryTaskAssignment,
@@ -78,6 +80,7 @@ class LibraryTaskAdmin(admin.ModelAdmin):
     list_filter = ("output_target",)
     search_fields = ("code", "name")
     inlines = (LibraryFileTaskInline,)
+    filter_horizontal = ("report_source_tasks",)
 
 
 class LibraryTaskAssignmentAdmin(admin.ModelAdmin):
@@ -130,6 +133,18 @@ class LibraryProjectAdmin(admin.ModelAdmin):
     filter_horizontal = ("library_tasks",)
 
 
+class LibraryProjectWorkflowMemberAdmin(admin.ModelAdmin):
+    list_display = ("project", "user", "workflow_role", "updated_at")
+    list_filter = ("workflow_role", "project")
+    search_fields = ("user__username", "project__code")
+
+
+class InspectionCaseWorkflowStateAdmin(admin.ModelAdmin):
+    list_display = ("case", "stage", "issue_date", "updated_by", "updated_at")
+    list_filter = ("stage",)
+    search_fields = ("case__case_no", "return_reason")
+
+
 # 重新注册 User 模型
 admin.site.unregister(User)
 admin.site.register(User, CustomUserAdmin)
@@ -143,6 +158,8 @@ admin.site.register(LibraryTask, LibraryTaskAdmin)
 admin.site.register(LibraryTaskAssignment, LibraryTaskAssignmentAdmin)
 admin.site.register(LibraryOCRProcessTask, LibraryOCRProcessTaskAdmin)
 admin.site.register(LibraryProject, LibraryProjectAdmin)
+admin.site.register(LibraryProjectWorkflowMember, LibraryProjectWorkflowMemberAdmin)
+admin.site.register(InspectionCaseWorkflowState, InspectionCaseWorkflowStateAdmin)
 admin.site.register(InspectedOrganization, InspectedOrganizationAdmin)
 admin.site.register(BizContact, BizContactAdmin)
 admin.site.register(BizDevice, BizDeviceAdmin)

@@ -3,231 +3,296 @@
 {% block page_title %}仪表盘{% endblock %}
 
 {% block content %}
-<!-- 欢迎信息 -->
-<div class="mb-8">
-    <h1 class="text-2xl font-bold text-gray-800">欢迎回来，{{ user.username }}！</h1>
-    <p class="text-gray-500 mt-1">这是您的后台管理系统仪表盘</p>
-</div>
-
-<!-- 文件库（Tablet 主后台入口，非 Django Admin） -->
-{% if role_perm.perm_file_library %}
-<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-    <a href="{% url 'file_library' %}?tab=ocr" class="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow flex items-center justify-between group border-l-4 border-emerald-500">
-        <div>
-            <p class="text-gray-500 text-sm mb-1">文件库 · OCR文件</p>
-            <p class="text-3xl font-bold text-gray-800">{{ library_upload_count }}</p>
-            <p class="text-sm text-emerald-600 mt-2 group-hover:underline">进入文件库管理 →</p>
-        </div>
-        <div class="w-14 h-14 bg-emerald-100 rounded-xl flex items-center justify-center">
-            <i class="ri-folder-2-line text-2xl text-emerald-600"></i>
-        </div>
-    </a>
-    <a href="{% url 'file_library' %}?tab=json" class="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow flex items-center justify-between group border-l-4 border-amber-500">
-        <div>
-            <p class="text-gray-500 text-sm mb-1">文件库 · JSON 文件</p>
-            <p class="text-3xl font-bold text-gray-800">{{ library_json_count }}</p>
-            <p class="text-sm text-amber-600 mt-2 group-hover:underline">查看 / 上传 JSON →</p>
-        </div>
-        <div class="w-14 h-14 bg-amber-100 rounded-xl flex items-center justify-center">
-            <i class="ri-file-code-line text-2xl text-amber-600"></i>
-        </div>
-    </a>
-</div>
-{% endif %}
-
-<!-- 统计卡片 -->
-<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-    {% if role_perm.perm_manage_users %}
-    <div class="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow">
-        <div class="flex items-center justify-between">
+<div class="mx-auto max-w-7xl space-y-8">
+    <!-- 欢迎区 -->
+    <section class="rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50/80 to-blue-50/40 p-6 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-8">
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-                <p class="text-gray-500 text-sm mb-1">用户总数</p>
-                <p class="text-3xl font-bold text-gray-800">{{ user_count }}</p>
-                <p class="text-xs text-gray-400 mt-2">系统注册用户</p>
+                <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">工作台</p>
+                <h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">欢迎回来，{{ user.username }}</h1>
+                <p class="mt-2 max-w-xl text-sm leading-relaxed text-slate-600">从这里进入文件库、项目与系统管理。下方卡片按您的权限动态展示。</p>
             </div>
-            <div class="w-14 h-14 bg-blue-100 rounded-xl flex items-center justify-center">
-                <i class="ri-user-line text-2xl text-blue-600"></i>
+            <div class="flex shrink-0 flex-wrap gap-2">
+                {% if role_perm.perm_file_library %}
+                <a href="{% url 'file_library' %}?tab=ocr" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700">
+                    <i class="ri-folder-2-line text-lg"></i>
+                    文件库
+                </a>
+                {% endif %}
+                {% if ui_sidebar_show_project_management %}
+                <a href="{% url 'library_projects' %}" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow-sm transition hover:bg-slate-50">
+                    <i class="ri-layout-grid-line text-lg"></i>
+                    项目工作台
+                </a>
+                {% endif %}
             </div>
         </div>
-    </div>
+    </section>
+
+    <!-- 文件库入口 -->
+    {% if role_perm.perm_file_library and not ui_dashboard_hide_file_stats_row %}
+    <section>
+        <h2 class="mb-4 text-sm font-semibold uppercase tracking-wider text-slate-500">文件与记录</h2>
+        <div class="grid gap-4 sm:grid-cols-2">
+            <a href="{% url 'file_library' %}?tab=ocr" class="group flex items-stretch justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ring-1 ring-slate-900/[0.04] transition hover:border-emerald-200 hover:shadow-md">
+                <div class="min-w-0">
+                    <p class="text-sm font-medium text-slate-500">文件库 · OCR</p>
+                    <p class="mt-2 text-3xl font-semibold tabular-nums text-slate-900">{{ library_upload_count }}</p>
+                    <p class="mt-3 inline-flex items-center gap-1 text-sm font-medium text-emerald-600 group-hover:underline">
+                        进入管理 <i class="ri-arrow-right-line"></i>
+                    </p>
+                </div>
+                <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600">
+                    <i class="ri-folder-2-line text-2xl"></i>
+                </div>
+            </a>
+            {% if ui_dashboard_site_record_focus %}
+            <a href="{% url 'file_library' %}?tab=site_record" class="group flex items-stretch justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ring-1 ring-slate-900/[0.04] transition hover:border-sky-200 hover:shadow-md">
+                <div class="min-w-0">
+                    <p class="text-sm font-medium text-slate-500">文件库 · 现场记录</p>
+                    <p class="mt-2 text-lg font-semibold text-slate-900">填写、上传与校核</p>
+                    <p class="mt-3 inline-flex items-center gap-1 text-sm font-medium text-sky-600 group-hover:underline">
+                        打开分类 <i class="ri-arrow-right-line"></i>
+                    </p>
+                </div>
+                <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-sky-100 text-sky-600">
+                    <i class="ri-file-paper-2-line text-2xl"></i>
+                </div>
+            </a>
+            {% elif not ui_dashboard_hide_json_tile %}
+            <a href="{% url 'file_library' %}?tab=json" class="group flex items-stretch justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ring-1 ring-slate-900/[0.04] transition hover:border-amber-200 hover:shadow-md">
+                <div class="min-w-0">
+                    <p class="text-sm font-medium text-slate-500">文件库 · JSON</p>
+                    <p class="mt-2 text-3xl font-semibold tabular-nums text-slate-900">{{ library_json_count }}</p>
+                    <p class="mt-3 inline-flex items-center gap-1 text-sm font-medium text-amber-600 group-hover:underline">
+                        查看与上传 <i class="ri-arrow-right-line"></i>
+                    </p>
+                </div>
+                <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-amber-100 text-amber-600">
+                    <i class="ri-file-code-line text-2xl"></i>
+                </div>
+            </a>
+            {% endif %}
+        </div>
+    </section>
     {% endif %}
-    
-    {% if role_perm.perm_manage_roles %}
-    <div class="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow">
-        <div class="flex items-center justify-between">
-            <div>
-                <p class="text-gray-500 text-sm mb-1">角色数量</p>
-                <p class="text-3xl font-bold text-gray-800">{{ role_count }}</p>
-                <p class="text-xs text-gray-400 mt-2">系统角色类型</p>
-            </div>
-            <div class="w-14 h-14 bg-green-100 rounded-xl flex items-center justify-center">
-                <i class="ri-shield-line text-2xl text-green-600"></i>
-            </div>
-        </div>
-    </div>
-    {% endif %}
-    
-    {% if role_perm.perm_manage_menus %}
-    <div class="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow">
-        <div class="flex items-center justify-between">
-            <div>
-                <p class="text-gray-500 text-sm mb-1">菜单数量</p>
-                <p class="text-3xl font-bold text-gray-800">{{ menu_count }}</p>
-                <p class="text-xs text-gray-400 mt-2">系统菜单项</p>
-            </div>
-            <div class="w-14 h-14 bg-purple-100 rounded-xl flex items-center justify-center">
-                <i class="ri-menu-line text-2xl text-purple-600"></i>
-            </div>
-        </div>
-    </div>
-    {% endif %}
-</div>
 
-<!-- 快捷操作 -->
-<div class="bg-white rounded-lg shadow p-6">
-    <h3 class="text-lg font-semibold text-gray-800 mb-6">快捷操作</h3>
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {% if role_perm.perm_file_library %}
-        <a href="{% url 'file_library' %}?tab=ocr" class="flex items-center p-4 bg-gradient-to-r from-emerald-50 to-teal-100 rounded-lg hover:from-emerald-100 hover:to-teal-200 transition-all group">
-            <div class="w-12 h-12 bg-emerald-600 rounded-lg flex items-center justify-center mr-4 group-hover:scale-110 transition-transform">
-                <i class="ri-folder-2-line text-xl text-white"></i>
+    <!-- 系统统计（管理员） -->
+    {% if role_perm.perm_manage_users or role_perm.perm_manage_roles or role_perm.perm_manage_menus %}
+    <section>
+        <h2 class="mb-4 text-sm font-semibold uppercase tracking-wider text-slate-500">系统概览</h2>
+        <div class="grid gap-4 sm:grid-cols-3">
+            {% if role_perm.perm_manage_users %}
+            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ring-1 ring-slate-900/[0.04]">
+                <div class="flex items-start justify-between gap-3">
+                    <div>
+                        <p class="text-sm text-slate-500">用户总数</p>
+                        <p class="mt-2 text-3xl font-semibold tabular-nums text-slate-900">{{ user_count }}</p>
+                        <p class="mt-1 text-xs text-slate-400">已注册账号</p>
+                    </div>
+                    <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-100 text-blue-600">
+                        <i class="ri-user-line text-xl"></i>
+                    </div>
+                </div>
             </div>
-            <div>
-                <p class="font-medium text-gray-800">文件库管理</p>
-                <p class="text-xs text-gray-500">上传、下载、预览、删除</p>
+            {% endif %}
+            {% if role_perm.perm_manage_roles %}
+            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ring-1 ring-slate-900/[0.04]">
+                <div class="flex items-start justify-between gap-3">
+                    <div>
+                        <p class="text-sm text-slate-500">角色数量</p>
+                        <p class="mt-2 text-3xl font-semibold tabular-nums text-slate-900">{{ role_count }}</p>
+                        <p class="mt-1 text-xs text-slate-400">权限模板</p>
+                    </div>
+                    <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-100 text-emerald-600">
+                        <i class="ri-shield-line text-xl"></i>
+                    </div>
+                </div>
             </div>
-        </a>
-        {% endif %}
-        {% if role_perm.perm_process_pipeline %}
-        <a href="{% url 'process_pipeline' %}" class="flex items-center p-4 bg-gradient-to-r from-cyan-50 to-cyan-100 rounded-lg hover:from-cyan-100 hover:to-cyan-200 transition-all group">
-            <div class="w-12 h-12 bg-cyan-600 rounded-lg flex items-center justify-center mr-4 group-hover:scale-110 transition-transform">
-                <i class="ri-cpu-line text-xl text-white"></i>
+            {% endif %}
+            {% if role_perm.perm_manage_menus %}
+            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ring-1 ring-slate-900/[0.04]">
+                <div class="flex items-start justify-between gap-3">
+                    <div>
+                        <p class="text-sm text-slate-500">菜单数量</p>
+                        <p class="mt-2 text-3xl font-semibold tabular-nums text-slate-900">{{ menu_count }}</p>
+                        <p class="mt-1 text-xs text-slate-400">导航项</p>
+                    </div>
+                    <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-violet-100 text-violet-600">
+                        <i class="ri-menu-line text-xl"></i>
+                    </div>
+                </div>
             </div>
-            <div>
-                <p class="font-medium text-gray-800">流程处理</p>
-                <p class="text-xs text-gray-500">MinerU + Ollama 管线</p>
-            </div>
-        </a>
-        <a href="{% url 'htmlpdf_editor' %}" class="flex items-center p-4 bg-gradient-to-r from-indigo-50 to-indigo-100 rounded-lg hover:from-indigo-100 hover:to-indigo-200 transition-all group">
-            <div class="w-12 h-12 bg-indigo-600 rounded-lg flex items-center justify-center mr-4 group-hover:scale-110 transition-transform">
-                <i class="ri-file-pdf-2-line text-xl text-white"></i>
-            </div>
-            <div>
-                <p class="font-medium text-gray-800">HTMLPDF</p>
-                <p class="text-xs text-gray-500">可视化模板制作与填报导出</p>
-            </div>
-        </a>
-        {% endif %}
-        {% if role_perm.perm_assign_tasks %}
-        <a href="{% url 'library_task_management' %}" class="flex items-center p-4 bg-gradient-to-r from-rose-50 to-rose-100 rounded-lg hover:from-rose-100 hover:to-rose-200 transition-all group">
-            <div class="w-12 h-12 bg-rose-600 rounded-lg flex items-center justify-center mr-4 group-hover:scale-110 transition-transform">
-                <i class="ri-clipboard-line text-xl text-white"></i>
-            </div>
-            <div>
-                <p class="font-medium text-gray-800">项目分配管理</p>
-                <p class="text-xs text-gray-500">新建任务、关联文件与分配项目</p>
-            </div>
-        </a>
-        {% elif role_perm.perm_file_library %}
-        <a href="{% url 'library_task_management' %}" class="flex items-center p-4 bg-gradient-to-r from-rose-50 to-orange-50 rounded-lg hover:from-rose-100 hover:to-orange-100 transition-all group">
-            <div class="w-12 h-12 bg-orange-600 rounded-lg flex items-center justify-center mr-4 group-hover:scale-110 transition-transform">
-                <i class="ri-inbox-line text-xl text-white"></i>
-            </div>
-            <div>
-                <p class="font-medium text-gray-800">我的项目任务</p>
-                <p class="text-xs text-gray-500">先选项目，再处理任务</p>
-            </div>
-        </a>
-        {% endif %}
-        {% if role_perm.perm_manage_users %}
-        <a href="{% url 'database_device_list' %}" class="flex items-center p-4 bg-gradient-to-r from-slate-50 to-slate-100 rounded-lg hover:from-slate-100 hover:to-slate-200 transition-all group">
-            <div class="w-12 h-12 bg-slate-600 rounded-lg flex items-center justify-center mr-4 group-hover:scale-110 transition-transform">
-                <i class="ri-database-2-line text-xl text-white"></i>
-            </div>
-            <div>
-                <p class="font-medium text-gray-800">数据库管理</p>
-                <p class="text-xs text-gray-500">检测仪器数据维护</p>
-            </div>
-        </a>
-        <a href="{% url 'user_list' %}" class="flex items-center p-4 bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg hover:from-blue-100 hover:to-blue-200 transition-all group">
-            <div class="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center mr-4 group-hover:scale-110 transition-transform">
-                <i class="ri-user-line text-xl text-white"></i>
-            </div>
-            <div>
-                <p class="font-medium text-gray-800">用户管理</p>
-                <p class="text-xs text-gray-500">管理系统用户</p>
-            </div>
-        </a>
-        {% endif %}
-        
-        {% if role_perm.perm_manage_roles %}
-        <a href="{% url 'role_list' %}" class="flex items-center p-4 bg-gradient-to-r from-green-50 to-green-100 rounded-lg hover:from-green-100 hover:to-green-200 transition-all group">
-            <div class="w-12 h-12 bg-green-600 rounded-lg flex items-center justify-center mr-4 group-hover:scale-110 transition-transform">
-                <i class="ri-shield-line text-xl text-white"></i>
-            </div>
-            <div>
-                <p class="font-medium text-gray-800">角色管理</p>
-                <p class="text-xs text-gray-500">管理角色权限</p>
-            </div>
-        </a>
-        {% endif %}
-        
-        {% if role_perm.perm_manage_menus %}
-        <a href="{% url 'menu_list' %}" class="flex items-center p-4 bg-gradient-to-r from-purple-50 to-purple-100 rounded-lg hover:from-purple-100 hover:to-purple-200 transition-all group">
-            <div class="w-12 h-12 bg-purple-600 rounded-lg flex items-center justify-center mr-4 group-hover:scale-110 transition-transform">
-                <i class="ri-menu-line text-xl text-white"></i>
-            </div>
-            <div>
-                <p class="font-medium text-gray-800">菜单管理</p>
-                <p class="text-xs text-gray-500">管理导航菜单</p>
-            </div>
-        </a>
-        {% endif %}
-        
-        <a href="/admin/" class="flex items-center p-4 bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg hover:from-gray-100 hover:to-gray-200 transition-all group">
-            <div class="w-12 h-12 bg-gray-600 rounded-lg flex items-center justify-center mr-4 group-hover:scale-110 transition-transform">
-                <i class="ri-settings-3-line text-xl text-white"></i>
-            </div>
-            <div>
-                <p class="font-medium text-gray-800">系统设置</p>
-                <p class="text-xs text-gray-500">Django Admin</p>
-            </div>
-        </a>
-    </div>
-</div>
+            {% endif %}
+        </div>
+    </section>
+    {% endif %}
 
-<!-- 系统信息 -->
-<div class="mt-8 bg-white rounded-lg shadow p-6">
-    <h3 class="text-lg font-semibold text-gray-800 mb-4">系统信息</h3>
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
-            <i class="ri-server-line text-gray-500"></i>
+    <!-- 快捷操作 -->
+    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-8">
+        <div class="mb-6 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
             <div>
-                <p class="text-sm text-gray-500">运行端口</p>
-                <p class="text-sm font-medium text-gray-800">11223</p>
+                <h2 class="text-lg font-semibold text-slate-900">快捷操作</h2>
+                <p class="text-sm text-slate-600">常用入口，一键跳转</p>
             </div>
         </div>
-        <div class="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
-            <i class="ri-database-line text-gray-500"></i>
-            <div>
-                <p class="text-sm text-gray-500">数据库</p>
-                <p class="text-sm font-medium text-gray-800">SQLite</p>
-            </div>
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {% if role_perm.perm_file_library %}
+            <a href="{% url 'file_library' %}?tab=ocr" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-emerald-200 hover:bg-emerald-50/50">
+                <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm">
+                    <i class="ri-folder-2-line text-lg"></i>
+                </span>
+                <span class="min-w-0">
+                    <span class="block font-medium text-slate-900">文件库管理</span>
+                    <span class="block truncate text-xs text-slate-500">上传、下载、预览</span>
+                </span>
+            </a>
+            {% endif %}
+            {% if ui_sidebar_show_project_management %}
+            <a href="{% url 'library_projects' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-violet-200 hover:bg-violet-50/50">
+                <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-white shadow-sm">
+                    <i class="ri-layout-grid-line text-lg"></i>
+                </span>
+                <span class="min-w-0">
+                    <span class="block font-medium text-slate-900">项目工作台</span>
+                    <span class="block truncate text-xs text-slate-500">项目、任务与提交</span>
+                </span>
+            </a>
+            {% endif %}
+            {% if role_perm.perm_process_pipeline %}
+            <a href="{% url 'process_pipeline' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-cyan-200 hover:bg-cyan-50/50">
+                <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-cyan-600 text-white shadow-sm">
+                    <i class="ri-cpu-line text-lg"></i>
+                </span>
+                <span class="min-w-0">
+                    <span class="block font-medium text-slate-900">流程处理</span>
+                    <span class="block truncate text-xs text-slate-500">文档处理管线</span>
+                </span>
+            </a>
+            {% endif %}
+            {% if role_perm.perm_htmlpdf or role_perm.perm_process_pipeline %}
+            <a href="{% url 'htmlpdf_editor' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-indigo-200 hover:bg-indigo-50/50">
+                <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm">
+                    <i class="ri-file-pdf-2-line text-lg"></i>
+                </span>
+                <span class="min-w-0">
+                    <span class="block font-medium text-slate-900">HTMLPDF</span>
+                    <span class="block truncate text-xs text-slate-500">模板与导出</span>
+                </span>
+            </a>
+            {% endif %}
+            {% if show_library_task_nav %}
+            <a href="{% url 'library_task_management' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-rose-200 hover:bg-rose-50/50">
+                <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-rose-600 text-white shadow-sm">
+                    <i class="ri-stack-line text-lg"></i>
+                </span>
+                <span class="min-w-0">
+                    <span class="block font-medium text-slate-900">任务模板库</span>
+                    <span class="block truncate text-xs text-slate-500">模板与分配</span>
+                </span>
+            </a>
+            {% elif role_perm.perm_file_library and not ui_sidebar_show_project_management %}
+            {# 与侧栏一致：侧栏已展示「项目工作台」时快捷区不再重复 #}
+            <a href="{% url 'library_projects' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-orange-200 hover:bg-orange-50/50">
+                <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-600 text-white shadow-sm">
+                    <i class="ri-layout-grid-line text-lg"></i>
+                </span>
+                <span class="min-w-0">
+                    <span class="block font-medium text-slate-900">项目工作台</span>
+                    <span class="block truncate text-xs text-slate-500">查看参与项目</span>
+                </span>
+            </a>
+            {% endif %}
+            {% if role_perm.perm_manage_users %}
+            <a href="{% url 'database_device_list' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-slate-300 hover:bg-white">
+                <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-700 text-white shadow-sm">
+                    <i class="ri-database-2-line text-lg"></i>
+                </span>
+                <span class="min-w-0">
+                    <span class="block font-medium text-slate-900">数据库管理</span>
+                    <span class="block truncate text-xs text-slate-500">检测仪器台账</span>
+                </span>
+            </a>
+            <a href="{% url 'user_list' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-blue-200 hover:bg-blue-50/50">
+                <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
+                    <i class="ri-user-line text-lg"></i>
+                </span>
+                <span class="min-w-0">
+                    <span class="block font-medium text-slate-900">用户管理</span>
+                    <span class="block truncate text-xs text-slate-500">账号与资料</span>
+                </span>
+            </a>
+            {% endif %}
+            {% if role_perm.perm_manage_roles %}
+            <a href="{% url 'role_list' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-emerald-200 hover:bg-emerald-50/50">
+                <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm">
+                    <i class="ri-shield-line text-lg"></i>
+                </span>
+                <span class="min-w-0">
+                    <span class="block font-medium text-slate-900">角色管理</span>
+                    <span class="block truncate text-xs text-slate-500">权限配置</span>
+                </span>
+            </a>
+            {% endif %}
+            {% if role_perm.perm_manage_menus %}
+            <a href="{% url 'menu_list' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-violet-200 hover:bg-violet-50/50">
+                <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-white shadow-sm">
+                    <i class="ri-menu-line text-lg"></i>
+                </span>
+                <span class="min-w-0">
+                    <span class="block font-medium text-slate-900">菜单管理</span>
+                    <span class="block truncate text-xs text-slate-500">侧边栏导航</span>
+                </span>
+            </a>
+            {% endif %}
+            {% if ui_dashboard_show_django_admin_tile %}
+            <a href="/admin/" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-slate-300 hover:bg-white">
+                <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-600 text-white shadow-sm">
+                    <i class="ri-settings-3-line text-lg"></i>
+                </span>
+                <span class="min-w-0">
+                    <span class="block font-medium text-slate-900">Django Admin</span>
+                    <span class="block truncate text-xs text-slate-500">高级系统设置</span>
+                </span>
+            </a>
+            {% endif %}
         </div>
-        <div class="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
-            <i class="ri-code-s-slash-line text-gray-500"></i>
-            <div>
-                <p class="text-sm text-gray-500">框架版本</p>
-                <p class="text-sm font-medium text-gray-800">Django 4.2.16</p>
+    </section>
+
+    <!-- 系统信息 -->
+    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-8">
+        <h2 class="text-lg font-semibold text-slate-900">系统信息</h2>
+        <p class="mt-1 text-sm text-slate-600">环境与当前会话摘要</p>
+        <dl class="mt-6 grid gap-3 sm:grid-cols-2">
+            <div class="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3">
+                <i class="ri-server-line text-xl text-slate-400"></i>
+                <div>
+                    <dt class="text-xs font-medium text-slate-500">运行端口</dt>
+                    <dd class="text-sm font-semibold text-slate-900">11223</dd>
+                </div>
             </div>
-        </div>
-        <div class="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
-            <i class="ri-user-settings-line text-gray-500"></i>
-            <div>
-                <p class="text-sm text-gray-500">当前角色</p>
-                <p class="text-sm font-medium text-gray-800">{% if user.profile.role %}{{ user.profile.role.name }}{% else %}未分配{% endif %}</p>
+            <div class="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3">
+                <i class="ri-database-line text-xl text-slate-400"></i>
+                <div>
+                    <dt class="text-xs font-medium text-slate-500">数据库</dt>
+                    <dd class="text-sm font-semibold text-slate-900">SQLite</dd>
+                </div>
             </div>
-        </div>
-    </div>
+            <div class="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3">
+                <i class="ri-code-s-slash-line text-xl text-slate-400"></i>
+                <div>
+                    <dt class="text-xs font-medium text-slate-500">框架版本</dt>
+                    <dd class="text-sm font-semibold text-slate-900">Django 4.2.16</dd>
+                </div>
+            </div>
+            <div class="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3">
+                <i class="ri-user-settings-line text-xl text-slate-400"></i>
+                <div>
+                    <dt class="text-xs font-medium text-slate-500">当前角色</dt>
+                    <dd class="text-sm font-semibold text-slate-900">{% if user.profile.role %}{{ user.profile.role.name }}{% else %}未分配{% endif %}</dd>
+                </div>
+            </div>
+        </dl>
+    </section>
 </div>
 {% endblock %}

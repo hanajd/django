@@ -1,303 +1,576 @@
 {% extends "base.html" %}
-{% block title %}项目管理{% endblock %}
-{% block page_title %}文件库项目管理{% endblock %}
+{% block title %}项目工作台{% endblock %}
+{% block page_title %}项目工作台{% endblock %}
 
 {% block content %}
-<div class="space-y-6">
-    <div class="bg-white rounded-lg shadow p-6">
-        <h3 class="text-base font-semibold text-gray-800 mb-2">新建项目</h3>
-        <p class="text-xs text-gray-500 mb-3">项目编码可不填，系统会自动生成。<strong>项目与任务为多对多</strong>；文件在 <a href="{% url 'library_task_management' %}" class="text-indigo-700 underline font-medium">任务管理</a> 中按任务维护（全部分类），此处只维护项目与任务的关联。</p>
-        {% if can_assign_tasks %}
-        <form method="post" class="space-y-4 max-w-3xl">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="create_project">
-            <div class="flex flex-wrap items-end gap-3">
-                <input type="text" name="project_code" placeholder="项目编码（可选）" class="px-3 py-2 border border-gray-300 rounded-md text-sm">
-                <input type="text" name="project_name" placeholder="项目名称（必填）" required class="px-3 py-2 border border-gray-300 rounded-md text-sm">
-                <input type="text" name="project_desc" placeholder="描述（可选）" class="px-3 py-2 border border-gray-300 rounded-md text-sm min-w-[18rem]">
-                <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">创建项目</button>
-            </div>
-            {% if all_library_tasks %}
-            <div>
-                <p class="text-sm font-medium text-gray-700 mb-2">同时关联任务（可选）</p>
-                <p class="text-xs text-gray-500 mb-2">勾选的任务将在项目创建后立即纳入本项目。</p>
-                <div class="max-h-40 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100 bg-gray-50/50">
-                    {% for t in all_library_tasks %}
-                    <label class="flex items-center gap-3 px-3 py-2 hover:bg-white cursor-pointer text-sm">
-                        <input type="checkbox" name="task_ids" value="{{ t.id }}" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
-                        <span><span class="font-mono text-xs text-gray-500">{{ t.code }}</span> · {{ t.name }}</span>
-                    </label>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
-        </form>
-        {% else %}
-        <p class="text-sm text-amber-800">仅具备「分配文件库任务」权限的角色可创建项目。</p>
+<div class="max-w-[1600px] mx-auto px-4 sm:px-6 py-6 min-h-[calc(100vh-6rem)]">
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+            <h1 class="text-2xl font-bold text-slate-900 tracking-tight">项目工作台</h1>
+            <p class="mt-1 text-sm text-slate-500 max-w-2xl">在同一页面完成项目选择、任务模板关联、流程与成员、文件绑定及 App 分配，减少在菜单间来回切换。</p>
+        </div>
+        {% if show_library_task_nav %}
+        <a href="{% url 'library_task_management' %}{% if selected_project_id %}?return_project={{ selected_project_id }}{% endif %}"
+           class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-medium shadow-sm hover:bg-slate-800 transition-colors">
+            <i class="ri-stack-line text-lg"></i>
+            任务模板库
+        </a>
         {% endif %}
     </div>
 
-    <div class="bg-white rounded-lg shadow p-6">
-        <div class="flex flex-wrap items-end gap-3 mb-4">
-            <div>
-                <label class="block text-xs text-gray-600 mb-1">选择项目</label>
-                <select id="project-switch" class="px-3 py-2 border border-gray-300 rounded-md text-sm min-w-[18rem]">
-                    <option value="">请选择项目</option>
-                    {% for p in projects %}
-                    <option value="{{ p.id }}" {% if selected_project_id == p.id|stringformat:"s" %}selected{% endif %}>{{ p.code }} · {{ p.name }}{% if not p.is_active %}（已停用）{% endif %}</option>
-                    {% endfor %}
-                </select>
+    <div class="grid grid-cols-1 lg:grid-cols-[minmax(240px,280px)_minmax(0,1fr)] gap-6 items-start">
+        <!-- 左侧：项目列表 -->
+        <aside class="lg:sticky lg:top-4 space-y-4">
+            <div class="rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden">
+                <div class="px-4 py-3 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white flex items-center justify-between">
+                    <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">项目</span>
+                    <span class="text-xs text-slate-400">{{ projects|length }} 个</span>
+                </div>
+                <div class="p-2">
+                    <input type="search" id="project-filter" placeholder="筛选编码或名称…"
+                           class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 mb-2">
+                    <nav class="max-h-[min(60vh,28rem)] overflow-y-auto space-y-0.5 pr-1" id="project-nav">
+                        {% for p in projects %}
+                        <a href="?project_id={{ p.id }}&tab={{ workbench_tab }}"
+                           data-filter="{{ p.code }} {{ p.name }}"
+                           class="proj-nav-item flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm transition-colors {% if selected_project_id == p.id|stringformat:'s' %}bg-indigo-50 text-indigo-900 ring-1 ring-indigo-200 font-medium{% else %}text-slate-700 hover:bg-slate-50{% endif %} {% if not p.is_active %}opacity-60{% endif %}">
+                            <span class="truncate flex-1"><span class="font-mono text-xs text-slate-500">{{ p.code }}</span> · {{ p.name }}</span>
+                            {% if not p.is_active %}<span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">停</span>{% endif %}
+                        </a>
+                        {% empty %}
+                        {% if workbench_projects_limited_to_task_assignments %}
+                        <div class="px-3 py-4 text-left text-xs leading-relaxed text-slate-600 space-y-2">
+                            <p class="font-medium text-slate-700">当前账号下列表受数据范围限制</p>
+                            <p>在「文件库仅本人数据」且未开启「分配文件库任务」时，左侧列出<strong>已向您分配任务的项目</strong>以及<strong>您本人创建的检测项目</strong>。</p>
+                            <p class="text-slate-500">若仍为空：请使用下方「新建项目」（需具备「创建检测项目」权限），或由管理员在「分配」中写入任务分配；仅创建空项目而未挂任务时，<code class="rounded bg-slate-100 px-1 py-0.5 text-[11px]">ensure_party_a_demo</code> 不会生成分配记录。</p>
+                        </div>
+                        {% else %}
+                        <p class="px-3 py-6 text-sm text-slate-400 text-center">暂无项目</p>
+                        {% endif %}
+                        {% endfor %}
+                    </nav>
+                </div>
             </div>
-            {% if selected_project %}
-            <p class="text-xs text-indigo-700 bg-indigo-50 px-2 py-1 rounded">当前项目：{{ selected_project.code }} · {{ selected_project.name }}</p>
-            {% if can_assign_tasks %}
-            <form method="post" class="inline" onsubmit="return confirm('确定删除当前项目？该操作不可恢复。');">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="delete_project">
-                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
-                <button type="submit" class="px-3 py-1.5 bg-red-600 text-white text-xs rounded hover:bg-red-700">删除项目</button>
-            </form>
-            {% endif %}
-            {% endif %}
-        </div>
 
-        {% if selected_project and can_assign_tasks %}
-        <div class="mb-2 p-4 border border-indigo-100 rounded-lg bg-indigo-50/40">
-            <h3 class="text-sm font-semibold text-gray-800 mb-2">维护本项目关联的任务</h3>
-            <p class="text-xs text-gray-600 mb-3">勾选后使用下方按钮加入或移除；各任务上的文件请在 <a href="{% url 'library_task_management' %}" class="text-indigo-700 underline font-medium">任务管理</a> 中维护。</p>
-            {% if not all_library_tasks %}
-            <p class="text-sm text-amber-800">尚无文件库任务，请先在任务管理中创建。</p>
-            {% else %}
-            <form method="post" class="space-y-3">
-                {% csrf_token %}
-                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
-                <div class="max-h-48 overflow-y-auto border border-gray-200 rounded-lg bg-white divide-y divide-gray-100">
-                    {% for t in all_library_tasks %}
-                    <label class="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 cursor-pointer text-sm">
-                        <input type="checkbox" name="task_ids" value="{{ t.id }}" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                               {% if t.id in project_task_ids %}checked{% endif %}>
-                        <span><span class="font-mono text-xs text-gray-500">{{ t.code }}</span> · {{ t.name }}</span>
-                    </label>
-                    {% endfor %}
-                </div>
-                <div class="flex flex-wrap gap-2">
-                    <button type="submit" name="action" value="bind_tasks" class="px-3 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">将勾选任务加入项目</button>
-                    <button type="submit" name="action" value="unbind_tasks" class="px-3 py-2 bg-slate-200 text-slate-800 text-sm rounded-lg hover:bg-slate-300">从项目移除勾选任务</button>
-                </div>
-            </form>
-            {% endif %}
-        </div>
-
-        {% if has_report_source_task_column %}
-        <div class="mb-2 mt-4 p-4 border border-violet-100 rounded-lg bg-violet-50/30">
-            <h3 class="text-sm font-semibold text-gray-800 mb-2">报告与现场记录任务关联</h3>
-            <p class="text-xs text-gray-600 mb-3">先选择一个报告任务，再勾选其来源现场记录任务。保存后，手动导出报告会聚合这些现场记录 JSON。</p>
-            {% if not project_report_tasks %}
-            <p class="text-sm text-gray-500">当前项目暂无输出目标为「报告」的任务。</p>
-            {% else %}
-            <form method="get" class="flex flex-wrap items-end gap-3 mb-3">
-                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
-                <div>
-                    <label class="block text-xs text-gray-600 mb-1">选择报告任务</label>
-                    <select name="report_task_id" class="px-3 py-2 border border-gray-300 rounded-md text-sm min-w-[18rem]" onchange="this.form.submit()">
-                        {% for rt in project_report_tasks %}
-                        <option value="{{ rt.id }}" {% if selected_report_task_id == rt.id|stringformat:"s" %}selected{% endif %}>
-                            {{ rt.code }} · {{ rt.name }}
-                        </option>
-                        {% endfor %}
-                    </select>
-                </div>
-            </form>
-
-            <form method="post" class="space-y-3">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="update_project_report_sources">
-                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
-                <input type="hidden" name="report_task_id" value="{{ selected_report_task_id }}">
-                <div class="border border-gray-200 rounded-lg bg-white">
-                    {% if project_site_tasks %}
-                        {% for st in project_site_tasks %}
-                        <label class="flex items-center gap-3 px-3 py-2 border-b last:border-b-0 border-gray-100 hover:bg-gray-50 cursor-pointer text-sm">
-                            <input type="checkbox" name="source_site_task_ids" value="{{ st.id }}" class="rounded border-gray-300 text-violet-600 focus:ring-violet-500"
-                                   {% if st.id in selected_report_source_ids %}checked{% endif %}>
-                            <span><span class="font-mono text-xs text-gray-500">{{ st.code }}</span> · {{ st.name }}</span>
-                        </label>
-                        {% endfor %}
-                    {% else %}
-                    <div class="px-3 py-6 text-sm text-gray-500">当前项目暂无可选的现场记录任务。</div>
-                    {% endif %}
-                </div>
-                <button type="submit" class="px-3 py-2 bg-violet-600 text-white text-sm rounded-lg hover:bg-violet-700">保存报告来源任务关联</button>
-            </form>
-            {% endif %}
-        </div>
-        {% endif %}
-
-        <div class="mb-2 mt-4 p-4 border border-emerald-100 rounded-lg bg-emerald-50/30">
-            <h3 class="text-sm font-semibold text-gray-800 mb-2">项目文件管理</h3>
-            <p class="text-xs text-gray-600 mb-3">可按分类浏览文件库并把文件加入当前项目，或从当前项目移除。该操作只影响项目关联，不影响文件本体。</p>
-            <form method="get" class="flex flex-wrap items-end gap-3 mb-4">
-                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
-                <div>
-                    <label class="block text-xs text-gray-600 mb-1">文件分类</label>
-                    <select name="project_file_tab" class="px-3 py-2 border border-gray-300 rounded-md text-sm"
-                            onchange="this.form.submit()">
-                        {% for t in file_library_tabs %}
-                        <option value="{{ t.key }}" {% if project_file_tab == t.key %}selected{% endif %}>{{ t.label }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-            </form>
-
-            <form method="post" class="space-y-3">
-                {% csrf_token %}
-                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
-                <input type="hidden" name="project_file_tab" value="{{ project_file_tab }}">
-                <div class="flex flex-wrap gap-2">
-                    <button type="submit" name="action" value="bind_project_files" class="px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700">将勾选文件加入项目</button>
-                    <button type="submit" name="action" value="unbind_project_files" class="px-3 py-2 bg-slate-200 text-slate-800 text-sm rounded-lg hover:bg-slate-300">从项目移除勾选文件</button>
-                </div>
-                <div class="overflow-x-auto border border-gray-200 rounded-lg max-h-96 overflow-y-auto bg-white">
-                    <table class="min-w-full text-sm text-left text-gray-700">
-                        <thead class="bg-gray-50 text-gray-600 uppercase text-xs sticky top-0">
-                            <tr>
-                                <th class="px-3 py-2 w-10"><input type="checkbox" id="check-all-project-files"></th>
-                                <th class="px-3 py-2">文件名</th>
-                                <th class="px-3 py-2">分类</th>
-                                <th class="px-3 py-2">项目内</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for f in project_file_rows %}
-                            <tr class="border-b border-gray-100 hover:bg-gray-50">
-                                <td class="px-3 py-2"><input type="checkbox" name="file_ids" value="{{ f.id }}" class="row-project-file"></td>
-                                <td class="px-3 py-2">{{ f.original_name }}</td>
-                                <td class="px-3 py-2 text-gray-500">{{ f.get_category_display }}</td>
-                                <td class="px-3 py-2">
-                                    {% if f.id in project_file_ids %}
-                                    <span class="text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-700">已关联</span>
-                                    {% else %}
-                                    <span class="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-500">未关联</span>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                            {% empty %}
-                            <tr><td colspan="4" class="px-3 py-8 text-center text-gray-400">当前分类暂无文件</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </form>
-        </div>
-        {% elif selected_project and not can_assign_tasks %}
-        <p class="text-sm text-gray-500">您无权修改项目与任务的关联。</p>
-        {% else %}
-        <p class="text-sm text-gray-500">请选择项目后可查看或维护任务关联。</p>
-        {% endif %}
-
-        {% if selected_project and can_assign_tasks and project_assignees %}
-        <div class="mt-8 pt-6 border-t border-gray-200">
-            <h3 class="text-sm font-semibold text-gray-800 mb-2">项目成员与编辑权限</h3>
-            <p class="text-xs text-gray-600 mb-4">以下用户曾被分配过本项目的任务。<strong>取消用户项目</strong>后，该用户仍可<strong>下载</strong>本项目文件，但不能再上传、删除、改绑或执行其他会改动库内数据的操作；需要时可恢复编辑权限。</p>
-            <div class="overflow-x-auto border border-gray-200 rounded-lg divide-y divide-gray-100 bg-white">
-                {% for row in project_assignees %}
-                <div class="flex flex-wrap items-center justify-between gap-3 px-3 py-3 text-sm">
-                    <div>
-                        <span class="font-medium text-gray-800">{{ row.user.username }}</span>
-                        {% if row.user.get_full_name %}
-                        <span class="text-gray-500">（{{ row.user.get_full_name }}）</span>
-                        {% endif %}
-                        {% if row.revoked %}
-                        <span class="ml-2 text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-800">已取消编辑</span>
-                        {% else %}
-                        <span class="ml-2 text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">可编辑</span>
-                        {% endif %}
-                    </div>
-                    <form method="post" class="shrink-0">
+            {% if can_assign_tasks or role_perm.perm_create_library_project %}
+            <details class="rounded-2xl border border-dashed border-indigo-200 bg-indigo-50/30 overflow-hidden group">
+                <summary class="px-4 py-3 cursor-pointer text-sm font-medium text-indigo-900 list-none flex items-center justify-between">
+                    <span><i class="ri-add-circle-line align-middle mr-1"></i> 新建项目</span>
+                    <i class="ri-arrow-down-s-line text-slate-400 group-open:rotate-180 transition-transform"></i>
+                </summary>
+                <div class="px-4 pb-4 pt-0 border-t border-indigo-100/80">
+                    <p class="text-xs text-slate-600 mt-3 mb-3">编码可留空；创建后可继续在右侧关联任务模板。</p>
+                    <form method="post" class="space-y-3">
                         {% csrf_token %}
-                        <input type="hidden" name="project_id" value="{{ selected_project_id }}">
-                        <input type="hidden" name="user_id" value="{{ row.user.pk }}">
-                        {% if row.revoked %}
-                        <button type="submit" name="action" value="restore_project_user" class="px-3 py-1.5 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">恢复编辑权限</button>
-                        {% else %}
-                        <button type="submit" name="action" value="revoke_project_user" class="px-3 py-1.5 text-sm rounded-lg bg-slate-200 text-slate-800 hover:bg-slate-300"
-                                onclick="return confirm('确定取消该用户在本项目上的编辑权限？其仍可下载文件。');">取消用户项目</button>
+                        <input type="hidden" name="action" value="create_project">
+                        <input type="text" name="project_code" placeholder="项目编码（可选）" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm">
+                        <input type="text" name="project_name" placeholder="项目名称 *" required class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm">
+                        <input type="text" name="project_desc" placeholder="描述（可选）" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm">
+                        {% if all_library_tasks %}
+                        <div class="max-h-32 overflow-y-auto rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
+                            {% for t in all_library_tasks %}
+                            <label class="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50">
+                                <input type="checkbox" name="task_ids" value="{{ t.id }}" class="rounded border-slate-300 text-indigo-600">
+                                <span class="truncate"><span class="font-mono text-xs text-slate-500">{{ t.code }}</span> · {{ t.name }}</span>
+                            </label>
+                            {% endfor %}
+                        </div>
                         {% endif %}
+                        <button type="submit" class="w-full py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">创建</button>
                     </form>
                 </div>
+            </details>
+            {% endif %}
+        </aside>
+
+        <!-- 右侧主区 -->
+        <main class="min-w-0 rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden">
+            {% if not selected_project %}
+            <div class="flex flex-col items-center justify-center py-20 px-6 text-center">
+                <div class="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+                    <i class="ri-folder-open-line text-3xl text-slate-400"></i>
+                </div>
+                <h2 class="text-lg font-semibold text-slate-800">请选择左侧项目</h2>
+                <p class="mt-2 text-sm text-slate-500 max-w-md">选择项目后，可在此切换「概览 / 任务与模板 / 流程 / 文件 / 分配 / 提交」标签完成配置。</p>
+            </div>
+            {% else %}
+            <div class="border-b border-slate-100 px-4 sm:px-6 py-4 bg-gradient-to-r from-white to-slate-50/80 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <div class="text-xs text-slate-500 mb-0.5">当前项目</div>
+                    <div class="flex flex-wrap items-baseline gap-2">
+                        <span class="font-mono text-sm text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">{{ selected_project.code }}</span>
+                        <span class="text-lg font-semibold text-slate-900">{{ selected_project.name }}</span>
+                        {% if not selected_project.is_active %}
+                        <span class="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">已停用</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% if can_delete_selected_project %}
+                <form method="post" class="shrink-0" onsubmit="return confirm('确定删除该项目？不可恢复。');">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="delete_project">
+                    <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                    <button type="submit" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 border border-red-200">
+                        <i class="ri-delete-bin-line"></i> 删除项目
+                    </button>
+                </form>
+                {% endif %}
+            </div>
+
+            <!-- 标签栏 -->
+            <div class="flex flex-wrap gap-1 px-3 sm:px-4 py-2 bg-slate-50/90 border-b border-slate-100">
+                {% for key, label in workbench_tabs %}
+                <a href="?project_id={{ selected_project_id }}&tab={{ key }}"
+                   class="px-3.5 py-2 rounded-lg text-sm font-medium transition-colors {% if workbench_tab == key %}bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200/80{% else %}text-slate-600 hover:text-slate-900 hover:bg-white/70{% endif %}">
+                    {{ label }}
+                </a>
                 {% endfor %}
             </div>
-        </div>
-        {% endif %}
 
-        {% if selected_project and can_assign_tasks %}
-        <div class="mt-8 pt-6 border-t border-gray-200">
-            <h3 class="text-sm font-semibold text-gray-800 mb-2">任务提交状态（taskNo）</h3>
-            <p class="text-xs text-gray-600 mb-4">可查看本项目 taskNo 当前状态。仅支持将 <strong>submitted</strong> 回退为 <strong>pending</strong>。</p>
-            <div class="overflow-x-auto border border-gray-200 rounded-lg bg-white">
-                <table class="min-w-full text-sm text-left text-gray-700">
-                    <thead class="bg-gray-50 text-gray-600 uppercase text-xs">
-                        <tr>
-                            <th class="px-3 py-2">taskNo</th>
-                            <th class="px-3 py-2">案件号</th>
-                            <th class="px-3 py-2">状态</th>
-                            <th class="px-3 py-2">提交时间</th>
-                            <th class="px-3 py-2">更新时间</th>
-                            <th class="px-3 py-2">提交用户</th>
-                            <th class="px-3 py-2">操作</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for row in project_submissions %}
-                        <tr class="border-b border-gray-100 hover:bg-gray-50">
-                            <td class="px-3 py-2 font-mono text-xs">{{ row.task_no }}</td>
-                            <td class="px-3 py-2">{{ row.case_no|default:"-" }}</td>
-                            <td class="px-3 py-2">
-                                <span class="text-xs px-2 py-0.5 rounded {% if row.status == 'submitted' %}bg-emerald-100 text-emerald-700{% elif row.status == 'pending' %}bg-amber-100 text-amber-800{% else %}bg-gray-100 text-gray-600{% endif %}">
-                                    {{ row.status_display }}（{{ row.status }}）
-                                </span>
-                            </td>
-                            <td class="px-3 py-2">{{ row.submitted_at|date:"Y-m-d H:i:s"|default:"-" }}</td>
-                            <td class="px-3 py-2">{{ row.updated_at|date:"Y-m-d H:i:s" }}</td>
-                            <td class="px-3 py-2">{{ row.created_by|default:"-" }}</td>
-                            <td class="px-3 py-2">
-                                {% if row.can_rollback %}
-                                <form method="post" class="inline" onsubmit="return confirm('确定将该任务从 submitted 回退为 pending 吗？');">
-                                    {% csrf_token %}
-                                    <input type="hidden" name="action" value="rollback_submission_to_pending">
-                                    <input type="hidden" name="project_id" value="{{ selected_project_id }}">
-                                    <input type="hidden" name="submission_id" value="{{ row.id }}">
-                                    <button type="submit" class="px-2 py-1 text-xs rounded bg-amber-600 text-white hover:bg-amber-700">回退为 pending</button>
-                                </form>
-                                {% else %}
-                                <span class="text-xs text-gray-400">不可回退</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% empty %}
-                        <tr><td colspan="7" class="px-3 py-8 text-center text-gray-400">当前项目暂无检测提交记录</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+            <div class="p-4 sm:p-6">
+                {% if workbench_tab == 'overview' %}
+                <div class="grid sm:grid-cols-3 gap-4 mb-8">
+                    <div class="rounded-xl border border-slate-100 bg-slate-50/80 p-4">
+                        <div class="text-xs font-medium text-slate-500 uppercase">关联任务模板</div>
+                        <div class="mt-1 text-2xl font-bold text-slate-900">{{ project_task_ids|length }}</div>
+                        <a href="?project_id={{ selected_project_id }}&tab=tasks" class="mt-2 inline-block text-xs text-indigo-600 hover:underline">去维护 →</a>
+                    </div>
+                    <div class="rounded-xl border border-slate-100 bg-slate-50/80 p-4">
+                        <div class="text-xs font-medium text-slate-500 uppercase">已分配用户</div>
+                        <div class="mt-1 text-2xl font-bold text-slate-900">{{ project_assignees|length }}</div>
+                        <a href="?project_id={{ selected_project_id }}&tab=assign" class="mt-2 inline-block text-xs text-indigo-600 hover:underline">去分配 →</a>
+                    </div>
+                    <div class="rounded-xl border border-slate-100 bg-slate-50/80 p-4">
+                        <div class="text-xs font-medium text-slate-500 uppercase">检测提交</div>
+                        <div class="mt-1 text-2xl font-bold text-slate-900">{{ project_submissions|length }}</div>
+                        <a href="?project_id={{ selected_project_id }}&tab=submissions" class="mt-2 inline-block text-xs text-indigo-600 hover:underline">查看 →</a>
+                    </div>
+                </div>
+                <div class="rounded-xl border border-indigo-100 bg-indigo-50/40 p-4 text-sm text-indigo-950">
+                    <strong class="font-semibold">推荐工作流：</strong>先在「任务与模板」把任务挂到本项目 → 在「任务模板库」绑定 PDF/JSON 模板 → 「流程」配置成员与报告来源 → 「文件」补充非模板类文件 → 「分配」下发给检测 App 用户。
+                </div>
+                {% endif %}
+
+                {% if workbench_tab == 'tasks' %}
+                    {% if selected_project and can_edit_project_workbench %}
+                    <div class="rounded-xl border border-indigo-100 bg-indigo-50/30 p-5">
+                        <h3 class="text-base font-semibold text-slate-900 mb-1">任务模板与项目</h3>
+                        <p class="text-xs text-slate-600 mb-4">勾选任务后加入或移出本项目；模板文件绑定请在 <a href="{% url 'library_task_management' %}?return_project={{ selected_project_id }}" class="text-indigo-700 font-medium underline">任务模板库</a> 中完成。</p>
+                        {% if not all_library_tasks %}
+                        <p class="text-sm text-amber-800">尚无可用任务模板，请先在任务模板库中创建。</p>
+                        {% else %}
+                        <form method="post" class="space-y-4">
+                            {% csrf_token %}
+                            <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                            <div class="max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
+                                {% for t in all_library_tasks %}
+                                <label class="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 cursor-pointer text-sm">
+                                    <input type="checkbox" name="task_ids" value="{{ t.id }}" class="rounded border-slate-300 text-indigo-600" {% if t.id in project_task_ids %}checked{% endif %}>
+                                    <span><span class="font-mono text-xs text-slate-500">{{ t.code }}</span> · {{ t.name }}</span>
+                                    {% if can_assign_tasks %}
+                                    <a href="{% url 'library_task_management' %}?manage_task={{ t.id }}&return_project={{ selected_project_id }}" class="ml-auto text-xs text-indigo-600 hover:underline shrink-0" onclick="event.stopPropagation();">编辑模板</a>
+                                    {% endif %}
+                                </label>
+                                {% endfor %}
+                            </div>
+                            <div class="flex flex-wrap gap-2">
+                                <button type="submit" name="action" value="bind_tasks" class="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">加入项目</button>
+                                <button type="submit" name="action" value="unbind_tasks" class="px-4 py-2 rounded-xl bg-slate-200 text-slate-800 text-sm font-medium hover:bg-slate-300">从项目移除</button>
+                            </div>
+                        </form>
+                        {% endif %}
+                    </div>
+                    {% elif selected_project and not can_edit_project_workbench %}
+                    <p class="text-sm text-slate-500">您无权修改项目与任务的关联。</p>
+                    {% endif %}
+                {% endif %}
+
+                {% if workbench_tab == 'workflow' %}
+                    {% if selected_project and can_edit_project_workbench %}
+                    <div class="space-y-6">
+                        <div class="rounded-xl border border-teal-100 bg-teal-50/40 p-5">
+                            <h3 class="text-base font-semibold text-slate-900 mb-2">检测流程与成员</h3>
+                            <p class="text-xs text-slate-600 mb-4">顺序：检测员 → 校核员 → 编制人 → 审核人 → 授权签字人；签发日期以终审为准。每岗位至多一名成员；同一用户可兼任多个岗位（测试沙箱账号进入工作台时会默认把五岗都填为本人）。</p>
+                            <div class="flex flex-wrap gap-2 text-xs text-slate-700 mb-6">
+                                {% for code, title in workflow_stage_definitions %}
+                                <span class="inline-flex items-center px-2.5 py-1 rounded-full bg-white border border-teal-200">{{ title }}</span>
+                                {% if not forloop.last %}<span class="text-teal-500">→</span>{% endif %}
+                                {% endfor %}
+                            </div>
+                            {% if workflow_members %}
+                            <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white mb-4">
+                                <table class="min-w-full text-sm">
+                                    <thead class="bg-slate-50 text-slate-500 text-xs uppercase">
+                                        <tr><th class="px-4 py-2 text-left">用户</th><th class="px-4 py-2 text-left">岗位</th><th class="px-4 py-2 w-24"></th></tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for m in workflow_members %}
+                                        <tr class="border-t border-slate-100">
+                                            <td class="px-4 py-2">{{ m.user.username }}</td>
+                                            <td class="px-4 py-2">{{ m.get_workflow_role_display }}</td>
+                                            <td class="px-4 py-2">
+                                                <form method="post" class="inline" onsubmit="return confirm('移除该成员？');">
+                                                    {% csrf_token %}
+                                                    <input type="hidden" name="action" value="remove_workflow_member">
+                                                    <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                                                    <input type="hidden" name="member_id" value="{{ m.id }}">
+                                                    <button type="submit" class="text-red-600 hover:underline text-xs">移除</button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {% else %}
+                            <p class="text-xs text-slate-500 mb-4">尚未配置流程成员。</p>
+                            {% endif %}
+                            <form method="post" class="flex flex-wrap items-end gap-3">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="add_workflow_member">
+                                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                                <div>
+                                    <label class="block text-xs text-slate-500 mb-1">用户</label>
+                                    <select name="user_id" class="px-3 py-2 border border-slate-200 rounded-lg text-sm min-w-[12rem]">
+                                        <option value="">请选择</option>
+                                        {% for u in assignable_workflow_users %}
+                                        <option value="{{ u.id }}">{{ u.username }}（{{ u.profile.role.name }}）</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-slate-500 mb-1">岗位</label>
+                                    <select name="workflow_role" class="px-3 py-2 border border-slate-200 rounded-lg text-sm min-w-[10rem]">
+                                        {% for rcode, rlabel in workflow_role_choices %}
+                                        <option value="{{ rcode }}">{{ rlabel }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <button type="submit" class="px-4 py-2 rounded-xl bg-teal-700 text-white text-sm font-medium hover:bg-teal-800">保存成员</button>
+                            </form>
+                            <h4 class="text-xs font-semibold text-slate-700 mt-6 mb-2">案件当前环节</h4>
+                            {% if project_workflow_cases %}
+                            <div class="overflow-x-auto max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white">
+                                <table class="min-w-full text-sm">
+                                    <thead class="bg-slate-50 text-xs text-slate-500 sticky top-0">
+                                        <tr><th class="px-3 py-2 text-left">案件</th><th class="px-3 py-2 text-left">环节</th><th class="px-3 py-2 text-left">签发</th><th class="px-3 py-2 text-left">退回说明</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for row in project_workflow_cases %}
+                                        <tr class="border-t border-slate-100">
+                                            <td class="px-3 py-2 font-mono text-xs">{{ row.case.case_no }}</td>
+                                            <td class="px-3 py-2">{{ row.stage_display }}</td>
+                                            <td class="px-3 py-2 text-xs">{{ row.issue_date|default:"—" }}</td>
+                                            <td class="px-3 py-2 text-xs text-slate-600">{{ row.return_reason|default:"—" }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {% else %}
+                            <p class="text-xs text-slate-500">暂无关联案件。</p>
+                            {% endif %}
+                        </div>
+
+                        {% if has_report_source_task_column %}
+                        <div class="rounded-xl border border-violet-100 bg-violet-50/40 p-5">
+                            <h3 class="text-base font-semibold text-slate-900 mb-2">报告与现场记录任务</h3>
+                            <p class="text-xs text-slate-600 mb-4">选择报告任务后勾选来源现场记录任务。</p>
+                            {% if not project_report_tasks %}
+                            <p class="text-sm text-slate-500">当前项目暂无「报告」类任务。</p>
+                            {% else %}
+                            <form method="get" class="mb-4 flex flex-wrap gap-3">
+                                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                                <input type="hidden" name="tab" value="workflow">
+                                <select name="report_task_id" class="px-3 py-2 border border-slate-200 rounded-lg text-sm min-w-[16rem]" onchange="this.form.submit()">
+                                    {% for rt in project_report_tasks %}
+                                    <option value="{{ rt.id }}" {% if selected_report_task_id == rt.id|stringformat:'s' %}selected{% endif %}>{{ rt.code }} · {{ rt.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </form>
+                            <form method="post" class="space-y-3">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="update_project_report_sources">
+                                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                                <input type="hidden" name="report_task_id" value="{{ selected_report_task_id }}">
+                                <div class="rounded-xl border border-slate-200 bg-white max-h-48 overflow-y-auto">
+                                    {% if project_site_tasks %}
+                                        {% for st in project_site_tasks %}
+                                        <label class="flex items-center gap-3 px-4 py-2.5 border-b border-slate-100 last:border-0 hover:bg-slate-50 cursor-pointer text-sm">
+                                            <input type="checkbox" name="source_site_task_ids" value="{{ st.id }}" class="rounded border-slate-300 text-violet-600" {% if st.id in selected_report_source_ids %}checked{% endif %}>
+                                            <span><span class="font-mono text-xs text-slate-500">{{ st.code }}</span> · {{ st.name }}</span>
+                                        </label>
+                                        {% endfor %}
+                                    {% else %}
+                                    <div class="px-4 py-8 text-sm text-slate-500 text-center">暂无可选现场记录任务</div>
+                                    {% endif %}
+                                </div>
+                                <button type="submit" class="px-4 py-2 rounded-xl bg-violet-600 text-white text-sm font-medium hover:bg-violet-700">保存关联</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% else %}
+                    <p class="text-sm text-slate-500">您无权维护流程配置。</p>
+                    {% endif %}
+                {% endif %}
+
+                {% if workbench_tab == 'files' %}
+                <div class="rounded-xl border border-emerald-100 bg-emerald-50/30 p-5">
+                    <h3 class="text-base font-semibold text-slate-900 mb-2">项目文件</h3>
+                    <p class="text-xs text-slate-600 mb-4">按分类勾选后加入或移出项目（不删除文件本体）。</p>
+                    {% if not selected_project %}
+                    {% elif not can_edit_project_workbench %}
+                    <p class="text-sm text-slate-500">您无权维护项目文件关联。</p>
+                    {% else %}
+                    <form method="get" class="mb-4 flex flex-wrap gap-3">
+                        <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                        <input type="hidden" name="tab" value="files">
+                        <select name="project_file_tab" class="px-3 py-2 border border-slate-200 rounded-lg text-sm" onchange="this.form.submit()">
+                            {% for t in file_library_tabs %}
+                            <option value="{{ t.key }}" {% if project_file_tab == t.key %}selected{% endif %}>{{ t.label }}</option>
+                            {% endfor %}
+                        </select>
+                    </form>
+                    <form method="post" class="space-y-3">
+                        {% csrf_token %}
+                        <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                        <input type="hidden" name="project_file_tab" value="{{ project_file_tab }}">
+                        <div class="flex flex-wrap gap-2">
+                            <button type="submit" name="action" value="bind_project_files" class="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-medium">加入项目</button>
+                            <button type="submit" name="action" value="unbind_project_files" class="px-4 py-2 rounded-xl bg-slate-200 text-slate-800 text-sm font-medium">从项目移除</button>
+                        </div>
+                        <div class="overflow-x-auto rounded-xl border border-slate-200 max-h-96 overflow-y-auto bg-white">
+                            <table class="min-w-full text-sm">
+                                <thead class="bg-slate-50 text-slate-500 text-xs uppercase sticky top-0">
+                                    <tr>
+                                        <th class="px-3 py-2 w-10"><input type="checkbox" id="check-all-project-files"></th>
+                                        <th class="px-3 py-2 text-left">文件</th>
+                                        <th class="px-3 py-2 text-left">分类</th>
+                                        <th class="px-3 py-2 text-left">状态</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for f in project_file_rows %}
+                                    <tr class="border-t border-slate-100 hover:bg-slate-50/80">
+                                        <td class="px-3 py-2"><input type="checkbox" name="file_ids" value="{{ f.id }}" class="row-project-file rounded border-slate-300"></td>
+                                        <td class="px-3 py-2">{{ f.original_name }}</td>
+                                        <td class="px-3 py-2 text-slate-500">{{ f.get_category_display }}</td>
+                                        <td class="px-3 py-2">
+                                            {% if f.id in project_file_ids %}
+                                            <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">已关联</span>
+                                            {% else %}
+                                            <span class="text-xs text-slate-400">未关联</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% empty %}
+                                    <tr><td colspan="4" class="px-3 py-12 text-center text-slate-400">当前分类暂无文件</td></tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </form>
+                    {% endif %}
+                </div>
+                {% endif %}
+
+                {% if workbench_tab == 'assign' %}
+                    {% if can_edit_project_workbench %}
+                    <div class="space-y-8">
+                        <div class="rounded-xl border border-blue-100 bg-blue-50/40 p-5">
+                            <h3 class="text-base font-semibold text-slate-900 mb-1">{% if participant_assign_self_only %}将本项目任务同步到本人账号{% else %}向 App 用户分配本项目{% endif %}</h3>
+                            <p class="text-xs text-slate-600 mb-4">{% if participant_assign_self_only %}点击下方按钮可为本人补齐本项目下全部任务模板的分配（不会为他人分配）。{% else %}分配后用户可在检测 App 中看到该项目及已关联的任务模板。{% endif %}</p>
+                            {% if not app_users_for_assign %}
+                            <p class="text-sm text-amber-800">没有可分配的检测侧账号。</p>
+                            {% else %}
+                            <form method="post" class="grid sm:grid-cols-2 gap-4 max-w-2xl">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="assign">
+                                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                                <div>
+                                    <label class="block text-xs font-medium text-slate-600 mb-1">接收用户</label>
+                                    <select name="assignee" required class="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white">
+                                        {% if not participant_assign_self_only %}
+                                        <option value="">请选择</option>
+                                        {% endif %}
+                                        {% for u in app_users_for_assign %}
+                                        <option value="{{ u.pk }}" {% if participant_assign_self_only %}selected{% endif %}>{{ u.username }}{% if u.get_full_name %}（{{ u.get_full_name }}）{% endif %}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="flex items-end">
+                                    <button type="submit" class="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700">确认分配</button>
+                                </div>
+                            </form>
+                            {% endif %}
+                        </div>
+
+                        {% if can_assign_tasks and project_assignees %}
+                        <div>
+                            <h4 class="text-sm font-semibold text-slate-800 mb-3">成员与编辑权限</h4>
+                            <div class="rounded-xl border border-slate-200 divide-y divide-slate-100 bg-white">
+                                {% for row in project_assignees %}
+                                <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
+                                    <div>
+                                        <span class="font-medium text-slate-900">{{ row.user.username }}</span>
+                                        {% if row.revoked %}
+                                        <span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">已取消编辑</span>
+                                        {% else %}
+                                        <span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">可编辑</span>
+                                        {% endif %}
+                                    </div>
+                                    <form method="post">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                                        <input type="hidden" name="user_id" value="{{ row.user.pk }}">
+                                        {% if row.revoked %}
+                                        <button type="submit" name="action" value="restore_project_user" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium">恢复编辑</button>
+                                        {% else %}
+                                        <button type="submit" name="action" value="revoke_project_user" class="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-800 text-xs font-medium hover:bg-slate-200"
+                                                onclick="return confirm('取消该用户在本项目上的编辑权限？');">取消编辑</button>
+                                        {% endif %}
+                                    </form>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <div>
+                            <h4 class="text-sm font-semibold text-slate-800 mb-3">本项目的分配记录</h4>
+                            <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                                <table class="min-w-full text-sm">
+                                    <thead class="bg-slate-50 text-slate-500 text-xs uppercase">
+                                        <tr>
+                                            <th class="px-4 py-2 text-left">接收用户</th>
+                                            <th class="px-4 py-2 text-left">分配人</th>
+                                            <th class="px-4 py-2 text-left">任务模板</th>
+                                            <th class="px-4 py-2 text-left">操作</th>
+                                            <th class="px-4 py-2 text-left">时间</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for a in project_scoped_assignment_records %}
+                                        <tr class="border-t border-slate-100 align-top">
+                                            <td class="px-4 py-2 font-medium">{% if a.assignee %}{{ a.assignee.username }}{% else %}—{% endif %}</td>
+                                            <td class="px-4 py-2 text-slate-600">{% if a.assigned_by %}{{ a.assigned_by.username }}{% else %}—{% endif %}</td>
+                                            <td class="px-4 py-2">
+                                                <ul class="list-disc list-inside text-slate-700 space-y-0.5">
+                                                    {% for t in a.tasks %}
+                                                    <li class="text-xs"><span class="font-mono text-slate-500">{{ t.code }}</span> · {{ t.name }}</li>
+                                                    {% empty %}
+                                                    <li class="text-slate-400 list-none">无</li>
+                                                    {% endfor %}
+                                                </ul>
+                                            </td>
+                                            <td class="px-4 py-2 whitespace-nowrap">
+                                                {% if a.assignee %}
+                                                {% if can_assign_tasks or a.assignee.id == user.id %}
+                                                <form method="post" class="inline" onsubmit="return confirm('撤回该用户在本项目上的分配？');">
+                                                    {% csrf_token %}
+                                                    <input type="hidden" name="action" value="unassign_project">
+                                                    <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                                                    <input type="hidden" name="assignee_id" value="{{ a.assignee.id }}">
+                                                    <button type="submit" class="text-xs px-2.5 py-1 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 font-medium">撤回</button>
+                                                </form>
+                                                {% else %}
+                                                <span class="text-xs text-slate-400">—</span>
+                                                {% endif %}
+                                                {% endif %}
+                                            </td>
+                                            <td class="px-4 py-2 text-slate-500 whitespace-nowrap text-xs">{{ a.created_at|date:"Y-m-d H:i" }}</td>
+                                        </tr>
+                                        {% empty %}
+                                        <tr><td colspan="5" class="px-4 py-10 text-center text-slate-400">暂无分配记录</td></tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    {% else %}
+                    <p class="text-sm text-slate-500">您无权执行分配操作。</p>
+                    {% endif %}
+                {% endif %}
+
+                {% if workbench_tab == 'submissions' %}
+                    {% if can_edit_project_workbench %}
+                    <div class="rounded-xl border border-slate-200 overflow-hidden">
+                        <div class="px-4 py-3 bg-slate-50 border-b border-slate-200">
+                            <h3 class="text-base font-semibold text-slate-900">检测提交（taskNo）</h3>
+                            <p class="text-xs text-slate-500 mt-0.5">仅支持将 submitted 回退为 pending</p>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full text-sm">
+                                <thead class="bg-white text-slate-500 text-xs uppercase border-b border-slate-100">
+                                    <tr>
+                                        <th class="px-4 py-2 text-left">taskNo</th>
+                                        <th class="px-4 py-2 text-left">案件</th>
+                                        <th class="px-4 py-2 text-left">状态</th>
+                                        <th class="px-4 py-2 text-left">提交时间</th>
+                                        <th class="px-4 py-2 text-left">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for row in project_submissions %}
+                                    <tr class="border-t border-slate-100 hover:bg-slate-50/80">
+                                        <td class="px-4 py-2 font-mono text-xs">{{ row.task_no }}</td>
+                                        <td class="px-4 py-2">{{ row.case_no|default:"-" }}</td>
+                                        <td class="px-4 py-2">
+                                            <span class="text-xs px-2 py-0.5 rounded-full {% if row.status == 'submitted' %}bg-emerald-100 text-emerald-800{% elif row.status == 'pending' %}bg-amber-100 text-amber-900{% else %}bg-slate-100 text-slate-600{% endif %}">{{ row.status_display }}</span>
+                                        </td>
+                                        <td class="px-4 py-2 text-xs text-slate-500">{{ row.submitted_at|date:"Y-m-d H:i"|default:"-" }}</td>
+                                        <td class="px-4 py-2">
+                                            {% if row.can_rollback %}
+                                            <form method="post" class="inline" onsubmit="return confirm('回退为 pending？');">
+                                                {% csrf_token %}
+                                                <input type="hidden" name="action" value="rollback_submission_to_pending">
+                                                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                                                <input type="hidden" name="submission_id" value="{{ row.id }}">
+                                                <button type="submit" class="text-xs px-2 py-1 rounded-lg bg-amber-600 text-white">回退</button>
+                                            </form>
+                                            {% else %}
+                                            <span class="text-xs text-slate-400">—</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% empty %}
+                                    <tr><td colspan="5" class="px-4 py-12 text-center text-slate-400">暂无记录</td></tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    {% else %}
+                    <p class="text-sm text-slate-500">您无权查看或回退提交状态。</p>
+                    {% endif %}
+                {% endif %}
             </div>
-        </div>
-        {% endif %}
+            {% endif %}
+        </main>
     </div>
 </div>
 <script>
 (function () {
-    var projectSwitch = document.getElementById('project-switch');
-    var checkAllProjectFiles = document.getElementById('check-all-project-files');
-    var projectFileRows = Array.from(document.querySelectorAll('.row-project-file'));
-    function go() {
-        var pid = projectSwitch ? projectSwitch.value : '';
-        var q = pid ? '?project_id=' + encodeURIComponent(pid) : '';
-        window.location.href = q;
+    var f = document.getElementById('project-filter');
+    var nav = document.getElementById('project-nav');
+    if (f && nav) {
+        f.addEventListener('input', function () {
+            var q = (f.value || '').toLowerCase();
+            nav.querySelectorAll('.proj-nav-item').forEach(function (a) {
+                var t = (a.getAttribute('data-filter') || '').toLowerCase();
+                a.style.display = !q || t.indexOf(q) >= 0 ? '' : 'none';
+            });
+        });
     }
-    projectSwitch?.addEventListener('change', go);
-    checkAllProjectFiles?.addEventListener('change', function (e) {
-        projectFileRows.forEach(function (cb) { cb.checked = !!e.target.checked; });
-    });
+    var checkAll = document.getElementById('check-all-project-files');
+    if (checkAll) {
+        checkAll.addEventListener('change', function (e) {
+            document.querySelectorAll('.row-project-file').forEach(function (cb) { cb.checked = !!e.target.checked; });
+        });
+    }
 })();
 </script>
 {% endblock %}

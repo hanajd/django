@@ -574,7 +574,9 @@
             locale: 'zh-CN',
             constants: {},
             enums: {},
-            steps: []
+            steps: [],
+            libraryTaskId: '',
+            libraryTemplateFileId: ''
         };
 
         function nextId() {
@@ -708,7 +710,9 @@
                 labelInput.addEventListener('mousedown', ev => ev.stopPropagation());
                 labelInput.addEventListener('input', () => {
                     f.placeholder = labelInput.value;
-                    f.originalPlaceholder = labelInput.value;
+                    // 命名优先级：侧栏手动 > 命名标记规则 > 保存前红字 OCR
+                    f.labelUserEdited = true;
+                    f.labelRuleNamed = false;
                     syncFieldLabelToCanvas(f);
                 });
                 const idSpan = document.createElement('span');
@@ -755,7 +759,13 @@
             applyAllNamingMarks();
         }
 
-        function fitInputStyle(input) {
+        function fieldWantsJustifiedInstrumentText(field) {
+            if (!field) return false;
+            const parts = [field.id, field.placeholder, field.originalPlaceholder].filter(Boolean);
+            return parts.some(s => String(s).includes('检测仪器'));
+        }
+
+        function fitInputStyle(input, field) {
             const maxFs = 10.5;
             let fs = maxFs;
             input.style.lineHeight = '1.2';
@@ -774,7 +784,7 @@
             if (fs < 5) {
                 input.style.fontSize = '5pt';
             }
-            input.style.textAlign = 'center';
+            input.style.textAlign = fieldWantsJustifiedInstrumentText(field) ? 'justify' : 'center';
             const overflowY = input.scrollHeight > input.clientHeight + 1;
             if (overflowY) {
                 input.style.paddingTop = '1px';
@@ -868,7 +878,7 @@
             i.rows = 1;
             i.oninput = () => {
                 f.value = i.value;
-                fitInputStyle(i);
+                fitInputStyle(i, f);
             };
             wrap.appendChild(badge);
             wrap.appendChild(i);
@@ -877,7 +887,7 @@
             f.el = i;
             updateFieldBadges();
             syncFieldLabelToCanvas(f);
-            requestAnimationFrame(() => fitInputStyle(i));
+            requestAnimationFrame(() => fitInputStyle(i, f));
         }
 
         function renderPdfAndFields(pdfUrl, loadedFields = []) {
@@ -1107,9 +1117,11 @@
             if (!marks.length) {
                 let restored = 0;
                 fields.forEach((f, idx) => {
+                    if (f.labelUserEdited) return;
                     const fallback = f.originalPlaceholder != null ? String(f.originalPlaceholder) : ('栏位' + idx);
                     if (f.placeholder !== fallback) {
                         f.placeholder = fallback;
+                        f.labelRuleNamed = false;
                         syncFieldLabelToCanvas(f);
                         restored += 1;
                     }
@@ -1155,6 +1167,7 @@
 
             let changed = 0;
             fields.forEach((f) => {
+                if (f.labelUserEdited) return;
                 const prefixParts = (prefixByField.get(f.id) || []).sort((a, b) => a.x - b.x).map(x => x.text);
                 const rightParts = (rightByField.get(f.id) || []).sort((a, b) => a.x - b.x).map(x => x.text);
                 const leftParts = (leftByField.get(f.id) || []).sort((a, b) => a.x - b.x).map(x => x.text);
@@ -1164,6 +1177,7 @@
                 const next = finalParts.join('_');
                 if (f.placeholder !== next) {
                     f.placeholder = next;
+                    f.labelRuleNamed = true;
                     syncFieldLabelToCanvas(f);
                     changed += 1;
                 }
@@ -1464,10 +1478,16 @@
             }
         };
 
-        function importTemplatePayload(d) {
+        function importTemplatePayload(d, optLibraryTemplateFileId) {
             if (!pdfDoc || !pdfReady) {
                 alert('模板 PDF 尚未加载完成，请稍后重试。');
                 return;
+            }
+            let keepLt = templateContext.libraryTaskId || '';
+            let keepLf = templateContext.libraryTemplateFileId || '';
+            if (optLibraryTemplateFileId !== undefined && optLibraryTemplateFileId !== null && String(optLibraryTemplateFileId).trim() !== '') {
+                keepLf = String(optLibraryTemplateFileId).trim();
+                keepLt = '';
             }
             const loadedFields = (d.fields || []).map((f, idx) => ({
                 id: f.id || 'f' + (idx + 1),
@@ -1479,11 +1499,14 @@
                 placeholder: f.placeholder || ('栏位' + idx),
                 originalPlaceholder: (f.originalPlaceholder != null ? f.originalPlaceholder : (f.placeholder || ('栏位' + idx))),
                 fieldType: f.fieldType || 'text',
-                redText: !!f.redText,
+                redText: (f.fieldType || 'text') === 'text' ? (f.redText !== false) : !!f.redText,
                 value: '',
                 checked: false,
                 imageData: '',
-                checkboxPair: f.checkboxPair && typeof f.checkboxPair === 'object' ? f.checkboxPair : null
+                checkboxPair: f.checkboxPair && typeof f.checkboxPair === 'object' ? f.checkboxPair : null,
+                labelUserEdited: !!f.labelUserEdited,
+                labelPersistedFromFile: f.labelPersistedFromFile != null ? !!f.labelPersistedFromFile : true,
+                labelRuleNamed: !!f.labelRuleNamed
             })).map(item => normalizeFieldSize(item));
             ensureUniqueFieldIds(loadedFields);
             fields.forEach(item => {
@@ -1506,7 +1529,9 @@
                 locale: d.locale || tm.locale || templateContext.locale || 'zh-CN',
                 constants: (d.constants && typeof d.constants === 'object') ? d.constants : ((fs.constants && typeof fs.constants === 'object') ? fs.constants : templateContext.constants || {}),
                 enums: (d.enums && typeof d.enums === 'object') ? d.enums : ((fs.enums && typeof fs.enums === 'object') ? fs.enums : templateContext.enums || {}),
-                steps: Array.isArray(d.steps) ? d.steps : (Array.isArray(fs.steps) ? fs.steps : (templateContext.steps || []))
+                steps: Array.isArray(d.steps) ? d.steps : (Array.isArray(fs.steps) ? fs.steps : (templateContext.steps || [])),
+                libraryTaskId: keepLt,
+                libraryTemplateFileId: keepLf
             };
         }
 
@@ -1559,7 +1584,7 @@
                 }
                 if (f.el) {
                     f.el.value = f.value;
-                    fitInputStyle(f.el);
+                    fitInputStyle(f.el, f);
                 }
             });
         }
@@ -1593,8 +1618,9 @@
             }
         }
         document.getElementById('btnImportTemplate').onclick = () => {
+            const sel = templateJsonSelect.value || '';
             requestLibraryJsonPayload()
-                .then(importTemplatePayload)
+                .then(d => importTemplatePayload(d, sel))
                 .catch(err => alert(err.message));
         };
         document.getElementById('btnImportContent').onclick = () => {
@@ -1636,6 +1662,9 @@
                 };
                 if (i.redText) row.redText = true;
                 if (i.checkboxPair && typeof i.checkboxPair === 'object') row.checkboxPair = i.checkboxPair;
+                if (i.labelUserEdited) row.labelUserEdited = true;
+                if (i.labelPersistedFromFile) row.labelPersistedFromFile = true;
+                if (i.labelRuleNamed) row.labelRuleNamed = true;
                 return row;
             });
         }
@@ -1666,6 +1695,7 @@
                 const detected = Array.isArray(data.fields) ? data.fields : [];
                 if (!detected.length) return;
                 redFields.forEach(f => {
+                    if (f.labelUserEdited || f.labelPersistedFromFile || f.labelRuleNamed) return;
                     const candidates = detected.filter(d => Number(d.page) === Number(f.page));
                     let best = null;
                     let bestScore = 0;
@@ -1784,6 +1814,9 @@
         function saveFrontendTemplate(exportMode = 'rule') {
             const baseName = document.getElementById('templateName').value.trim() || 'template';
             const name = baseName.endsWith('.json') ? baseName.replace(/\.json$/i, '_frontend.json') : (baseName + '_frontend.json');
+            const libTpl = (templateContext.libraryTemplateFileId || '').trim()
+                || (templateJsonSelect && templateJsonSelect.value ? String(templateJsonSelect.value).trim() : '');
+            const libTask = (templateContext.libraryTaskId || '').trim();
             fetch('/files/htmlpdf/api/export-frontend-json/', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1802,10 +1835,16 @@
                     constants: templateContext.constants || {},
                     enums: templateContext.enums || {},
                     steps: templateContext.steps || [],
+                    libraryTaskId: libTask,
+                    libraryTemplateFileId: libTpl,
                     formSchema: {
                         constants: templateContext.constants || {},
                         enums: templateContext.enums || {},
                         steps: templateContext.steps || []
+                    },
+                    meta: {
+                        libraryTaskId: libTask,
+                        libraryTemplateFileId: libTpl
                     }
                 })
             }).then(async r => {
@@ -1896,6 +1935,11 @@
                     const d = await r.json();
                     if (!r.ok) throw new Error(d.error || '加载模板 PDF 失败');
                     if (!d.pdf_url) throw new Error('模板 PDF 地址缺失');
+                    const lids = Array.isArray(d.linked_library_task_ids) ? d.linked_library_task_ids : [];
+                    if (lids.length) {
+                        templateContext.libraryTaskId = String(lids[0]);
+                        templateContext.libraryTemplateFileId = '';
+                    }
                     renderPdfAndFields(d.pdf_url, []);
                 })
                 .catch(err => alert(err.message));

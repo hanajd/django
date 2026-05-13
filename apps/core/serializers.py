@@ -70,13 +70,12 @@ class UserCreateSerializer(serializers.ModelSerializer):
 
         with transaction.atomic():
             user = User.objects.create_user(password=password, **validated_data)
-            UserProfile.objects.create(
-                user=user,
-                phone=phone or None,
-                department=department or None,
-                position=position or None,
-                role=role,
-            )
+            profile, _ = UserProfile.objects.get_or_create(user=user)
+            profile.phone = phone or None
+            profile.department = department or None
+            profile.position = position or None
+            profile.role = role
+            profile.save()
 
         return user
 

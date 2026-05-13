@@ -1,47 +1,165 @@
 """角色权限与文件库访问策略（供 views、context_processors 共用）。"""
-from typing import Dict, List, Tuple
+from typing import Any, Dict, FrozenSet, List, Tuple
 
 from apps.core.models import LibraryFile
 
-# 与 Role 模型字段一致，顺序用于「编辑角色」表单展示
-ROLE_PERMISSION_MATRIX: List[Tuple[str, str, str]] = [
-    ("perm_manage_users", "用户管理", "创建、编辑、删除系统用户"),
-    ("perm_manage_roles", "角色管理", "管理角色及下方各项功能开关"),
-    ("perm_manage_menus", "菜单管理", "管理侧边栏动态菜单与角色关联"),
-    ("perm_file_library", "文件库访问", "进入文件库列表与筛选"),
+# 企业级权限分类（与《检测业务多角色与工作流说明》2.3 对齐）：基础操作 / 数据范围 / 流程与业务
+ROLE_PERMISSION_CATEGORY_ORDER: Tuple[str, ...] = ("basic", "data", "workflow")
+ROLE_PERMISSION_CATEGORY_META: Dict[str, Dict[str, str]] = {
+    "basic": {
+        "title": "基础操作权限",
+        "subtitle": "后台管理入口、文件库访问与文件类操作（上传、下载、预览、删除等）",
+    },
+    "data": {
+        "title": "数据与范围",
+        "subtitle": "控制文件库可见数据范围，落实「项目隔离、岗位隔离」与本人数据限制",
+    },
+    "workflow": {
+        "title": "流程与业务",
+        "subtitle": "检测流程管线、HTMLPDF、任务分配与业务登记等延伸能力",
+    },
+}
+
+# 与 Role 模型字段一致；第四元组为分类 slug（见 ROLE_PERMISSION_CATEGORY_META）
+ROLE_PERMISSION_MATRIX: List[Tuple[str, str, str, str]] = [
+    ("perm_manage_users", "用户管理", "创建、编辑、删除系统用户", "basic"),
+    ("perm_manage_roles", "角色管理", "管理角色及下方各项功能开关", "basic"),
+    ("perm_manage_menus", "菜单管理", "管理侧边栏动态菜单与角色关联", "basic"),
+    ("perm_file_library", "文件库访问", "进入文件库列表与筛选", "basic"),
     (
         "perm_file_upload",
         "文件上传",
         "向 OCR / JSON / 模板 / 现场记录 分类上传",
+        "basic",
     ),
     (
         "perm_file_upload_attachment",
         "附件上传",
         "仅「附件」分类；可与「文件上传」分开授权（便于向 App 用户单独开放附件）",
+        "basic",
     ),
-    ("perm_file_download", "文件下载", "下载文件库中的文件"),
-    ("perm_file_preview", "文件预览", "在线预览 PDF / 图片 / JSON / Markdown 等"),
-    ("perm_file_delete", "文件删除", "单条删除与批量删除"),
+    ("perm_file_download", "文件下载", "下载文件库中的文件", "basic"),
+    ("perm_file_preview", "文件预览", "在线预览 PDF / 图片 / JSON / Markdown 等", "basic"),
+    ("perm_file_delete", "文件删除", "单条删除与批量删除", "basic"),
     (
         "perm_file_scope_own_only",
         "文件库仅本人数据",
         "开启后仅能查看、预览、下载本人上传或产生的记录",
+        "data",
     ),
-    ("perm_process_pipeline", "流程处理", "使用 MinerU + Ollama 集成管线"),
+    ("perm_process_pipeline", "流程处理", "使用 MinerU + Ollama 集成管线", "workflow"),
+    (
+        "perm_htmlpdf",
+        "HTMLPDF 模板编辑器",
+        "使用 HTMLPDF 可视化模板编辑与导出 API（不含流程处理管线）",
+        "workflow",
+    ),
     (
         "perm_assign_tasks",
         "分配文件库任务",
-        "向 App 用户下发任务并指定模板文件（超级管理员 / 管理员使用）",
+        "新建任务模板与模板绑定、关联项目、向 App 用户下发任务（管理员或模板编辑等）",
+        "workflow",
+    ),
+    (
+        "perm_create_library_project",
+        "创建检测项目",
+        "在项目工作台新建检测项目；与「分配文件库任务」分离，不隐含向他人分配任务",
+        "workflow",
     ),
     (
         "perm_biz_registry",
         "业务登记",
         "维护受检单位、设备、联系人及案件、原始记录、报告与文件库联动",
+        "workflow",
     ),
 ]
 
+# 仅通过 UserProfile.perm_overrides 生效、Role 模型无对应字段的补充键（须纳入 role_has 白名单）
+USER_PROFILE_ONLY_PERM_OVERRIDE_KEYS: FrozenSet[str] = frozenset(
+    {
+        "perm_library_task_templates_write",
+    }
+)
+
+# 可参与「项目任务分配 / 检测 App 侧」的角色（含旧版 app_user）
+APP_SIDE_ROLE_CODES: FrozenSet[str] = frozenset(
+    {
+        "app_user",
+        "field_inspector",
+        "site_reviewer",
+        "report_author",
+        "report_auditor",
+        "authorized_signatory",
+    }
+)
+
+
+_ROLE_KIND_BADGE_CLASSES = {
+    "slate": "bg-slate-100 text-slate-800 ring-1 ring-slate-200/80",
+    "blue": "bg-blue-100 text-blue-900 ring-1 ring-blue-200/70",
+    "violet": "bg-violet-100 text-violet-900 ring-1 ring-violet-200/70",
+    "amber": "bg-amber-100 text-amber-950 ring-1 ring-amber-200/70",
+}
+
+
+def role_enterprise_catalog(code: str) -> Dict[str, Any]:
+    """列表/表单侧：企业域分类与是否可参与 App 检测任务（APP_SIDE_ROLE_CODES）。"""
+    in_app = code in APP_SIDE_ROLE_CODES
+    if code in ("super_admin", "admin"):
+        kind, style = "系统管理", "slate"
+    elif code in (
+        "field_inspector",
+        "site_reviewer",
+        "report_author",
+        "report_auditor",
+        "authorized_signatory",
+    ):
+        kind, style = "检测流程岗位", "blue"
+    elif code in ("template_editor", "template_tester"):
+        kind, style = "模板与测试", "violet"
+    elif code == "app_user":
+        kind, style = "App 侧（兼容）", "amber"
+    else:
+        kind, style = "其他", "slate"
+    return {
+        "kind_label": kind,
+        "badge_class": _ROLE_KIND_BADGE_CLASSES[style],
+        "in_app_side": in_app,
+    }
+
+
+def role_permission_groups_for_edit(role) -> List[Dict[str, Any]]:
+    """编辑角色页：按「基础操作 / 数据范围 / 流程与业务」分组展示权限矩阵。"""
+    buckets: Dict[str, List[Dict[str, Any]]] = {c: [] for c in ROLE_PERMISSION_CATEGORY_ORDER}
+    for key, title, help_text, cat in ROLE_PERMISSION_MATRIX:
+        buckets.setdefault(cat, [])
+        buckets[cat].append(
+            {
+                "field": key,
+                "title": title,
+                "help": help_text,
+                "value": bool(getattr(role, key)),
+            }
+        )
+    groups: List[Dict[str, Any]] = []
+    for cat in ROLE_PERMISSION_CATEGORY_ORDER:
+        rows = buckets.get(cat) or []
+        if not rows:
+            continue
+        meta = ROLE_PERMISSION_CATEGORY_META[cat]
+        groups.append(
+            {
+                "slug": cat,
+                "title": meta["title"],
+                "subtitle": meta["subtitle"],
+                "rows": rows,
+            }
+        )
+    return groups
+
+
 def _full_admin_perms() -> Dict[str, bool]:
-    p = {key: True for key, _, _ in ROLE_PERMISSION_MATRIX}
+    p = {key: True for key, _, _, _ in ROLE_PERMISSION_MATRIX}
     p["perm_file_scope_own_only"] = False
     return p
 
@@ -61,10 +179,62 @@ ROLE_DEFAULT_PERMS_BY_CODE: Dict[str, Dict[str, bool]] = {
         "perm_file_delete": False,
         "perm_file_scope_own_only": True,
         "perm_process_pipeline": False,
+        "perm_htmlpdf": False,
         "perm_assign_tasks": False,
+        "perm_create_library_project": True,
         "perm_biz_registry": True,
     },
+    "template_tester": {
+        "perm_manage_users": False,
+        "perm_manage_roles": False,
+        "perm_manage_menus": False,
+        "perm_file_library": True,
+        "perm_file_upload": True,
+        "perm_file_upload_attachment": False,
+        "perm_file_download": True,
+        "perm_file_preview": True,
+        "perm_file_delete": False,
+        "perm_file_scope_own_only": True,
+        "perm_process_pipeline": False,
+        "perm_htmlpdf": True,
+        "perm_assign_tasks": False,
+        "perm_create_library_project": True,
+        "perm_biz_registry": False,
+    },
+    "template_editor": {
+        "perm_manage_users": False,
+        "perm_manage_roles": False,
+        "perm_manage_menus": False,
+        "perm_file_library": True,
+        "perm_file_upload": True,
+        "perm_file_upload_attachment": False,
+        "perm_file_download": True,
+        "perm_file_preview": True,
+        "perm_file_delete": False,
+        "perm_file_scope_own_only": False,
+        "perm_process_pipeline": False,
+        "perm_htmlpdf": True,
+        "perm_assign_tasks": True,
+        "perm_create_library_project": True,
+        "perm_biz_registry": False,
+    },
 }
+# 与 app_user 同级的文件库/登记默认，后续可在「编辑角色」中细调
+_app_side = dict(ROLE_DEFAULT_PERMS_BY_CODE["app_user"])
+ROLE_DEFAULT_PERMS_BY_CODE["field_inspector"] = dict(_app_side)
+ROLE_DEFAULT_PERMS_BY_CODE["site_reviewer"] = dict(_app_side)
+ROLE_DEFAULT_PERMS_BY_CODE["report_author"] = dict(_app_side)
+ROLE_DEFAULT_PERMS_BY_CODE["report_auditor"] = dict(_app_side)
+ROLE_DEFAULT_PERMS_BY_CODE["report_auditor"]["perm_file_scope_own_only"] = False
+_te = ROLE_DEFAULT_PERMS_BY_CODE["template_editor"]
+_perm_keys = [k for k, _, _, _ in ROLE_PERMISSION_MATRIX]
+ROLE_DEFAULT_PERMS_BY_CODE["authorized_signatory"] = {
+    k: bool(_app_side.get(k)) or bool(_te.get(k)) for k in _perm_keys
+}
+ROLE_DEFAULT_PERMS_BY_CODE["authorized_signatory"]["perm_file_delete"] = True
+ROLE_DEFAULT_PERMS_BY_CODE["authorized_signatory"]["perm_process_pipeline"] = True
+ROLE_DEFAULT_PERMS_BY_CODE["authorized_signatory"]["perm_file_scope_own_only"] = False
+ROLE_DEFAULT_PERMS_BY_CODE["authorized_signatory"]["perm_create_library_project"] = True
 
 
 def _user_role(user):
@@ -76,6 +246,43 @@ def _user_role(user):
         return None
 
 
+def _user_perm_overrides(user) -> Dict[str, bool]:
+    """用户级权限覆盖：ROLE_PERMISSION_MATRIX 中的键 + USER_PROFILE_ONLY_PERM_OVERRIDE_KEYS。"""
+    if not getattr(user, "is_authenticated", False):
+        return {}
+    try:
+        raw = user.profile.perm_overrides
+    except Exception:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    valid = {key for key, _, _, _ in ROLE_PERMISSION_MATRIX} | USER_PROFILE_ONLY_PERM_OVERRIDE_KEYS
+    out: Dict[str, bool] = {}
+    for k, v in raw.items():
+        if k not in valid:
+            continue
+        out[str(k)] = bool(v)
+    return out
+
+
+def library_user_has_party_a_demo_restrictions(user) -> bool:
+    """
+    甲方演示类账号：禁止在后台为其他用户分配角色、管理用户/角色模块。
+
+    由 ``ensure_party_a_demo`` 在 ``perm_overrides`` 中写入 ``party_a_demo_restrictions: true``；
+    未写入该键时，仍对默认用户名 ``party_a_demo`` 生效以便兼容旧数据。
+    """
+    if not getattr(user, "is_authenticated", False):
+        return False
+    try:
+        raw = user.profile.perm_overrides
+    except Exception:
+        raw = {}
+    if isinstance(raw, dict) and raw.get("party_a_demo_restrictions") is True:
+        return True
+    return (getattr(user, "username", "") or "").strip().lower() == "party_a_demo"
+
+
 def _role_code(user) -> str:
     role = _user_role(user)
     if role is None:
@@ -83,8 +290,48 @@ def _role_code(user) -> str:
     return getattr(role, "code", "") or ""
 
 
+def role_has_htmlpdf(user) -> bool:
+    """是否可使用 HTMLPDF 编辑器：独立权限，或与流程处理一并开启（兼容旧角色）。"""
+    return role_has(user, "perm_htmlpdf") or role_has(user, "perm_process_pipeline")
+
+
+def library_user_may_filled_pdf_toolchain(user) -> bool:
+    """
+    是否可使用「检测数据填 PDF / 报告合并」等与模板填充相关的文件库能力。
+
+    与 ``perm_process_pipeline``（MinerU + Ollama 管线）分离，便于 ``template_tester``
+    等仅有 HTMLPDF/模板侧权限的账号仍能导出现场记录、报告及任务模板试导。
+    """
+    return role_has(user, "perm_process_pipeline") or role_has(user, "perm_htmlpdf")
+
+
+def library_user_may_access_task_template_library_nav(user) -> bool:
+    """
+    是否与 ``library_task_management`` 视图一致的准入条件（侧栏、仪表盘、项目工作台链等）。
+
+    含：分配文件库任务、覆盖项 ``perm_library_task_templates_write``（如甲方演示自建模板）、
+    或已被分配检测任务且具备模板填 PDF 链路的参与人。
+    不包含 ``perm_file_library``；展示入口的模板仍需自备文件库可见性判断。
+    """
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if role_has(user, "perm_assign_tasks") or role_has(user, "perm_library_task_templates_write"):
+        return True
+    from apps.core.models import LibraryTaskAssignment
+
+    return bool(
+        library_user_may_filled_pdf_toolchain(user)
+        and LibraryTaskAssignment.objects.filter(assignee=user).exists()
+    )
+
+
 def role_has(user, perm: str) -> bool:
-    """是否拥有某权限；Django 超级用户与角色代码 super_admin 视为全开。"""
+    """
+    是否拥有某权限：
+    - Django 超级用户、角色代码 super_admin：固定全开（不受用户级覆盖影响）；
+    - 否则若 UserProfile.perm_overrides 含该键，以覆盖值为准；
+    - 否则取角色上对应布尔字段。
+    """
     if not getattr(user, "is_authenticated", False):
         return False
     if getattr(user, "is_superuser", False):
@@ -94,7 +341,102 @@ def role_has(user, perm: str) -> bool:
         return False
     if _role_code(user) == "super_admin":
         return True
+    overrides = _user_perm_overrides(user)
+    if perm in overrides:
+        return overrides[perm]
     return bool(getattr(role, perm, False))
+
+
+def library_user_is_template_editor(user) -> bool:
+    return _role_code(user) == "template_editor"
+
+
+def library_user_can_assign_tasks_to_participants(user) -> bool:
+    """
+    是否可操作「向检测流程参与人分配项目任务、维护项目流程成员」等（与仅维护任务模板区分）。
+    模板编辑角色不可调整他人或其它岗位的任务分配。
+    """
+    if not role_has(user, "perm_assign_tasks"):
+        return False
+    if library_user_is_template_editor(user):
+        return False
+    return True
+
+
+def library_user_has_task_assignment_on_project(user, project) -> bool:
+    """当前用户是否已被分配某项目下的文件库任务（LibraryTaskAssignment，project 非空）。"""
+    if user is None or project is None:
+        return False
+    from apps.core.models import LibraryTaskAssignment
+
+    return LibraryTaskAssignment.objects.filter(assignee=user, project=project).exists()
+
+
+def library_user_may_mutate_project_workbench(user, project) -> bool:
+    """
+    是否可对「项目工作台」内指定项目进行与项目相关的写操作（不含新建/删除项目、不含撤回他人分配等全局管理动作）。
+    具备分配权的账号视为全项目；否则须为已在该项目获得任务分配的检测侧参与人。
+    """
+    if project is None or not getattr(user, "is_authenticated", False):
+        return False
+    if library_user_can_assign_tasks_to_participants(user):
+        return True
+    if library_user_has_task_assignment_on_project(user, project):
+        return True
+    if role_has(user, "perm_create_library_project") and getattr(project, "created_by_id", None) == user.id:
+        return True
+    return False
+
+
+def library_user_may_browse_shared_library_templates(user) -> bool:
+    """
+    是否可在文件库「模板」分类中浏览任务级共享模板（含其他用户创建的模板文件）。
+    条件：非「仅本人数据」、或系统管理类角色、或具备向参与人分配任务权限、或已在至少一个项目上有任务分配。
+    """
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+    if _role_code(user) in ("super_admin", "admin"):
+        return True
+    if not library_scope_own_files_only(user):
+        return True
+    if library_user_can_assign_tasks_to_participants(user):
+        return True
+    return bool(library_user_scoped_project_ids(user))
+
+
+def library_template_granted_via_assigned_projects_tasks(user, lf: LibraryFile) -> bool:
+    """受限用户：模板文件已绑定到「本人可访问项目」所挂载的 LibraryTask 时允许访问。"""
+    from apps.core.models import LibraryTask
+
+    if lf.category != LibraryFile.CATEGORY_TEMPLATE:
+        return False
+    pids = library_user_scoped_project_ids(user)
+    if not pids:
+        return False
+    task_ids = LibraryTask.objects.filter(projects__id__in=pids).values_list("id", flat=True).distinct()
+    return lf.library_tasks.filter(pk__in=list(task_ids)).exists()
+
+
+def library_user_may_edit_library_task(user, task) -> bool:
+    """
+    当前用户是否可编辑该 LibraryTask（输出目标、模板绑定、删除等）。
+    模板编辑仅可编辑本人创建的任务模板。
+    具备「分配文件库任务」时可按角色规则维护；仅有覆盖项 perm_library_task_templates_write
+    （如甲方演示）且未开分配权时，仅可维护本人创建的任务模板。
+    """
+    if task is None:
+        return False
+    assign = role_has(user, "perm_assign_tasks")
+    tmpl_write = role_has(user, "perm_library_task_templates_write")
+    if not assign and not tmpl_write:
+        return False
+    if assign:
+        if not library_user_is_template_editor(user):
+            return True
+        return getattr(task, "created_by_id", None) == user.id
+    return getattr(task, "created_by_id", None) == user.id
 
 
 def library_scope_own_files_only(user) -> bool:
@@ -102,6 +444,20 @@ def library_scope_own_files_only(user) -> bool:
     if _role_code(user) in ("super_admin", "admin"):
         return False
     return role_has(user, "perm_file_scope_own_only")
+
+
+def library_inspection_act_on_all_projects(user) -> bool:
+    """
+    默认审核人、授权签字人可对任意活跃项目使用检测任务/提交等 API（不依赖任务分配）。
+    若管理员将对应角色的「文件库仅本人数据」重新开启，则恢复为仅已分配项目可访问。
+    """
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if library_user_can_assign_tasks_to_participants(user):
+        return True
+    if _role_code(user) not in ("report_auditor", "authorized_signatory"):
+        return False
+    return not library_scope_own_files_only(user)
 
 
 def library_assigned_project_ids(user):
@@ -113,6 +469,104 @@ def library_assigned_project_ids(user):
         .values_list("project_id", flat=True)
         .distinct()
     )
+
+
+def library_user_scoped_project_ids(user) -> list[int]:
+    """
+    「仅本人数据」下与项目维度相关的可见项目 ID：
+    任务分配中的项目，加上（若有权限）本人创建的检测项目。
+    """
+    from apps.core.models import LibraryProject
+
+    seen: set[int] = set()
+    out: list[int] = []
+    for pid in library_assigned_project_ids(user):
+        if pid not in seen:
+            seen.add(pid)
+            out.append(pid)
+    if role_has(user, "perm_create_library_project"):
+        for pid in LibraryProject.objects.filter(created_by=user).values_list("pk", flat=True):
+            if pid not in seen:
+                seen.add(pid)
+                out.append(pid)
+    return out
+
+
+def library_user_test_account_self_fill(user) -> bool:
+    """
+    测试沙箱账号：仅本人数据 + 可自建项目 + 不可向他人分配任务。
+    此类账号在项目工作台加载时，自动把可见项目上的任务分配与流程岗位同步为本人。
+    """
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if getattr(user, "is_superuser", False) or _role_code(user) in ("super_admin", "admin"):
+        return False
+    return (
+        library_scope_own_files_only(user)
+        and role_has(user, "perm_create_library_project")
+        and not library_user_can_assign_tasks_to_participants(user)
+    )
+
+
+def library_signatory_assigned_project_selected(user, project_selected_id: int | None) -> bool:
+    """
+    授权签字人当前是否筛选在「本人被分配到的项目」下。
+    用于在「仅本人数据」模式下，于该项目内开放与管理员相当的文件操作入口（批量删除、合并报告等）。
+    """
+    if project_selected_id is None:
+        return False
+    if _role_code(user) != "authorized_signatory":
+        return False
+    return project_selected_id in set(library_assigned_project_ids(user))
+
+
+def library_export_merge_allowed_under_own_files_scope(user, project_selected_id: int | None) -> bool:
+    """
+    「仅本人数据」下是否允许文件库中的合并报告 / 手动导出 PDF 等入口。
+
+    除「授权签字人已选中被分配项目」外，对甲方演示等沙箱账号（仅本人 + 自建项目 + 不可分配他人任务）
+    在存在可见项目时亦允许，避免必须先在文件库顶栏选项目才能导出。
+    """
+    if not library_scope_own_files_only(user):
+        return True
+    if library_signatory_assigned_project_selected(user, project_selected_id):
+        return True
+    if library_user_test_account_self_fill(user) and library_user_scoped_project_ids(user):
+        return True
+    return False
+
+
+def library_user_may_access_assigned_library_task(user, task) -> bool:
+    """
+    无「分配文件库任务」权限时，是否仍可打开某任务模板页（查看绑定、试导 PDF）。
+
+    已被分配到该任务（任意项目）的参与人允许，避免 party_a_demo 等账号被完全挡在任务模板库外。
+    """
+    if task is None:
+        return False
+    if library_user_may_edit_library_task(user, task):
+        return True
+    from apps.core.models import LibraryTaskAssignment
+
+    return LibraryTaskAssignment.objects.filter(assignee=user, library_task=task).exists()
+
+
+def library_user_may_export_task_template_pdf_for_project(user, task, project) -> bool:
+    """从任务模板试导现场记录/报告 PDF：全量维护权限，或在本项目有该任务分配且可写工作台。"""
+    if task is None or project is None:
+        return False
+    if library_user_may_edit_library_task(user, task):
+        return True
+    if not library_user_may_mutate_project_workbench(user, project):
+        return False
+    from apps.core.models import LibraryTaskAssignment
+
+    return LibraryTaskAssignment.objects.filter(assignee=user, library_task=task, project=project).exists()
+
+
+def library_signatory_unrestricted_template_picker(user) -> bool:
+    """授权签字人在任务模板中绑定模板文件时，可浏览全库模板（不限本人上传）。"""
+    return _role_code(user) == "authorized_signatory"
 
 
 def library_user_revoked_project_ids(user):
@@ -150,7 +604,7 @@ def library_upload_blocked_revoked_projects(user, project_ids: list) -> str:
 
 def library_project_file_granted_via_task_assignment(user, lf: LibraryFile) -> bool:
     """仅本人数据模式下：文件已关联到用户被分配过的任一项目时，可访问（前端按项目交互，不按任务）。"""
-    pids = library_assigned_project_ids(user)
+    pids = library_user_scoped_project_ids(user)
     if not pids:
         return False
     return lf.projects.filter(pk__in=pids).exists()
@@ -162,6 +616,11 @@ def library_file_access_allowed(user, lf: LibraryFile) -> bool:
         return False
     if not library_scope_own_files_only(user):
         return True
+    if lf.category == LibraryFile.CATEGORY_TEMPLATE and library_user_may_browse_shared_library_templates(user):
+        if library_user_can_assign_tasks_to_participants(user):
+            return True
+        if library_template_granted_via_assigned_projects_tasks(user, lf):
+            return True
     if library_project_file_granted_via_task_assignment(user, lf):
         return True
     if lf.created_by_id is None:
@@ -171,7 +630,51 @@ def library_file_access_allowed(user, lf: LibraryFile) -> bool:
 
 def role_permission_map(user) -> Dict[str, bool]:
     """供模板使用的权限字典。"""
-    return {key: role_has(user, key) for key, _, _ in ROLE_PERMISSION_MATRIX}
+    return {key: role_has(user, key) for key, _, _, _ in ROLE_PERMISSION_MATRIX}
+
+
+def role_ui_context(user) -> Dict[str, Any]:
+    """
+    按角色精简后台侧栏/仪表盘，减少与岗位职责无关的入口。
+    模板中使用 ui_* 键（由 context_processors 扁平注入）。
+    """
+    empty: Dict[str, Any] = {
+        "ui_sidebar_show_project_management": False,
+        "ui_dashboard_hide_json_tile": False,
+        "ui_dashboard_site_record_focus": False,
+        "ui_dashboard_hide_file_stats_row": False,
+        "ui_dashboard_show_django_admin_tile": False,
+    }
+    if not getattr(user, "is_authenticated", False):
+        return empty
+    code = _role_code(user)
+    is_super = bool(getattr(user, "is_superuser", False)) or code == "super_admin"
+    is_admin = code == "admin"
+    has_assign = library_user_can_assign_tasks_to_participants(user)
+
+    # 侧栏「项目管理」：现场检测两岗只做上传/校核，不进入项目配置页
+    if is_super or is_admin or has_assign:
+        show_pm = role_has(user, "perm_file_library")
+    elif code in ("field_inspector", "site_reviewer"):
+        show_pm = False
+    else:
+        show_pm = role_has(user, "perm_file_library")
+
+    # 仪表盘首行文件统计：现场两岗只强调现场记录，隐藏 JSON 统计块
+    site_focus = code in ("field_inspector", "site_reviewer")
+    hide_json = site_focus
+    hide_file_row = not role_has(user, "perm_file_library")
+
+    # Django Admin 入口：仅保留给系统管理类角色，避免检测岗误点
+    show_admin_tile = is_super or is_admin or role_has(user, "perm_manage_users")
+
+    return {
+        "ui_sidebar_show_project_management": bool(show_pm),
+        "ui_dashboard_hide_json_tile": bool(hide_json),
+        "ui_dashboard_site_record_focus": bool(site_focus),
+        "ui_dashboard_hide_file_stats_row": bool(hide_file_row),
+        "ui_dashboard_show_django_admin_tile": bool(show_admin_tile),
+    }
 
 
 def role_can_upload_library_category(user, category: str) -> bool:

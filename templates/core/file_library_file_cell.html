@@ -1,0 +1,24 @@
+{# 文件库表格「文件信息」列 #}
+<div class="space-y-1.5 file-lib-file-cell">
+    <div class="flex flex-wrap items-center gap-2">
+        <span class="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-900 ring-1 ring-blue-100/80">{{ f.file_library_kind_badge }}</span>
+        <span class="text-xs tabular-nums text-slate-500">{{ f.size|filesizeformat }}</span>
+    </div>
+    {% if role_perm.perm_file_preview and f.preview_kind != 'unsupported' %}
+    <a href="{% url 'file_preview' f.pk %}" target="_blank" rel="noopener" class="-m-0.5 block rounded-lg p-0.5 transition hover:bg-blue-50/80">
+        <span class="block text-base font-semibold leading-snug text-slate-900 break-words hover:text-blue-900">{{ f.file_library_primary_title }}</span>
+    </a>
+    {% else %}
+    <p class="text-base font-semibold leading-snug text-slate-900 break-words">{{ f.file_library_primary_title }}</p>
+    {% endif %}
+    {% if f.file_library_where_sentence %}
+    <p class="text-xs text-slate-600">{{ f.file_library_where_sentence }}</p>
+    {% endif %}
+    {% if f.file_library_secondary %}
+    <p class="text-xs leading-snug text-slate-500 break-words">{{ f.file_library_secondary }}</p>
+    {% endif %}
+    <details class="mt-1 rounded border border-slate-100 bg-slate-50/90 text-xs text-slate-600">
+        <summary class="cursor-pointer select-none px-2 py-1.5 hover:bg-slate-100/80">系统文件名</summary>
+        <div class="border-t border-slate-100 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-slate-500 break-all">{{ f.file_technical_storage_name }}</div>
+    </details>
+</div>

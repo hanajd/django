@@ -1,0 +1,26 @@
+{
+  "exampleVersion": "2",
+  "note": "instruments 为表单初值（常与任务模板 bound_instrument_ids 一致）；全量仪器下拉请调用登记/台账 API，不再在导出 JSON 中附带 instrumentCatalogOptions。",
+  "instruments": [
+    {
+      "id": "1",
+      "instrumentId": "1",
+      "identifier": "EQ-2024-001",
+      "name": "剂量仪示例",
+      "model": "XYZ-100",
+      "certificateNo": "CNAS-CAL-0001",
+      "validUntil": "2026-12-31T00:00:00+08:00",
+      "enabled": true
+    },
+    {
+      "id": "2",
+      "instrumentId": "2",
+      "identifier": "EQ-2024-002",
+      "name": "千伏表示例",
+      "model": "",
+      "certificateNo": "",
+      "validUntil": "",
+      "enabled": true
+    }
+  ]
+}

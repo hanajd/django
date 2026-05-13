@@ -75,7 +75,7 @@
         });
     </script>
 </head>
-<body class="bg-gray-100 min-h-screen">
+<body class="min-h-screen bg-slate-100 antialiased text-slate-900">
     
     {% if user.is_authenticated %}
     <!-- 主布局：侧边栏 + 主内容区 -->
@@ -105,31 +105,45 @@
                         <i class="ri-folder-2-line text-lg"></i>
                         <span>文件库管理</span>
                     </a>
+                    {% if ui_sidebar_show_project_management %}
                     <a href="{% url 'library_projects' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
-                        <i class="ri-folders-line text-lg"></i>
-                        <span>项目管理</span>
+                        <i class="ri-layout-grid-line text-lg"></i>
+                        <span>项目工作台</span>
                     </a>
+                    {% endif %}
+                    {% if show_library_task_nav %}
+                    <a href="{% url 'library_task_management' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2 text-gray-400 hover:text-white rounded-r-lg text-sm border-l-2 border-transparent hover:border-slate-600 ml-2">
+                        <i class="ri-stack-line text-base"></i>
+                        <span>任务模板库</span>
+                    </a>
+                    {% elif role_perm.perm_file_library and not ui_sidebar_show_project_management %}
+                    {# 已在上方「项目管理」入口展示项目工作台时不再重复 #}
+                    <a href="{% url 'library_projects' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
+                        <i class="ri-layout-grid-line text-lg"></i>
+                        <span>项目工作台</span>
+                    </a>
+                    {% endif %}
                     {% if not hide_process_pipeline %}
                     <a href="{% url 'process_pipeline' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
                         <i class="ri-cpu-line text-lg"></i>
                         <span>流程处理</span>
                     </a>
+                    {% endif %}
+                    {% if role_perm.perm_htmlpdf or role_perm.perm_process_pipeline %}
                     <a href="{% url 'htmlpdf_editor' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
                         <i class="ri-file-pdf-2-line text-lg"></i>
                         <span>HTMLPDF</span>
                     </a>
                     {% endif %}
-                    {% if role_perm.perm_assign_tasks %}
-                    <a href="{% url 'library_task_management' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
-                        <i class="ri-clipboard-line text-lg"></i>
-                        <span>项目分配管理</span>
+                </div>
+                {% endif %}
+                {% if show_backend_usage_guide %}
+                <div class="px-2 pb-3 mb-2 border-b border-slate-700/60">
+                    <p class="px-4 py-1.5 text-xs font-medium text-slate-500">帮助</p>
+                    <a href="{% url 'backend_usage_guide' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 rounded-r-lg text-slate-200 hover:text-white border border-slate-600/60 bg-slate-800/40 hover:bg-slate-700/50">
+                        <i class="ri-book-open-line text-lg shrink-0"></i>
+                        <span>后台系统使用说明</span>
                     </a>
-                    {% elif role_perm.perm_file_library %}
-                    <a href="{% url 'library_task_management' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
-                        <i class="ri-inbox-line text-lg"></i>
-                        <span>我的项目任务</span>
-                    </a>
-                    {% endif %}
                 </div>
                 {% endif %}
                 {% for menu in menus %}
@@ -193,25 +207,32 @@
         </aside>
         
         <!-- 主内容区 -->
-        <main class="flex-1 overflow-y-auto">
+        <main class="flex min-h-0 flex-1 flex-col overflow-y-auto bg-slate-50/90">
             <!-- 顶栏 -->
-            <header class="bg-white shadow-sm px-6 py-4">
-                <div class="flex items-center justify-between">
-                    <h2 class="text-lg font-semibold text-gray-800">{% block page_title %}仪表盘{% endblock %}</h2>
-                    <div class="flex items-center space-x-4">
-                        <span class="text-sm text-gray-500">{{ user.username }}</span>
+            <header class="sticky top-0 z-10 border-b border-slate-200/90 bg-white/95 px-6 py-3.5 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/85">
+                <div class="flex items-center justify-between gap-4">
+                    <h2 class="text-base font-semibold tracking-tight text-slate-900 sm:text-lg">{% block page_title %}仪表盘{% endblock %}</h2>
+                    <div class="flex items-center gap-3">
+                        {% if show_backend_usage_guide %}
+                        <a href="{% url 'backend_usage_guide' %}" class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 shadow-sm hover:bg-slate-50">
+                            <i class="ri-book-open-line text-base text-indigo-600"></i>
+                            后台系统使用说明
+                        </a>
+                        {% endif %}
+                        <span class="hidden max-w-[12rem] truncate text-sm text-slate-500 sm:inline" title="{{ user.username }}">{{ user.username }}</span>
+                        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600 sm:hidden" title="{{ user.username }}"><i class="ri-user-smile-line"></i></span>
                     </div>
                 </div>
             </header>
             
             <!-- 内容区 -->
-            <div class="p-6">
+            <div class="flex-1 p-6 lg:p-8">
                 {% if messages %}
-                <!-- 消息提示 -->
-                <div class="mb-4">
+                <div class="mb-6 space-y-2">
                     {% for message in messages %}
-                    <div class="px-4 py-3 rounded {% if message.tags == 'error' %}bg-red-100 text-red-700{% elif message.tags == 'success' %}bg-green-100 text-green-700{% else %}bg-blue-100 text-blue-700{% endif %}">
-                        {{ message }}
+                    <div role="alert" class="flex items-start gap-3 rounded-xl border px-4 py-3 text-sm shadow-sm {% if message.tags == 'error' %}border-red-200 bg-red-50 text-red-800{% elif message.tags == 'success' %}border-emerald-200 bg-emerald-50 text-emerald-900{% else %}border-blue-200 bg-blue-50 text-blue-900{% endif %}">
+                        <i class="mt-0.5 shrink-0 text-lg {% if message.tags == 'error' %}ri-error-warning-line{% elif message.tags == 'success' %}ri-checkbox-circle-line{% else %}ri-information-line{% endif %}"></i>
+                        <span class="leading-relaxed">{{ message }}</span>
                     </div>
                     {% endfor %}
                 </div>

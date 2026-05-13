@@ -3,55 +3,56 @@
 {% block page_title %}{% if menu %}编辑菜单{% else %}创建菜单{% endif %}{% endblock %}
 
 {% block content %}
-<div class="bg-white rounded-lg shadow p-6">
+<div class="mx-auto max-w-7xl">
+<div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-8">
     <form method="post">
         {% csrf_token %}
         
         <div class="max-w-2xl">
             <div class="space-y-6">
                 <div>
-                    <label for="name" class="block text-sm font-medium text-gray-700 mb-1">菜单名称 <span class="text-red-500">*</span></label>
+                    <label for="name" class="mb-1 block text-sm font-medium text-slate-700">菜单名称 <span class="text-red-500">*</span></label>
                     <input 
                         type="text" 
                         name="name" 
                         id="name" 
                         value="{% if menu %}{{ menu.name }}{% endif %}"
-                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        class="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                         required
                     >
                 </div>
                 
                 <div>
-                    <label for="path" class="block text-sm font-medium text-gray-700 mb-1">路由路径</label>
+                    <label for="path" class="mb-1 block text-sm font-medium text-slate-700">路由路径</label>
                     <input 
                         type="text" 
                         name="path" 
                         id="path" 
                         value="{% if menu %}{{ menu.path }}{% endif %}"
                         placeholder="/users/ 或留空表示父菜单"
-                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        class="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                     >
                 </div>
                 
                 <div>
-                    <label for="icon" class="block text-sm font-medium text-gray-700 mb-1">图标</label>
+                    <label for="icon" class="mb-1 block text-sm font-medium text-slate-700">图标</label>
                     <input 
                         type="text" 
                         name="icon" 
                         id="icon" 
                         value="{% if menu %}{{ menu.icon }}{% endif %}"
                         placeholder="例如: dashboard, user, settings"
-                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        class="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                     >
-                    <p class="text-xs text-gray-500 mt-1">使用 RemixIcon 图标名称，如: dashboard, user, settings</p>
+                    <p class="mt-1.5 text-xs text-slate-500">使用 Remix Icon 名称（不含 ri- 前缀），如 dashboard、user、settings</p>
                 </div>
                 
                 <div>
-                    <label for="parent" class="block text-sm font-medium text-gray-700 mb-1">父级菜单</label>
+                    <label for="parent" class="mb-1 block text-sm font-medium text-slate-700">父级菜单</label>
                     <select 
                         name="parent" 
                         id="parent" 
-                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        class="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2.5 text-sm text-slate-900 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                     >
                         <option value="">无（顶级菜单）</option>
                         {% for m in admin_menus %}
@@ -65,62 +66,63 @@
                 </div>
                 
                 <div>
-                    <label for="sort_order" class="block text-sm font-medium text-gray-700 mb-1">排序</label>
+                    <label for="sort_order" class="mb-1 block text-sm font-medium text-slate-700">排序</label>
                     <input 
                         type="number" 
                         name="sort_order" 
                         id="sort_order" 
                         value="{% if menu %}{{ menu.sort_order }}{% else %}0{% endif %}"
-                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        class="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-2.5 text-sm text-slate-900 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                     >
                 </div>
                 
                 {% if menu %}
                 <div>
-                    <label class="flex items-center">
+                    <label class="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/40 px-4 py-3 transition hover:bg-white">
                         <input 
                             type="checkbox" 
                             name="is_visible" 
                             id="is_visible" 
                             {% if menu.is_visible %}checked{% endif %}
-                            class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                            class="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                         >
-                        <span class="ml-2 text-sm text-gray-700">是否可见</span>
+                        <span class="text-sm font-medium text-slate-800">在侧边栏中显示</span>
                     </label>
                 </div>
                 {% endif %}
                 
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">允许访问的角色</label>
-                    <div class="space-y-2">
+                    <label class="mb-2 block text-sm font-medium text-slate-700">允许访问的角色</label>
+                    <div class="space-y-2 rounded-xl border border-slate-200 bg-slate-50/40 p-4">
                         {% for role in roles %}
-                        <label class="flex items-center">
+                        <label class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 transition hover:bg-white">
                             <input 
                                 type="checkbox" 
                                 name="roles" 
                                 value="{{ role.id }}"
                                 {% if menu and role in menu.roles.all %}checked{% endif %}
-                                class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                class="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                             >
-                            <span class="ml-2 text-sm text-gray-700">{{ role.name }}</span>
+                            <span class="text-sm text-slate-800">{{ role.name }}</span>
                         </label>
                         {% endfor %}
                     </div>
                 </div>
             </div>
             
-            <div class="mt-6 flex justify-end space-x-4">
-                <a href="{% url 'menu_list' %}" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+            <div class="mt-8 flex flex-wrap justify-end gap-3 border-t border-slate-100 pt-6">
+                <a href="{% url 'menu_list' %}" class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50">
                     取消
                 </a>
                 <button 
                     type="submit" 
-                    class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    class="inline-flex items-center justify-center rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700"
                 >
                     保存
                 </button>
             </div>
         </div>
     </form>
+</div>
 </div>
 {% endblock %}

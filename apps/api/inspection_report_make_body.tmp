@@ -1,0 +1,1512 @@
+def _build_submit_value_mapping(source_data: dict, map_id: str | None = None):
+    mid = (map_id or "").strip() or DEFAULT_SUBMIT_PLACEHOLDER_MAP_ID
+    if mid not in SUBMIT_PLACEHOLDER_MAPS:
+        mid = DEFAULT_SUBMIT_PLACEHOLDER_MAP_ID
+    return build_submit_value_mapping(source_data, mid)
+
+
+def _build_submit_derived_value_mapping(
+    source_data: dict,
+    project=None,
+    task_no: str = "",
+    task_obj=None,
+    inspection_case=None,
+    *,
+    manual_device_count: int | None = None,
+):
+    def _s(v):
+        return "" if v is None else str(v)
+
+    report_info = source_data.get("reportInfo") or {}
+    hospital_info = source_data.get("hospitalInfo") or {}
+    equipment_info = source_data.get("equipmentInfo") or {}
+    test_result = source_data.get("testResult") or {}
+    hospital_name = str(hospital_info.get("name") or "")
+    model = str(equipment_info.get("model") or "")
+    device_name = str(equipment_info.get("deviceName") or "")
+    year = str(report_info.get("year") or "")
+    month = str(report_info.get("month") or "")
+    day = str(report_info.get("day") or "")
+    if not (year and month and day):
+        td = test_result.get("testDate")
+        if isinstance(td, str):
+            d = parse_datetime(td.strip())
+            if isinstance(d, datetime):
+                year, month, day = str(d.year), str(d.month), str(d.day)
+
+    def _test_line(block: dict):
+        if not isinstance(block, dict):
+            return ""
+        return (
+            f"{block.get('controlMode') or ''}：{block.get('kv') or ''}kV，{block.get('ma') or ''}mA，\n"
+            f"平板探测器尺寸D={block.get('size') or ''}mm \n标准水模"
+        )
+
+    kerma_typical = test_result.get("kermaTypical") or {}
+    kerma_max_normal = test_result.get("kermaMaxNormal") or {}
+    kerma_max_high = test_result.get("kermaMaxHigh") or {}
+    high_contrast = test_result.get("highContrast") or {}
+    low_contrast = test_result.get("lowContrast") or {}
+    screen_kerma = test_result.get("screenKerma") or {}
+    abc = test_result.get("abc") or {}
+    dsa = test_result.get("dsa") or {}
+
+    def _mv(block: dict, *fallback_keys: str) -> str:
+        if not isinstance(block, dict):
+            return ""
+        if "measuredValue" in block and block.get("measuredValue") not in (None, ""):
+            return _s(block.get("measuredValue"))
+        for k in fallback_keys:
+            if k in block and block.get(k) not in (None, ""):
+                return _s(block.get(k))
+        return ""
+
+    testman = ""
+    if manual_device_count is not None:
+        try:
+            device_count = max(0, int(manual_device_count))
+        except (TypeError, ValueError):
+            device_count = 0
+    else:
+        device_count = 0
+        if inspection_case is not None:
+            device_count = inspection_case.site_records.count()
+        elif project is not None:
+            device_count = SiteRecord.objects.filter(case__library_project=project).count()
+    if project is not None:
+        names = (
+            User.objects.filter(site_records__case__library_project=project)
+            .order_by("username")
+            .values_list("username", flat=True)
+            .distinct()
+        )
+        testman = "、".join([n for n in names if n])
+
+    project_code = _display_project_id(project)
+    task_no_val = _display_task_no(task_no, project=project)
+
+    is_report = bool(
+        task_obj is not None and getattr(task_obj, "output_target", None) == LibraryTask.OUTPUT_REPORT
+    )
+    report_template_name = (task_obj.name or "").strip() if is_report else ""
+    project_title = ""
+    if is_report and (hospital_name or report_template_name):
+        project_title = f"{hospital_name}{report_template_name}"
+
+    contact_name, contact_phone = split_contact_name_phone(
+        str(hospital_info.get("contactPerson") or ""),
+        str(hospital_info.get("contactPhone") or ""),
+    )
+    if not contact_name and not contact_phone:
+        dd = source_data.get("dynamicData")
+        if isinstance(dd, dict):
+            for dk, dv in dd.items():
+                sk = str(dk or "")
+                if "委托单位联系人" in sk and "电话" in sk:
+                    contact_name, contact_phone = split_contact_name_phone(str(dv or "").strip(), "")
+                    break
+
+    contact_name = (contact_name or str(hospital_info.get("contactPerson") or "")).strip()
+    contact_phone = (contact_phone or str(hospital_info.get("contactPhone") or "")).strip()
+    addr = str(hospital_info.get("address") or "")
+    rated = str(equipment_info.get("ratedParams") or "")
+    mfr = str(equipment_info.get("manufacturer") or "")
+    serial = str(equipment_info.get("serialNo") or "")
+    loc = str(equipment_info.get("location") or "")
+
+    derived: dict = {
+        "projectId": project_code,
+        "entrustNo": project_code,
+        "委托编号": project_code,
+        "commissionNo": project_code,
+        "taskNo": task_no_val,
+        "inspectedNo": task_no_val,
+        "受检编号": task_no_val,
+        "testnumber": task_no_val,
+        "deviceCount": str(device_count),
+        "testman": testman,
+        "assessment": (
+            f"应委托方要求，依据相关检测标准，对{hospital_name}放射诊疗设备（{model} 型{device_name}）"
+            "进行了质量控制检测（验收检测），结果表明：\n所检设备的质量控制相关参数均符合相关标准要求。"
+        ),
+        "testDate": f"{year}年{month}月{day}日" if year and month and day else "",
+        "kerma_test": _test_line(kerma_typical),
+        "kermaMax_test": _test_line({"controlMode": "最大比释动能", **(kerma_max_normal if isinstance(kerma_max_normal, dict) else {})}),
+        "kermaMaxNormal_test": _test_line(kerma_max_normal),
+        "kermaMaxHigh_test": _test_line(kerma_max_high),
+        "highContrast_test": _test_line(high_contrast),
+        "lowContrast_test": _test_line(low_contrast),
+        "screenKerma_test": _test_line(screen_kerma),
+        "abc_test": _test_line(abc),
+        "dsa_doseFirst_test": _test_line((dsa.get("doseFirst") or {}) if isinstance(dsa, dict) else {}),
+        "dsa_doseSecond_test": _test_line((dsa.get("doseSecond") or {}) if isinstance(dsa, dict) else {}),
+        "dsa_test": _test_line(dsa if isinstance(dsa, dict) else {}),
+        "kerma_result": _s(kerma_typical.get("calcValue")) if isinstance(kerma_typical, dict) and kerma_typical.get("calcValue") not in (None, "") else _mv(kerma_typical, "measuredValue", "result"),
+        "kermaMaxNormal_reult": _s(kerma_max_normal.get("calcValue")) if isinstance(kerma_max_normal, dict) and kerma_max_normal.get("calcValue") not in (None, "") else _mv(kerma_max_normal, "measuredValue", "result"),
+        "kermaMaxHigh_result": _s(kerma_max_high.get("calcValue")) if isinstance(kerma_max_high, dict) and kerma_max_high.get("calcValue") not in (None, "") else _mv(kerma_max_high, "measuredValue", "result"),
+        "abc_result": _s(abc.get("measuredValue", "")) if isinstance(abc, dict) else "",
+        # *_result 按你的要求优先使用 calcValue（缺失时回退 measuredValue/result）
+        "hightContrast_result": _s(high_contrast.get("calcValue")) if isinstance(high_contrast, dict) and high_contrast.get("calcValue") not in (None, "") else _mv(high_contrast, "measuredValue", "result"),
+        "lowContrast_result": _s(low_contrast.get("calcValue")) if isinstance(low_contrast, dict) and low_contrast.get("calcValue") not in (None, "") else _mv(low_contrast, "measuredValue", "result"),
+        "screenKerma_result": _s(screen_kerma.get("calcValue")) if isinstance(screen_kerma, dict) and screen_kerma.get("calcValue") not in (None, "") else _mv(screen_kerma, "measuredValue", "result"),
+    }
+
+    # 与 HTMLPDF 模板常见中文 placeholder/id 对齐（原 value_mapping 多为英文键，字段名优先匹配会落空）
+    derived["受检单位"] = hospital_name
+    derived["受检单位名称"] = hospital_name
+    derived["受检单位地址"] = addr
+    derived["联系人"] = contact_name
+    derived["联系电话"] = contact_phone
+    derived["联系人电话"] = contact_phone
+    derived["受检设备台数"] = str(device_count)
+    derived["设备名称"] = device_name
+    derived["设备型号"] = model
+    derived["额定参数"] = rated
+    derived["生产厂家"] = mfr
+    derived["设备编号"] = serial
+    derived["设备所在场所"] = loc
+    if year and month and day:
+        derived["检测日期"] = f"{year}年{month}月{day}日"
+        derived["检测年"] = year
+        derived["检测月"] = month
+        derived["检测日"] = day
+
+    if project_title:
+        derived["项目名称"] = project_title
+        derived["projectTitle"] = project_title
+
+    if is_report:
+        now = timezone.localtime()
+        ry, rm, rd = str(now.year), str(now.month), str(now.day)
+        derived["报告日期"] = f"{ry}年{rm}月{rd}日"
+        derived["报告年"] = ry
+        derived["报告月"] = rm
+        derived["报告日"] = rd
+
+    return derived
+
+
+def _build_template_binding_value_mapping(source_data: dict, bindings: dict[str, object]) -> dict[str, object]:
+    if not isinstance(bindings, dict):
+        return {}
+    rules = bindings.get("value_rules")
+    if not isinstance(rules, list):
+        return {}
+    normalized_rules = []
+    for row in rules:
+        if not isinstance(row, dict):
+            continue
+        key = row.get("key") or row.get("id") or row.get("fieldId") or row.get("placeholder")
+        if not key:
+            continue
+        normalized = {"key": key}
+        for k, v in row.items():
+            if k in ("key", "id", "fieldId", "placeholder"):
+                continue
+            normalized[k] = v
+        normalized_rules.append(normalized)
+    return resolve_mapping_rules(source_data, normalized_rules)
+
+
+def _fill_template_fields_with_submit(
+    source_data: dict,
+    template_fields: list,
+    map_id: str | None = None,
+    project=None,
+    task_no: str = "",
+    bindings: dict[str, object] | None = None,
+    task_obj=None,
+    inspection_case=None,
+    *,
+    manual_device_count: int | None = None,
+):
+    # 允许通过环境变量强制使用旧版回填逻辑，便于问题回滚定位。
+    if str(os.environ.get("INSPECTION_FILL_USE_LEGACY", "0")).strip().lower() in {"1", "true", "yes", "on"}:
+        return _fill_template_fields_with_submit_legacy(
+            source_data,
+            template_fields,
+            map_id=map_id,
+            project=project,
+            task_no=task_no,
+            bindings=bindings,
+            task_obj=task_obj,
+            inspection_case=inspection_case,
+            manual_device_count=manual_device_count,
+        )
+    return _fill_template_fields_with_submit_enhanced(
+        source_data,
+        template_fields,
+        map_id=map_id,
+        project=project,
+        task_no=task_no,
+        bindings=bindings,
+        task_obj=task_obj,
+        inspection_case=inspection_case,
+        manual_device_count=manual_device_count,
+    )
+
+
+def _fill_template_fields_with_submit_legacy(
+    source_data: dict,
+    template_fields: list,
+    map_id: str | None = None,
+    project=None,
+    task_no: str = "",
+    bindings: dict[str, object] | None = None,
+    task_obj=None,
+    inspection_case=None,
+    *,
+    manual_device_count: int | None = None,
+):
+    """
+    旧版回填逻辑（保留原行为）：
+    - 文本/勾选仅按 field.id 或 field.placeholder 取值
+    - 签名仅按 signature_map[field_key]，回退 author/reviewer/approver
+    """
+    signatures = source_data.get("signatures") or {}
+    value_mapping = _build_submit_value_mapping(source_data, map_id)
+    binding_map = _build_template_binding_value_mapping(source_data, bindings or {})
+    if binding_map:
+        value_mapping.update(binding_map)
+    # dynamicData 按 pdfFieldId 存储；回填报告按占位符匹配，转挂到 schema 语义键而非直并 pdfFieldId
+    _merge_mapping_fill_empty(value_mapping, _build_dynamic_data_semantic_mapping(source_data))
+    value_mapping.update(
+        _build_submit_derived_value_mapping(
+            source_data,
+            project=project,
+            task_no=task_no,
+            task_obj=task_obj,
+            inspection_case=inspection_case,
+            manual_device_count=manual_device_count,
+        )
+    )
+    _inject_dynamic_data_for_report_template_placeholders(value_mapping, source_data, template_fields)
+    _apply_template_field_sources_to_mapping(value_mapping, source_data, template_fields, overwrite=True)
+    signature_map = {}
+    if isinstance(bindings, dict):
+        raw_sig_map = bindings.get("signature_map")
+        if isinstance(raw_sig_map, dict):
+            signature_map = raw_sig_map
+
+    for field in template_fields:
+        if not isinstance(field, dict):
+            continue
+        field_key = field.get("id") or field.get("placeholder")
+        field_type = (field.get("fieldType") or "").lower()
+        if field_type == "text":
+            field["content"] = value_mapping.get(field_key, "")
+            continue
+        if field_type == "check":
+            field["checked"] = bool(value_mapping.get(field_key, False))
+            continue
+        if field_type == "image":
+            sig_key = signature_map.get(field_key) if isinstance(signature_map, dict) else None
+            if not isinstance(sig_key, str) or not sig_key:
+                sig_key = field_key if field_key in ("author", "reviewer", "approver") else ""
+            if sig_key:
+                field["imageData"] = signatures.get(sig_key) or ""
+    return template_fields
+
+
+def _build_field_to_pdf_reverse_index(bindings: dict[str, object] | None) -> dict[str, str]:
+    out: dict[str, str] = {}
+    if not isinstance(bindings, dict):
+        return out
+    raw_field_to_pdf = bindings.get("field_to_pdf")
+    if not isinstance(raw_field_to_pdf, list):
+        return out
+    for row in raw_field_to_pdf:
+        if not isinstance(row, dict):
+            continue
+        field_id = str(row.get("fieldId") or "").strip()
+        if not field_id:
+            continue
+        # 不按 pdfFieldId 建反查：多模板/多份 JSON 间 pdfFieldId 不稳定，报告回填以 placeholder/title 对齐
+        for key in (
+            str(row.get("placeholder") or "").strip(),
+            str(row.get("title") or "").strip(),
+        ):
+            if key:
+                out[key] = field_id
+    return out
+
+
+def _field_semantic_candidate_keys(field: dict) -> list[str]:
+    """
+    报告回填优先按「输入框语义名」匹配：id / placeholder / title / originalPlaceholder，
+    以及 source 上的 placeholder/title/label（与 HTMLPDF 导出一致）。
+    pdfFieldId 仅作定位兜底，见 _pick_value_for_field。
+    """
+    raw = [
+        str(field.get("id") or "").strip(),
+        str(field.get("placeholder") or "").strip(),
+        str(field.get("title") or "").strip(),
+        str(field.get("originalPlaceholder") or "").strip(),
+    ]
+    src = field.get("source")
+    if isinstance(src, dict):
+        for attr in ("placeholder", "title", "label", "bindKey", "key"):
+            v = src.get(attr)
+            if isinstance(v, str) and v.strip():
+                raw.append(v.strip())
+    seen: set[str] = set()
+    out: list[str] = []
+    for k in raw:
+        if not k:
+            continue
+        collapsed = k.replace("\u3000", " ").strip()
+        variants = [k, collapsed, collapsed.rstrip("：:").strip()]
+        for v in variants:
+            if v and v not in seen:
+                seen.add(v)
+                out.append(v)
+    return out
+
+
+def _field_candidate_keys(field: dict) -> list[str]:
+    """含 pdfFieldId，用于签名等需在语义名之后仍可按内部编号命中的场景。"""
+    sem = _field_semantic_candidate_keys(field)
+    src = field.get("source") if isinstance(field.get("source"), dict) else {}
+    pid = str(field.get("pdfFieldId") or src.get("pdfFieldId") or "").strip()
+    if pid and pid not in sem:
+        return sem + [pid]
+    return sem
+
+
+def _is_single_item_verdict_text_field(field: dict) -> bool:
+    """单项判定格：值应在制作报告时由标准+检测结果计算，不用现场记录 JSON 直接回填。"""
+    for k in _field_candidate_keys(field):
+        if "单项判定" in str(k or ""):
+            return True
+    return False
+
+
+def _find_template_field_by_semantic_key(template_fields: list, key: str):
+    if not key or not isinstance(template_fields, list):
+        return None
+    want = str(key or "").strip()
+    if not want:
+        return None
+    flat: list = []
+    _walk_template_field_dicts(template_fields, flat)
+    for f in flat:
+        if not isinstance(f, dict):
+            continue
+        for k in ("placeholder", "id", "title", "originalPlaceholder"):
+            if str(f.get(k) or "").strip() == want:
+                return f
+        src = f.get("source")
+        if isinstance(src, dict):
+            for sk in ("placeholder", "title", "label", "bindKey", "key"):
+                if str(src.get(sk) or "").strip() == want:
+                    return f
+    return None
+
+
+def _nested_get_for_submit(data: object, path_dots: str):
+    """按 `a.b.c` 从提交 JSON 嵌套 dict 取值（用于 field.source.submitPath）。"""
+    parts = [p for p in str(path_dots or "").split(".") if p]
+    if not parts:
+        return None
+    cur: object = data
+    for p in parts:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(p)
+    return cur
+
+
+def _inject_submit_dot_path_aliases(value_mapping: dict, source_data: dict, max_depth: int = 10) -> None:
+    """
+    将 reportInfo / hospitalInfo / equipmentInfo / testResult / conclusion 展成点号键，
+    与模板里 `hospitalInfo.name` 等 field id 对齐；不覆盖已有非空值。
+    """
+
+    def walk(obj: object, prefix: str, depth: int) -> None:
+        if depth <= 0 or not isinstance(obj, dict):
+            return
+        for k, v in obj.items():
+            nk = str(k)
+            path = f"{prefix}.{nk}" if prefix else nk
+            if isinstance(v, dict) and v:
+                walk(v, path, depth - 1)
+                continue
+            if isinstance(v, list):
+                continue
+            if v in (None, ""):
+                continue
+            if value_mapping.get(path) not in (None, ""):
+                continue
+            value_mapping[path] = v
+
+    for root in ("reportInfo", "hospitalInfo", "equipmentInfo", "testResult", "conclusion"):
+        block = source_data.get(root)
+        if isinstance(block, dict) and block:
+            walk(block, root, max_depth)
+
+
+def _apply_template_field_sources_to_mapping(
+    value_mapping: dict, source_data: dict, fields: list, *, overwrite: bool = False
+) -> None:
+    """
+    根据模板 fields 上的 source.submitPath，把 **真实提交 JSON** 中的值写到各输入框语义键（id/placeholder/title）。
+    用于现场记录模板与报告模板之间的字段对齐：同源 submitPath → 多份模板可共用取值逻辑。
+    overwrite=True 时在键上强制采用提交值（用于在派生字段之后仍以 submit JSON 为准）。
+    递归处理嵌套 fields/children（表格内单元格）。
+    """
+    flat: list = []
+    _walk_template_field_dicts(fields, flat)
+    for f in flat:
+        if not isinstance(f, dict):
+            continue
+        if _is_single_item_verdict_text_field(f):
+            continue
+        src = f.get("source")
+        if not isinstance(src, dict):
+            continue
+        sp = str(src.get("submitPath") or "").strip()
+        if not sp:
+            continue
+        val = _nested_get_for_submit(source_data, sp)
+        if val is None or val == "":
+            continue
+        if isinstance(val, (dict, list)):
+            continue
+        for key in _field_semantic_candidate_keys(f):
+            if not key:
+                continue
+            if not overwrite and value_mapping.get(key) not in (None, ""):
+                continue
+            value_mapping[key] = val
+
+
+def _walk_template_field_dicts(fields: list | None, acc: list) -> None:
+    """递归展开模板 fields（含表格/分组子 fields）。"""
+    if not isinstance(fields, list):
+        return
+    for f in fields:
+        if not isinstance(f, dict):
+            continue
+        acc.append(f)
+        nested = f.get("fields") or f.get("children")
+        if isinstance(nested, list):
+            _walk_template_field_dicts(nested, acc)
+
+
+def _inject_dynamic_data_for_report_template_placeholders(
+    value_mapping: dict, source_data: dict, report_template_fields: list
+) -> None:
+    """
+    用**当前报告模板**各字段上的 pdfFieldId 去 submit.dynamicData 取值，写入该字段的 placeholder/id/title 等键。
+    这样「按占位符回填」仍使用前端 JSON，而不把 PDF 原文当 content；也不再用「报告控件 pdfFieldId 直查」作为 _pick 兜底。
+    """
+    dd = source_data.get("dynamicData")
+    if not isinstance(dd, dict) or not dd:
+        return
+    flat: list = []
+    _walk_template_field_dicts(report_template_fields, flat)
+    for f in flat:
+        if _is_single_item_verdict_text_field(f):
+            continue
+        src = f.get("source") if isinstance(f.get("source"), dict) else {}
+        pid = str(src.get("pdfFieldId") or f.get("pdfFieldId") or "").strip()
+        if not pid:
+            continue
+        val = dd.get(pid)
+        if val in (None, "") or isinstance(val, (dict, list)):
+            continue
+        for key in _field_semantic_candidate_keys(f):
+            if not key:
+                continue
+            if value_mapping.get(key) not in (None, ""):
+                continue
+            value_mapping[key] = val
+
+
+def _inject_hospital_equipment_cn_aliases(value_mapping: dict, source_data: dict) -> None:
+    """
+    将 hospitalInfo / equipmentInfo 按常见中文 placeholder 再挂一批键，避免模板用语与默认英文键不一致时落空。
+    仅补缺，不覆盖已有非空映射。
+    """
+    hi = source_data.get("hospitalInfo") if isinstance(source_data.get("hospitalInfo"), dict) else {}
+    ei = source_data.get("equipmentInfo") if isinstance(source_data.get("equipmentInfo"), dict) else {}
+
+    def put(keys: list[str], val: object) -> None:
+        if val in (None, ""):
+            return
+        s = str(val).strip()
+        if not s:
+            return
+        for key in keys:
+            if not key:
+                continue
+            if value_mapping.get(key) not in (None, ""):
+                continue
+            value_mapping[key] = s
+
+    put(
+        ["受检单位名称", "医院名称", "单位名称", "医疗机构名称", "受检单位"],
+        hi.get("name"),
+    )
+    put(["受检单位地址", "单位地址", "地址"], hi.get("address"))
+    put(["联系人", "委托单位联系人", "受检单位联系人"], hi.get("contactPerson"))
+    put(["联系电话", "联系人电话", "电话", "手机"], hi.get("contactPhone"))
+    put(["设备型号", "型号", "设备规格型号"], ei.get("model"))
+    put(["设备编号", "序列号", "SN", "产品编号", "设备序列号"], ei.get("serialNo"))
+    put(["生产厂家", "制造商", "生产厂", "企业名称"], ei.get("manufacturer"))
+    put(["设备所在场所", "所在场所", "场所", "安装地点", "使用场所"], ei.get("location"))
+    put(["设备名称", "仪器名称"], ei.get("deviceName"))
+    put(["额定参数", "额定"], ei.get("ratedParams"))
+
+
+def _verdict_base_from_field_key(verdict_key: str) -> str:
+    """从「…_单项判定」或「…单项判定」类 id/placeholder 得到前缀，用于拼同行检测结果键。"""
+    v = str(verdict_key or "").strip()
+    if v.endswith("_单项判定"):
+        return v[: -len("_单项判定")]
+    if v.endswith("单项判定") and len(v) > len("单项判定"):
+        return v[: -len("单项判定")]
+    return ""
+
+
+def _verdict_result_placeholder_keys(verdict_key: str) -> list[str]:
+    base = _verdict_base_from_field_key(verdict_key)
+    if not base:
+        return []
+    return [
+        f"{base}_检测结果",
+        f"{base}_计算结果",
+        f"{base}_报出值",
+        f"{base}检测结果",
+        f"{base}计算结果",
+        f"{base}报出值",
+    ]
+
+
+def _get_judgment_criterion_text(field: dict) -> str:
+    for k in ("judgmentCriterionText", "judgmentCriterion", "criterionText", "判定标准"):
+        t = str(field.get(k) or "").strip()
+        if t:
+            return t
+    return ""
+
+
+def _is_signature_image_text(v) -> bool:
+    if not isinstance(v, str):
+        return False
+    text = v.strip()
+    if not text:
+        return False
+    if text.startswith("data:image/png;base64,"):
+        text = text.split(",", 1)[1]
+    try:
+        base64.b64decode(text, validate=True)
+        return True
+    except Exception:
+        return False
+
+
+def _merge_mapping_fill_empty(base: dict, extra: dict) -> None:
+    """仅补充 base 中仍为空缺的键，避免覆盖已有占位符映射。"""
+    for k, v in (extra or {}).items():
+        if not k:
+            continue
+        if base.get(k) not in (None, ""):
+            continue
+        base[k] = v
+
+
+def _submit_field_semantic_label_keys(fld: dict) -> list[str]:
+    """前端 steps 里单控件可参与报告匹配的语义名（与模板 placeholder/title 对齐，不用 pdfFieldId）。"""
+    raw: list[str] = []
+    for attr in ("id", "placeholder", "title", "label", "name", "originalPlaceholder"):
+        v = fld.get(attr)
+        if isinstance(v, str) and v.strip():
+            raw.append(v.strip())
+    src = fld.get("source")
+    if isinstance(src, dict):
+        for attr in ("placeholder", "title", "label", "originalPlaceholder", "bindKey", "key"):
+            v = src.get(attr)
+            if isinstance(v, str) and v.strip():
+                raw.append(v.strip())
+    seen: set[str] = set()
+    out: list[str] = []
+    for k in raw:
+        collapsed = k.replace("\u3000", " ").strip()
+        for v in (k, collapsed, collapsed.rstrip("：:").strip()):
+            if v and v not in seen:
+                seen.add(v)
+                out.append(v)
+    return out
+
+
+def _build_dynamic_data_semantic_mapping(source_data: dict) -> dict[str, Any]:
+    """
+    将 submit.dynamicData（按 pdfFieldId 存值）转挂到 schema 控件上的 placeholder/title/id 等键。
+    报告 PDF 模板与多份现场记录 JSON 的 pdfFieldId 往往不一致，回填应以占位符一致为准，不能按模板 pdfFieldId 直查 dynamicData。
+    """
+    dd = source_data.get("dynamicData")
+    if not isinstance(dd, dict):
+        dd = {}
+    out: dict[str, Any] = {}
+
+    def add_for_field(val: object, fld: dict) -> None:
+        if val is None or val == "":
+            return
+        if isinstance(val, (dict, list)):
+            return
+        for key in _submit_field_semantic_label_keys(fld):
+            if out.get(key) not in (None, ""):
+                continue
+            out[key] = val
+
+    def walk_fields(fields: list) -> None:
+        if not isinstance(fields, list):
+            return
+        for fld in fields:
+            if not isinstance(fld, dict):
+                continue
+            src = fld.get("source") if isinstance(fld.get("source"), dict) else {}
+            pid = str(src.get("pdfFieldId") or fld.get("pdfFieldId") or "").strip()
+            val = fld.get("value")
+            if val in (None, "") and fld.get("defaultValue") not in (None, ""):
+                val = fld.get("defaultValue")
+            if val in (None, "") and pid:
+                val = dd.get(pid)
+            add_for_field(val, fld)
+            nested = fld.get("fields") or fld.get("children")
+            if isinstance(nested, list):
+                walk_fields(nested)
+
+    steps = source_data.get("steps")
+    if isinstance(steps, list):
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            walk_fields(step.get("fields"))
+            sections = step.get("sections")
+            if not isinstance(sections, list):
+                continue
+            for sec in sections:
+                if not isinstance(sec, dict):
+                    continue
+                walk_fields(sec.get("fields"))
+    return out
+
+
+def _collect_signature_values(source_data: dict) -> dict[str, str]:
+    """
+    从 submit payload 中收集签名值：
+    1) 顶层 signatures 对象（兼容 author/reviewer/approver 及扩展角色）
+    2) 前端回传的 schema 字段（type=signature）中提取 value/defaultValue，并按 submitPath 归并
+    """
+    out: dict[str, str] = {}
+
+    # 1) 顶层 signatures
+    signatures = source_data.get("signatures")
+    if isinstance(signatures, dict):
+        for k, v in signatures.items():
+            key = str(k or "").strip()
+            if key and _is_signature_image_text(v):
+                out[key] = v
+
+    # 2) schema fields where type=signature
+    steps = source_data.get("steps")
+    if isinstance(steps, list):
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            sections = step.get("sections")
+            if not isinstance(sections, list):
+                continue
+            for sec in sections:
+                if not isinstance(sec, dict):
+                    continue
+                fields = sec.get("fields")
+                if not isinstance(fields, list):
+                    continue
+                for fld in fields:
+                    if not isinstance(fld, dict):
+                        continue
+                    if str(fld.get("type") or "").lower() != "signature":
+                        continue
+                    val = fld.get("value")
+                    if not _is_signature_image_text(val):
+                        val = fld.get("defaultValue")
+                    if not _is_signature_image_text(val):
+                        continue
+                    src = fld.get("source") if isinstance(fld.get("source"), dict) else {}
+                    submit_path = str(src.get("submitPath") or "").strip()
+                    # signatures.xxx -> xxx
+                    if submit_path.startswith("signatures."):
+                        k = submit_path.split(".", 1)[1].strip()
+                        if k:
+                            out[k] = val
+                    fid = str(fld.get("id") or "").strip()
+                    if fid:
+                        out[fid] = val
+                    # 一对多签名框：将同一签名值扩展到所有关联 pdfFieldId，
+                    # 以便模板回填阶段命中每个 image 字段。
+                    src_pdf_id = str(src.get("pdfFieldId") or "").strip()
+                    if src_pdf_id:
+                        out[src_pdf_id] = val
+                    src_pdf_ids = src.get("pdfFieldIds")
+                    if isinstance(src_pdf_ids, list):
+                        for pid in src_pdf_ids:
+                            p = str(pid or "").strip()
+                            if p:
+                                out[p] = val
+
+    # 3) dynamicData 直连签名（常见为 f76/f77/f78）
+    dynamic_data = source_data.get("dynamicData")
+    if isinstance(dynamic_data, dict):
+        for k, v in dynamic_data.items():
+            key = str(k or "").strip()
+            if not key:
+                continue
+            if _is_signature_image_text(v):
+                out[key] = v
+
+    # 常见角色别名兜底
+    if "author" not in out and "inspector" in out:
+        out["author"] = out["inspector"]
+    if "reviewer" not in out and "checker" in out:
+        out["reviewer"] = out["checker"]
+    if "approver" not in out and "authorizedSignatory" in out:
+        out["approver"] = out["authorizedSignatory"]
+    return out
+
+
+def _fill_template_fields_with_submit_enhanced(
+    source_data: dict,
+    template_fields: list,
+    map_id: str | None = None,
+    project=None,
+    task_no: str = "",
+    bindings: dict[str, object] | None = None,
+    task_obj=None,
+    inspection_case=None,
+    *,
+    manual_device_count: int | None = None,
+):
+    """
+    增强回填逻辑（以 submitted JSON 为主）：
+    1) 占位符语义键（id/placeholder/title/source.*）→ value_mapping；
+    2) field_to_pdf 反查 fieldId；
+    3) 再用本字段 pdfFieldId → submit.dynamicData 定位取值；
+    4) 嵌套表格内字段递归处理；单项判定格不直接吃现场记录文本，仅第二遍按标准+检测结果计算。
+    """
+    signature_values = _collect_signature_values(source_data)
+    value_mapping = _prepare_backfill_value_mapping(
+        source_data,
+        map_id=map_id,
+        bindings=bindings if isinstance(bindings, dict) else {},
+        project=project,
+        task_no=task_no,
+        task_obj=task_obj,
+        inspection_case=inspection_case,
+        report_template_fields=template_fields if isinstance(template_fields, list) else [],
+        manual_device_count=manual_device_count,
+    )
+    signature_map = {}
+    if isinstance(bindings, dict):
+        raw_sig_map = bindings.get("signature_map")
+        if isinstance(raw_sig_map, dict):
+            signature_map = raw_sig_map
+    reverse_field_map = _build_field_to_pdf_reverse_index(bindings)
+    flat_report_fields: list = []
+    _walk_template_field_dicts(template_fields, flat_report_fields)
+
+    try:
+        from utils.verdict_from_criterion import verdict_from_measurement
+    except ImportError:
+        verdict_from_measurement = None
+
+    def _scalar_fillable(v):
+        if v is None or v == "":
+            return None
+        if isinstance(v, (dict, list)):
+            return None
+        return v
+
+    def _pick_value_for_field(field: dict):
+        if _is_single_item_verdict_text_field(field):
+            return ""
+        candidates = _field_semantic_candidate_keys(field)
+        for k in candidates:
+            if k and k in value_mapping:
+                got = _scalar_fillable(value_mapping.get(k))
+                if got is not None:
+                    return got
+        for k in candidates:
+            mapped_fid = reverse_field_map.get(k)
+            if mapped_fid and mapped_fid in value_mapping:
+                got = _scalar_fillable(value_mapping.get(mapped_fid))
+                if got is not None:
+                    return got
+        src_f = field.get("source") if isinstance(field.get("source"), dict) else {}
+        pid = str(src_f.get("pdfFieldId") or field.get("pdfFieldId") or "").strip()
+        dd = source_data.get("dynamicData")
+        if pid and isinstance(dd, dict) and pid in dd:
+            got = _scalar_fillable(dd.get(pid))
+            if got is not None:
+                return got
+        # 语义兜底：设备编号(SN/序列号/产品编号) 等同义标题统一回填 equipmentInfo.serialNo。
+        joined = " ".join([k for k in candidates if k]).replace("（", "(").replace("）", ")")
+        if (
+            ("设备编号" in joined and ("SN" in joined or "序列号" in joined or "产品编号" in joined))
+            or ("serialno" in joined.lower())
+        ):
+            serial_no = (
+                value_mapping.get("serialNo")
+                or (source_data.get("equipmentInfo") or {}).get("serialNo")
+                or ""
+            )
+            return serial_no
+        if "项目名称" in joined:
+            return value_mapping.get("项目名称") or value_mapping.get("projectTitle") or ""
+        if "受检设备台数" in joined:
+            return value_mapping.get("受检设备台数") or value_mapping.get("deviceCount") or ""
+        if "联系电话" in joined:
+            return value_mapping.get("联系电话") or ""
+        if (
+            "联系人" in joined
+            and "联系电话" not in joined
+            and "委托单位联系人" not in joined
+            and "联系人/" not in joined
+        ):
+            return value_mapping.get("联系人") or ""
+        return ""
+
+    def _report_merge_condition_result_text(field: dict, picked) -> str:
+        """
+        报告模板中「检测条件/检测结果」类字段：仅用 submit 映射到的 picked 与 PDF 原文数字位对齐合并。
+        无提交值时不得把 PDF 整段原文写入 content（否则整页像占位符）。
+        picked 可能为 int/float（value_mapping 数值），须先转 str。
+        """
+        picked_s = "" if picked is None else str(picked).strip()
+        if not task_obj or task_obj.output_target != LibraryTask.OUTPUT_REPORT:
+            return picked_s
+        keys = [k for k in _field_candidate_keys(field) if k]
+        joined = " ".join(keys).replace("（", "(").replace("）", ")")
+        if "检测条件" not in joined and "检测结果" not in joined:
+            return picked_s
+        tmpl = str(field.get("originalPlaceholder") or field.get("placeholder") or "").strip()
+        if not picked_s:
+            return ""
+        if not tmpl or not re.search(r"\d", tmpl):
+            return picked_s
+        return merge_number_tokens_from_source(tmpl, picked_s)
+
+    def _auto_verdict_text_if_applicable(field: dict, picked: str) -> str:
+        """
+        模板字段含判定标准（judgmentCriterionText 等）时，根据同行「检测结果/计算结果/报出值」
+        与标准文本推断「合格/不合格」。须先完成首轮文本回填（含检测结果的数字合并），再调用本函数。
+        """
+        if not verdict_from_measurement:
+            return picked
+        crit = _get_judgment_criterion_text(field)
+        if not crit:
+            return picked
+        vkey = ""
+        for k in _field_candidate_keys(field):
+            ks = str(k or "").strip()
+            if "单项判定" in ks:
+                vkey = ks
+                break
+        if not vkey:
+            return picked
+        peer_keys = _verdict_result_placeholder_keys(vkey)
+        measured = ""
+        for rk in peer_keys:
+            peer = _find_template_field_by_semantic_key(template_fields, rk)
+            if peer:
+                mc = str(peer.get("content") or "").strip()
+                if mc:
+                    measured = mc
+                    break
+        if not measured:
+            for rk in peer_keys:
+                measured = value_mapping.get(rk) or ""
+                if measured not in (None, ""):
+                    break
+        if not measured:
+            for rk in peer_keys:
+                peer = _find_template_field_by_semantic_key(template_fields, rk)
+                if peer:
+                    measured = _pick_value_for_field(peer) or ""
+                if measured not in (None, ""):
+                    break
+        if measured in (None, ""):
+            return picked
+        auto = verdict_from_measurement(str(measured), crit)
+        return auto if auto else picked
+
+    def _pick_signature_for_field(field: dict):
+        candidates = _field_candidate_keys(field)
+        if isinstance(signature_map, dict):
+            for key in candidates:
+                if not key:
+                    continue
+                mapped = signature_map.get(key)
+                if isinstance(mapped, str) and mapped:
+                    picked = signature_values.get(mapped) or ""
+                    if picked:
+                        return picked
+
+        if isinstance(signature_map, dict):
+            for _, row in signature_map.items():
+                if not isinstance(row, dict):
+                    continue
+                image_path = str(row.get("image") or "").strip()
+                name_path = str(row.get("name") or "").strip()
+                if not image_path:
+                    continue
+                # 仅在字段名命中 role/name 关键词时采用该映射
+                hit = False
+                for key in candidates:
+                    if not key:
+                        continue
+                    if key in ("author", "reviewer", "approver"):
+                        hit = True
+                    if "检测员" in key and ("preparedBy" in name_path or "author" in image_path):
+                        hit = True
+                    if "校核" in key and ("reviewedBy" in name_path or "reviewer" in image_path):
+                        hit = True
+                    if "批准" in key and ("approvedBy" in name_path or "approver" in image_path):
+                        hit = True
+                if not hit:
+                    continue
+                if image_path.startswith("signatures."):
+                    sig_key = image_path.split(".", 1)[1]
+                else:
+                    sig_key = image_path
+                if sig_key:
+                    picked = signature_values.get(sig_key) or ""
+                    if picked:
+                        return picked
+
+        # 优先按模板字段候选键直接命中签名池（支持 f76/f77/f78、中文 id、语义 id）
+        for key in candidates:
+            if not key:
+                continue
+            picked = signature_values.get(key) or ""
+            if picked:
+                return picked
+
+        for key in candidates:
+            if key in (
+                "author",
+                "reviewer",
+                "approver",
+                "inspector",
+                "mainInspector",
+                "checker",
+                "authorizedSignatory",
+                "accompanyingPerson",
+            ):
+                return signature_values.get(key) or ""
+
+        # 无显式映射时按中文语义兜底，确保多页同类签名框都能命中。
+        joined = " ".join([k for k in candidates if k]).strip()
+        if joined:
+            if ("校核" in joined) or ("复核" in joined):
+                return signature_values.get("checker") or signature_values.get("reviewer") or ""
+            if ("检测员" in joined) or ("检验员" in joined):
+                return (
+                    signature_values.get("inspector")
+                    or signature_values.get("author")
+                    or signature_values.get("mainInspector")
+                    or ""
+                )
+            if ("陪同" in joined) or ("受检单位" in joined):
+                return signature_values.get("accompanyingPerson") or ""
+        return ""
+
+    for field in flat_report_fields:
+        if not isinstance(field, dict):
+            continue
+        field_type = (field.get("fieldType") or "").lower()
+        if field_type == "text":
+            if _is_single_item_verdict_text_field(field):
+                field["content"] = ""
+            else:
+                picked = _pick_value_for_field(field)
+                picked = _report_merge_condition_result_text(field, picked)
+                field["content"] = picked
+            continue
+        if field_type == "check":
+            field["checked"] = bool(_pick_value_for_field(field))
+            continue
+        if field_type == "image":
+            field["imageData"] = _pick_signature_for_field(field)
+    for field in flat_report_fields:
+        if not isinstance(field, dict):
+            continue
+        if (field.get("fieldType") or "").lower() != "text":
+            continue
+        if not _is_single_item_verdict_text_field(field):
+            continue
+        c0 = field.get("content")
+        field["content"] = _auto_verdict_text_if_applicable(
+            field, "" if c0 is None else str(c0)
+        )
+    return template_fields
+
+
+def _merge_pdf_template_bindings(base: dict | None, overlay: dict | None) -> dict:
+    """
+    合并 HTMLPDF 模板 bindings：overlay 在同名规则上覆盖 base。
+    用于把「现场记录任务」模板里的 value_rules / field_to_pdf / signature_map 并入报告模板。
+    """
+    base = dict(base) if isinstance(base, dict) else {}
+    overlay = dict(overlay) if isinstance(overlay, dict) else {}
+    if not overlay:
+        return base
+    if not base:
+        return overlay
+    out = {**base}
+    br = base.get("value_rules")
+    orules = overlay.get("value_rules")
+    if isinstance(orules, list):
+        rules_by_key: dict[str, dict] = {}
+        for row in br or []:
+            if isinstance(row, dict) and row.get("key"):
+                rules_by_key[str(row["key"])] = row
+        for row in orules:
+            if isinstance(row, dict) and row.get("key"):
+                rules_by_key[str(row["key"])] = row
+        out["value_rules"] = list(rules_by_key.values())
+    bf = base.get("field_to_pdf")
+    oftp = overlay.get("field_to_pdf")
+    if isinstance(oftp, list):
+        by_fid: dict[str, dict] = {}
+        for row in bf or []:
+            if isinstance(row, dict) and row.get("fieldId"):
+                by_fid[str(row["fieldId"])] = row
+        for row in oftp:
+            if isinstance(row, dict) and row.get("fieldId"):
+                by_fid[str(row["fieldId"])] = row
+        out["field_to_pdf"] = list(by_fid.values())
+    bs = base.get("signature_map") if isinstance(base.get("signature_map"), dict) else {}
+    osm = overlay.get("signature_map") if isinstance(overlay.get("signature_map"), dict) else {}
+    if osm:
+        out["signature_map"] = {**bs, **osm}
+    for k, v in overlay.items():
+        if k in ("value_rules", "field_to_pdf", "signature_map"):
+            continue
+        if v is not None:
+            out[k] = v
+    return out
+
+
+def _load_merged_template_bindings_for_library_task(library_task: LibraryTask | None) -> dict:
+    """
+    读取某文件库任务下全部 JSON 模板中的 bindings 并合并（先旧后新，新覆盖旧）。
+    不要求 fields 含坐标，便于仅有 schema/bindings 的模板参与映射。
+    """
+    if library_task is None:
+        return {}
+    acc: dict = {}
+    template_qs = (
+        LibraryFile.objects.filter(category=LibraryFile.CATEGORY_TEMPLATE, library_tasks=library_task)
+        .order_by("created_at", "id")
+        .distinct()
+    )
+    for lf in template_qs:
+        if not (lf.original_name or "").lower().endswith(".json"):
+            continue
+        try:
+            template_path = pipeline_service.library_absolute_path(lf.relative_path)
+            raw_text = template_path.read_text(encoding="utf-8", errors="replace")
+            parsed = htmlpdf_service.parse_template_json(raw_text)
+        except Exception:
+            continue
+        b = parsed.get("bindings")
+        if isinstance(b, dict) and b:
+            acc = _merge_pdf_template_bindings(acc, b)
+    return acc
+
+
+def _merged_bindings_for_report_task(
+    report_task: LibraryTask,
+    project,
+    task_no: str,
+    report_template_bindings: dict,
+) -> dict:
+    """
+    报告回填：在报告模板 bindings 之上，叠加上
+    1) 报告任务配置的现场记录来源任务模板 JSON 中的 bindings；
+    2) 当前提交 taskNo 对应的现场记录任务模板（若提交来自现场记录任务，与 schema 一致）。
+    顺序：来源任务（配置顺序）→ 提交关联现场任务 → 报告模板（最后生效，报告专用规则优先）。
+    """
+    if report_task.output_target != LibraryTask.OUTPUT_REPORT:
+        return report_template_bindings if isinstance(report_template_bindings, dict) else {}
+    if project is None:
+        return report_template_bindings if isinstance(report_template_bindings, dict) else {}
+    acc: dict = {}
+    for st in _report_site_record_source_tasks(project, report_task):
+        acc = _merge_pdf_template_bindings(acc, _load_merged_template_bindings_for_library_task(st))
+    assign_task = _resolve_library_task_for_task_no(task_no, project)
+    if assign_task is not None and assign_task.output_target == LibraryTask.OUTPUT_SITE_RECORD:
+        acc = _merge_pdf_template_bindings(acc, _load_merged_template_bindings_for_library_task(assign_task))
+    return _merge_pdf_template_bindings(acc, report_template_bindings if isinstance(report_template_bindings, dict) else {})
+
+
+def _build_filled_template_fields_for_task(
+    task_obj,
+    payload: dict,
+    map_id: str | None = None,
+    project=None,
+    task_no: str = "",
+    inspection_case=None,
+    *,
+    manual_device_count: int | None = None,
+):
+    if task_obj is None:
+        return None, None, "未找到可用任务模板", ""
+    template_qs = (
+        LibraryFile.objects.filter(category=LibraryFile.CATEGORY_TEMPLATE, library_tasks=task_obj)
+        .order_by("-created_at")
+        .distinct()
+    )
+    template_json_rows = [row for row in template_qs if row.original_name.lower().endswith(".json")]
+    if not template_json_rows:
+        return None, None, "任务下缺少 JSON 模板", ""
+    candidates = []
+    for template_json_lf in template_json_rows:
+        try:
+            template_path = pipeline_service.library_absolute_path(template_json_lf.relative_path)
+            raw_text = template_path.read_text(encoding="utf-8", errors="replace")
+            parsed = htmlpdf_service.parse_template_json(raw_text)
+        except Exception:
+            continue
+        fields = parsed.get("fields") or []
+        if not isinstance(fields, list) or not fields:
+            continue
+        has_layout_field = any(
+            isinstance(f, dict)
+            and "page" in f
+            and (all(k in f for k in ("x0", "y0", "x1", "y1")) or all(k in f for k in ("x", "y", "w", "h")))
+            for f in fields
+        )
+        if not has_layout_field:
+            continue
+        source_pdf_template_id = None
+        source_pdf = parsed.get("source_pdf") or {}
+        if isinstance(source_pdf, dict):
+            raw_pdf_id = source_pdf.get("template_file_id")
+            try:
+                source_pdf_template_id = int(raw_pdf_id) if raw_pdf_id is not None else None
+            except (TypeError, ValueError):
+                source_pdf_template_id = None
+        template_bindings = parsed.get("bindings") or {}
+        candidates.append((template_json_lf, fields, source_pdf_template_id, template_bindings))
+    if not candidates:
+        return None, None, "任务下 JSON 模板不是 HTMLPDF 字段模板（fields 缺少 page 与坐标）", ""
+    if len(candidates) > 1:
+        return None, None, "任务下存在多个可用 HTMLPDF JSON 模板，请只保留一个", ""
+    template_json_lf, fields, source_pdf_template_id, template_bindings = candidates[0]
+    template_bindings = _merged_bindings_for_report_task(
+        task_obj, project, task_no, template_bindings if isinstance(template_bindings, dict) else {}
+    )
+    return (
+        _fill_template_fields_with_submit(
+            payload,
+            fields,
+            map_id,
+            project=project,
+            task_no=task_no,
+            bindings=template_bindings,
+            task_obj=task_obj,
+            inspection_case=inspection_case,
+            manual_device_count=manual_device_count,
+        ),
+        source_pdf_template_id,
+        "",
+        template_json_lf.original_name,
+    )
+
+
+def _build_filled_template_fields_from_submit(task_no: str, project, payload: dict, map_id: str | None = None):
+    task_obj = _resolve_library_task_for_task_no(task_no, project)
+    if task_obj is None:
+        return None, None, "未找到对应任务，无法按任务模板导出", ""
+    return _build_filled_template_fields_for_task(
+        task_obj,
+        payload,
+        map_id=map_id,
+        project=project,
+        task_no=task_no,
+    )
+def _report_site_record_source_tasks(project, report_task):
+    if report_task is not None:
+        lst = list(
+            report_task.report_source_tasks.filter(output_target=LibraryTask.OUTPUT_SITE_RECORD).order_by("code", "id")
+        )
+        if lst:
+            return lst
+    return list(project.library_tasks.filter(output_target=LibraryTask.OUTPUT_SITE_RECORD).order_by("code", "id"))
+
+
+def _load_first_parsed_template_json_for_task(library_task: LibraryTask | None) -> dict | None:
+    """读取任务下首个含 fields 的 JSON 模板（不要求坐标），用于 submitPath 与 bindings。"""
+    if library_task is None:
+        return None
+    template_qs = (
+        LibraryFile.objects.filter(category=LibraryFile.CATEGORY_TEMPLATE, library_tasks=library_task)
+        .order_by("-created_at", "-id")
+        .distinct()
+    )
+    for lf in template_qs:
+        if not (lf.original_name or "").lower().endswith(".json"):
+            continue
+        try:
+            template_path = pipeline_service.library_absolute_path(lf.relative_path)
+            raw_text = template_path.read_text(encoding="utf-8", errors="replace")
+            parsed = htmlpdf_service.parse_template_json(raw_text)
+        except Exception:
+            continue
+        fields = parsed.get("fields")
+        if isinstance(fields, list) and fields:
+            return parsed if isinstance(parsed, dict) else None
+    return None
+
+
+def _iter_site_record_parsed_templates_for_report(
+    task_no: str, project, report_task: LibraryTask | None
+):
+    """
+    按提交 taskNo 与报告任务解析「对应现场记录模板」JSON（解析顺序）：
+    1) 当前提交所属现场记录任务（与 submitted json 同源）；
+    2) 报告任务配置的现场记录来源任务；
+    3) 项目下其余现场记录任务（_report_site_record_source_tasks 顺序）。
+    """
+    if project is None or report_task is None or report_task.output_target != LibraryTask.OUTPUT_REPORT:
+        return
+    seen: set[int] = set()
+    ordered: list[LibraryTask] = []
+    assign = _resolve_library_task_for_task_no(task_no, project)
+    if assign is not None and assign.output_target == LibraryTask.OUTPUT_SITE_RECORD:
+        ordered.append(assign)
+        seen.add(int(assign.pk))
+    for st in _report_site_record_source_tasks(project, report_task):
+        tid = int(st.pk)
+        if tid not in seen:
+            ordered.append(st)
+            seen.add(tid)
+    for st in ordered:
+        parsed = _load_first_parsed_template_json_for_task(st)
+        if parsed is not None:
+            yield st, parsed
+
+
+def _prepare_backfill_value_mapping(
+    source_data: dict,
+    *,
+    map_id: str | None,
+    bindings: dict,
+    project,
+    task_no: str,
+    task_obj,
+    inspection_case,
+    report_template_fields: list,
+    manual_device_count: int | None = None,
+) -> dict:
+    """
+    回填值准备（以 submitted JSON 为主）：
+    1. 默认 submit → 占位符映射；
+    2. 合并后模板 bindings.value_rules（仍只从提交 JSON 取值）；
+    3. 现场记录模板 fields 的 submitPath → 输入框语义键；
+    4. 报告模板 fields 的 submitPath；
+    5. 点号路径别名（如 hospitalInfo.name）；
+    6. dynamicData：steps 语义键 + 按报告模板字段 pdfFieldId 写入对应 placeholder；
+    7. 项目/任务派生字段；
+    8. 再次按报告模板 submitPath 强制覆盖，确保 content 来自 submit 而非占位原文。
+    """
+    mid = (map_id or "").strip() or DEFAULT_SUBMIT_PLACEHOLDER_MAP_ID
+    value_mapping: dict = dict(build_submit_value_mapping(source_data, mid))
+    binding_map = _build_template_binding_value_mapping(source_data, bindings or {})
+    if binding_map:
+        value_mapping.update(binding_map)
+    if task_obj is not None and project is not None:
+        for _st, parsed in _iter_site_record_parsed_templates_for_report(task_no, project, task_obj):
+            site_fields = parsed.get("fields") or []
+            if isinstance(site_fields, list):
+                _apply_template_field_sources_to_mapping(value_mapping, source_data, site_fields)
+    if isinstance(report_template_fields, list):
+        _apply_template_field_sources_to_mapping(value_mapping, source_data, report_template_fields)
+    _inject_submit_dot_path_aliases(value_mapping, source_data)
+    _merge_mapping_fill_empty(value_mapping, _build_dynamic_data_semantic_mapping(source_data))
+    if isinstance(report_template_fields, list):
+        _inject_dynamic_data_for_report_template_placeholders(
+            value_mapping, source_data, report_template_fields
+        )
+    value_mapping.update(
+        _build_submit_derived_value_mapping(
+            source_data,
+            project=project,
+            task_no=task_no,
+            task_obj=task_obj,
+            inspection_case=inspection_case,
+            manual_device_count=manual_device_count,
+        )
+    )
+    if isinstance(report_template_fields, list):
+        _apply_template_field_sources_to_mapping(
+            value_mapping, source_data, report_template_fields, overwrite=True
+        )
+    _inject_hospital_equipment_cn_aliases(value_mapping, source_data)
+    return value_mapping
+def _resolve_report_task_for_case(task_no: str, project):
+    """
+    解析当前案件应使用的报告任务。
+    优先规则：
+    1) taskNo 直接对应且输出目标=report 的任务；
+    2) 项目中第一个输出目标=report 的任务。
+    """
+    task_obj = _resolve_library_task_for_task_no(task_no, project)
+    if task_obj is not None and task_obj.output_target == LibraryTask.OUTPUT_REPORT:
+        return task_obj
+    return (
+        project.library_tasks.filter(output_target=LibraryTask.OUTPUT_REPORT)
+        .order_by("code", "id")
+        .first()
+    )
+def _normalize_fields_for_htmlpdf(fields):
+    """扁平化嵌套 fields，并按页码、纵坐标、横坐标排序，减少叠字顺序导致的乱序。"""
+    normalized = []
+    skipped = 0
+
+    def _append_one(f: dict) -> None:
+        nonlocal skipped
+        if not isinstance(f, dict):
+            skipped += 1
+            return
+        page = f.get("page")
+        if page in (None, ""):
+            skipped += 1
+            return
+        if all(k in f for k in ("x0", "y0", "x1", "y1")):
+            try:
+                x0 = float(f.get("x0"))
+                y0 = float(f.get("y0"))
+                x1 = float(f.get("x1"))
+                y1 = float(f.get("y1"))
+            except (TypeError, ValueError):
+                skipped += 1
+                return
+        elif all(k in f for k in ("x", "y", "w", "h")):
+            try:
+                x = float(f.get("x"))
+                y = float(f.get("y"))
+                w = float(f.get("w"))
+                h = float(f.get("h"))
+            except (TypeError, ValueError):
+                skipped += 1
+                return
+            if w <= 0 or h <= 0:
+                skipped += 1
+                return
+            x0, y0, x1, y1 = x, y, x + w, y + h
+        else:
+            skipped += 1
+            return
+        text_val = f.get("value")
+        if text_val in (None, ""):
+            text_val = f.get("content", "")
+        normalized.append(
+            {
+                "page": page,
+                "x0": x0,
+                "y0": y0,
+                "x1": x1,
+                "y1": y1,
+                "fieldType": (f.get("fieldType") or "text"),
+                "value": text_val or "",
+                "checked": bool(f.get("checked", False)),
+                "imageData": f.get("imageData") or "",
+            }
+        )
+
+    def _walk(rows):
+        for f in rows or []:
+            if not isinstance(f, dict):
+                continue
+            _append_one(f)
+            nested = f.get("fields") or f.get("children")
+            if isinstance(nested, list):
+                _walk(nested)
+
+    _walk(fields)
+
+    def _sort_key(r):
+        try:
+            p = int(r["page"])
+        except (TypeError, ValueError):
+            p = 0
+        return (p, float(r.get("y0") or 0), float(r.get("x0") or 0))
+
+    normalized.sort(key=_sort_key)
+    return normalized, skipped
+
+
+def _persist_filled_pdf_from_submit(
+    user,
+    task_no: str,
+    case: InspectionCase,
+    project,
+    filled_fields: list,
+    template_pdf_id=None,
+    template_json_name: str = "",
+    task_obj=None,
+):
+    if not isinstance(filled_fields, list) or not filled_fields:
+        return False, "无可用填充字段"
+    normalized_fields, skipped_fields = _normalize_fields_for_htmlpdf(filled_fields)
+    if not normalized_fields:
+        return False, "模板字段缺少有效页码或坐标（支持 x/y/w/h 或 x0/y0/x1/y1）"
+    if task_obj is None:
+        task_obj = _resolve_library_task_for_task_no(task_no, project)
+    if task_obj is None:
+        return False, "未找到对应任务模板，无法导出"
+    template_pdf_lf = None
+    if template_pdf_id:
+        template_pdf_lf = (
+            LibraryFile.objects.filter(pk=template_pdf_id, category=LibraryFile.CATEGORY_TEMPLATE, projects=project)
+            .distinct()
+            .first()
+        )
+    template_qs = (
+        LibraryFile.objects.filter(category=LibraryFile.CATEGORY_TEMPLATE, library_tasks=task_obj)
+        .order_by("-created_at")
+        .distinct()
+    )
+    if template_pdf_lf is None:
+        template_pdf_rows = [row for row in template_qs if row.original_name.lower().endswith(".pdf")]
+        if not template_pdf_rows:
+            return False, "项目下缺少 PDF 模板"
+        if len(template_pdf_rows) > 1:
+            return False, "项目下存在多个 PDF 模板，请先保证每个任务项目仅有一个 PDF 模板"
+        template_pdf_lf = template_pdf_rows[0]
+    try:
+        source_pdf = pipeline_service.library_absolute_path(template_pdf_lf.relative_path)
+        pdf_bytes = htmlpdf_service.build_filled_pdf(normalized_fields, source_pdf)
+    except Exception as exc:
+        return False, f"PDF 渲染失败: {exc}"
+    output_category = LibraryFile.CATEGORY_REPORT if task_obj.output_target == LibraryTask.OUTPUT_REPORT else LibraryFile.CATEGORY_SITE_RECORD
+    safe_task_no = (task_no or "").replace("/", "_")
+    filename = f"{safe_task_no}-报告.pdf" if output_category == LibraryFile.CATEGORY_REPORT else f"{safe_task_no}-现场记录.pdf"
+    wrapped = type("UploadLike", (), {"read": lambda self: pdf_bytes, "name": filename})()
+    created, _ = save_library_binary_uploads(
+        user, [wrapped], output_category,
+        link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
+        link_object_id=case.pk, project_ids=[project.pk]
+    )
+    if task_obj and created:
+        attach_files_to_tasks([row["id"] for row in created if row.get("id")], [task_obj.pk], user)
+    if not created:
+        return False, "PDF 保存失败（save_library_binary_uploads 未创建记录）"
+    if skipped_fields:
+        return True, f"导出成功，但已跳过 {skipped_fields} 个不合法模板字段"
+    return True, ""

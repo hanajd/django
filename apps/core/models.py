@@ -12,7 +12,14 @@ class Role(models.Model):
     ROLE_CHOICES = (
         ('super_admin', _('超级管理员')),
         ('admin', _('普通管理员')),
-        ('app_user', _('App 用户')),
+        ('app_user', _('App 用户（兼容旧版，等同检测侧参与人）')),
+        ('field_inspector', _('检测员')),
+        ('site_reviewer', _('校核员')),
+        ('report_author', _('编制人')),
+        ('report_auditor', _('审核人')),
+        ('authorized_signatory', _('授权签字人')),
+        ('template_editor', _('模板编辑')),
+        ('template_tester', _('模板与 HTMLPDF 测试')),
     )
     
     name = models.CharField(
@@ -50,10 +57,20 @@ class Role(models.Model):
         help_text=_('开启后仅能访问 created_by 为当前用户的库文件'),
     )
     perm_process_pipeline = models.BooleanField(default=False, verbose_name=_('流程处理'))
+    perm_htmlpdf = models.BooleanField(
+        default=False,
+        verbose_name=_('HTMLPDF 模板编辑器'),
+        help_text=_('进入 HTMLPDF 编辑器及相关 API；不含 MinerU/Ollama 流程处理'),
+    )
     perm_assign_tasks = models.BooleanField(
         default=False,
         verbose_name=_('分配文件库任务'),
-        help_text=_('创建文件库任务、关联项目任务、向 App 用户分配任务'),
+        help_text=_('创建任务模板、维护模板绑定、关联项目任务、向 App 用户分配任务'),
+    )
+    perm_create_library_project = models.BooleanField(
+        default=False,
+        verbose_name=_('创建检测项目'),
+        help_text=_('在项目工作台新建检测项目；不含向他人分配任务'),
     )
     perm_biz_registry = models.BooleanField(
         default=False,
@@ -116,6 +133,12 @@ class UserProfile(models.Model):
         blank=True,
         related_name='user_profiles',
         verbose_name=_('角色')
+    )
+    perm_overrides = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name=_('权限个性化覆盖'),
+        help_text=_('按权限键存储 true/false；未出现的键继承角色。空对象表示完全跟随角色'),
     )
     created_at = models.DateTimeField(
         auto_now_add=True,
@@ -272,8 +295,8 @@ class LibraryFile(models.Model):
         through="LibraryFileTask",
         blank=True,
         related_name="library_files",
-        verbose_name=_("关联任务"),
-        help_text=_("后台任务挂载的文件，与项目为多对多；分配后同步写入项目关联"),
+        verbose_name=_("关联任务模板"),
+        help_text=_("仅「模板」类应挂任务模板；其它分类请通过项目关联。模板在任务挂到项目时可同步到项目。"),
     )
 
     class Meta:
@@ -307,7 +330,7 @@ class LibraryFile(models.Model):
 
 
 class LibraryTask(models.Model):
-    """文件库任务：与项目多对多；文件通过 LibraryFileTask 挂载（全部分类）。"""
+    """文件库任务模板：与项目多对多；直接挂载的文件应为「模板」类。其它文件通过项目关联。"""
 
     OUTPUT_SITE_RECORD = "site_record"
     OUTPUT_REPORT = "report"
@@ -344,6 +367,15 @@ class LibraryTask(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("创建时间"))
     updated_at = models.DateTimeField(auto_now=True, verbose_name=_("更新时间"))
+    bound_instrument_ids = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name=_("模板默认检测仪器"),
+        help_text=_(
+            "有序的主数据仪器 id 列表（对应 InstrumentCatalog）。"
+            "合并到提交的 instruments 中用于下拉与 PDF 展示；与提交去重后追加。"
+        ),
+    )
 
     class Meta:
         verbose_name = _("文件库任务")
@@ -564,7 +596,7 @@ class LibraryFileProject(models.Model):
 
 
 class LibraryFileTask(models.Model):
-    """文件-任务关联（与文件-项目关联方式一致，支持全部分类）。"""
+    """文件-任务模板关联（业务上仅用于模板文件；兼容历史非模板数据）。"""
 
     library_file = models.ForeignKey(
         LibraryFile,
@@ -951,6 +983,148 @@ class InspectionSubmissionInstrument(models.Model):
 
     def __str__(self):
         return f"{self.submission.task_no} / {self.name}"
+
+
+class LibraryProjectWorkflowMember(models.Model):
+    """项目内流程岗位：同一用户在同一项目仅允许一个流程岗位。"""
+
+    ROLE_FIELD_INSPECTOR = "field_inspector"
+    ROLE_SITE_REVIEWER = "site_reviewer"
+    ROLE_REPORT_AUTHOR = "report_author"
+    ROLE_REPORT_AUDITOR = "report_auditor"
+    ROLE_AUTH_SIGNATORY = "authorized_signatory"
+    WORKFLOW_ROLE_CHOICES = (
+        (ROLE_FIELD_INSPECTOR, _("检测员")),
+        (ROLE_SITE_REVIEWER, _("校核员")),
+        (ROLE_REPORT_AUTHOR, _("编制人")),
+        (ROLE_REPORT_AUDITOR, _("审核人")),
+        (ROLE_AUTH_SIGNATORY, _("授权签字人")),
+    )
+
+    project = models.ForeignKey(
+        LibraryProject,
+        on_delete=models.CASCADE,
+        related_name="workflow_members",
+        verbose_name=_("项目"),
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="library_project_workflow_memberships",
+        verbose_name=_("用户"),
+    )
+    workflow_role = models.CharField(
+        max_length=32,
+        choices=WORKFLOW_ROLE_CHOICES,
+        db_index=True,
+        verbose_name=_("流程岗位"),
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("创建时间"))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_("更新时间"))
+
+    @classmethod
+    def default_workflow_role_for_user(cls, user) -> str:
+        """
+        将用户全局 Role.code 映射为项目内 workflow_role。
+        五类检测流程角色一一对应；旧版 app_user 等与未识别代码默认映射为检测员（field_inspector）。
+        """
+        prof = getattr(user, "profile", None)
+        role = getattr(prof, "role", None) if prof else None
+        code = (getattr(role, "code", None) or "").strip()
+        known = frozenset(
+            {
+                cls.ROLE_FIELD_INSPECTOR,
+                cls.ROLE_SITE_REVIEWER,
+                cls.ROLE_REPORT_AUTHOR,
+                cls.ROLE_REPORT_AUDITOR,
+                cls.ROLE_AUTH_SIGNATORY,
+            }
+        )
+        if code in known:
+            return code
+        return cls.ROLE_FIELD_INSPECTOR
+
+    @classmethod
+    def ensure_for_project_assignment(cls, project, user):
+        """
+        项目任务分配给某用户后：按该用户全局角色写入对应「流程岗位」槽位（每项目每岗位至多一人）。
+        若该岗位已有记录则更新为当前用户（与测试账号一人兼任多岗的模型一致）。
+        """
+        if project is None or user is None:
+            return None
+        wf = cls.default_workflow_role_for_user(user)
+        obj, _created = cls.objects.update_or_create(
+            project=project,
+            workflow_role=wf,
+            defaults={"user": user},
+        )
+        return obj
+
+    class Meta:
+        verbose_name = _("项目流程成员")
+        verbose_name_plural = verbose_name
+        ordering = ["project_id", "workflow_role", "user_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["project", "workflow_role"],
+                name="uniq_project_workflow_role_slot",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.project.code} / {self.user.username} / {self.workflow_role}"
+
+
+class InspectionCaseWorkflowState(models.Model):
+    """检验案件在「现场记录 → 报告签发」链上的当前环节（与业务登记案件一对一）。"""
+
+    STAGE_SITE_FILL = "SITE_FILL"
+    STAGE_SITE_REVIEW = "SITE_REVIEW"
+    STAGE_REPORT_DRAFT = "REPORT_DRAFT"
+    STAGE_REPORT_AUDIT = "REPORT_AUDIT"
+    STAGE_REPORT_SIGN = "REPORT_SIGN"
+    STAGE_ISSUED = "ISSUED"
+    STAGE_CHOICES = (
+        (STAGE_SITE_FILL, _("检测员填写现场记录")),
+        (STAGE_SITE_REVIEW, _("校核员校核现场记录")),
+        (STAGE_REPORT_DRAFT, _("编制人编制报告")),
+        (STAGE_REPORT_AUDIT, _("审核人审核报告")),
+        (STAGE_REPORT_SIGN, _("授权签字人签发")),
+        (STAGE_ISSUED, _("已签发")),
+    )
+
+    case = models.OneToOneField(
+        InspectionCase,
+        on_delete=models.CASCADE,
+        primary_key=True,
+        related_name="workflow_state",
+        verbose_name=_("案件"),
+    )
+    stage = models.CharField(
+        max_length=32,
+        choices=STAGE_CHOICES,
+        default=STAGE_SITE_FILL,
+        db_index=True,
+        verbose_name=_("当前环节"),
+    )
+    return_reason = models.TextField(blank=True, default="", verbose_name=_("最近一次退回说明"))
+    issue_date = models.DateField(null=True, blank=True, verbose_name=_("签发日期"))
+    updated_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="inspection_case_workflow_updates",
+        verbose_name=_("最后操作人"),
+    )
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_("环节更新时间"))
+
+    class Meta:
+        verbose_name = _("案件流程状态")
+        verbose_name_plural = verbose_name
+
+    def __str__(self):
+        return f"{self.case_id} / {self.stage}"
 
 
 class InstrumentCatalog(models.Model):

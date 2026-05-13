@@ -5,7 +5,9 @@ import signal
 import subprocess
 import sys
 import time
-from typing import List, Tuple
+from typing import Dict, List, Optional, Tuple
+
+from utils.gpu_scheduler import mineru_subprocess_env
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +33,19 @@ def _clear_mineru_output_dir(output_subdir: str) -> None:
 
 
 def _run_mineru_subprocess(
-    cmd: List[str], timeout_s: int
+    cmd: List[str],
+    timeout_s: int,
+    *,
+    extra_env: Optional[Dict[str, str]] = None,
 ) -> Tuple[int, str, str]:
     """
     运行 mineru；POSIX 下使用新会话，超时或失败时可结束整个进程组，减少子进程残留导致的「停不下来」。
+    extra_env 合并进子进程环境（用于按负载选择 CUDA_VISIBLE_DEVICES）。
     """
     use_session = sys.platform != "win32"
+    env = os.environ.copy()
+    if extra_env:
+        env.update(extra_env)
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -45,6 +54,7 @@ def _run_mineru_subprocess(
         encoding="utf-8",
         errors="replace",
         start_new_session=use_session,
+        env=env,
     )
     out, err = "", ""
     try:
@@ -203,7 +213,9 @@ def convert_pdf_to_md(pdf_path: str, output_subdir: str) -> str:
             " ".join(cmd),
             "可用" if _nvidia_gpu_available() else "未检测到或未安装驱动",
         )
-        returncode, stdout, stderr = _run_mineru_subprocess(cmd, timeout_s)
+        returncode, stdout, stderr = _run_mineru_subprocess(
+            cmd, timeout_s, extra_env=mineru_subprocess_env()
+        )
         if returncode != 0:
             logger.error(
                 "mineru 退出码 %s\nstderr:\n%s\nstdout 末尾:\n%s",

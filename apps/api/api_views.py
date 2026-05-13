@@ -21,6 +21,7 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from apps.core.library_access import (
     library_file_access_allowed,
+    library_user_can_assign_tasks_to_participants,
     role_can_upload_library_category,
     role_has,
 )
@@ -242,7 +243,7 @@ class LibraryOCRTaskStatusAPIView(APIView):
 
     def get(self, request, task_id: int):
         task = get_object_or_404(LibraryOCRProcessTask, pk=task_id)
-        if task.created_by_id != request.user.id and not role_has(request.user, "perm_assign_tasks"):
+        if task.created_by_id != request.user.id and not library_user_can_assign_tasks_to_participants(request.user):
             return Response({"detail": "无权查看该任务"}, status=status.HTTP_403_FORBIDDEN)
         files = list(
             LibraryFile.objects.filter(pk__in=task.generated_json_file_ids, category=LibraryFile.CATEGORY_JSON)
@@ -276,7 +277,7 @@ class LibraryOCRTaskAutofillAPIView(APIView):
 
     def get(self, request, task_id: int):
         task = get_object_or_404(LibraryOCRProcessTask, pk=task_id)
-        if task.created_by_id != request.user.id and not role_has(request.user, "perm_assign_tasks"):
+        if task.created_by_id != request.user.id and not library_user_can_assign_tasks_to_participants(request.user):
             return Response({"detail": "无权访问该任务"}, status=status.HTTP_403_FORBIDDEN)
         task.refresh_from_db()
         status_url = request.build_absolute_uri(

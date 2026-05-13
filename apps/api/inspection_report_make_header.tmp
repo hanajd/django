@@ -1,0 +1,32 @@
+"""报告制作：检测提交 → HTMLPDF 模板回填、bindings 合并、字段归一化与 PDF 落库。
+
+与 `inspection_pdf_service` 中的任务解析、现场记录 JSON 合并等解耦，便于维护。
+"""
+from __future__ import annotations
+
+import base64
+import os
+import re
+from datetime import datetime
+from typing import Any
+
+from django.contrib.auth.models import User
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
+
+from apps.api.inspection_submit_placeholder_maps import (
+    DEFAULT_SUBMIT_PLACEHOLDER_MAP_ID,
+    SUBMIT_PLACEHOLDER_MAPS,
+    build_submit_value_mapping,
+    resolve_mapping_rules,
+)
+from apps.core import htmlpdf_service, pipeline_service
+from apps.core.library_file_service import attach_files_to_tasks, save_library_binary_uploads
+from apps.core.models import (
+    InspectionCase,
+    LibraryFile,
+    LibraryTask,
+    SiteRecord,
+)
+from utils.report_fill_helpers import merge_number_tokens_from_source, split_contact_name_phone
+
