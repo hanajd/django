@@ -19,7 +19,7 @@ class Role(models.Model):
         ('report_auditor', _('审核人')),
         ('authorized_signatory', _('授权签字人')),
         ('template_editor', _('模板编辑')),
-        ('template_tester', _('模板与 HTMLPDF 测试')),
+        ('template_tester', _('模板编辑器（测试）')),
     )
     
     name = models.CharField(
@@ -56,11 +56,11 @@ class Role(models.Model):
         verbose_name=_('文件库仅本人数据'),
         help_text=_('开启后仅能访问 created_by 为当前用户的库文件'),
     )
-    perm_process_pipeline = models.BooleanField(default=False, verbose_name=_('流程处理'))
+    perm_process_pipeline = models.BooleanField(default=False, verbose_name=_('OCR处理'))
     perm_htmlpdf = models.BooleanField(
         default=False,
-        verbose_name=_('HTMLPDF 模板编辑器'),
-        help_text=_('进入 HTMLPDF 编辑器及相关 API；不含 MinerU/Ollama 流程处理'),
+        verbose_name=_('模板编辑器'),
+        help_text=_('进入模板编辑器及相关 API；不含 MinerU/Ollama OCR 处理'),
     )
     perm_assign_tasks = models.BooleanField(
         default=False,
@@ -140,6 +140,18 @@ class UserProfile(models.Model):
         verbose_name=_('权限个性化覆盖'),
         help_text=_('按权限键存储 true/false；未出现的键继承角色。空对象表示完全跟随角色'),
     )
+    file_library_quota_bytes = models.BigIntegerField(
+        default=5368709120,
+        verbose_name=_('文件库容量配额（字节）'),
+        help_text=_('默认 5GiB（5368709120）。超级用户或角色为超级管理员/普通管理员时不校验配额'),
+    )
+    web_session_key = models.CharField(
+        max_length=64,
+        blank=True,
+        null=True,
+        verbose_name=_('当前 Web 会话键'),
+        help_text=_('用于单浏览器会话：新浏览器登录后台后会更新，旧会话随即失效；与平板 JWT 无关'),
+    )
     created_at = models.DateTimeField(
         auto_now_add=True,
         verbose_name=_('创建时间')
@@ -217,6 +229,13 @@ class Menu(models.Model):
         return self.children.filter(is_visible=True)
 
 
+class ActiveLibraryFileManager(models.Manager):
+    """默认查询排除回收站中的记录（deleted_at 非空）。"""
+
+    def get_queryset(self):
+        return super().get_queryset().filter(deleted_at__isnull=True)
+
+
 class LibraryFile(models.Model):
     """File library entry: user uploads, JSON outputs, or pipeline temp artifacts."""
     CATEGORY_UPLOAD = 'upload'
@@ -283,6 +302,13 @@ class LibraryFile(models.Model):
         verbose_name=_('创建者'),
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('创建时间'))
+    deleted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name=_('移入回收站时间'),
+        help_text=_('非空表示文件在回收站；超过约 30 天保留期后由系统自动彻底删除'),
+    )
     projects = models.ManyToManyField(
         "LibraryProject",
         through="LibraryFileProject",
@@ -298,6 +324,9 @@ class LibraryFile(models.Model):
         verbose_name=_("关联任务模板"),
         help_text=_("仅「模板」类应挂任务模板；其它分类请通过项目关联。模板在任务挂到项目时可同步到项目。"),
     )
+
+    objects = ActiveLibraryFileManager()
+    all_objects = models.Manager()
 
     class Meta:
         verbose_name = _('文件库文件')

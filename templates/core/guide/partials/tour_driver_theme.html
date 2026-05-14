@@ -1,0 +1,107 @@
+{# 与 driver.js 弹层配合：深色玻璃风 + 高亮脉冲；需在 driver.css 之后引入 #}
+<style>
+@keyframes guide-tour-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(129, 140, 248, 0.55), 0 0 24px rgba(99, 102, 241, 0.35); }
+    50% { box-shadow: 0 0 0 6px rgba(129, 140, 248, 0.15), 0 0 32px rgba(99, 102, 241, 0.45); }
+}
+.guide-tour-spotlight {
+    animation: guide-tour-pulse 2.2s ease-in-out infinite;
+    border-radius: 0.75rem;
+}
+/* driver.js 1.x 弹层：覆盖默认浅色卡片 */
+.driver-popover.guide-driver-popover {
+    max-width: min(22rem, calc(100vw - 2rem));
+    border-radius: 1rem !important;
+    border: 1px solid rgba(129, 140, 248, 0.45) !important;
+    background: rgba(15, 23, 42, 0.94) !important;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.06) inset,
+        0 25px 50px -12px rgba(0, 0, 0, 0.55),
+        0 0 80px -20px rgba(99, 102, 241, 0.35) !important;
+    color: #e2e8f0 !important;
+}
+.driver-popover.guide-driver-popover .driver-popover-title {
+    font-size: 1.05rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.02em;
+    color: #f8fafc !important;
+    line-height: 1.35 !important;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+    padding-bottom: 0.5rem;
+    margin-bottom: 0.5rem !important;
+    text-shadow: none !important;
+    zoom: normal !important;
+}
+.driver-popover.guide-driver-popover .driver-popover-description {
+    font-size: 0.875rem !important;
+    line-height: 1.65 !important;
+    color: #cbd5e1 !important;
+    text-shadow: none !important;
+    zoom: normal !important;
+}
+.driver-popover.guide-driver-popover .driver-popover-progress-text {
+    font-size: 0.7rem !important;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #a5b4fc !important;
+    text-shadow: none !important;
+    zoom: normal !important;
+}
+.driver-popover.guide-driver-popover .driver-popover-description strong {
+    color: #fde68a;
+    font-weight: 600;
+}
+.driver-popover.guide-driver-popover .driver-popover-footer {
+    border-top: 1px solid rgba(51, 65, 85, 0.85);
+    margin-top: 0.75rem;
+    padding-top: 0.75rem !important;
+    zoom: normal !important;
+}
+.driver-popover.guide-driver-popover .driver-popover-navigation-btns {
+    gap: 0.35rem;
+}
+.driver-popover.guide-driver-popover button {
+    border-radius: 0.5rem !important;
+    font-weight: 600 !important;
+    font-size: 0.8rem !important;
+    padding: 0.4rem 0.85rem !important;
+    transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+    text-shadow: none !important;
+    zoom: normal !important;
+}
+.driver-popover.guide-driver-popover .driver-popover-next-btn {
+    background: linear-gradient(135deg, #6366f1, #4f46e5) !important;
+    color: #fff !important;
+    border: none !important;
+    box-shadow: 0 4px 14px rgba(79, 70, 229, 0.45);
+}
+.driver-popover.guide-driver-popover .driver-popover-next-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px rgba(79, 70, 229, 0.55);
+}
+.driver-popover.guide-driver-popover .driver-popover-prev-btn {
+    background: rgba(51, 65, 85, 0.9) !important;
+    color: #e2e8f0 !important;
+    border: 1px solid rgba(100, 116, 139, 0.6) !important;
+}
+.driver-popover.guide-driver-popover .driver-popover-close-btn {
+    color: #94a3b8 !important;
+    background: transparent !important;
+}
+.driver-popover.guide-driver-popover .driver-popover-close-btn:hover {
+    color: #f1f5f9 !important;
+}
+body.driver-active {
+    scroll-behavior: smooth;
+}
+/* 减轻与 driver 默认 fade 叠层导致的叠影 */
+body.driver-fade .driver-popover.guide-driver-popover {
+    animation: none !important;
+}
+body.driver-fade .driver-overlay.driver-overlay-animated {
+    animation: none !important;
+}
+</style>

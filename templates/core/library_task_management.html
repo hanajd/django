@@ -14,14 +14,14 @@
     </div>
     {% endif %}
 
-    <p class="text-sm text-slate-600 max-w-3xl leading-relaxed">
+    <p id="guide-task-intro" class="text-sm text-slate-600 max-w-3xl leading-relaxed">
         在此维护<strong>任务模板</strong>与<strong>模板</strong>分类文件的绑定、默认仪器，以及<strong>报告类模板</strong>与<strong>现场记录类模板</strong>的默认关联等元数据。将模板挂到具体项目、维护项目级文件与向 App 用户下发任务，请使用<strong>项目工作台</strong>。
     </p>
 
     {% if can_manage_templates or can_participant_task_library %}
     <div class="grid grid-cols-1 lg:grid-cols-[minmax(260px,300px)_minmax(0,1fr)] gap-6 items-start">
         <!-- 左侧：模板列表 -->
-        <aside class="lg:sticky lg:top-4 rounded-2xl border border-slate-200/90 bg-white shadow-sm overflow-hidden flex flex-col max-h-[min(70vh,36rem)]">
+        <aside id="guide-task-sidebar" class="lg:sticky lg:top-4 rounded-2xl border border-slate-200/90 bg-white shadow-sm overflow-hidden flex flex-col max-h-[min(70vh,36rem)]">
             <div class="px-4 py-3 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
                 <h2 class="text-xs font-semibold uppercase tracking-wide text-slate-500">模板列表</h2>
                 <input type="search" id="task-filter" placeholder="筛选编码或名称…"
@@ -53,7 +53,7 @@
         <!-- 右侧：详情 / 新建 -->
         <div class="min-w-0 space-y-6">
             {% if show_new_task_form and can_manage_templates %}
-            <div class="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50/80 to-white p-6 shadow-sm">
+            <div id="guide-task-new-form" class="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50/80 to-white p-6 shadow-sm">
                 <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
                     <div>
                         <h3 class="text-lg font-semibold text-slate-900">新建任务模板</h3>
@@ -115,7 +115,7 @@
                     </div>
                     {% endif %}
                 </div>
-                <div class="px-2 sm:px-3 py-2 border-b border-slate-100 flex flex-wrap gap-1 bg-slate-50/60">
+                <div id="guide-task-mgmt-tabs" class="px-2 sm:px-3 py-2 border-b border-slate-100 flex flex-wrap gap-1 bg-slate-50/60">
                     <a href="{% url 'library_task_management' %}?manage_task={{ manage_task.id }}{% if rp %}&return_project={{ rp }}{% endif %}{% if export_project_id_val %}&export_project_id={{ export_project_id_val }}{% endif %}"
                        class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {% if not task_edit_mode %}bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200/80{% else %}text-slate-600 hover:bg-white/80{% endif %}">概览</a>
                     {% if can_manage_templates %}
@@ -188,9 +188,9 @@
                         <div class="min-w-[14rem] flex-1">
                             <label for="export_project_id" class="block text-xs font-medium text-slate-700 mb-1">导出 PDF 所用项目</label>
                             {% if manage_task.output_target == 'report' %}
-                            <p class="text-xs text-slate-600 mb-2">按该项目最新检测提交定位案件，并聚合已绑定的现场记录 JSON 导出报告 PDF（需具备 HTMLPDF 或流程处理权限）。</p>
+                            <p class="text-xs text-slate-600 mb-2">按该项目最新检测提交定位案件，并汇总已绑定的现场记录，导出报告 PDF（需具备模板编辑器或文档识别权限）。</p>
                             {% else %}
-                            <p class="text-xs text-slate-600 mb-2">按该项目最新 submit 回填并导出现场记录 PDF。</p>
+                            <p class="text-xs text-slate-600 mb-2">按该项目最新检测提交回填并导出现场记录 PDF。</p>
                             {% endif %}
                             <select name="export_project_id" id="export_project_id" required class="w-full max-w-md px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:ring-2 focus:ring-emerald-500">
                                 <option value="">请选择项目</option>
@@ -241,7 +241,7 @@
 
                 {% else %}
                 <!-- 编辑：仪器 + 文件 -->
-                <div class="p-5 sm:p-6 space-y-8">
+                <div id="guide-task-template-bind-panel" class="p-5 sm:p-6 space-y-8">
                     <div class="flex flex-wrap items-center justify-between gap-3">
                         <p class="text-sm text-slate-600">勾选文件库中的<strong>模板</strong>分类文件，加入或移出本任务模板。</p>
                         <a href="{% url 'library_task_management' %}?manage_task={{ manage_task.id }}{% if export_project_id_val %}&export_project_id={{ export_project_id_val }}{% endif %}{% if rp %}&return_project={{ rp }}{% endif %}"

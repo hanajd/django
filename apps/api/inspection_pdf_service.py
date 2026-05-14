@@ -876,7 +876,7 @@ def _inspected_org_from_submit_row(row: dict) -> str:
 
 
 def _per_report_title_line_for_merge(row: dict) -> str:
-    """单份报告在合并命名中使用的「报告名称」候选串（用于抽取 DSA/DR/CT 等缩写）。"""
+    """单份报告在合并命名中使用的「报告名称」候选串（用于抽取设备类型，见 pdf_merge.MERGED_REPORT_DEVICE_TYPE_LABELS）。"""
     sub = row.get("submit")
     if isinstance(sub, dict):
         ei = sub.get("equipmentInfo") or {}

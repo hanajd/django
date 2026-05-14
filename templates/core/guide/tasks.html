@@ -1,0 +1,35 @@
+{% extends "core/guide/section_base.html" %}
+{% block guide_section %}
+<section class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <h1 class="text-lg font-bold text-slate-900">任务模板库</h1>
+    <p class="text-slate-700">入口：左侧 <span class="guide-nav">任务模板库</span>（若看不到该项，说明当前角色无维护模板权限）。页内的 <span class="guide-ui">紫底文字</span> 表示您需要在界面上找到的按钮或标签页名称。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">一、什么时候需要新建模板</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>单位新增标准检测类型或需要新空白版式 PDF 时，在列表或工具栏找到 <span class="guide-ui">新建</span> 按钮进入创建流程（具体位置以界面为准）。</li>
+        <li>表单中填写 <strong>模板名称</strong>，并在单选或下拉中选择该模板用于<strong>现场记录类</strong>还是<strong>报告类</strong> PDF，最后点击 <span class="guide-ui">保存</span> / <span class="guide-ui">提交</span> 完成创建。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">二、新建后必做：勾回具体项目</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>仅在任务模板库中「存在」一份模板，并不代表任何项目会自动使用它。</li>
+        <li>请打开左侧 <span class="guide-nav">项目工作台</span>，在任务列表中勾选新建项，并点击 <span class="guide-ui">保存</span>，把「项目 ↔ 模板」关系钉死。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">三、模板与仪器绑定</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>在任务详情中打开 <span class="guide-ui">模板与仪器</span> 或名称相近的标签页，将已在 <span class="guide-nav">文件库</span> 上传的版式 PDF、JSON 等与该任务绑定。</li>
+        <li>若页面提供<strong>默认设备清单</strong>，勾选常用仪器后同样需要 <span class="guide-ui">保存</span>。</li>
+        <li>绑定后若 <span class="guide-ui">试导出</span> 仍提示缺文件：请回到文件库核对分类与文件名。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">四、试导出（核对版式）</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>点击 <span class="guide-ui">试导出</span>（或同类按钮），在弹窗或向导中选择一个<strong>已有检测数据</strong>的项目，生成 PDF 检查版式。</li>
+        <li>若提示<strong>缺少数据</strong>：说明所选项目下尚无对应填报，需先完成业务流程再重试。</li>
+        <li>若 PDF 乱版：可结合 <span class="guide-nav">模板编辑器</span> 与模板 JSON 检查字段绑定。</li>
+    </ul>
+
+    <p class="rounded-lg bg-slate-50 px-3 py-2 text-slate-600">小结：任务模板库回答的是——<strong>「每种检测用哪套版式、绑哪些文件、默认仪器是什么、版式对不对」</strong>。</p>
+</section>
+{% endblock %}

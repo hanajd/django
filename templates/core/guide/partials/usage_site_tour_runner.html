@@ -1,0 +1,426 @@
+{# 依赖：body 前已加载 driver.js.iife.js；head 已加载 driver.css 与 tour_driver_theme #}
+{% verbatim %}
+<script>
+(function () {
+    var STORAGE_KEY = 'usage_site_tour_v1';
+    var TOUR_START_URL = '/help/usage/tour/start/';
+    var TOUR_FINISH_URL = '/help/usage/tour/finish/';
+    var driverFactory = window.driver && window.driver.js && window.driver.js.driver;
+    if (!driverFactory) return;
+
+    var currentDriver = null;
+    var resumeTimer = null;
+
+    function getManifestRoot() {
+        var el = document.getElementById('usage-site-tour-manifest-data');
+        if (!el || !el.textContent) return null;
+        try {
+            return JSON.parse(el.textContent);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function getTourState() {
+        try {
+            var raw = sessionStorage.getItem(STORAGE_KEY);
+            return raw ? JSON.parse(raw) : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function setTourState(obj) {
+        try {
+            sessionStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
+        } catch (e) {}
+    }
+
+    function clearTourState() {
+        try {
+            sessionStorage.removeItem(STORAGE_KEY);
+        } catch (e) {}
+    }
+
+    function getCsrfToken() {
+        var m = document.cookie.match(/csrftoken=([^;]+)/);
+        return m ? decodeURIComponent(m[1].trim()) : '';
+    }
+
+    function postJson(url, bodyObj) {
+        return fetch(url, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken(),
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: JSON.stringify(bodyObj || {}),
+        }).then(function (r) {
+            return r.json().catch(function () {
+                return {};
+            }).then(function (j) {
+                return { ok: r.ok, status: r.status, json: j };
+            });
+        });
+    }
+
+    function postFinishOnce() {
+        if (window.__usageTourFinishPosted) return Promise.resolve();
+        window.__usageTourFinishPosted = true;
+        return postJson(TOUR_FINISH_URL, {}).catch(function () {});
+    }
+
+    function pathnameOf(urlPath) {
+        try {
+            return new URL(urlPath, window.location.origin).pathname;
+        } catch (e) {
+            return urlPath || '';
+        }
+    }
+
+    function segmentIndexById(manifest, id) {
+        var segs = (manifest && manifest.segments) || [];
+        for (var i = 0; i < segs.length; i++) {
+            if (segs[i].id === id) return i;
+        }
+        return -1;
+    }
+
+    function matchSegment(seg) {
+        if (!seg || window.location.pathname !== pathnameOf(seg.path)) return false;
+        if (seg.match_path_only) {
+            var q = window.location.search || '';
+            var subs = seg.require_query_substrings;
+            if (subs && subs.length) {
+                for (var i = 0; i < subs.length; i++) {
+                    if (q.indexOf(subs[i]) === -1) return false;
+                }
+            }
+            var absent = seg.require_query_absent_substrings;
+            if (absent && absent.length) {
+                for (var j = 0; j < absent.length; j++) {
+                    if (q.indexOf(absent[j]) !== -1) return false;
+                }
+            }
+            return true;
+        }
+        if (!seg.search) return true;
+        var want = new URLSearchParams(seg.search.replace(/^\?/, ''));
+        var have = new URLSearchParams(window.location.search.replace(/^\?/, ''));
+        var keys = Array.from(want.keys());
+        for (var k = 0; k < keys.length; k++) {
+            var key = keys[k];
+            if (have.get(key) !== want.get(key)) return false;
+        }
+        return true;
+    }
+
+    /** 新建任务 POST 后进入 manage_task=…，对齐「任务概览」段索引 */
+    function bumpTourFromTaskCreate() {
+        var manifest = getManifestRoot();
+        var st = getTourState();
+        if (!manifest || !manifest.segments || !st || !st.active) return;
+        var idx = typeof st.segmentIndex === 'number' ? st.segmentIndex : 0;
+        var cur = manifest.segments[idx];
+        if (!cur || cur.id !== 'task_template_new') return;
+        if (pathnameOf(cur.path) !== window.location.pathname) return;
+        var q = window.location.search || '';
+        if (/manage_task=\d+/.test(q) && q.indexOf('new_task=1') === -1) {
+            var j = segmentIndexById(manifest, 'task_post_create_tabs');
+            if (j >= 0) setTourState({ active: true, segmentIndex: j });
+        }
+    }
+
+    /** 用户点了「模板与仪器」后 URL 带 edit_task=1，切到绑定文件段 */
+    function bumpTabSwitchToBindSegment() {
+        var manifest = getManifestRoot();
+        var st = getTourState();
+        if (!manifest || !manifest.segments || !st || !st.active) return;
+        var idx = typeof st.segmentIndex === 'number' ? st.segmentIndex : 0;
+        var cur = manifest.segments[idx];
+        var q = window.location.search || '';
+        if (cur && cur.id === 'task_post_create_tabs' && q.indexOf('edit_task=1') !== -1) {
+            var j = segmentIndexById(manifest, 'task_bind_templates');
+            if (j >= 0) setTourState({ active: true, segmentIndex: j });
+        }
+    }
+
+    function pickInitialDriverStepIndex(segIndex, manifest) {
+        var segs = manifest && manifest.segments ? manifest.segments : [];
+        var seg = segs[segIndex];
+        if (!seg) return 0;
+        var q = window.location.search || '';
+        var tourOn = document.body && document.body.getAttribute('data-usage-workflow-tour') === '1';
+        if (tourOn && seg.id === 'project_workbench' && /project_id=\d+/.test(q) && q.indexOf('tab=tasks') !== -1) {
+            return 3;
+        }
+        return 0;
+    }
+
+    function buildDriverSteps(seg) {
+        var out = [];
+        var steps = seg.steps || [];
+        for (var i = 0; i < steps.length; i++) {
+            var st = steps[i];
+            if (!st.element || !document.querySelector(st.element)) continue;
+            var row = { element: st.element };
+            if (st.allow_interaction === true) row.disableActiveInteraction = false;
+            if (st.popover) row.popover = Object.assign({}, st.popover);
+            out.push(row);
+        }
+        return out;
+    }
+
+    function buildNextSegmentHref(nxt) {
+        if (nxt.merge_query_from_current) {
+            var params = new URLSearchParams(window.location.search.replace(/^\?/, ''));
+            var mq = nxt.merge_query || {};
+            Object.keys(mq).forEach(function (k) {
+                params.set(k, mq[k]);
+            });
+            var qs = params.toString();
+            return pathnameOf(nxt.path) + (qs ? '?' + qs : '');
+        }
+        return nxt.path + (nxt.search || '');
+    }
+
+    function reattachLastStepNavigation(driverSteps, segIndex, allSegs, driverRef, doneLabel, nextLabel) {
+        if (!driverSteps.length) return;
+        var last = driverSteps[driverSteps.length - 1];
+        last.popover = last.popover || {};
+        var orig = last.popover.onNextClick;
+        var isLastSeg = segIndex === allSegs.length - 1;
+        if (isLastSeg && doneLabel) last.popover.doneBtnText = doneLabel;
+        else if (!isLastSeg && nextLabel) last.popover.doneBtnText = nextLabel;
+        last.popover.onNextClick = function (_ev, _step, opts) {
+            if (orig) return orig(_ev, _step, opts);
+            var d = driverRef || (opts && opts.driver);
+            function doDestroy() {
+                try {
+                    if (d && typeof d.destroy === 'function') d.destroy();
+                } catch (err) {}
+            }
+            if (isLastSeg) {
+                postFinishOnce().finally(function () {
+                    clearTourState();
+                    setTimeout(doDestroy, 0);
+                });
+                return;
+            }
+            setTourState({ active: true, segmentIndex: segIndex + 1 });
+            var nxt = allSegs[segIndex + 1];
+            var href = buildNextSegmentHref(nxt);
+            setTimeout(function () {
+                doDestroy();
+                window.location.href = href;
+            }, 0);
+        };
+    }
+
+    function runSegment(segIndex) {
+        var manifest = getManifestRoot();
+        if (!manifest) return;
+        var segs = manifest.segments;
+        if (!segs || segIndex < 0 || segIndex >= segs.length) {
+            clearTourState();
+            return;
+        }
+        var seg = segs[segIndex];
+        var driverSteps = buildDriverSteps(seg);
+        var finishLabel = manifest.finish_label || '完成练习';
+        var isLastSeg = segIndex === segs.length - 1;
+        var doneBtnGlobal = isLastSeg ? finishLabel : '下一步';
+        if (!driverSteps.length) {
+            if (segIndex + 1 < segs.length) {
+                setTourState({ active: true, segmentIndex: segIndex + 1 });
+                var nxt0 = segs[segIndex + 1];
+                window.location.href = buildNextSegmentHref(nxt0);
+            } else {
+                postFinishOnce().finally(function () {
+                    clearTourState();
+                });
+            }
+            return;
+        }
+        if (currentDriver && currentDriver.isActive()) {
+            currentDriver.destroy();
+        }
+        var startStep = pickInitialDriverStepIndex(segIndex, manifest);
+        if (startStep >= driverSteps.length) startStep = 0;
+        var inst = driverFactory({
+            animate: false,
+            showProgress: true,
+            progressText: '本段 {{current}} / {{total}}',
+            popoverClass: 'guide-driver-popover',
+            allowClose: true,
+            overlayClickBehavior: function () {},
+            disableActiveInteraction: false,
+            overlayOpacity: 0.62,
+            overlayColor: '#0f172a',
+            stagePadding: 10,
+            stageRadius: 12,
+            nextBtnText: '下一步',
+            prevBtnText: '上一步',
+            doneBtnText: doneBtnGlobal,
+            showButtons: ['next', 'previous', 'close'],
+            smoothScroll: true,
+            steps: driverSteps,
+            onHighlighted: function (el) {
+                if (el && el.classList) el.classList.add('guide-tour-spotlight');
+            },
+            onDeselected: function (el) {
+                if (el && el.classList) el.classList.remove('guide-tour-spotlight');
+            },
+            onDestroyed: function () {
+                currentDriver = null;
+                document.querySelectorAll('.guide-tour-spotlight').forEach(function (n) {
+                    n.classList.remove('guide-tour-spotlight');
+                });
+            },
+            onCloseClick: function (_el, _step, opts) {
+                postFinishOnce().finally(function () {
+                    clearTourState();
+                    var d = currentDriver || (opts && opts.driver);
+                    setTimeout(function () {
+                        try {
+                            if (d && typeof d.destroy === 'function') d.destroy();
+                        } catch (e) {}
+                    }, 0);
+                });
+            },
+        });
+        reattachLastStepNavigation(driverSteps, segIndex, segs, inst, finishLabel, '下一步');
+        currentDriver = inst;
+        inst.drive(startStep);
+    }
+
+    function startTour() {
+        var manifest = getManifestRoot();
+        if (!manifest || !manifest.segments || !manifest.segments.length) return;
+        if (resumeTimer) {
+            clearTimeout(resumeTimer);
+            resumeTimer = null;
+        }
+        if (currentDriver && currentDriver.isActive()) return;
+        window.__usageTourFinishPosted = false;
+        postJson(TOUR_START_URL, {}).then(function (res) {
+            if (!res.ok || !res.json || !res.json.ok) {
+                var err = (res.json && res.json.error) || res.status;
+                alert(err === 'forbidden' ? '当前账号无法开始流程练习。' : '无法开始练习，请稍后重试。');
+                return;
+            }
+            setTourState({ active: true, segmentIndex: 0 });
+            var first = manifest.segments[0];
+            if (!matchSegment(first)) {
+                window.location.href = first.path + (first.search || '');
+                return;
+            }
+            setTimeout(function () {
+                runSegment(0);
+            }, 400);
+        });
+    }
+
+    function resetTour() {
+        var manifest = getManifestRoot();
+        if (!manifest || !manifest.segments || !manifest.segments.length) return;
+        if (resumeTimer) {
+            clearTimeout(resumeTimer);
+            resumeTimer = null;
+        }
+        clearTourState();
+        if (currentDriver && currentDriver.isActive()) {
+            currentDriver.destroy();
+        }
+        window.__usageTourFinishPosted = false;
+        postJson(TOUR_FINISH_URL, {})
+            .catch(function () {})
+            .then(function () {
+                return postJson(TOUR_START_URL, {});
+            })
+            .then(function (res) {
+                if (!res.ok || !res.json || !res.json.ok) return;
+                setTourState({ active: true, segmentIndex: 0 });
+                var first = manifest.segments[0];
+                if (!matchSegment(first)) {
+                    window.location.href = first.path + (first.search || '');
+                } else {
+                    setTimeout(function () {
+                        runSegment(0);
+                    }, 400);
+                }
+            });
+    }
+
+    function tryResume() {
+        bumpTourFromTaskCreate();
+        bumpTabSwitchToBindSegment();
+        var st = getTourState();
+        if (!st || !st.active) return;
+        if (resumeTimer) {
+            clearTimeout(resumeTimer);
+            resumeTimer = null;
+        }
+        var manifest = getManifestRoot();
+        if (!manifest || !manifest.segments) {
+            clearTourState();
+            return;
+        }
+        var segs = manifest.segments;
+        var idx = typeof st.segmentIndex === 'number' ? st.segmentIndex : 0;
+        if (idx >= segs.length) {
+            clearTourState();
+            return;
+        }
+        if (!matchSegment(segs[idx])) {
+            clearTourState();
+            return;
+        }
+        resumeTimer = setTimeout(function () {
+            resumeTimer = null;
+            runSegment(idx);
+        }, 500);
+    }
+
+    function wireUsageGuideIndexButtons() {
+        if (!window.UsageSiteTour || !UsageSiteTour.hasManifest()) return;
+        var b1 = document.getElementById('btn-guide-start');
+        var b2 = document.getElementById('btn-guide-reset');
+        if (!b1 || b1.getAttribute('data-usage-tour-wired') === '1') return;
+        b1.setAttribute('data-usage-tour-wired', '1');
+        b1.addEventListener('click', function () {
+            if (UsageSiteTour.isDriverActive()) return;
+            UsageSiteTour.start();
+        });
+        if (b2) {
+            b2.addEventListener('click', function () {
+                UsageSiteTour.reset();
+            });
+        }
+    }
+
+    window.UsageSiteTour = {
+        start: startTour,
+        reset: resetTour,
+        hasManifest: function () {
+            return !!document.getElementById('usage-site-tour-manifest-data');
+        },
+        isDriverActive: function () {
+            return !!(currentDriver && currentDriver.isActive());
+        },
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function () {
+            tryResume();
+            wireUsageGuideIndexButtons();
+        });
+    } else {
+        tryResume();
+        wireUsageGuideIndexButtons();
+    }
+})();
+</script>
+{% endverbatim %}

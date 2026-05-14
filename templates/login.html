@@ -14,6 +14,12 @@
         <form method="post">
             {% csrf_token %}
             
+            {% if request.GET.reason == 'web_elsewhere' %}
+            <div class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                此账号已在其它浏览器登录后台，当前会话已关闭。若您仍在使用原浏览器，请忽略；若非本人操作，请及时修改密码。
+            </div>
+            {% endif %}
+            
             <div class="mb-6">
                 <label for="username" class="block text-gray-700 text-sm font-medium mb-2">用户名</label>
                 <div class="relative">

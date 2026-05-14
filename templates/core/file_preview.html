@@ -34,7 +34,7 @@
         {% endif %}
     </div>
     {% if kind == 'unsupported' %}
-    <p class="text-gray-500">此文件类型不支持在线预览（支持图片、PDF、JSON、Markdown）。</p>
+    <p class="text-gray-500">此文件类型不支持在线预览（常见图片、PDF、数据与说明类文件可预览）。</p>
     {% elif kind == 'image' %}
     <div class="flex justify-center">
         <img src="{% url 'file_library_raw' lf.pk %}" alt="{{ lf.original_name }}" class="max-w-full h-auto rounded border border-gray-200">

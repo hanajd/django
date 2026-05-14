@@ -16,7 +16,7 @@ ROLE_PERMISSION_CATEGORY_META: Dict[str, Dict[str, str]] = {
     },
     "workflow": {
         "title": "流程与业务",
-        "subtitle": "检测流程管线、HTMLPDF、任务分配与业务登记等延伸能力",
+        "subtitle": "检测流程管线、模板编辑器、任务分配与业务登记等延伸能力",
     },
 }
 
@@ -29,7 +29,7 @@ ROLE_PERMISSION_MATRIX: List[Tuple[str, str, str, str]] = [
     (
         "perm_file_upload",
         "文件上传",
-        "向 OCR / JSON / 模板 / 现场记录 分类上传",
+        "向待识别文件、数据文件、模板、现场记录等分类上传",
         "basic",
     ),
     (
@@ -39,7 +39,7 @@ ROLE_PERMISSION_MATRIX: List[Tuple[str, str, str, str]] = [
         "basic",
     ),
     ("perm_file_download", "文件下载", "下载文件库中的文件", "basic"),
-    ("perm_file_preview", "文件预览", "在线预览 PDF / 图片 / JSON / Markdown 等", "basic"),
+    ("perm_file_preview", "文件预览", "在线预览 PDF、图片、数据与说明类文件等", "basic"),
     ("perm_file_delete", "文件删除", "单条删除与批量删除", "basic"),
     (
         "perm_file_scope_own_only",
@@ -47,11 +47,11 @@ ROLE_PERMISSION_MATRIX: List[Tuple[str, str, str, str]] = [
         "开启后仅能查看、预览、下载本人上传或产生的记录",
         "data",
     ),
-    ("perm_process_pipeline", "流程处理", "使用 MinerU + Ollama 集成管线", "workflow"),
+    ("perm_process_pipeline", "文档识别", "使用独立页面的文档识别与结构化抽取", "workflow"),
     (
         "perm_htmlpdf",
-        "HTMLPDF 模板编辑器",
-        "使用 HTMLPDF 可视化模板编辑与导出 API（不含流程处理管线）",
+        "模板编辑器",
+        "使用模板编辑器进行 PDF 模板版式编辑与试填导出（不含独立文档识别页）",
         "workflow",
     ),
     (
@@ -265,12 +265,16 @@ def _user_perm_overrides(user) -> Dict[str, bool]:
     return out
 
 
+# 未配置 party_a_demo_restrictions 时，仍按登录名识别演示类账号（默认 seed 为 test；保留 party_a_demo 兼容旧库）
+_PARTY_A_DEMO_LEGACY_USERNAMES = frozenset({"test", "party_a_demo"})
+
+
 def library_user_has_party_a_demo_restrictions(user) -> bool:
     """
     甲方演示类账号：禁止在后台为其他用户分配角色、管理用户/角色模块。
 
     由 ``ensure_party_a_demo`` 在 ``perm_overrides`` 中写入 ``party_a_demo_restrictions: true``；
-    未写入该键时，仍对默认用户名 ``party_a_demo`` 生效以便兼容旧数据。
+    未写入该键时，仍对演示用登录名（默认 ``test``，及旧名 ``party_a_demo``）生效以便兼容。
     """
     if not getattr(user, "is_authenticated", False):
         return False
@@ -280,7 +284,8 @@ def library_user_has_party_a_demo_restrictions(user) -> bool:
         raw = {}
     if isinstance(raw, dict) and raw.get("party_a_demo_restrictions") is True:
         return True
-    return (getattr(user, "username", "") or "").strip().lower() == "party_a_demo"
+    un = (getattr(user, "username", "") or "").strip().lower()
+    return un in _PARTY_A_DEMO_LEGACY_USERNAMES
 
 
 def _role_code(user) -> str:
@@ -290,8 +295,20 @@ def _role_code(user) -> str:
     return getattr(role, "code", "") or ""
 
 
+def library_user_may_use_htmlpdf_matrix_beta_controls(user) -> bool:
+    """
+    内测能力：固定表格模板 JSON、前端规则/AI JSON、定位前缀与左右填等。
+    仅 Django 超级用户或角色编码 super_admin 可使用（含编辑器工具栏与对应 API）。
+    """
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+    return _role_code(user) == "super_admin"
+
+
 def role_has_htmlpdf(user) -> bool:
-    """是否可使用 HTMLPDF 编辑器：独立权限，或与流程处理一并开启（兼容旧角色）。"""
+    """是否可使用模板编辑器：独立权限，或与 OCR 处理一并开启（兼容旧角色）。"""
     return role_has(user, "perm_htmlpdf") or role_has(user, "perm_process_pipeline")
 
 
@@ -300,7 +317,7 @@ def library_user_may_filled_pdf_toolchain(user) -> bool:
     是否可使用「检测数据填 PDF / 报告合并」等与模板填充相关的文件库能力。
 
     与 ``perm_process_pipeline``（MinerU + Ollama 管线）分离，便于 ``template_tester``
-    等仅有 HTMLPDF/模板侧权限的账号仍能导出现场记录、报告及任务模板试导。
+    等仅有模板编辑器/模板侧权限的账号仍能导出现场记录、报告及任务模板试导。
     """
     return role_has(user, "perm_process_pipeline") or role_has(user, "perm_htmlpdf")
 
@@ -331,6 +348,9 @@ def role_has(user, perm: str) -> bool:
     - Django 超级用户、角色代码 super_admin：固定全开（不受用户级覆盖影响）；
     - 否则若 UserProfile.perm_overrides 含该键，以覆盖值为准；
     - 否则取角色上对应布尔字段。
+    - ``perm_library_task_templates_write`` 不在 Role 表字段中，仅见 ``perm_overrides``；
+      对甲方演示类账号（见 ``library_user_has_party_a_demo_restrictions``）若未显式写入该键，
+      则默认视为 True，与 ``ensure_party_a_demo`` 意图一致并兼容旧数据。
     """
     if not getattr(user, "is_authenticated", False):
         return False
@@ -344,6 +364,8 @@ def role_has(user, perm: str) -> bool:
     overrides = _user_perm_overrides(user)
     if perm in overrides:
         return overrides[perm]
+    if perm == "perm_library_task_templates_write" and library_user_has_party_a_demo_restrictions(user):
+        return True
     return bool(getattr(role, perm, False))
 
 
@@ -540,7 +562,7 @@ def library_user_may_access_assigned_library_task(user, task) -> bool:
     """
     无「分配文件库任务」权限时，是否仍可打开某任务模板页（查看绑定、试导 PDF）。
 
-    已被分配到该任务（任意项目）的参与人允许，避免 party_a_demo 等账号被完全挡在任务模板库外。
+    已被分配到该任务（任意项目）的参与人允许，避免 test / party_a_demo 等演示账号被完全挡在任务模板库外。
     """
     if task is None:
         return False
@@ -690,3 +712,48 @@ def role_can_upload_library_category(user, category: str) -> bool:
     ):
         return role_has(user, "perm_file_upload")
     return False
+
+
+# 文件库默认配额：5 GiB（与 UserProfile.file_library_quota_bytes 默认值一致）
+FILE_LIBRARY_DEFAULT_QUOTA_BYTES = 5368709120
+
+
+def library_user_file_library_quota_bytes(user) -> int | None:
+    """
+    当前用户文件库配额（字节）。返回 None 表示不限制（超级用户或超级管理员/普通管理员角色）。
+    """
+    if not getattr(user, "is_authenticated", False):
+        return None
+    if getattr(user, "is_superuser", False):
+        return None
+    code = _role_code(user)
+    if code in ("super_admin", "admin"):
+        return None
+    try:
+        v = int(user.profile.file_library_quota_bytes)
+        return max(v, 0)
+    except Exception:
+        return FILE_LIBRARY_DEFAULT_QUOTA_BYTES
+
+
+def library_user_file_library_usage_bytes(user) -> int:
+    """当前用户已占用的文件库字节数（不含回收站中已软删记录）。"""
+    from django.db.models import Sum
+
+    if not getattr(user, "is_authenticated", False):
+        return 0
+    v = LibraryFile.objects.filter(created_by=user).aggregate(s=Sum("size"))["s"]
+    return int(v or 0)
+
+
+def library_user_file_library_upload_exceeds_quota(user, additional_bytes: int) -> Tuple[bool, int, int | None]:
+    """
+    若再增加 additional_bytes 是否超过配额。
+    返回 (是否超限, 当前已用字节, 配额上限或 None 表示不限)。
+    """
+    cap = library_user_file_library_quota_bytes(user)
+    used = library_user_file_library_usage_bytes(user)
+    if cap is None:
+        return False, used, None
+    add = max(int(additional_bytes), 0)
+    return (used + add > cap), used, cap

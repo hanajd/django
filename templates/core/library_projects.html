@@ -4,7 +4,7 @@
 
 {% block content %}
 <div class="max-w-[1600px] mx-auto px-4 sm:px-6 py-6 min-h-[calc(100vh-6rem)]">
-    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+    <div id="guide-project-header" class="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
             <h1 class="text-2xl font-bold text-slate-900 tracking-tight">项目工作台</h1>
             <p class="mt-1 text-sm text-slate-500 max-w-2xl">在同一页面完成项目选择、任务模板关联、流程与成员、文件绑定及 App 分配，减少在菜单间来回切换。</p>
@@ -20,7 +20,7 @@
 
     <div class="grid grid-cols-1 lg:grid-cols-[minmax(240px,280px)_minmax(0,1fr)] gap-6 items-start">
         <!-- 左侧：项目列表 -->
-        <aside class="lg:sticky lg:top-4 space-y-4">
+        <aside id="guide-project-sidebar" class="lg:sticky lg:top-4 space-y-4">
             <div class="rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden">
                 <div class="px-4 py-3 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white flex items-center justify-between">
                     <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">项目</span>
@@ -42,7 +42,7 @@
                         <div class="px-3 py-4 text-left text-xs leading-relaxed text-slate-600 space-y-2">
                             <p class="font-medium text-slate-700">当前账号下列表受数据范围限制</p>
                             <p>在「文件库仅本人数据」且未开启「分配文件库任务」时，左侧列出<strong>已向您分配任务的项目</strong>以及<strong>您本人创建的检测项目</strong>。</p>
-                            <p class="text-slate-500">若仍为空：请使用下方「新建项目」（需具备「创建检测项目」权限），或由管理员在「分配」中写入任务分配；仅创建空项目而未挂任务时，<code class="rounded bg-slate-100 px-1 py-0.5 text-[11px]">ensure_party_a_demo</code> 不会生成分配记录。</p>
+                            <p class="text-slate-500">若仍为空：请使用下方「新建项目」（需具备「创建检测项目」权限），或由管理员在「分配」中为您配置任务；仅创建空项目而未挂载任务时，不会自动出现分配记录。</p>
                         </div>
                         {% else %}
                         <p class="px-3 py-6 text-sm text-slate-400 text-center">暂无项目</p>
@@ -53,7 +53,7 @@
             </div>
 
             {% if can_assign_tasks or role_perm.perm_create_library_project %}
-            <details class="rounded-2xl border border-dashed border-indigo-200 bg-indigo-50/30 overflow-hidden group">
+            <details id="guide-project-create" class="rounded-2xl border border-dashed border-indigo-200 bg-indigo-50/30 overflow-hidden group">
                 <summary class="px-4 py-3 cursor-pointer text-sm font-medium text-indigo-900 list-none flex items-center justify-between">
                     <span><i class="ri-add-circle-line align-middle mr-1"></i> 新建项目</span>
                     <i class="ri-arrow-down-s-line text-slate-400 group-open:rotate-180 transition-transform"></i>
@@ -118,7 +118,7 @@
             </div>
 
             <!-- 标签栏 -->
-            <div class="flex flex-wrap gap-1 px-3 sm:px-4 py-2 bg-slate-50/90 border-b border-slate-100">
+            <div id="guide-project-workbench-tabs" class="flex flex-wrap gap-1 px-3 sm:px-4 py-2 bg-slate-50/90 border-b border-slate-100">
                 {% for key, label in workbench_tabs %}
                 <a href="?project_id={{ selected_project_id }}&tab={{ key }}"
                    class="px-3.5 py-2 rounded-lg text-sm font-medium transition-colors {% if workbench_tab == key %}bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200/80{% else %}text-slate-600 hover:text-slate-900 hover:bg-white/70{% endif %}">
@@ -147,13 +147,14 @@
                     </div>
                 </div>
                 <div class="rounded-xl border border-indigo-100 bg-indigo-50/40 p-4 text-sm text-indigo-950">
-                    <strong class="font-semibold">推荐工作流：</strong>先在「任务与模板」把任务挂到本项目 → 在「任务模板库」绑定 PDF/JSON 模板 → 「流程」配置成员与报告来源 → 「文件」补充非模板类文件 → 「分配」下发给检测 App 用户。
+                    <strong class="font-semibold">推荐工作流：</strong>先在「任务与模板」把任务挂到本项目 → 在「任务模板库」绑定版式 PDF 与配套数据文件 → 「流程」配置成员与报告来源 → 「文件」补充非模板类文件 → 「分配」下发给检测 App 用户。
                 </div>
                 {% endif %}
 
                 {% if workbench_tab == 'tasks' %}
+                <div id="guide-project-bind-workspace" class="rounded-xl border border-indigo-100 bg-indigo-50/30 p-5">
                     {% if selected_project and can_edit_project_workbench %}
-                    <div class="rounded-xl border border-indigo-100 bg-indigo-50/30 p-5">
+                    <div>
                         <h3 class="text-base font-semibold text-slate-900 mb-1">任务模板与项目</h3>
                         <p class="text-xs text-slate-600 mb-4">勾选任务后加入或移出本项目；模板文件绑定请在 <a href="{% url 'library_task_management' %}?return_project={{ selected_project_id }}" class="text-indigo-700 font-medium underline">任务模板库</a> 中完成。</p>
                         {% if not all_library_tasks %}
@@ -182,7 +183,10 @@
                     </div>
                     {% elif selected_project and not can_edit_project_workbench %}
                     <p class="text-sm text-slate-500">您无权修改项目与任务的关联。</p>
+                    {% else %}
+                    <p class="text-sm text-slate-600">请先在左侧选择一个项目，再在此勾选要关联的任务模板。</p>
                     {% endif %}
+                </div>
                 {% endif %}
 
                 {% if workbench_tab == 'workflow' %}

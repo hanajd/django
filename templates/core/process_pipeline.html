@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}流程处理{% endblock %}
-{% block page_title %}集成处理流程（utils.document_pipeline）{% endblock %}
+{% block title %}文档识别{% endblock %}
+{% block page_title %}文档识别{% endblock %}
 
 {% block content %}
 <style>
@@ -25,8 +25,8 @@
                 </svg>
             </span>
             <div>
-                <p class="text-sm font-semibold text-gray-900">正在执行管线</p>
-                <p class="text-xs text-gray-500 mt-1 leading-relaxed">合并 PDF → MinerU → Markdown 清洗 → Ollama 生成 JSON。耗时取决于文件大小与模型，请勿关闭或刷新本页。</p>
+                <p class="text-sm font-semibold text-gray-900">正在处理</p>
+                <p class="text-xs text-gray-500 mt-1 leading-relaxed">系统会依次完成文档合并、版式识别、文本整理与结构化提取。耗时取决于文件大小与当前负载，请勿关闭或刷新本页。</p>
             </div>
         </div>
         <p class="text-xs text-gray-400 mb-2">进度（不确定）：表示任务仍在进行</p>
@@ -38,7 +38,7 @@
 
 <div class="bg-white rounded-lg shadow p-6 mb-6">
     <p class="text-sm text-gray-600 mb-4">
-        从「OCR文件」分类中选择 PDF / JPG / PNG 提取铭牌，并转换为 JSON 文件。
+        从「待识别文件」分类中选择 PDF / JPG / PNG，识别铭牌等信息并生成可入库的结构化文件。
     </p>
     <form method="post" id="pipeline-form">
         {% csrf_token %}
@@ -88,21 +88,21 @@
 {% if result %}
 <div class="bg-white rounded-lg shadow p-6 space-y-4">
     <h3 class="text-lg font-semibold text-gray-800">处理结果</h3>
-    <p class="text-sm text-gray-600">批次 ID：<code class="bg-gray-100 px-1 rounded">{{ result.batch_id }}</code></p>
+    <p class="text-sm text-gray-600">处理编号：<span class="font-mono text-gray-800">{{ result.batch_id }}</span></p>
     <p class="text-sm">
         <a class="text-blue-600 hover:underline" href="{% url 'file_temp_batch' result.batch_id %}" target="_blank" rel="noopener">
             查看本次中间文件（临时文件库）
         </a>
     </p>
-    <p class="text-sm text-gray-600">管线状态：</p>
+    <p class="text-sm text-gray-600">处理过程摘要（供核对或联系管理员时说明情况）：</p>
     <pre class="text-xs bg-gray-50 border border-gray-200 rounded p-4 overflow-auto max-h-48">{{ result.pipeline_json }}</pre>
     <div>
-        <h4 class="font-medium text-gray-800 mb-2">设备 JSON</h4>
+        <h4 class="font-medium text-gray-800 mb-2">设备结构化结果</h4>
         <pre class="text-xs bg-gray-50 border border-gray-200 rounded p-4 overflow-auto max-h-96">{{ result.devices_json }}</pre>
     </div>
-    <h4 class="font-medium text-gray-800 mb-2">图片数据（images）</h4>
+    <h4 class="font-medium text-gray-800 mb-2">附图与版面数据</h4>
     <pre class="text-xs bg-gray-50 border border-gray-200 rounded p-4 overflow-auto max-h-64">{{ result.images_json }}</pre>
-    <p class="text-sm text-gray-600">每台仪器已拆分为独立 JSON 文件并登记到文件库「JSON 文件」分类，可在文件库中按日期筛选、预览或下载。</p>
+    <p class="text-sm text-gray-600">每台仪器已拆分为独立条目并登记到文件库「数据文件」分类，可在文件库中按日期筛选、预览或下载。</p>
 </div>
 {% endif %}
 <script>

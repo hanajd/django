@@ -1,0 +1,43 @@
+{% extends "core/guide/section_base.html" %}
+{% block guide_section %}
+<section class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <h1 class="text-lg font-bold text-slate-900">整体工作顺序</h1>
+    <p class="text-slate-700">现场检测类业务在后台里通常拆成几条线：<strong>项目是谁的</strong>、<strong>做哪些检测</strong>、<strong>资料与版式放在哪</strong>、<strong>谁去填与审</strong>、<strong>最后形成记录和报告</strong>。下面按「时间顺序 + 菜单对应关系」说明，便于您把界面和真实工作对上号。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">一、业务主线（心里先有这张图）</h2>
+    <p class="text-slate-700">实际流程多为：<strong>确定项目 → 明确检测项 → 准备模板与附件 → 现场或线上填报 → 形成现场记录 → 再形成对外报告</strong>。后台左侧大致为 <span class="guide-nav">项目工作台</span> → <span class="guide-nav">文件库</span> / <span class="guide-nav">任务模板库</span> →（填报与导出）→ 记录与报告相关能力，不必一次全弄懂，按项目推进即可。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">二、每一步在后台里对应什么</h2>
+    <ol class="list-decimal space-y-4 pl-5 text-slate-700">
+        <li>
+            <strong>先选项目</strong><br>
+            左侧进入 <span class="guide-nav">项目工作台</span>，在列表中<strong>点选当前要操作的项目</strong>。多数列表、<span class="guide-ui">分配</span>相关页签、挂任务都只对「当前选中项目」生效。若未选项目就去找文件或任务，往往看到空列表或灰色按钮。
+        </li>
+        <li>
+            <strong>把检测任务挂到项目上</strong><br>
+            在同一页面将本单位要做的标准检测<strong>勾选到本项目</strong>，并点击页面上的 <span class="guide-ui">保存</span> / <span class="guide-ui">确认</span>类按钮（具体文案以界面为准）。含义是：告诉系统「这个项目包含哪些检测项」。未勾选的任务，后续模板选择、流程、导出可能不会出现或会报错。
+        </li>
+        <li>
+            <strong>准备资料（文件库）</strong><br>
+            进入 <span class="guide-nav">文件库管理</span>，上传空白 PDF、JSON 模板、现场照片等，并按顶部分类 <span class="guide-ui">模板</span>、<span class="guide-ui">现场记录</span>、<span class="guide-ui">报告</span>、<span class="guide-ui">附件</span> 等存放。需要画版式或试填时，在「模板」列表中点击某 PDF 旁的 <span class="guide-ui">编辑模板</span> 进入 <span class="guide-nav">模板编辑器</span>。
+        </li>
+        <li>
+            <strong>定版式与仪器（任务模板库）</strong><br>
+            进入 <span class="guide-nav">任务模板库</span>，维护「每种检测长什么样」：绑定文件库里的版式、设置默认仪器、使用 <span class="guide-ui">试导出</span> 等核对 PDF。若点击了 <span class="guide-ui">新建</span> 增加模板类型，必须回到 <span class="guide-nav">项目工作台</span> 把新任务<strong>再勾进本项目并保存</strong>，否则系统不知道哪个项目要用它。
+        </li>
+        <li>
+            <strong>填报与模板编辑器（若账号具备权限）</strong><br>
+            在 <span class="guide-nav">模板编辑器</span> 中为 PDF 划定填写区并 <span class="guide-ui">保存坐标模板 JSON</span> 等；或在其他业务页完成检测数据填报。试填后可 <span class="guide-ui">导出已填写 PDF</span>，并在下拉中选择写入 <span class="guide-ui">现场记录</span> 或 <span class="guide-ui">报告</span>（详见「模板编辑器」专篇）。
+        </li>
+        <li>
+            <strong>现场记录与报告</strong><br>
+            数据与现场结果齐备后，按单位流程生成或导出<strong>现场记录</strong>，再进入<strong>报告</strong>环节。业务上常见关系是：<strong>同一项目下有多台设备则往往多份报告</strong>；<strong>单份报告常汇总多份现场记录</strong>；若项目对接多个科室、各科不必使用全部报告，可在 <span class="guide-nav">文件库</span> 的 <span class="guide-ui">报告</span> 分类下用 <span class="guide-ui">多选 + 合并</span> 等能力做组合交付（详见专篇「现场记录与报告」第一节）。
+        </li>
+    </ol>
+
+    <h2 class="text-base font-semibold text-slate-900">三、建议阅读顺序</h2>
+    <p class="text-slate-700">第一次使用：先读本篇建立整体图，再依次打开本站内 <span class="guide-nav">项目工作台</span>、<span class="guide-nav">文件库</span>、<span class="guide-nav">任务模板库</span> 各篇细看；需要画 PDF 时再读 <span class="guide-nav">模板编辑器</span> 专篇；最后浏览「现场记录与报告」与「常见情况与排查」。</p>
+
+    <p class="rounded-lg bg-slate-50 px-3 py-2 text-slate-600">小结：整体顺序回答的是——<strong>「从选项目到出报告，中间每一步在后台点哪里、先做什么」</strong>。</p>
+</section>
+{% endblock %}

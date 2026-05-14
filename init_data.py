@@ -272,7 +272,7 @@ if file_parent_menu:
             'roles': [super_admin, admin, app_user],
         },
         {
-            'name': '流程处理',
+            'name': 'OCR处理',
             'path': '/files/process/',
             'icon': 'cpu',
             'sort_order': 2,

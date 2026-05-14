@@ -5580,7 +5580,8 @@ def _persist_filled_pdf_from_submit(
     created, _ = save_library_binary_uploads(
         user, [wrapped], output_category,
         link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
-        link_object_id=case.pk, project_ids=[project.pk]
+        link_object_id=case.pk, project_ids=[project.pk],
+        enforce_storage_quota=False,
     )
     # 导出 PDF 仅挂项目/案件，不写入任务模板 M2M（任务模板只绑定「模板」类文件）。
     if not created:

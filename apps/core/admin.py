@@ -149,8 +149,7 @@ class InspectionCaseWorkflowStateAdmin(admin.ModelAdmin):
 admin.site.unregister(User)
 admin.site.register(User, CustomUserAdmin)
 
-# 注册自定义模型
-admin.site.register(UserProfile)
+# 注册自定义模型（UserProfile 通过 User 内联编辑，含「文件库容量配额」等字段）
 admin.site.register(Role, RoleAdmin)
 admin.site.register(Menu, MenuAdmin)
 admin.site.register(LibraryFile, LibraryFileAdmin)

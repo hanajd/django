@@ -1,0 +1,92 @@
+{% extends "core/guide/section_base.html" %}
+{% block guide_section %}
+<section class="space-y-4 rounded-2xl border border-indigo-100 bg-indigo-50/30 p-6 shadow-sm">
+    <h1 class="text-lg font-bold text-slate-900">模板编辑器</h1>
+    <p class="text-slate-700"><strong>用途</strong>：在浏览器中打开模板 PDF，用鼠标标出文字填写区、勾选框、图片区，保存为坐标 JSON 与（可选）前端规则 JSON，并可把试填结果<strong>导出为已填写 PDF</strong>写入文件库。下文 <span class="guide-ui">紫底</span> 均对应工具栏或页面上<strong>可见的按钮/下拉文字</strong>，请到编辑器里对照查找。</p>
+    <p class="text-slate-700"><strong>入口</strong>：<span class="guide-nav">文件库管理</span> → 顶部点 <span class="guide-ui">模板</span> → 在目标 PDF 行点击 <span class="guide-ui">编辑模板</span>（需具备「模板编辑器」或文档识别等相关权限）。打开后：上方为工具栏，左侧为填写区列表，中间为 PDF 画布。</p>
+
+    <div class="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+        <h2 class="text-base font-semibold text-slate-900">一、推荐操作顺序（首次建议严格按序）</h2>
+        <ol class="list-decimal space-y-3 pl-5 text-slate-700">
+            <li><strong>等待 PDF 加载完成</strong>：进入后若画布空白，请稍候；若长时间失败，检查网络或重新从文件库点击 <span class="guide-ui">编辑模板</span>。</li>
+            <li>在工具栏先用下拉框 <span class="guide-ui">选择模板 JSON</span> 选中一条已保存的 JSON（若有）。</li>
+            <li>点击 <span class="guide-ui">从文件库载入版式</span>，把 JSON 里的框线、类型套到当前 PDF。</li>
+            <li>若无 JSON，点击 <span class="guide-ui">按红字自动框选</span>（仅当待填项为 PDF 中文本层的<strong>红色</strong>字时有效）；生成后在左侧列表核对位置。</li>
+            <li>补画空白：依次点 <span class="guide-ui">框选文字填写区</span>、<span class="guide-ui">添加勾选框</span>、<span class="guide-ui">添加图片区域</span>，再在画布上拖拽（按钮高亮即处于画框模式）。</li>
+            <li>在左侧「填写区列表」改每个框的名称，与单位 JSON 的 <code class="rounded bg-slate-100 px-1 text-xs">id</code> 约定一致；<code class="rounded bg-slate-100 px-1 text-xs">f1、f2…</code> 为 PDF 顺序号。</li>
+            <li>核对底图时可点 <span class="guide-ui">隐藏填写框</span>，再点一次变为 <span class="guide-ui">显示填写框</span>。</li>
+            <li>点击 <span class="guide-ui">保存坐标模板 JSON</span> 写入文件库模板分类；若需网页填报，再点 <span class="guide-ui">保存前端规则 JSON</span>。</li>
+            <li>试填后，在工具栏右侧下拉选择 <span class="guide-ui">保存到现场记录</span> 或 <span class="guide-ui">保存到报告</span>，再点 <span class="guide-ui">导出已填写 PDF</span>。</li>
+        </ol>
+    </div>
+
+    <div class="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+        <h2 class="text-base font-semibold text-slate-900">二、工具栏按钮说明（与界面对照）</h2>
+        <dl class="space-y-4 text-slate-700">
+            <div>
+                <dt class="font-medium text-slate-900"><span class="guide-ui">选择模板 JSON</span>（下拉框）</dt>
+                <dd class="mt-1">仅切换候选文件，<strong>不会</strong>自动套版；需再点 <span class="guide-ui">从文件库载入版式</span> 或 <span class="guide-ui">载入已保存的填写内容</span>。</dd>
+            </div>
+            <div>
+                <dt class="font-medium text-slate-900"><span class="guide-ui">从文件库载入版式</span></dt>
+                <dd class="mt-1"><strong>前提</strong>：下拉框已选 JSON。<strong>作用</strong>：加载框线、类型等。<strong>典型场景</strong>：换 PDF 修订版但版式与旧 JSON 一致。</dd>
+            </div>
+            <div>
+                <dt class="font-medium text-slate-900"><span class="guide-ui">载入已保存的填写内容</span></dt>
+                <dd class="mt-1">在<strong>不改变框线</strong>的前提下回填已保存的填写值；适合换底图对比试填。</dd>
+            </div>
+            <div>
+                <dt class="font-medium text-slate-900">文件名输入框（占位如「保存到文件库时的文件名」）</dt>
+                <dd class="mt-1">保存 JSON / 导出 PDF 时作为建议文件名，可留空使用系统默认。</dd>
+            </div>
+            <div>
+                <dt class="font-medium text-slate-900"><span class="guide-ui">保存坐标模板 JSON</span></dt>
+                <dd class="mt-1">写入文件库 <span class="guide-ui">模板</span> 分类，供下次载入或程序填数。</dd>
+            </div>
+            <div>
+                <dt class="font-medium text-slate-900"><span class="guide-ui">保存前端规则 JSON</span></dt>
+                <dd class="mt-1">生成前端可渲染的规则结构；与仅坐标 JSON 用途不同。</dd>
+            </div>
+            <div>
+                <dt class="font-medium text-slate-900"><span class="guide-ui">隐藏填写框</span> / <span class="guide-ui">显示填写框</span></dt>
+                <dd class="mt-1">切换画布上框线可见性，不删数据。</dd>
+            </div>
+            <div>
+                <dt class="font-medium text-slate-900"><span class="guide-ui">框选文字填写区</span></dt>
+                <dd class="mt-1">拖拽生成文本框；画完后在左侧列表改标签与业务 id。</dd>
+            </div>
+            <div>
+                <dt class="font-medium text-slate-900"><span class="guide-ui">按红字自动框选</span></dt>
+                <dd class="mt-1">识别红色文本层批量建框；黑字、扫描图请改用手动 <span class="guide-ui">框选文字填写区</span>。</dd>
+            </div>
+            <div>
+                <dt class="font-medium text-slate-900"><span class="guide-ui">添加勾选框</span></dt>
+                <dd class="mt-1">拖出小矩形作打勾位。</dd>
+            </div>
+            <div>
+                <dt class="font-medium text-slate-900"><span class="guide-ui">添加图片区域</span></dt>
+                <dd class="mt-1">拖出区域用于粘贴或上传图片。</dd>
+            </div>
+            <div>
+                <dt class="font-medium text-slate-900"><span class="guide-ui">保存到现场记录</span> / <span class="guide-ui">保存到报告</span> + <span class="guide-ui">导出已填写 PDF</span></dt>
+                <dd class="mt-1">下拉决定写入文件库的分类；<span class="guide-ui">导出已填写 PDF</span> 把当前填写压入 PDF 并保存。</dd>
+            </div>
+        </dl>
+        <p class="text-xs text-slate-500 border-t border-slate-100 pt-3"><strong>内测项</strong>：<span class="guide-ui">保存固定表格模板 JSON</span>、<span class="guide-ui">保存前端规则 JSON</span>、<span class="guide-ui">保存前端 JSON（AI）</span>、<span class="guide-ui">定位前缀</span>、<span class="guide-ui">向右填</span>、<span class="guide-ui">向左填</span> 仅对<strong>系统管理员</strong>显示；其它账号以界面为准。</p>
+    </div>
+
+    <div class="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+        <h2 class="text-base font-semibold text-slate-900">三、左侧「填写区列表」</h2>
+        <ul class="list-disc space-y-2 pl-5 text-slate-700">
+            <li>序号与画布角标一致；悬停列表行与画布框可<strong>联动高亮</strong>。</li>
+            <li>点击行内空白可<strong>滚动定位</strong>到对应框；在行内编辑名称会同步画布。</li>
+            <li>使用 <span class="guide-ui">按红字自动框选</span> 后，红字填写区在画布上常以红字显示，便于与底图区分。</li>
+        </ul>
+    </div>
+
+    <div class="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+        <h2 class="text-base font-semibold text-slate-900">四、填写区命名（中文 + 下划线）</h2>
+        <p class="text-slate-700">填写区名称建议以<strong>中文</strong>为主，用下划线串联<strong>行主题</strong>与<strong>列名</strong>，例如 <span class="rounded bg-slate-100 px-1 text-xs">检测日期_年</span>、<span class="rounded bg-slate-100 px-1 text-xs">额定参数_kV</span>。系统自动生成的顺序号（如 f1、f2）与阅读顺序对应；人工阅读与表格对应关系以中文名称为准。</p>
+    </div>
+</section>
+{% endblock %}

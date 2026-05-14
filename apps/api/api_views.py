@@ -6,6 +6,7 @@ import json as json_std
 import threading
 import uuid
 
+from django.conf import settings
 from django.core import signing
 from django.db import close_old_connections
 from django.shortcuts import get_object_or_404
@@ -33,6 +34,7 @@ from apps.core.library_file_service import (
     save_library_binary_uploads,
 )
 from apps.core import pipeline_service
+from apps.core.session_lease import revoke_user_refresh_tokens
 from apps.core.models import LibraryFile, LibraryProject, Menu, Role, UserProfile
 from apps.core.models import LibraryOCRProcessTask
 from apps.core.serializers import (
@@ -48,7 +50,7 @@ _TEMPLATE_PDF_SIGNER = signing.TimestampSigner(salt="template-pdf-download")
 
 class LibraryOCRUploadAPIView(APIView):
     """
-    OCR 文件上传后异步流程处理（与 Web 文件库「OCR文件」分类一致）。
+    OCR 文件上传后异步 OCR 处理（与 Web 文件库「OCR文件」分类一致）。
 
     - 认证：``Authorization: Bearer <access>``（与 ``/api/v1/auth/login/`` 返回的 access 一致）。
     - 请求：``multipart/form-data``，字段 ``files`` 可多文件；也支持单字段 ``file``。
@@ -572,6 +574,8 @@ class AuthAPIView(APIView):
         # 验证用户名和密码
         user = authenticate(request, username=username, password=password)
         if user:
+            if getattr(settings, "AUTH_REVOKE_PRIOR_REFRESH_TOKENS_ON_LOGIN", True):
+                revoke_user_refresh_tokens(user)
             # 生成 JWT Token
             refresh = RefreshToken.for_user(user)
             

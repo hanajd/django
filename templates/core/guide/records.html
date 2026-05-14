@@ -1,0 +1,51 @@
+{% extends "core/guide/section_base.html" %}
+{% block guide_section %}
+<section class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <h1 class="text-lg font-bold text-slate-900">现场记录与报告</h1>
+    <p class="text-slate-700">在流程上，<strong>现场记录</strong>与<strong>报告</strong>处于检测业务的后段。与界面相关时，请关注 <span class="guide-nav">文件库管理</span> 顶部分类 <span class="guide-ui">现场记录</span>、<span class="guide-ui">报告</span> 及页内的上传、导出、合并类按钮（名称以单位配置为准）。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">一、项目、设备、现场记录与报告：对应关系（重点）</h2>
+    <p class="text-slate-700">下面用「检测项目」这条主线把几类成品串起来，便于理解它们在<strong>挂在项目下面</strong>时为什么常常是「多对多」、以及为什么要做<strong>报告合并</strong>。</p>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>
+            <strong>现场记录与报告分别解决什么问题</strong><br>
+            <strong>现场记录</strong>更贴近单次或单阶段的实测过程：原始读数、工况、签字栏等，往往对应「某次/某张表」的留痕。<strong>报告</strong>更贴近对外或对上的正式结论：在数据与现场材料齐备、经审核把关后，形成可交付的正式文本。二者在文件库里分属不同顶部分类存放，但业务上<strong>报告会引用、汇总现场侧已经固化的信息</strong>。
+        </li>
+        <li>
+            <strong>「一台设备」与「一份报告、多份现场记录」</strong><br>
+            在常见业务理解里，<strong>一份报告往往对应「一台设备（或一套检测对象）」在标准意义上的正式检测结论</strong>。但同一台设备在一次检测周期中，可能分多道工序、多张原始表、多次进场记录，因此<strong>同一份报告在内容上常常需要汇总多份现场记录表单</strong>——即<strong>一份报告对应多份现场记录</strong>是正常现象，而不是「一张现场记录就必须对应唯一一份报告」的简单一一映射。
+        </li>
+        <li>
+            <strong>「一个项目」与「多份报告」</strong><br>
+            一个检测<strong>项目</strong>下面，往往会挂多台设备、多套检测任务；每台设备或每条检测线都可能各自形成<strong>现场记录</strong>并最终出具<strong>报告</strong>。因此<strong>同一个项目下出现多份报告</strong>很常见：它们各自对应不同设备或不同检测单元，但都归集在该项目的资料与流程之下。
+        </li>
+        <li>
+            <strong>多科室与「报告合并 / 组合」</strong><br>
+            同一项目在实际运行中，可能对接<strong>多个科室</strong>（或多条对外交付线）。各科室对外或对内所需材料<strong>不一定相同</strong>，也未必需要项目下的<strong>全部</strong>报告原文。此时除了按权限与分配控制「谁能看到哪几份」之外，系统通常还会在<strong>报告</strong>分类下提供<strong>多选文件后合并</strong>（或单位配置的同类「组合」能力）：把已生成的多份报告 PDF，按规则合成一份对外件，或整理成某一科室需要的套装。具体操作以文件库报告页顶说明与按钮文案为准。
+        </li>
+    </ul>
+    <p class="rounded-lg border border-indigo-100 bg-indigo-50/50 px-3 py-2 text-sm text-slate-800">记忆口诀：<strong>项目管范围与归属；现场记录管过程留痕；报告管正式结论；多设备则多报告；单报告常合多份现场记录；多科室则常要「选用 + 合并」报告。</strong></p>
+
+    <h2 class="text-base font-semibold text-slate-900">二、现场记录：何时生成、存在哪里</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li><strong>业务含义</strong>：把当次现场检测过程与结果固定成文，常含原始数据、签字栏等。</li>
+        <li><strong>在后台中的位置</strong>：进入 <span class="guide-nav">文件库管理</span>，点顶部 <span class="guide-ui">现场记录</span> 管理成品；在 <span class="guide-nav">模板编辑器</span> 中也可在导出前将保存目标选为现场记录类选项。</li>
+        <li><strong>前置条件</strong>：在 <span class="guide-nav">项目工作台</span> 已挂任务并完成必要填报；若点导出类按钮提示缺数据，需先回到填报流程补齐。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">三、报告：与现场记录的关系</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li><strong>业务含义</strong>：对外正式结论，一般在现场记录与数据审核通过后编制；与第一节中「报告汇总多份现场记录」的叙述一致。</li>
+        <li><strong>在后台中的位置</strong>：在文件库点 <span class="guide-ui">报告</span> 分类管理成品；从模板编辑器导出时也可选报告类保存目标。</li>
+        <li><strong>区分存放</strong>：草稿、沟通稿勿与正式报告混放；附件用 <span class="guide-ui">附件</span> 等分类。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">四、多份合成一份（若单位启用）</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>在 <span class="guide-ui">报告</span> 列表中勾选多份文件后，点击页面上的 <span class="guide-ui">合并</span> 或单位配置的同类按钮；这与第一节所述「多科室只需部分报告、或需要组合对外」的需求相对应。</li>
+        <li>若按钮灰色：读页顶提示，常见为未选对类型、份数不足或无权限。</li>
+    </ul>
+
+    <p class="rounded-lg bg-slate-50 px-3 py-2 text-slate-600">小结：本模块回答的是——<strong>「现场结果何时固化为记录、何时升级为报告、在项目与设备维度上如何一对多/多对多、成品放哪、多份报告如何合并或组合交付」</strong>。</p>
+</section>
+{% endblock %}

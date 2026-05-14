@@ -1,0 +1,42 @@
+{% extends "core/guide/section_base.html" %}
+{% block guide_section %}
+<section class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <h1 class="text-lg font-bold text-slate-900">常见情况与排查</h1>
+    <p class="text-slate-700">下列问题多由前置步骤或当前上下文引起。文中 <span class="guide-nav">灰底</span> 为侧栏菜单名，<span class="guide-ui">紫底</span> 为页内按钮或分类标签，便于您回到系统里对照。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">一、列表是空的</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>先到 <span class="guide-nav">项目工作台</span> 确认是否已<strong>选中项目</strong>；许多列表只展示当前项目数据。</li>
+        <li>再确认任务是否已勾选进项目并点击过 <span class="guide-ui">保存</span>；是否已有填报或上传记录。</li>
+        <li>若在 <span class="guide-nav">文件库管理</span>：检查顶部是否点对了 <span class="guide-ui">模板</span>、<span class="guide-ui">现场记录</span>、<span class="guide-ui">报告</span> 等分类。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">二、按钮灰色或点击无反应</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>阅读按钮旁或页顶的灰色说明；常见原因：未选项目、未勾选文件、合并份数不足、无写权限等。</li>
+        <li>若弹窗或提示为<strong>无权操作</strong>：需管理员调整角色或由有权限账号操作。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">三、导出 PDF 提示缺数据</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>表示当前所选项目下缺少导出依赖的填报或记录。</li>
+        <li>回到 <span class="guide-nav">项目工作台</span> 与业务填报页补全数据后再点导出类按钮。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">四、模板编辑器：自动框选无结果或框错位</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li><strong>无结果</strong>：待填项不是红色文本层时，<span class="guide-ui">按红字自动框选</span> 会失败，请改用 <span class="guide-ui">框选文字填写区</span>。</li>
+        <li><strong>框错位</strong>：尝试浏览器缩放 100%、刷新后重新 <span class="guide-ui">从文件库载入版式</span> 或重新打开 <span class="guide-ui">编辑模板</span>。</li>
+        <li><strong>保存失败</strong>：检查登录是否过期、网络与弹窗拦截。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">五、左侧没有某个菜单</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>侧栏菜单由角色控制；例如看不到 <span class="guide-nav">任务模板库</span> 通常表示无模板维护权限。</li>
+        <li>需扩展权限时请联系单位管理员。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">六、与单位制度不一致时</h2>
+    <p class="text-slate-700 text-sm">若贵单位另有书面制度或培训材料，以单位规定为准；本说明描述常见默认用法。</p>
+</section>
+{% endblock %}

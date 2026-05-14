@@ -1,0 +1,48 @@
+{% extends "core/guide/section_base.html" %}
+{% block guide_section %}
+<section class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <h1 class="text-lg font-bold text-slate-900">项目工作台</h1>
+    <p class="text-slate-700">入口：左侧菜单 <span class="guide-nav">项目工作台</span>。这是围绕<strong>一个具体检测项目</strong>开展工作的中心页面：选项目、挂任务、看流程、做分配。下文凡带 <span class="guide-ui">紫底</span> 的，表示页内需点击的按钮或标签页文字。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">一、先选项目：当前上下文是什么</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>左侧为<strong>项目列表</strong>，点击一行即可选中。右侧主区域展示的内容、表格、按钮，通常都只对<strong>当前选中项目</strong>生效。</li>
+        <li>若列表为空：可能是账号未被加入任何项目，或当前筛选条件下无项目，需联系管理员确认权限与项目成员。</li>
+        <li>切换项目后，若发现右侧数据变化，属于正常现象——不同项目下的任务、文件、分配彼此独立。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">二、挂检测任务：本项目要做哪些标准检测</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>在页面中的<strong>任务勾选 / 任务列表</strong>区域，将本项目需要执行的检测类型<strong>勾选上</strong>，并务必点击 <span class="guide-ui">保存</span>、<span class="guide-ui">确定</span> 或页面底部同类按钮（以实际界面为准）。</li>
+        <li>含义是向系统声明：「本项目包含这些检测项」。未勾选的任务，后续在文件关联、模板选择、流程节点中可能<strong>不会出现</strong>或无法导出对应 PDF。</li>
+        <li>若单位后续在 <span class="guide-nav">任务模板库</span> 新增检测类型：配置好后仍需回到本页<strong>勾进本项目</strong>并再次保存。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">三、流程与岗位：每个环节谁负责</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>点击页面上名为 <span class="guide-ui">流程</span>、<span class="guide-ui">环节</span> 或类似的<strong>标签页</strong>，可查看编制、审核、签字等节点由谁承担（具体名称以界面为准）。</li>
+        <li>若您是外业人员，可重点确认：自己的名字是否出现在应负责的环节；若应由他人处理却显示自己，可请管理员核对流程配置。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">四、分配任务：外业与协作如何接到活</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>先点开 <span class="guide-ui">分配</span>（或名称相近的标签页），再按页面说明将任务分给外业、协作或其他岗位人员；提交前注意点击 <span class="guide-ui">保存</span> 类按钮。</li>
+        <li>被分配人需使用<strong>自己的账号</strong>登录，并在其可见的项目列表中进入同一项目，才能看到待办检测。</li>
+        <li>分配保存后若对方仍看不到：请核对是否选对项目、对方是否在本项目成员内、角色权限是否包含对应菜单。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">五、与任务模板库、文件库的衔接</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>若页面提示去配置版式、空白表、默认仪器，一般需进入左侧 <span class="guide-nav">任务模板库</span>，在 <span class="guide-ui">模板与仪器</span> 等页面完成绑定后再回到本项目继续。</li>
+        <li>若提示上传或选择模板 PDF / JSON，则需到 <span class="guide-nav">文件库管理</span> 对应顶部分类下操作；详见「文件库」一篇。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">六、与现场记录、报告数量的关系（概念）</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>您在项目下挂的<strong>检测任务</strong>，最终会对应到外业填报、<span class="guide-ui">现场记录</span>与<span class="guide-ui">报告</span>等成品。一个项目里若包含多台设备或多条检测线，文件库中<strong>同项目下出现多份报告</strong>是常见情况。</li>
+        <li>而<strong>一份报告</strong>在业务上又往往要<strong>汇总多份现场记录</strong>（多表、多阶段实测）；若多个科室各自需要不同套装，还可能用到报告列表中的<strong>合并 / 组合</strong>类功能。完整图示与表述见 <span class="guide-nav">现场记录与报告</span> 专篇第一节。</li>
+    </ul>
+
+    <p class="rounded-lg bg-slate-50 px-3 py-2 text-slate-600">小结：项目工作台回答的是——<strong>「这是哪个项目、做哪些检测、谁在什么环节负责、任务分给谁」</strong>；与记录/报告的数量关系见上一节及文件库专篇。</p>
+</section>
+{% endblock %}

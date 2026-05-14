@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ guide_section_title }} — 后台使用说明{% endblock %}
+{% block page_title %}后台使用说明：{{ guide_section_title }}{% endblock %}
+
+{% block content %}
+<div id="guide-app-root" class="mx-auto max-w-3xl space-y-6 pb-12 text-sm leading-relaxed text-slate-700" data-task-nav="{{ show_library_task_nav|yesno:'true,false' }}" data-guide-page="{{ guide_page }}">
+    {% include "core/guide/partials/ui_styles.html" %}
+    {% include "core/guide/partials/legend.html" %}
+    {% include "core/guide/partials/nav.html" %}
+    <div id="guide-section-root" class="space-y-6">
+        {% block guide_section %}{% endblock %}
+    </div>
+    {% include "core/guide/partials/pager.html" %}
+</div>
+{% endblock %}

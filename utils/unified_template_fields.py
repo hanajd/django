@@ -119,4 +119,15 @@ def _field_dict_to_compact_row(mf: Dict[str, Any]) -> Dict[str, Any]:
     cp = mf.get("checkboxPair")
     if isinstance(cp, dict) and cp:
         out["checkboxPair"] = cp
+    fe = str(mf.get("fieldExpression") or mf.get("pdfFieldExpression") or "").strip()
+    if fe:
+        out["fieldExpression"] = fe
+    jct = mf.get("judgmentCriteriaByTestType")
+    if isinstance(jct, dict) and jct:
+        out["judgmentCriteriaByTestType"] = jct
+    if mf.get("judgmentCriteriaManual") is True:
+        out["judgmentCriteriaManual"] = True
+    fv = mf.get("fieldVerdict")
+    if isinstance(fv, dict) and fv:
+        out["fieldVerdict"] = fv
     return out

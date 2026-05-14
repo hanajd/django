@@ -1,5 +1,5 @@
 """
-创建或更新「模板 + HTMLPDF」测试账号（无流程处理管线权限）。
+创建或更新「模板 + 模板编辑器」测试账号（无 OCR 处理管线权限）。
 
 示例::
 
@@ -14,7 +14,7 @@ from apps.core.models import Role, UserProfile
 
 
 class Command(BaseCommand):
-    help = "创建 template_tester 角色并绑定用户（文件库模板上传 + HTMLPDF，不含 MinerU/Ollama）"
+    help = "创建 template_tester 角色并绑定用户（文件库模板上传 + 模板编辑器，不含 MinerU/Ollama）"
 
     def add_arguments(self, parser):
         parser.add_argument("--username", default="htmlpdf_tester", help="登录用户名")
@@ -37,8 +37,8 @@ class Command(BaseCommand):
         role, created = Role.objects.get_or_create(
             code="template_tester",
             defaults={
-                "name": "模板与 HTMLPDF 测试",
-                "description": "仅文件库模板分类上传与 HTMLPDF 编辑器及相关 API",
+                "name": "模板编辑器（测试）",
+                "description": "仅文件库模板分类上传与模板编辑器及相关 API",
                 **defaults,
             },
         )
@@ -46,7 +46,7 @@ class Command(BaseCommand):
             for k, v in defaults.items():
                 setattr(role, k, v)
             if not (role.name or "").strip():
-                role.name = "模板与 HTMLPDF 测试"
+                role.name = "模板编辑器（测试）"
             role.save()
             self.stdout.write("已更新角色 template_tester 权限矩阵")
 
@@ -69,8 +69,8 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS(
                 f"用户「{username}」已绑定角色 template_tester；"
-                "拥有：文件库访问、向模板等分类上传、HTMLPDF 编辑器；"
-                "不拥有：流程处理、手动导出 PDF/报告（仍属管线侧能力）。"
+                "拥有：文件库访问、向模板等分类上传、模板编辑器；"
+                "不拥有：OCR 处理、手动导出 PDF/报告（仍属管线侧能力）。"
             )
         )
         if password == "htmlpdf_tester_change_me":

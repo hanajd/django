@@ -181,6 +181,82 @@
             color: #c9cdd4;
             font-family: Consolas, monospace;
         }
+        .formula-panel {
+            margin-top: 16px;
+            padding-top: 12px;
+            border-top: 1px solid #e5e6eb;
+        }
+        .formula-panel h4 {
+            font-size: 14px;
+            color: #1d2129;
+            margin-bottom: 8px;
+        }
+        .formula-block {
+            margin-bottom: 12px;
+        }
+        .formula-block label {
+            display: block;
+            font-size: 12px;
+            color: #4e5969;
+            margin-bottom: 4px;
+            font-weight: 600;
+        }
+        .formula-hint {
+            font-size: 11px;
+            color: #86909c;
+            line-height: 1.45;
+            margin-top: 4px;
+        }
+        .formula-panel textarea,
+        .formula-panel input[type="text"] {
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid #e5e6eb;
+            border-radius: 6px;
+            padding: 6px 8px;
+            font-size: 12px;
+            font-family: Consolas, "Microsoft YaHei", monospace;
+        }
+        .formula-panel textarea {
+            min-height: 52px;
+            resize: vertical;
+        }
+        .formula-panel .row2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .formula-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .formula-actions button {
+            padding: 5px 10px;
+            border-radius: 6px;
+            border: 1px solid #dcdfe6;
+            background: #fff;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .formula-actions button.primary {
+            border-color: #165dff;
+            color: #165dff;
+            background: rgba(22, 93, 255, 0.06);
+        }
+        .formula-actions button.primary:hover {
+            background: rgba(22, 93, 255, 0.12);
+        }
+        .formula-manual-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            margin-top: 8px;
+            font-size: 12px;
+            color: #4e5969;
+        }
+        .formula-manual-row input { margin-top: 2px; }
         .field-row-actions {
             display: flex;
             flex-direction: column;
@@ -482,43 +558,47 @@
 <body>
     <div class="toolbar">
         <div class="toolbar-group">
-        <strong>PDF模板编辑工具</strong>
+        <strong>模板编辑器</strong>
         <input type="file" id="imageFilePicker" accept="image/*" style="display:none;">
-        <select id="templateJsonSelect" title="从模板分类选择 JSON">
-            <option value="">模板JSON</option>
+        <select id="templateJsonSelect" title="从文件库模板分类选择已保存的 JSON">
+            <option value="">选择模板 JSON</option>
         </select>
-        <button id="btnImportTemplate">导入模板</button>
-        <button id="btnImportContent">导入内容</button>
-        <input type="text" id="templateName" placeholder="导出文件名(可选)">
-        <button id="saveTemplate">保存模板</button>
-        <button id="saveMatrixTemplate">保存固定表格模板JSON</button>
-        <button id="saveFrontendTemplate">保存前端JSON(规则)</button>
-        <button id="saveFrontendTemplateAI">保存前端JSON(AI)</button>
+        <button id="btnImportTemplate" type="button" title="把下拉框中选中的 JSON 版式套到当前 PDF 上">从文件库载入版式</button>
+        <button id="btnImportContent" type="button" title="仅载入 JSON 里已保存的填写内容，不改变框线位置">载入已保存的填写内容</button>
+        <input type="text" id="templateName" placeholder="保存到文件库时的文件名（可选）">
+        <button id="saveTemplate" type="button" title="保存当前各框坐标与属性到文件库「模板」">保存坐标模板 JSON</button>
+        <button id="saveMatrixTemplate" type="button">保存固定表格模板 JSON</button>
+        <button id="saveFrontendTemplate" type="button" title="按规则生成可前端渲染的 JSON">保存前端规则 JSON</button>
+        <button id="saveFrontendTemplateAI" type="button" title="由服务端结合大模型生成前端 JSON">保存前端 JSON（AI）</button>
         </div>
         <div class="toolbar-group">
-        <button id="btnToggleFields">隐藏输入框</button>
-        <button id="btnMarkPrefix">定位前缀</button>
-        <button id="btnFillRight">向右填</button>
-        <button id="btnFillLeft">向左填</button>
-        <button id="btnAddText">添加输入框</button>
-        <button id="btnAutoRedBoxes" type="button" title="按 PDF 红色文本自动划框（与 full_text_coordinate_boxing 合并规则一致）">自动划框(红字)</button>
-        <button id="btnAddCheck">添加打勾</button>
-        <button id="btnAddImage">添加图片框</button>
+        <button id="btnToggleFields" type="button">隐藏填写框</button>
+        <button id="btnMarkPrefix" type="button">定位前缀</button>
+        <button id="btnFillRight" type="button">向右填</button>
+        <button id="btnFillLeft" type="button">向左填</button>
+        <button id="btnAddText" type="button" title="在 PDF 上拖出矩形，作为文字填写区域">框选文字填写区</button>
+        <button id="btnAutoRedBoxes" type="button" title="识别 PDF 中的红色文字并自动生成填写框">自动框选</button>
+        <button id="btnAddCheck" type="button" title="拖出小框作为勾选位置">添加勾选框</button>
+        <button id="btnAddImage" type="button" title="拖出区域用于粘贴或上传图片">添加图片区域</button>
         </div>
         <div class="toolbar-group">
         <select id="outputCategory" title="生成 PDF 存储分类">
             <option value="site_record">保存到现场记录</option>
             <option value="report">保存到报告</option>
         </select>
-        <button id="btnSave">导出填写PDF</button>
+        <button id="btnSave" type="button" title="把当前填写结果写入 PDF 并保存到文件库">导出已填写 PDF</button>
         </div>
     </div>
 
     <div class="main">
         <aside class="sidebar">
-            <h3>输入框列表</h3>
-            <p class="sidebar-hint">序号与画布角标一致；悬停列表或控件会联动高亮；点击行内空白处可滚动定位到对应控件；标签可直接在下方输入框修改，画布会同步更新。「自动划框(红字)」仅识别 PDF 中红色字体区域，填写内容在画布上以红字显示。</p>
+            <h3>填写区列表</h3>
+            <p class="sidebar-hint">序号与画布角标一致；悬停列表或控件会联动高亮；点击行内空白处可滚动定位到对应控件；标签可直接在下方输入框修改，画布会同步更新。「自动框选」仅识别 PDF 中红色字体区域，填写内容在画布上以红字显示。选中某一栏后，可在下方「公式与判定」用 f 编号填写算术公式与合格标准（详见项目文档 json公式说明.md）。</p>
             <div id="fieldList"></div>
+            <div class="formula-panel" id="fieldFormulaPanelWrap">
+                <h4>公式与判定（当前栏位）</h4>
+                <div id="fieldFormulaPanel"></div>
+            </div>
         </aside>
         <div class="pdf-scroll">
             <div id="pdfContainer" class="pdf-container"></div>
@@ -528,6 +608,10 @@
     <script>
         const pdfjsLib = window['pdfjs-dist/build/pdf'];
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+        const HTMLPDF_MATRIX_BETA_UI = window.HTMLPDF_MATRIX_BETA_UI === true || window.HTMLPDF_MATRIX_BETA_UI === 'true';
+        const HTMLPDF_PARTY_A_DEMO_UI = window.HTMLPDF_PARTY_A_DEMO_UI === true || window.HTMLPDF_PARTY_A_DEMO_UI === 'true';
+        const HTMLPDF_SHOW_MATRIX_BETA_TOOLBAR = HTMLPDF_MATRIX_BETA_UI && !HTMLPDF_PARTY_A_DEMO_UI;
 
         let pdfDoc = null,
             pageMeta = {},
@@ -542,16 +626,31 @@
         const pdfContainer = document.getElementById('pdfContainer');
         const pdfScroll = document.querySelector('.pdf-scroll');
         const btnToggleFields = document.getElementById('btnToggleFields');
-        const btnMarkPrefix = document.getElementById('btnMarkPrefix');
-        const btnFillRight = document.getElementById('btnFillRight');
-        const btnFillLeft = document.getElementById('btnFillLeft');
+        let btnMarkPrefix = document.getElementById('btnMarkPrefix');
+        let btnFillRight = document.getElementById('btnFillRight');
+        let btnFillLeft = document.getElementById('btnFillLeft');
         const btnAddText = document.getElementById('btnAddText');
         const btnAutoRedBoxes = document.getElementById('btnAutoRedBoxes');
         const btnAddCheck = document.getElementById('btnAddCheck');
         const btnAddImage = document.getElementById('btnAddImage');
-        const btnSaveMatrixTemplate = document.getElementById('saveMatrixTemplate');
+        let btnSaveMatrixTemplate = document.getElementById('saveMatrixTemplate');
         const imageFilePicker = document.getElementById('imageFilePicker');
         const templateJsonSelect = document.getElementById('templateJsonSelect');
+        if (!HTMLPDF_SHOW_MATRIX_BETA_TOOLBAR) {
+            const strip = (el) => {
+                if (el && el.parentNode) el.parentNode.removeChild(el);
+            };
+            strip(btnSaveMatrixTemplate);
+            btnSaveMatrixTemplate = null;
+            strip(document.getElementById('saveFrontendTemplate'));
+            strip(document.getElementById('saveFrontendTemplateAI'));
+            strip(btnMarkPrefix);
+            btnMarkPrefix = null;
+            strip(btnFillRight);
+            btnFillRight = null;
+            strip(btnFillLeft);
+            btnFillLeft = null;
+        }
         let drawMode = false,
             currentFieldType = 'text',
             drawActive = false,
@@ -678,11 +777,251 @@
             }
         }
 
+        let selectedFieldId = null;
+
+        function ensureJudgmentObj(f) {
+            if (!f) return;
+            if (!f.judgmentCriteriaByTestType || typeof f.judgmentCriteriaByTestType !== 'object') {
+                f.judgmentCriteriaByTestType = { acceptance: '', status: '' };
+            }
+            const j = f.judgmentCriteriaByTestType;
+            j.acceptance = j.acceptance != null ? String(j.acceptance) : '';
+            j.status = j.status != null ? String(j.status) : '';
+        }
+
+        function inferJudgmentCriteriaStrings(f) {
+            const parts = [f.placeholder, f.originalPlaceholder, f.title, f.id].filter(Boolean).map(s => String(s));
+            const blob = parts.join(' ');
+            let acc = '';
+            let st = '';
+            const setBoth = (s) => {
+                const t = String(s || '').trim();
+                acc = t;
+                st = t;
+            };
+            let m = blob.match(/(f\d+)\s*\+-\s*([\d.]+)/i);
+            if (m) {
+                setBoth(m[1] + '±' + m[2]);
+                return { acceptance: acc, status: st };
+            }
+            m = blob.match(new RegExp('(f\\d+|[\\d.]+)\\s*(?:±|\\+/-)\\s*([\\d.]+)'));
+            if (m) {
+                setBoth(m[1] + '±' + m[2]);
+                return { acceptance: acc, status: st };
+            }
+            m = blob.match(/(<=|>=|≤|≥|<|>)\s*([\d.]+|f\d+)/i);
+            if (m) {
+                let op = m[1];
+                if (op === '≤') op = '<=';
+                if (op === '≥') op = '>=';
+                setBoth(op + m[2]);
+                return { acceptance: acc, status: st };
+            }
+            m = blob.match(/不超过\s*([\d.]+)/);
+            if (m) {
+                setBoth('<=' + m[1]);
+                return { acceptance: acc, status: st };
+            }
+            return { acceptance: '', status: '' };
+        }
+
+        function normalizeFieldExpressionInput(raw, pdfFieldId) {
+            let s = String(raw || '').trim();
+            if (!s) return '';
+            const esc = String(pdfFieldId || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const re = new RegExp('^' + esc + '\\s*=\\s*(.+)$', 'i');
+            const m = s.match(re);
+            if (m) s = String(m[1] || '').trim();
+            return s;
+        }
+
+        function renderFormulaPanel() {
+            const host = document.getElementById('fieldFormulaPanel');
+            if (!host) return;
+            const f = selectedFieldId ? getFieldById(selectedFieldId) : null;
+            host.innerHTML = '';
+            if (!f) {
+                const p = document.createElement('p');
+                p.className = 'formula-hint';
+                p.textContent = '请先在上方列表点击某一栏，或点击画布上文本框使其获得焦点，再在此处填写公式与判定。';
+                host.appendChild(p);
+                return;
+            }
+            ensureJudgmentObj(f);
+            const rawPid = (f.pdfFieldId && /^f\d+$/i.test(String(f.pdfFieldId)))
+                ? String(f.pdfFieldId).toLowerCase()
+                : String(f.id || '').trim();
+            const pid = rawPid || 'f?';
+
+            const h = document.createElement('div');
+            h.className = 'formula-hint';
+            h.textContent = '当前 pdfFieldId：' + pid + '（与 JSON、现场判定引擎一致）';
+            host.appendChild(h);
+
+            const b1 = document.createElement('div');
+            b1.className = 'formula-block';
+            const l1 = document.createElement('label');
+            l1.textContent = '算术公式（只填右边）';
+            b1.appendChild(l1);
+            const t1 = document.createElement('textarea');
+            t1.spellcheck = false;
+            t1.placeholder = '例：f34+f35  或  (f12+f13)/2\n也可粘贴整式：' + pid + '=f34+f35，保存时会自动去掉左边的「' + pid + '=」';
+            t1.value = String(f.fieldExpression || '');
+            t1.addEventListener('input', () => {
+                f.fieldExpression = normalizeFieldExpressionInput(t1.value, pid);
+            });
+            t1.addEventListener('blur', () => {
+                f.fieldExpression = normalizeFieldExpressionInput(t1.value, pid);
+                t1.value = String(f.fieldExpression || '');
+            });
+            b1.appendChild(t1);
+            const h1 = document.createElement('div');
+            h1.className = 'formula-hint';
+            h1.textContent = '保存到模板 JSON 的字段名为 fieldExpression；仅允许 f 数字与 + - * / % ( )。';
+            b1.appendChild(h1);
+            host.appendChild(b1);
+
+            const cbMan = document.createElement('input');
+            cbMan.type = 'checkbox';
+            cbMan.id = 'judgmentCriteriaManualCb';
+            cbMan.checked = !!f.judgmentCriteriaManual;
+            cbMan.addEventListener('change', () => {
+                f.judgmentCriteriaManual = !!cbMan.checked;
+            });
+
+            const b2 = document.createElement('div');
+            b2.className = 'formula-block';
+            const l2 = document.createElement('label');
+            l2.textContent = '判定标准（按检测类型）';
+            b2.appendChild(l2);
+            const row2 = document.createElement('div');
+            row2.className = 'row2';
+            const accWrap = document.createElement('div');
+            const la = document.createElement('div');
+            la.className = 'formula-hint';
+            la.style.fontWeight = '600';
+            la.textContent = '验收 acceptance';
+            const ia = document.createElement('input');
+            ia.type = 'text';
+            ia.value = f.judgmentCriteriaByTestType.acceptance;
+            ia.placeholder = '<=25.0';
+            ia.addEventListener('input', () => {
+                f.judgmentCriteriaByTestType.acceptance = ia.value;
+                f.judgmentCriteriaManual = true;
+                cbMan.checked = true;
+            });
+            accWrap.appendChild(la);
+            accWrap.appendChild(ia);
+            const stWrap = document.createElement('div');
+            const ls = document.createElement('div');
+            ls.className = 'formula-hint';
+            ls.style.fontWeight = '600';
+            ls.textContent = '状态 status';
+            const is = document.createElement('input');
+            is.type = 'text';
+            is.value = f.judgmentCriteriaByTestType.status;
+            is.placeholder = '可与验收相同';
+            is.addEventListener('input', () => {
+                f.judgmentCriteriaByTestType.status = is.value;
+                f.judgmentCriteriaManual = true;
+                cbMan.checked = true;
+            });
+            stWrap.appendChild(ls);
+            stWrap.appendChild(is);
+            row2.appendChild(accWrap);
+            row2.appendChild(stWrap);
+            b2.appendChild(row2);
+            const h2 = document.createElement('div');
+            h2.className = 'formula-hint';
+            h2.textContent = '示例：<=20.0、>=f33、f23±10.0（对称允差）。手写 f23+-10.0 在自动检索时会规范为 f23±10.0。';
+            b2.appendChild(h2);
+            host.appendChild(b2);
+
+            const actions = document.createElement('div');
+            actions.className = 'formula-actions';
+            const btnPick = document.createElement('button');
+            btnPick.type = 'button';
+            btnPick.className = 'primary';
+            btnPick.textContent = '把选中的 f 号插入公式';
+            const sel = document.createElement('select');
+            sel.style.flex = '1';
+            sel.style.minWidth = '0';
+            sel.appendChild(new Option('— 选择栏位 —', ''));
+            fields.forEach((o) => {
+                if (o.id === f.id) return;
+                const lab = String(o.placeholder || o.id || '').slice(0, 24);
+                sel.appendChild(new Option(o.id + ' · ' + lab, o.id));
+            });
+            btnPick.addEventListener('click', () => {
+                const v = String(sel.value || '').trim();
+                if (!v) {
+                    alert('请先在右侧下拉框选择要插入的栏位。');
+                    return;
+                }
+                t1.focus();
+                const start = t1.selectionStart != null ? t1.selectionStart : t1.value.length;
+                const end = t1.selectionEnd != null ? t1.selectionEnd : start;
+                const before = t1.value.slice(0, start);
+                const after = t1.value.slice(end);
+                t1.value = before + v + after;
+                f.fieldExpression = normalizeFieldExpressionInput(t1.value, pid);
+                const pos = start + v.length;
+                t1.setSelectionRange(pos, pos);
+            });
+            actions.appendChild(btnPick);
+            actions.appendChild(sel);
+            host.appendChild(actions);
+
+            const btnAuto = document.createElement('button');
+            btnAuto.type = 'button';
+            btnAuto.textContent = '自动检索判定（读标签文案）';
+            btnAuto.addEventListener('click', () => {
+                if (f.judgmentCriteriaManual) {
+                    alert('已勾选「判定已由人工定型」。请先取消勾选再自动检索；未勾选时以您手写的判定为准。');
+                    return;
+                }
+                const g = inferJudgmentCriteriaStrings(f);
+                if (!g.acceptance && !g.status) {
+                    alert('未从当前标签中识别到判定标准。请手工填写，或把「≤25.0」「f23±10」等写进侧栏标签后再试。');
+                    return;
+                }
+                f.judgmentCriteriaByTestType.acceptance = g.acceptance;
+                f.judgmentCriteriaByTestType.status = g.status || g.acceptance;
+                renderFormulaPanel();
+            });
+            host.appendChild(btnAuto);
+
+            const manRow = document.createElement('div');
+            manRow.className = 'formula-manual-row';
+            const lbMan = document.createElement('label');
+            lbMan.htmlFor = 'judgmentCriteriaManualCb';
+            lbMan.textContent = '判定已由人工定型：打开后「自动检索」不会改写上方两行（推荐在改好标准后勾选）';
+            manRow.appendChild(cbMan);
+            manRow.appendChild(lbMan);
+            host.appendChild(manRow);
+
+            const clr = document.createElement('div');
+            clr.className = 'formula-actions';
+            const btnClr = document.createElement('button');
+            btnClr.type = 'button';
+            btnClr.textContent = '清空本栏公式与判定';
+            btnClr.addEventListener('click', () => {
+                f.fieldExpression = '';
+                f.judgmentCriteriaByTestType = { acceptance: '', status: '' };
+                f.judgmentCriteriaManual = false;
+                renderFormulaPanel();
+            });
+            clr.appendChild(btnClr);
+            host.appendChild(clr);
+        }
+
         function refreshFieldList() {
             const el = document.getElementById('fieldList');
             el.innerHTML = '';
             if (!fields.length) {
                 el.textContent = '暂无输入框';
+                selectedFieldId = null;
+                renderFormulaPanel();
                 return;
             }
             fields.forEach((f, idx) => {
@@ -739,6 +1078,8 @@
                     if (ev.target.closest('button') || ev.target.closest('.field-row-label-input')) return;
                     clearAllRowHighlights();
                     setRowHighlightForField(f.id, true);
+                    selectedFieldId = f.id;
+                    renderFormulaPanel();
                     scrollFieldIntoView(f.id);
                 });
                 row.addEventListener('mouseenter', () => setCanvasHoverForField(f.id, true));
@@ -746,6 +1087,7 @@
                 el.appendChild(row);
             });
             updateFieldBadges();
+            renderFormulaPanel();
         }
 
         function removeField(id) {
@@ -755,6 +1097,7 @@
             if (item.wrap) item.wrap.remove();
             else item.el?.remove();
             fields.splice(idx, 1);
+            if (selectedFieldId === id) selectedFieldId = null;
             refreshFieldList();
             applyAllNamingMarks();
         }
@@ -839,6 +1182,13 @@
                 };
                 wrap.appendChild(badge);
                 wrap.appendChild(box);
+                wrap.addEventListener('mousedown', (ev) => {
+                    if (ev.target === box) return;
+                    selectedFieldId = f.id;
+                    clearAllRowHighlights();
+                    setRowHighlightForField(f.id, true);
+                    renderFormulaPanel();
+                });
                 meta.pageDiv.appendChild(wrap);
                 f.wrap = wrap;
                 f.el = box;
@@ -863,6 +1213,13 @@
                 };
                 wrap.appendChild(badge);
                 wrap.appendChild(box);
+                wrap.addEventListener('mousedown', (ev) => {
+                    if (ev.target === box || ev.target.tagName === 'IMG') return;
+                    selectedFieldId = f.id;
+                    clearAllRowHighlights();
+                    setRowHighlightForField(f.id, true);
+                    renderFormulaPanel();
+                });
                 meta.pageDiv.appendChild(wrap);
                 f.wrap = wrap;
                 f.el = box;
@@ -880,6 +1237,19 @@
                 f.value = i.value;
                 fitInputStyle(i, f);
             };
+            i.addEventListener('focus', () => {
+                selectedFieldId = f.id;
+                clearAllRowHighlights();
+                setRowHighlightForField(f.id, true);
+                renderFormulaPanel();
+            });
+            wrap.addEventListener('mousedown', (ev) => {
+                if (ev.target === i) return;
+                selectedFieldId = f.id;
+                clearAllRowHighlights();
+                setRowHighlightForField(f.id, true);
+                renderFormulaPanel();
+            });
             wrap.appendChild(badge);
             wrap.appendChild(i);
             meta.pageDiv.appendChild(wrap);
@@ -897,6 +1267,27 @@
                 if (!Object.prototype.hasOwnProperty.call(normalized, 'originalPlaceholder')) {
                     normalized.originalPlaceholder = normalized.placeholder || '';
                 }
+                if (!Object.prototype.hasOwnProperty.call(normalized, 'fieldExpression')) {
+                    normalized.fieldExpression = '';
+                } else {
+                    normalized.fieldExpression = String(normalized.fieldExpression || '').trim();
+                }
+                if (!normalized.judgmentCriteriaByTestType || typeof normalized.judgmentCriteriaByTestType !== 'object') {
+                    normalized.judgmentCriteriaByTestType = { acceptance: '', status: '' };
+                } else {
+                    normalized.judgmentCriteriaByTestType = {
+                        acceptance: normalized.judgmentCriteriaByTestType.acceptance != null
+                            ? String(normalized.judgmentCriteriaByTestType.acceptance) : '',
+                        status: normalized.judgmentCriteriaByTestType.status != null
+                            ? String(normalized.judgmentCriteriaByTestType.status) : ''
+                    };
+                }
+                if (!Object.prototype.hasOwnProperty.call(normalized, 'judgmentCriteriaManual')) {
+                    normalized.judgmentCriteriaManual = false;
+                } else {
+                    normalized.judgmentCriteriaManual = !!normalized.judgmentCriteriaManual;
+                }
+                if (normalized.title == null) normalized.title = '';
                 return normalized;
             });
             ensureUniqueFieldIds(fields);
@@ -971,9 +1362,9 @@
         function setDrawMode(on, fieldType = 'text') {
             drawMode = on;
             currentFieldType = fieldType;
-            btnMarkPrefix.classList.toggle('active', on && fieldType === 'prefix');
-            btnFillRight.classList.toggle('active', on && fieldType === 'fillRight');
-            btnFillLeft.classList.toggle('active', on && fieldType === 'fillLeft');
+            if (btnMarkPrefix) btnMarkPrefix.classList.toggle('active', on && fieldType === 'prefix');
+            if (btnFillRight) btnFillRight.classList.toggle('active', on && fieldType === 'fillRight');
+            if (btnFillLeft) btnFillLeft.classList.toggle('active', on && fieldType === 'fillLeft');
             btnAddText.classList.toggle('active', on && fieldType === 'text');
             btnAddCheck.classList.toggle('active', on && fieldType === 'check');
             btnAddImage.classList.toggle('active', on && fieldType === 'image');
@@ -982,7 +1373,7 @@
 
         function applyFieldsVisibility() {
             pdfContainer.classList.toggle('hide-fields', !showFieldsOnCanvas);
-            btnToggleFields.textContent = showFieldsOnCanvas ? '隐藏输入框' : '显示输入框';
+            btnToggleFields.textContent = showFieldsOnCanvas ? '隐藏填写框' : '显示填写框';
         }
 
         function renderMarks() {
@@ -1270,7 +1661,11 @@
                 fieldType: 'text',
                 value: '',
                 checked: false,
-                imageData: ''
+                imageData: '',
+                fieldExpression: '',
+                judgmentCriteriaByTestType: { acceptance: '', status: '' },
+                judgmentCriteriaManual: false,
+                title: ''
             };
             normalizeFieldSize(f);
             fields.push(f);
@@ -1300,7 +1695,11 @@
                     fieldType: 'check',
                     value: '',
                     checked: false,
-                    imageData: ''
+                    imageData: '',
+                    fieldExpression: '',
+                    judgmentCriteriaByTestType: { acceptance: '', status: '' },
+                    judgmentCriteriaManual: false,
+                    title: ''
                 };
                 normalizeFieldSize(f);
                 fields.push(f);
@@ -1404,7 +1803,11 @@
                     fieldType: currentFieldType,
                     value: '',
                     checked: false,
-                    imageData: ''
+                    imageData: '',
+                    fieldExpression: '',
+                    judgmentCriteriaByTestType: { acceptance: '', status: '' },
+                    judgmentCriteriaManual: false,
+                    title: ''
                 };
                 normalizeFieldSize(f);
                 fields.push(f);
@@ -1418,9 +1821,9 @@
             showFieldsOnCanvas = !showFieldsOnCanvas;
             applyFieldsVisibility();
         };
-        btnMarkPrefix.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'prefix'), 'prefix');
-        btnFillRight.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'fillRight'), 'fillRight');
-        btnFillLeft.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'fillLeft'), 'fillLeft');
+        btnMarkPrefix && (btnMarkPrefix.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'prefix'), 'prefix'));
+        btnFillRight && (btnFillRight.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'fillRight'), 'fillRight'));
+        btnFillLeft && (btnFillLeft.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'fillLeft'), 'fillLeft'));
         btnAddText.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'text'), 'text');
         btnAddCheck.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'check'), 'check');
         btnAddImage.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'image'), 'image');
@@ -1438,10 +1841,10 @@
                     credentials: 'same-origin',
                     body: JSON.stringify({})
                 });
-                const data = await parseJsonResponseOrThrow(res, '自动划框失败');
+                const data = await parseJsonResponseOrThrow(res, '自动框选失败');
                 const list = data.fields || [];
                 if (!list.length) {
-                    alert('未检测到红色文本区域。请确认 PDF 中待填项为红色字体，或改用「添加输入框」手动划框。');
+                    alert('未检测到红色文本区域。请确认 PDF 中待填项为红色字体，或改用「框选文字填写区」手动划框。');
                     return;
                 }
                 list.forEach(raw => {
@@ -1462,7 +1865,11 @@
                         value: '',
                         checked: false,
                         imageData: '',
-                        checkboxPair: raw.checkboxPair && typeof raw.checkboxPair === 'object' ? raw.checkboxPair : null
+                        checkboxPair: raw.checkboxPair && typeof raw.checkboxPair === 'object' ? raw.checkboxPair : null,
+                        fieldExpression: '',
+                        judgmentCriteriaByTestType: { acceptance: '', status: '' },
+                        judgmentCriteriaManual: false,
+                        title: ''
                     });
                     fields.push(f);
                     mountField(f);
@@ -1489,8 +1896,11 @@
                 keepLf = String(optLibraryTemplateFileId).trim();
                 keepLt = '';
             }
-            const loadedFields = (d.fields || []).map((f, idx) => ({
-                id: f.id || 'f' + (idx + 1),
+            const loadedFields = (d.fields || []).map((f, idx) => {
+                const pdfFieldIdRaw = String(f.pdfFieldId || '').trim();
+                const sid = /^f\d+$/i.test(pdfFieldIdRaw) ? pdfFieldIdRaw.toLowerCase() : (f.id || 'f' + (idx + 1));
+                return {
+                id: sid,
                 page: f.page,
                 x: f.x,
                 y: f.y,
@@ -1506,8 +1916,18 @@
                 checkboxPair: f.checkboxPair && typeof f.checkboxPair === 'object' ? f.checkboxPair : null,
                 labelUserEdited: !!f.labelUserEdited,
                 labelPersistedFromFile: f.labelPersistedFromFile != null ? !!f.labelPersistedFromFile : true,
-                labelRuleNamed: !!f.labelRuleNamed
-            })).map(item => normalizeFieldSize(item));
+                labelRuleNamed: !!f.labelRuleNamed,
+                fieldExpression: String(f.fieldExpression || f.pdfFieldExpression || '').trim(),
+                judgmentCriteriaByTestType: (f.judgmentCriteriaByTestType && typeof f.judgmentCriteriaByTestType === 'object')
+                    ? {
+                        acceptance: f.judgmentCriteriaByTestType.acceptance != null ? String(f.judgmentCriteriaByTestType.acceptance) : '',
+                        status: f.judgmentCriteriaByTestType.status != null ? String(f.judgmentCriteriaByTestType.status) : ''
+                    }
+                    : { acceptance: '', status: '' },
+                judgmentCriteriaManual: !!f.judgmentCriteriaManual,
+                title: f.title != null ? String(f.title) : ''
+                };
+            }).map(item => normalizeFieldSize(item));
             ensureUniqueFieldIds(loadedFields);
             fields.forEach(item => {
                 if (item.wrap) item.wrap.remove();
@@ -1515,6 +1935,7 @@
             });
             fields = loadedFields;
             fieldIdSeq = fields.length ? Math.max(...fields.map(f => parseInt(f.id.slice(1)) || 0)) + 1 : 1;
+            selectedFieldId = null;
             fields.forEach(f => mountField(f));
             refreshFieldList();
             const tm = (d && d.template_meta && typeof d.template_meta === 'object') ? d.template_meta : {};
@@ -1541,7 +1962,7 @@
                 return;
             }
             if (!fields.length) {
-                alert('请先导入模板，再导入内容');
+                alert('请先点击「从文件库载入版式」，再使用「载入已保存的填写内容」');
                 return;
             }
             const contentMap = d.content || {};
@@ -1606,7 +2027,7 @@
             const res = await fetch('/files/htmlpdf/api/template-jsons/');
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || '读取模板 JSON 列表失败');
-            templateJsonSelect.innerHTML = '<option value="">模板JSON</option>';
+            templateJsonSelect.innerHTML = '<option value="">选择模板 JSON</option>';
             (data.templates || []).forEach(t => {
                 const opt = document.createElement('option');
                 opt.value = String(t.id);
@@ -1665,6 +2086,17 @@
                 if (i.labelUserEdited) row.labelUserEdited = true;
                 if (i.labelPersistedFromFile) row.labelPersistedFromFile = true;
                 if (i.labelRuleNamed) row.labelRuleNamed = true;
+                const fe = String(i.fieldExpression || '').trim();
+                if (fe) row.fieldExpression = fe;
+                ensureJudgmentObj(i);
+                const acc = String(i.judgmentCriteriaByTestType.acceptance || '').trim();
+                const st = String(i.judgmentCriteriaByTestType.status || '').trim();
+                if (acc || st) {
+                    row.judgmentCriteriaByTestType = {};
+                    if (acc) row.judgmentCriteriaByTestType.acceptance = acc;
+                    if (st) row.judgmentCriteriaByTestType.status = st;
+                }
+                if (i.judgmentCriteriaManual) row.judgmentCriteriaManual = true;
                 return row;
             });
         }
@@ -1763,8 +2195,8 @@
                     }
                 })
             }).then(async r => {
-                const d = await parseJsonResponseOrThrow(r, '保存模板失败');
-                alert('模板已保存到文件库「模板」分类');
+                const d = await parseJsonResponseOrThrow(r, '保存坐标模板失败');
+                alert('坐标模板 JSON 已保存到文件库「模板」分类');
                 if (d.file && d.file.library_url) {
                     window.open(d.file.library_url, '_blank');
                 }
@@ -1807,10 +2239,12 @@
             await syncAutoRedNamesBeforeSave();
             exportJsonMerged();
         };
-        btnSaveMatrixTemplate.onclick = async () => {
-            await syncAutoRedNamesBeforeSave();
-            exportMatrixTemplateJson();
-        };
+        if (btnSaveMatrixTemplate) {
+            btnSaveMatrixTemplate.onclick = async () => {
+                await syncAutoRedNamesBeforeSave();
+                exportMatrixTemplateJson();
+            };
+        }
         function saveFrontendTemplate(exportMode = 'rule') {
             const baseName = document.getElementById('templateName').value.trim() || 'template';
             const name = baseName.endsWith('.json') ? baseName.replace(/\.json$/i, '_frontend.json') : (baseName + '_frontend.json');
@@ -1848,21 +2282,27 @@
                     }
                 })
             }).then(async r => {
-                const d = await parseJsonResponseOrThrow(r, '保存前端JSON失败');
-                alert('前端渲染 JSON 已保存到文件库「模板」分类');
+                const d = await parseJsonResponseOrThrow(r, '保存前端规则 JSON 失败');
+                alert('前端规则 JSON 已保存到文件库「模板」分类');
                 if (d.file && d.file.library_url) {
                     window.open(d.file.library_url, '_blank');
                 }
             }).catch(err => alert(err.message));
         }
-        document.getElementById('saveFrontendTemplate').onclick = async () => {
-            await syncAutoRedNamesBeforeSave();
-            saveFrontendTemplate('rule');
-        };
-        document.getElementById('saveFrontendTemplateAI').onclick = async () => {
-            await syncAutoRedNamesBeforeSave();
-            saveFrontendTemplate('llm');
-        };
+        const elSaveFrontendTemplate = document.getElementById('saveFrontendTemplate');
+        if (elSaveFrontendTemplate) {
+            elSaveFrontendTemplate.onclick = async () => {
+                await syncAutoRedNamesBeforeSave();
+                saveFrontendTemplate('rule');
+            };
+        }
+        const btnSaveFrontendTemplateAI = document.getElementById('saveFrontendTemplateAI');
+        if (btnSaveFrontendTemplateAI) {
+            btnSaveFrontendTemplateAI.onclick = async () => {
+                await syncAutoRedNamesBeforeSave();
+                saveFrontendTemplate('llm');
+            };
+        }
 
         document.getElementById('btnSave').onclick = () => {
             const outputCategory = document.getElementById('outputCategory')?.value || 'site_record';
@@ -1890,7 +2330,7 @@
             }).then(async r => {
                 const d = await parseJsonResponseOrThrow(r, '保存PDF失败');
                 const where = d.saved_to === 'report' ? '报告' : '现场记录';
-                alert(`填写 PDF 已保存到文件库「${where}」分类`);
+                alert(`已填写 PDF 已保存到文件库「${where}」分类`);
                 if (d.file && d.file.library_url) {
                     window.open(d.file.library_url, '_blank');
                 }

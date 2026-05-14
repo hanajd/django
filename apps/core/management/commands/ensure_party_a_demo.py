@@ -2,13 +2,23 @@
 甲方演示账号：可走检测业务链（与《检测业务多角色与工作流说明》中的 App 侧角色一致），
 通过「文件库仅本人数据」+ 仅绑定指定项目的任务分配，避免看到或操作其他账号的任务与项目数据。
 
-使用前请先在后台或项目管理中准备好「演示项目」：挂载至少一个 LibraryTask（现场记录/报告等），
-再执行本命令将该项目下全部任务分配给该用户。
+**不提供** ``--project-code`` 时：只创建/更新演示用户（登录名、密码、角色与 ``perm_overrides``），
+并仍会在目标用户名为 ``test`` 时尝试将单独的 ``party_a_demo`` 重命名为 ``test``；**不会**查找项目、
+写入任务分配或调用 ``sync_project_for_solo_tester``。适合仅需改登录名或密码、不想动项目编码的场景。
+
+若库里仍是旧名 ``party_a_demo``，执行 ``python manage.py ensure_party_a_demo``（默认 ``--username test``）
+即可在无其它「test」用户时自动重命名；若已存在重名，请在「用户管理」中手工处理。
+
+需要把演示项目下任务分配给该用户时，再带上 ``--project-code``（及可选 ``--create-project-if-missing``）执行。
 
 示例::
 
+    # 仅用户（含旧名 party_a_demo → test）
+    python manage.py ensure_party_a_demo --username test --password '强密码'
+
+    # 用户 + 项目任务分配
     python manage.py ensure_party_a_demo \\
-        --username party_a_demo \\
+        --username test \\
         --password '强密码' \\
         --project-code DEMO_PARTY_A \\
         --create-project-if-missing
@@ -25,7 +35,7 @@ from apps.core.models import (
 )
 
 
-# 与种子角色 authorized_signatory 对齐：能力覆盖登记、文件库、流程/HTMLPDF 等；
+# 与种子角色 authorized_signatory 对齐：能力覆盖登记、文件库、流程/模板编辑器等；
 # 再通过 UserProfile.perm_overrides 收紧数据范围并关闭「分配文件库任务」；
 # 通过 perm_library_task_templates_write 允许在任务模板库新建并维护本人创建的任务模板；
 # 并关闭用户/角色/菜单管理与 party_a_demo_restrictions 标记，禁止演示账号为他人分配角色。
@@ -45,28 +55,32 @@ _PARTY_A_OVERRIDES = {
 
 class Command(BaseCommand):
     help = (
-        "创建或更新甲方演示账号：全检测链能力 + 仅本人/已分配项目数据，"
+        "创建或更新甲方演示账号：全检测链能力 + 仅本人/已分配项目数据（提供 --project-code 时还会写入项目任务分配）；"
         "不向他人分配文件库任务（perm_assign_tasks 关闭），"
-        "但可在任务模板库新建并维护本人创建的任务模板（perm_library_task_templates_write）"
+        "但可在任务模板库新建并维护本人创建的任务模板（perm_library_task_templates_write）。"
+        "省略 --project-code 时只更新用户与权限覆盖，不调整任何项目。"
     )
 
     def add_arguments(self, parser):
-        parser.add_argument("--username", default="party_a_demo", help="登录用户名")
+        parser.add_argument("--username", default="test", help="登录用户名（默认 test）")
         parser.add_argument(
             "--password",
-            default="party_a_demo_change_me",
+            default="test_change_me",
             help="初始密码（生产环境请使用强密码）",
         )
         parser.add_argument("--email", default="", help="可选邮箱")
         parser.add_argument(
             "--project-code",
-            required=True,
-            help="演示用文件库项目编码（须已挂载 LibraryTask；可用 --create-project-if-missing 自动建空项目）",
+            default="",
+            help=(
+                "可选。演示用文件库项目编码；提供时须已挂载 LibraryTask（或用 --create-project-if-missing 建空项目）。"
+                "省略则只更新用户/密码/角色与权限覆盖，不写任务分配、不改项目。"
+            ),
         )
         parser.add_argument(
             "--create-project-if-missing",
             action="store_true",
-            help="若不存在该 code 的项目则创建一条启用中的空项目（仍需后续挂载任务或再次执行以分配）",
+            help="仅在与 --project-code 联用时生效：若不存在该 code 的项目则创建启用中的空项目",
         )
         parser.add_argument(
             "--project-name",
@@ -78,16 +92,43 @@ class Command(BaseCommand):
         username = (options["username"] or "").strip()
         password = options["password"]
         email = (options.get("email") or "").strip()
-        project_code = (options["project_code"] or "").strip()
+        project_code = (options.get("project_code") or "").strip()
         create_if_missing = bool(options.get("create_project_if_missing"))
         project_name = (options.get("project_name") or "").strip()
 
         if not username:
             self.stderr.write(self.style.ERROR("username 不能为空"))
             return
-        if not project_code:
-            self.stderr.write(self.style.ERROR("--project-code 不能为空"))
-            return
+        if create_if_missing and not project_code:
+            self.stdout.write(
+                self.style.WARNING("已忽略 --create-project-if-missing（未提供 --project-code）。")
+            )
+
+        # 默认演示名改为 test 后：若库里仍只有 party_a_demo，自动重命名，避免用户管理里一直显示旧名
+        target_username = username
+        legacy_demo = User.objects.filter(username__iexact="party_a_demo").first()
+        if legacy_demo is not None and target_username.lower() == "test":
+            other_test = (
+                User.objects.filter(username__iexact="test")
+                .exclude(pk=legacy_demo.pk)
+                .first()
+            )
+            if other_test is not None:
+                self.stderr.write(
+                    self.style.ERROR(
+                        "已存在另一用户名为「test」的账号，无法将「party_a_demo」自动重命名。"
+                        "请在用户管理中删除或改名其中一方后再执行。"
+                    )
+                )
+                return
+            if legacy_demo.username != target_username:
+                legacy_demo.username = target_username
+                legacy_demo.save(update_fields=["username"])
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f"已将数据库中的旧演示登录名「party_a_demo」重命名为「{target_username}」。"
+                    )
+                )
 
         role = Role.objects.filter(code=_BASE_ROLE_CODE).first()
         if role is None:
@@ -97,26 +138,6 @@ class Command(BaseCommand):
                 )
             )
             return
-
-        project = LibraryProject.objects.filter(code=project_code).first()
-        if project is None:
-            if not create_if_missing:
-                self.stderr.write(
-                    self.style.ERROR(
-                        f"未找到项目 code={project_code!r}；可加上 --create-project-if-missing 自动创建"
-                    )
-                )
-                return
-            display = project_name or project_code
-            # created_by 在第二步绑定用户后再写
-            project = LibraryProject.objects.create(
-                code=project_code,
-                name=display,
-                description="甲方演示沙箱（由 ensure_party_a_demo 创建）",
-                is_active=True,
-                created_by=None,
-            )
-            self.stdout.write(self.style.WARNING(f"已新建空项目: {project.code} / {project.name}"))
 
         user, _ = User.objects.get_or_create(
             username=username,
@@ -139,6 +160,41 @@ class Command(BaseCommand):
         prof.role = role
         prof.perm_overrides = merged
         prof.save(update_fields=["role", "perm_overrides", "updated_at"])
+
+        if not project_code:
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f"用户「{username}」已更新（角色 {_BASE_ROLE_CODE}、演示权限覆盖已写入）。"
+                    "未提供 --project-code：已跳过项目查找、任务分配与流程岗位同步。"
+                    "需要绑定演示项目时请再次执行并加上 --project-code。"
+                )
+            )
+            if password == "test_change_me":
+                self.stdout.write(
+                    self.style.WARNING(
+                        "当前为默认密码，请务必使用 --password 指定强密码并在交付后督促甲方修改。"
+                    )
+                )
+            return
+
+        project = LibraryProject.objects.filter(code=project_code).first()
+        if project is None:
+            if not create_if_missing:
+                self.stderr.write(
+                    self.style.ERROR(
+                        f"未找到项目 code={project_code!r}；可加上 --create-project-if-missing 自动创建"
+                    )
+                )
+                return
+            display = project_name or project_code
+            project = LibraryProject.objects.create(
+                code=project_code,
+                name=display,
+                description="甲方演示沙箱（由 ensure_party_a_demo 创建）",
+                is_active=True,
+                created_by=None,
+            )
+            self.stdout.write(self.style.WARNING(f"已新建空项目: {project.code} / {project.name}"))
 
         if project.created_by_id is None:
             project.created_by = user
@@ -182,14 +238,14 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS(
                 f"用户「{username}」已绑定角色 {_BASE_ROLE_CODE}；"
-                "权限覆盖：业务登记、文件库、流程处理、HTMLPDF 等（随角色库配置）；"
+                "权限覆盖：业务登记、文件库、OCR 处理、模板编辑器等（随角色库配置）；"
                 "数据范围：仅本人上传/产生的文件库记录，以及本项目中通过任务分配授权的数据；"
                 "不向他人分配文件库任务（perm_assign_tasks 关闭），"
                 "可在任务模板库新建并维护本人创建的任务模板（perm_library_task_templates_write）；"
                 "不可进入用户/角色管理或为他人分配角色（party_a_demo_restrictions + 相关 perm 关闭）。"
             )
         )
-        if password == "party_a_demo_change_me":
+        if password == "test_change_me":
             self.stdout.write(
                 self.style.WARNING(
                     "当前为默认密码，请务必使用 --password 指定强密码并在交付后督促甲方修改。"

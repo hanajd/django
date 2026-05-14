@@ -32,6 +32,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from apps.core import pipeline_service
 from apps.core import htmlpdf_service
+from apps.core.session_lease import bind_web_session_for_user, clear_web_session_lease
 from apps.core.library_file_service import (
     attach_files_to_projects,
     attach_files_to_tasks,
@@ -41,6 +42,8 @@ from apps.core.library_file_service import (
     parse_project_ids,
     safe_library_basename,
     save_library_binary_uploads,
+    soft_delete_library_file,
+    hard_delete_library_file_disk_and_row,
 )
 from apps.core.library_access import (
     APP_SIDE_ROLE_CODES,
@@ -62,15 +65,25 @@ from apps.core.library_access import (
     library_user_may_edit_library_task,
     library_user_may_export_task_template_pdf_for_project,
     library_user_may_filled_pdf_toolchain,
+    library_user_may_use_htmlpdf_matrix_beta_controls,
     library_user_has_party_a_demo_restrictions,
     library_user_may_access_task_template_library_nav,
     library_user_scoped_project_ids,
     library_user_test_account_self_fill,
+    library_user_file_library_quota_bytes,
+    library_user_file_library_usage_bytes,
     role_can_upload_library_category,
     role_enterprise_catalog,
     role_has,
     role_has_htmlpdf,
     role_permission_groups_for_edit,
+)
+from apps.core.usage_workflow_tour import (
+    register_tour_library_file,
+    register_tour_project,
+    register_tour_task,
+    tour_cleanup_and_clear_session,
+    tour_start,
 )
 from apps.core.models import (
     InspectionCase,
@@ -90,7 +103,7 @@ from apps.core.models import (
 )
 from utils.ollama_extract import generate_frontend_template_with_ollama
 from utils.frontend_schema_rule_engine import build_frontend_schema_by_rules, normalize_field_text_by_underscore_rules
-from utils.pdf_field_formulas import merge_field_formulas_into_frontend
+from utils.pdf_field_formulas import attach_root_field_formulas_to_pdf_field_rows, merge_field_formulas_into_frontend
 from utils.unified_template_fields import compact_unified_pdf_fields_for_storage
 
 _LIBRARYTASK_HAS_REPORT_SOURCE_RELATION = None
@@ -134,7 +147,7 @@ def _require_htmlpdf(request):
     if not role_has_htmlpdf(request.user):
         if request.path.startswith("/files/htmlpdf/api/"):
             return JsonResponse({"error": "forbidden"}, status=403)
-        messages.error(request, "无权访问 HTMLPDF 模板编辑器")
+        messages.error(request, "无权访问模板编辑器")
         return redirect(reverse("dashboard"))
     return None
 
@@ -199,6 +212,8 @@ def login_view(request):
         user = authenticate(request, username=username, password=password)
         if user:
             login(request, user)
+            if getattr(settings, "AUTH_SINGLE_WEB_SESSION_PER_USER", True):
+                bind_web_session_for_user(user, request.session.session_key)
             return redirect('dashboard')
         else:
             messages.error(request, '用户名或密码错误')
@@ -209,6 +224,8 @@ def login_view(request):
 @login_required
 def logout_view(request):
     """登出视图"""
+    if request.user.is_authenticated:
+        clear_web_session_lease(request.user)
     logout(request)
     return redirect('login')
 
@@ -233,13 +250,79 @@ def dashboard(request):
     return render(request, 'dashboard.html', context)
 
 
+_GUIDE_USAGE_SECTIONS = (
+    ("overview", "整体工作顺序", "core/guide/overview.html"),
+    ("project", "项目工作台", "core/guide/project.html"),
+    ("files", "文件库", "core/guide/files.html"),
+    ("tasks", "任务模板库", "core/guide/tasks.html"),
+    ("htmlpdf", "模板编辑器", "core/guide/htmlpdf.html"),
+    ("records", "现场记录与报告", "core/guide/records.html"),
+    ("tips", "常见情况与排查", "core/guide/tips.html"),
+)
+_GUIDE_USAGE_LOOKUP = {slug: (title, tpl) for slug, title, tpl in _GUIDE_USAGE_SECTIONS}
+
+
 @login_required
-def backend_usage_guide(request):
-    """后台系统使用说明（面向新手的工作流程说明；当前仅对部分引导账号开放）。"""
+def backend_usage_guide(request, page=None):
+    """后台系统使用说明（分页；面向新手；当前仅对部分引导账号开放）。"""
     if not library_user_has_party_a_demo_restrictions(request.user):
         messages.info(request, "当前账号暂不可查看该说明。")
         return redirect(reverse("dashboard"))
-    return render(request, "core/backend_usage_guide.html", {})
+    show_task_nav = library_user_may_access_task_template_library_nav(request.user)
+    nav_items = [{"slug": slug, "title": title} for slug, title, _tpl in _GUIDE_USAGE_SECTIONS]
+    base_ctx = {
+        "show_library_task_nav": show_task_nav,
+        "guide_nav_items": nav_items,
+    }
+    if page is None:
+        return render(
+            request,
+            "core/guide/index.html",
+            {
+                **base_ctx,
+                "guide_page": "index",
+            },
+        )
+    if page not in _GUIDE_USAGE_LOOKUP:
+        raise Http404("未找到该说明页")
+    title, template_name = _GUIDE_USAGE_LOOKUP[page]
+    slugs = [s for s, _t, _p in _GUIDE_USAGE_SECTIONS]
+    idx = slugs.index(page)
+    prev_item = nav_items[idx - 1] if idx > 0 else None
+    next_item = nav_items[idx + 1] if idx < len(nav_items) - 1 else None
+    return render(
+        request,
+        template_name,
+        {
+            **base_ctx,
+            "guide_page": page,
+            "guide_section_title": title,
+            "guide_prev": prev_item,
+            "guide_next": next_item,
+        },
+    )
+
+
+@login_required
+@require_POST
+def usage_workflow_tour_start(request):
+    """开始「流程练习」会话：仅引导账号；会清理上次未结束的练习残留数据。"""
+    if not library_user_has_party_a_demo_restrictions(request.user):
+        return JsonResponse({"ok": False, "error": "forbidden"}, status=403)
+    ok = tour_start(request)
+    if not ok:
+        return JsonResponse({"ok": False, "error": "forbidden"}, status=403)
+    return JsonResponse({"ok": True})
+
+
+@login_required
+@require_POST
+def usage_workflow_tour_finish(request):
+    """结束练习：删除本会话在练习中登记的项目 / 任务模板 / 模板库文件，并清除会话键。"""
+    if not library_user_has_party_a_demo_restrictions(request.user):
+        return JsonResponse({"ok": False, "error": "forbidden"}, status=403)
+    stats = tour_cleanup_and_clear_session(request)
+    return JsonResponse({"ok": True, "deleted": stats})
 
 
 @login_required
@@ -438,6 +521,16 @@ def user_edit(request, user_id):
     profile, _ = UserProfile.objects.get_or_create(user=user)
     
     if request.method == 'POST':
+        new_username = (request.POST.get("username") or "").strip()
+        if not new_username:
+            messages.error(request, "用户名不能为空")
+            return redirect("user_edit", user_id=user_id)
+        if new_username != user.username:
+            if User.objects.filter(username=new_username).exclude(pk=user.pk).exists():
+                messages.error(request, "用户名已存在")
+                return redirect("user_edit", user_id=user_id)
+            user.username = new_username
+
         user.email = request.POST.get('email', user.email)
         user.first_name = request.POST.get('first_name', user.first_name)
         user.last_name = request.POST.get('last_name', user.last_name)
@@ -805,6 +898,7 @@ def library_projects(request):
                     description=desc,
                     created_by=request.user,
                 )
+                register_tour_project(request, row.pk)
                 task_ids = []
                 for x in request.POST.getlist("task_ids"):
                     try:
@@ -1504,15 +1598,7 @@ def library_projects(request):
                 ("assign", "分配"),
                 ("submissions", "提交"),
             ],
-            "file_library_tabs": [
-                {"key": "ocr", "label": "OCR文件"},
-                {"key": "json", "label": "JSON 文件"},
-                {"key": "template", "label": "模板"},
-                {"key": "site_record", "label": "现场记录"},
-                {"key": "report", "label": "报告"},
-                {"key": "attachment", "label": "附件"},
-                {"key": "inspection_submit", "label": "检测提交"},
-            ],
+            "file_library_tabs": list(_FILE_LIBRARY_TAB_DEFS),
         },
     )
 
@@ -1559,7 +1645,18 @@ def _parse_file_library_date_range(request):
 
 
 _FILE_LIBRARY_VALID_TABS = frozenset(
-    {"ocr", "json", "template", "site_record", "report", "attachment", "inspection_submit"}
+    {"ocr", "json", "template", "site_record", "report", "attachment", "inspection_submit", "trash"}
+)
+
+_FILE_LIBRARY_TAB_DEFS = (
+    {"key": "ocr", "label": "待识别文件"},
+    {"key": "json", "label": "数据文件"},
+    {"key": "template", "label": "模板"},
+    {"key": "site_record", "label": "现场记录"},
+    {"key": "report", "label": "报告"},
+    {"key": "attachment", "label": "附件"},
+    {"key": "inspection_submit", "label": "检测提交"},
+    {"key": "trash", "label": "回收站"},
 )
 
 
@@ -2062,12 +2159,13 @@ def file_library(request):
         elif LibraryProject.objects.filter(code=code).exists():
             messages.error(request, "项目编码已存在")
         else:
-            LibraryProject.objects.create(
+            row = LibraryProject.objects.create(
                 code=code,
                 name=name,
                 description=desc,
                 created_by=request.user,
             )
+            register_tour_project(request, row.pk)
             messages.success(request, f"已创建项目：{name}")
         return redirect(reverse("file_library") + _file_library_query_string(tab, "", "", "", project_selected))
 
@@ -2092,9 +2190,56 @@ def file_library(request):
     if not post_project_ids and request.POST.get("project"):
         post_project_ids = parse_project_ids([request.POST.get("project", "")])
 
+    if request.method == "POST" and request.POST.get("action") == "restore_library_file":
+        df = request.POST.get("date_from", "").strip()
+        dt = request.POST.get("date_to", "").strip()
+        up = request.POST.get("uploader", "").strip()
+        redir = reverse("file_library") + _file_library_query_string("trash", df, dt, up, project_selected)
+        if not role_has(request.user, "perm_file_delete"):
+            messages.error(request, "当前角色无权恢复文件")
+            return redirect(redir)
+        try:
+            rid = int(request.POST.get("file_id", "0"))
+        except ValueError:
+            rid = 0
+        lf = LibraryFile.all_objects.filter(pk=rid).first()
+        if lf is None or lf.deleted_at is None:
+            messages.error(request, "记录不存在或不在回收站中")
+            return redirect(redir)
+        if not library_file_access_allowed(request.user, lf):
+            messages.error(request, "无权恢复该文件")
+            return redirect(redir)
+        lf.deleted_at = None
+        lf.save(update_fields=["deleted_at"])
+        messages.success(request, "已从回收站恢复")
+        return redirect(redir)
+
+    if request.method == "POST" and request.POST.get("action") == "purge_library_file_permanent":
+        df = request.POST.get("date_from", "").strip()
+        dt = request.POST.get("date_to", "").strip()
+        up = request.POST.get("uploader", "").strip()
+        redir = reverse("file_library") + _file_library_query_string("trash", df, dt, up, project_selected)
+        if not role_has(request.user, "perm_file_delete"):
+            messages.error(request, "当前角色无权彻底删除")
+            return redirect(redir)
+        try:
+            rid = int(request.POST.get("file_id", "0"))
+        except ValueError:
+            rid = 0
+        lf = LibraryFile.all_objects.filter(pk=rid, deleted_at__isnull=False).first()
+        if lf is None:
+            messages.error(request, "未找到回收站中的文件")
+            return redirect(redir)
+        if not library_file_access_allowed(request.user, lf):
+            messages.error(request, "无权删除该文件")
+            return redirect(redir)
+        hard_delete_library_file_disk_and_row(lf)
+        messages.success(request, "已永久删除")
+        return redirect(redir)
+
     if request.method == "POST" and request.POST.get("action") == "upload":
         if not role_can_upload_library_category(request.user, LibraryFile.CATEGORY_UPLOAD):
-            messages.error(request, "当前角色无权向「OCR文件」分类上传")
+            messages.error(request, "当前角色无权向「待识别文件」分类上传")
             return redirect(
                 reverse("file_library") + _file_library_query_string(tab, "", "", "")
             )
@@ -2121,7 +2266,7 @@ def file_library(request):
 
     if request.method == "POST" and request.POST.get("action") == "upload_json":
         if not role_can_upload_library_category(request.user, LibraryFile.CATEGORY_JSON):
-            messages.error(request, "当前角色无权上传 JSON 文件")
+            messages.error(request, "当前角色无权上传到「数据文件」分类")
             return redirect(
                 reverse("file_library") + _file_library_query_string("json", "", "", "")
             )
@@ -2136,8 +2281,19 @@ def file_library(request):
             )
         files = request.FILES.getlist("files")
         if not files:
-            messages.error(request, "请选择要上传的 JSON 文件")
+            messages.error(request, "请选择要上传的数据文件（.json）")
         else:
+            cap = library_user_file_library_quota_bytes(request.user)
+            if cap is not None:
+                tot = sum((getattr(f, "size", None) or 0) for f in files)
+                if library_user_file_library_usage_bytes(request.user) + tot > cap:
+                    messages.error(request, "已超过文件库容量配额，无法继续上传。")
+                    df = request.POST.get("date_from", "").strip()
+                    dt = request.POST.get("date_to", "").strip()
+                    up = request.POST.get("uploader", "").strip()
+                    return redirect(
+                        reverse("file_library") + _file_library_query_string("json", df, dt, up, project_selected)
+                    )
             pipeline_service.ensure_file_library_dirs()
             json_dir = Path(settings.FILE_LIBRARY_JSON_DIR)
             added = 0
@@ -2154,7 +2310,7 @@ def file_library(request):
                     text = raw.decode("utf-8-sig")
                     json_std.loads(text)
                 except (UnicodeDecodeError, json_std.JSONDecodeError):
-                    messages.warning(request, f"内容不是合法 JSON，已跳过: {safe}")
+                    messages.warning(request, f"文件内容格式不正确，已跳过: {safe}")
                     continue
                 uid = uuid.uuid4().hex
                 disk_name = f"{uid}_{safe}"
@@ -2171,7 +2327,7 @@ def file_library(request):
                 attach_files_to_projects([lf.pk], post_project_ids, request.user)
                 added += 1
             if added:
-                messages.success(request, f"已上传 {added} 个 JSON 文件")
+                messages.success(request, f"已成功上传 {added} 个文件")
         df = request.POST.get("date_from", "").strip()
         dt = request.POST.get("date_to", "").strip()
         up = request.POST.get("uploader", "").strip()
@@ -2198,11 +2354,16 @@ def file_library(request):
         if not files:
             messages.error(request, "请选择要上传的文件")
         else:
-            n = _persist_binary_library_files(
-                request, files, LibraryFile.CATEGORY_TEMPLATE, project_ids=post_project_ids
+            created, skipped = save_library_binary_uploads(
+                request.user, files, LibraryFile.CATEGORY_TEMPLATE, project_ids=post_project_ids
             )
-            if n:
-                messages.success(request, f"已上传 {n} 个模板文件")
+            for s in skipped:
+                fn = s.get("filename") or "(无名)"
+                messages.warning(request, f"跳过文件 {fn}: {s.get('reason', '')}")
+            for row in created:
+                register_tour_library_file(request, int(row["id"]))
+            if created:
+                messages.success(request, f"已上传 {len(created)} 个模板文件")
         df = request.POST.get("date_from", "").strip()
         dt = request.POST.get("date_to", "").strip()
         up = request.POST.get("uploader", "").strip()
@@ -2330,7 +2491,7 @@ def file_library(request):
                 continue
         ids = list(dict.fromkeys([i for i in ids if i > 0]))
         if not ids:
-            messages.error(request, "请先勾选至少一条检测提交 JSON")
+            messages.error(request, "请先勾选至少一条检测提交记录")
             df = request.POST.get("date_from", "").strip()
             dt = request.POST.get("date_to", "").strip()
             up = request.POST.get("uploader", "").strip()
@@ -2360,12 +2521,12 @@ def file_library(request):
                 payload = json_std.loads(p.read_text(encoding="utf-8", errors="replace"))
             except Exception:
                 skipped_count += 1
-                skip_reasons.append(f"{lf.original_name}: JSON 读取或解析失败")
+                skip_reasons.append(f"{lf.original_name}: 文件读取或格式解析失败")
                 continue
             required_keys = {"reportInfo", "hospitalInfo", "equipmentInfo", "testResult"}
             if not isinstance(payload, dict) or not required_keys.issubset(set(payload.keys())):
                 skipped_count += 1
-                skip_reasons.append(f"{lf.original_name}: 不是原始 submit JSON")
+                skip_reasons.append(f"{lf.original_name}: 不是有效的检测提交原始数据")
                 continue
             if lf.link_entity != LibraryFile.LINK_ENTITY_INSPECTION_CASE or not lf.link_object_id:
                 skipped_count += 1
@@ -2450,7 +2611,7 @@ def file_library(request):
             empty_hint = (
                 "请先勾选至少一条现场记录 PDF"
                 if tab == "site_record"
-                else "请先勾选至少一条检测提交 JSON"
+                else "请先勾选至少一条检测提交记录"
             )
             messages.error(request, empty_hint)
             df = request.POST.get("date_from", "").strip()
@@ -2500,11 +2661,11 @@ def file_library(request):
                     p = pipeline_service.library_absolute_path(lf.relative_path)
                     submit_payload = json_std.loads(p.read_text(encoding="utf-8", errors="replace"))
                 except Exception as exc:
-                    errors.append(f"{lf.original_name}: JSON 读取或解析失败 ({exc})")
+                    errors.append(f"{lf.original_name}: 文件读取或格式解析失败 ({exc})")
                     continue
                 if not isinstance(submit_payload, dict) or not submit_required.issubset(submit_payload.keys()):
                     errors.append(
-                        f"{lf.original_name}: 不是有效检测提交 JSON（需含 reportInfo/hospitalInfo/equipmentInfo/testResult）"
+                        f"{lf.original_name}: 检测提交数据不完整（缺少报告、受检信息、设备或检测结果等必要内容）"
                     )
                     continue
                 rows_ok.append((lf, case, submit_payload))
@@ -2545,7 +2706,7 @@ def file_library(request):
         if not rows_ok:
             messages.error(
                 request,
-                "没有可用的现场记录 PDF（或检测提交 JSON）",
+                "没有可用的现场记录，或缺少可用的检测提交数据",
             )
             return redirect(redir)
 
@@ -2635,7 +2796,7 @@ def file_library(request):
         else:
             n_files = len(rows_ok)
             case_nos = ", ".join(sorted({c.case_no for c in cases_for_load}))
-            src_lbl = "现场记录 PDF" if tab == "site_record" else "检测提交 JSON"
+            src_lbl = "现场记录 PDF" if tab == "site_record" else "检测提交数据"
             msg = (
                 f"已为项目 {project.code} 导出 1 份报告（"
                 f"不同案件 {distinct_case_n} 个（受检台数以此为准），勾选{src_lbl} {n_files} 份；"
@@ -2750,6 +2911,7 @@ def file_library(request):
             link_entity=(lf0.link_entity or "") if lf0.link_entity else "",
             link_object_id=lf0.link_object_id,
             project_ids=sorted(project_pids_union),
+            enforce_storage_quota=False,
         )
         if not created:
             messages.error(request, "合并 PDF 已生成但保存到文件库失败")
@@ -2769,6 +2931,60 @@ def file_library(request):
         if request.GET.get("date_from") or request.GET.get("date_to"):
             return redirect(reverse("file_library") + f"?tab={tab}")
         d0, d1, date_from, date_to = None, None, "", ""
+
+    if tab == "trash":
+        qs = LibraryFile.all_objects.filter(deleted_at__isnull=False).select_related("created_by").prefetch_related(
+            "projects", "library_tasks"
+        )
+        is_lib_admin = bool(getattr(request.user, "is_superuser", False))
+        if not is_lib_admin:
+            try:
+                rc = request.user.profile.role.code if request.user.profile.role_id else ""
+                is_lib_admin = rc in ("super_admin", "admin")
+            except Exception:
+                pass
+        if not is_lib_admin:
+            qs = qs.filter(created_by=request.user)
+        if d0 is not None and d1 is not None:
+            qs = qs.filter(deleted_at__date__gte=d0, deleted_at__date__lte=d1)
+        files = list(qs.order_by("-deleted_at", "-id"))
+        _annotate_file_library_display(files)
+        usage_b = library_user_file_library_usage_bytes(request.user)
+        quota_b = library_user_file_library_quota_bytes(request.user)
+        projects_qs = LibraryProject.objects.filter(is_active=True).order_by("code")
+        if library_scope_own_files_only(request.user):
+            ap = library_user_scoped_project_ids(request.user)
+            projects_qs = projects_qs.filter(pk__in=ap) if ap else projects_qs.none()
+        return render(
+            request,
+            "core/file_library.html",
+            {
+                "projects": projects_qs,
+                "project_selected": project_selected,
+                "tab": tab,
+                "file_library_tabs": list(_FILE_LIBRARY_TAB_DEFS),
+                "files": files,
+                "file_library_nested_groups": [],
+                "file_library_nested_mode": "trash",
+                "file_library_template_shared_browse": False,
+                "file_library_table_colspan": 5,
+                "date_from": date_from,
+                "date_to": date_to,
+                "date_filter_active": bool(d0 and d1),
+                "uploader_selected": "",
+                "uploader_choices": [],
+                "file_scope_own_only": library_scope_own_files_only(request.user),
+                "can_batch_delete": False,
+                "file_library_row_selection": False,
+                "can_manual_export_submit_pdf": False,
+                "can_manual_export_report_from_site_record": False,
+                "can_merge_reports": False,
+                "trash_days_notice": 30,
+                "file_library_usage_bytes": usage_b,
+                "file_library_quota_bytes": quota_b,
+                "file_library_quota_limited": quota_b is not None,
+            },
+        )
 
     cat = _library_category_for_tab(tab)
     restricted = library_scope_own_files_only(request.user)
@@ -2878,6 +3094,9 @@ def file_library(request):
     )
     file_library_table_colspan = 4 + (1 if file_library_row_selection else 0)
 
+    usage_b = library_user_file_library_usage_bytes(request.user)
+    quota_b = library_user_file_library_quota_bytes(request.user)
+
     return render(
         request,
         "core/file_library.html",
@@ -2885,15 +3104,7 @@ def file_library(request):
             "projects": projects_qs,
             "project_selected": project_selected,
             "tab": tab,
-            "file_library_tabs": [
-                {"key": "ocr", "label": "OCR文件"},
-                {"key": "json", "label": "JSON 文件"},
-                {"key": "template", "label": "模板"},
-                {"key": "site_record", "label": "现场记录"},
-                {"key": "report", "label": "报告"},
-                {"key": "attachment", "label": "附件"},
-                {"key": "inspection_submit", "label": "检测提交"},
-            ],
+            "file_library_tabs": list(_FILE_LIBRARY_TAB_DEFS),
             "files": files,
             "file_library_nested_groups": file_library_nested_groups,
             "file_library_nested_mode": file_library_nested_mode,
@@ -2922,6 +3133,10 @@ def file_library(request):
                 tab == "report"
                 and fill_export_ok
             ),
+            "trash_days_notice": 30,
+            "file_library_usage_bytes": usage_b,
+            "file_library_quota_bytes": quota_b,
+            "file_library_quota_limited": quota_b is not None,
         },
     )
 
@@ -2960,14 +3175,8 @@ def file_library_delete(request, pk):
         up = request.POST.get("uploader", "").strip()
         return redirect(reverse("file_library") + _file_library_query_string(tab, df, dt, up))
     tab = tab_guess
-    try:
-        p = pipeline_service.library_absolute_path(lf.relative_path)
-        if p.is_file():
-            p.unlink()
-    except (ValueError, OSError):
-        pass
-    lf.delete()
-    messages.success(request, "已删除")
+    soft_delete_library_file(lf)
+    messages.success(request, "已移入回收站（可在「回收站」中恢复或彻底删除）")
     df = request.POST.get("date_from", "").strip()
     dt = request.POST.get("date_to", "").strip()
     up = request.POST.get("uploader", "").strip()
@@ -3013,16 +3222,12 @@ def file_library_batch_delete(request):
     if set(ids) != {str(pk) for pk in allowed_pks}:
         messages.error(request, "部分所选文件不存在或无权删除")
         return redirect(reverse("file_library") + _file_library_query_string(tab, df, dt, up))
-    qs = LibraryFile.objects.filter(pk__in=allowed_pks, category=cat)
+    qs = list(LibraryFile.objects.filter(pk__in=allowed_pks, category=cat))
+    n = 0
     for lf in qs:
-        try:
-            p = pipeline_service.library_absolute_path(lf.relative_path)
-            if p.is_file():
-                p.unlink()
-        except (ValueError, OSError):
-            pass
-    deleted, _ = qs.delete()
-    messages.success(request, f"已删除 {deleted} 个文件")
+        soft_delete_library_file(lf)
+        n += 1
+    messages.success(request, f"已将 {n} 个文件移入回收站")
     return redirect(reverse("file_library") + _file_library_query_string(tab, df, dt, up))
 
 
@@ -3115,8 +3320,13 @@ def file_preview(request, pk):
 
 @login_required
 def process_pipeline(request):
+    if library_user_has_party_a_demo_restrictions(request.user) and getattr(
+        settings, "PARTY_A_DEMO_DISABLE_PIPELINE", False
+    ):
+        messages.error(request, "演示账号未开放文档识别处理页")
+        return redirect(reverse("file_library") + "?tab=ocr")
     if not role_has(request.user, "perm_process_pipeline"):
-        messages.error(request, "当前角色无权使用流程处理")
+        messages.error(request, "当前角色无权使用文档识别")
         return redirect(reverse("file_library") + "?tab=ocr")
     project_raw = request.GET.get("project", "").strip()
     try:
@@ -3192,7 +3402,7 @@ def process_pipeline(request):
         if n_json:
             messages.success(
                 request,
-                f"已按仪器拆分并保存 {n_json} 个 JSON 文件到文件库「JSON 文件」分类。",
+                f"已按仪器拆分并保存 {n_json} 个数据文件到文件库「数据文件」分类。",
             )
         context = {
             "uploads": uploads,
@@ -3265,12 +3475,17 @@ def htmlpdf_editor_open(request, pk: int):
     if not index_path.is_file():
         return HttpResponse("htmlpdf 模板页面不存在", status=404)
     html = index_path.read_text(encoding="utf-8")
+    party_demo = library_user_has_party_a_demo_restrictions(request.user)
+    matrix_beta = library_user_may_use_htmlpdf_matrix_beta_controls(request.user)
     inject = (
         "<script>"
         f"window.HTMLPDF_INITIAL_TEMPLATE_PDF_ID={lf.pk};"
+        f"window.HTMLPDF_PARTY_A_DEMO_UI={'true' if party_demo else 'false'};"
+        f"window.HTMLPDF_MATRIX_BETA_UI={'true' if matrix_beta else 'false'};"
         "</script>"
     )
-    html = html.replace("</body>", inject + "\n</body>")
+    # 必须出现在主内联脚本之前，否则读取 MATRIX_BETA / PARTY_A_DEMO 时 window 尚未赋值，strip 逻辑与权限不一致。
+    html = html.replace("<body>", "<body>\n" + inject + "\n", 1)
     return HttpResponse(html, content_type="text/html; charset=utf-8")
 
 
@@ -3541,6 +3756,7 @@ def htmlpdf_api_export_json(request):
     if skipped and not created:
         return JsonResponse({"error": "模板保存失败"}, status=500)
     row = created[0]
+    register_tour_library_file(request, int(row["id"]))
     return JsonResponse(
         {
             "ok": True,
@@ -3691,6 +3907,9 @@ def _slim_unified_v2_template_library_payload(
     field_formulas: dict | list | None = None,
 ) -> dict:
     """On-disk unified template: single ``formSchema``, compact ``pdf.fields``, no duplicate root blocks."""
+    orphans = {}
+    if field_formulas is not None:
+        orphans = attach_root_field_formulas_to_pdf_field_rows(normalized_pdf_fields, field_formulas)
     compact_fields = compact_unified_pdf_fields_for_storage(normalized_pdf_fields)
     out = {
         "schema": "unified_form_template/v2",
@@ -3703,10 +3922,8 @@ def _slim_unified_v2_template_library_payload(
         "locale": locale,
         "pdf": {"source_pdf": source_pdf if isinstance(source_pdf, dict) else {}, "fields": compact_fields},
     }
-    if isinstance(field_formulas, dict) and field_formulas:
-        out["fieldFormulas"] = field_formulas
-    elif isinstance(field_formulas, list) and field_formulas:
-        out["fieldFormulas"] = field_formulas
+    if isinstance(orphans, dict) and orphans:
+        out["fieldFormulas"] = orphans
     out["formSchema"] = {
         "constants": constants if isinstance(constants, dict) else {},
         "enums": enums if isinstance(enums, dict) else {},
@@ -4261,10 +4478,16 @@ def htmlpdf_api_export_frontend_json(request):
     gx = _require_htmlpdf(request)
     if gx:
         return JsonResponse({"error": "forbidden"}, status=403)
+    if not library_user_may_use_htmlpdf_matrix_beta_controls(request.user):
+        return JsonResponse({"error": "当前账号不可使用内测中的前端 JSON 导出能力"}, status=403)
     try:
         data = json_std.loads(request.body.decode("utf-8"))
     except Exception:
         return JsonResponse({"error": "请求体不是合法JSON"}, status=400)
+    if library_user_has_party_a_demo_restrictions(request.user):
+        mode = str(data.get("export_mode") or data.get("exportMode") or "rule").strip().lower()
+        if mode == "llm":
+            return JsonResponse({"error": "演示账号不可用 AI 方式保存前端 JSON"}, status=403)
 
     name = safe_library_basename((data.get("name") or "template_frontend").strip() or "template_frontend")
     if not name.lower().endswith(".json"):
@@ -4480,6 +4703,7 @@ def htmlpdf_api_export_frontend_json(request):
     if skipped and not created:
         return JsonResponse({"error": "前端JSON保存失败"}, status=500)
     row = created[0]
+    register_tour_library_file(request, int(row["id"]))
     return JsonResponse(
         {
             "ok": True,
@@ -4504,6 +4728,8 @@ def htmlpdf_api_export_matrix_json(request):
     gx = _require_htmlpdf(request)
     if gx:
         return JsonResponse({"error": "forbidden"}, status=403)
+    if not library_user_may_use_htmlpdf_matrix_beta_controls(request.user):
+        return JsonResponse({"error": "当前账号不可使用内测中的固定表格模板 JSON 导出"}, status=403)
     try:
         data = json_std.loads(request.body.decode("utf-8"))
     except Exception:
@@ -4881,7 +5107,7 @@ def library_task_management(request):
             if task_obj.output_target == LibraryTask.OUTPUT_REPORT:
                 report_payload, source_reason = _load_site_record_payload_for_report(case, project, task_obj)
                 if not isinstance(report_payload, dict) or not report_payload:
-                    messages.error(request, source_reason or "未找到可用的现场记录 JSON，无法导出报告")
+                    messages.error(request, source_reason or "未找到可用的现场记录，无法导出报告")
                     return redirect(
                         reverse("library_task_management") + f"?manage_task={task_obj.pk}&export_project_id={project.pk}"
                     )
@@ -4945,6 +5171,7 @@ def library_task_management(request):
                     output_target=output_target,
                     created_by=request.user,
                 )
+                register_tour_task(request, row.pk)
                 messages.success(
                     request,
                     f"已创建任务模板 {row.code}（输出到：{row.get_output_target_display()}）。"

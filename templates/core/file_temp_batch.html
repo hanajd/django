@@ -4,13 +4,13 @@
 
 {% block content %}
 <div class="bg-white rounded-lg shadow p-6">
-    <p class="text-sm text-gray-600 mb-4">批次 <code class="bg-gray-100 px-1 rounded">{{ batch_id }}</code> 的中间产物（合并 PDF、MinerU 输出等）。可预览图片 / PDF / JSON / Markdown。</p>
+    <p class="text-sm text-gray-600 mb-4">本次处理生成的临时文件（如合并后的文档、识别过程文件等）。编号：{{ batch_id }}。支持在线预览常见图片、PDF、数据与说明类文件。</p>
     <div class="overflow-x-auto">
         <table class="min-w-full text-sm text-left text-gray-700">
             <thead class="bg-gray-50 text-gray-600 uppercase text-xs">
                 <tr>
                     <th class="px-3 py-2">文件名</th>
-                    <th class="px-3 py-2">相对路径</th>
+                    <th class="px-3 py-2">存储位置</th>
                     <th class="px-3 py-2">大小</th>
                     <th class="px-3 py-2">操作</th>
                 </tr>
@@ -37,6 +37,6 @@
             </tbody>
         </table>
     </div>
-    <a href="{% url 'process_pipeline' %}" class="inline-block mt-4 text-blue-600 hover:underline text-sm">返回流程处理</a>
+    <a href="{% url 'process_pipeline' %}" class="inline-block mt-4 text-blue-600 hover:underline text-sm">返回文档识别</a>
 </div>
 {% endblock %}

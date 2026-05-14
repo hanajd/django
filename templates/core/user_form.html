@@ -22,7 +22,6 @@
                             name="username" 
                             id="username" 
                             value="{% if edit_user %}{{ edit_user.username }}{% endif %}"
-                            {% if edit_user %}readonly{% endif %}
                             class="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                             required
                         >
@@ -142,7 +141,7 @@
             </p>
             {% if perm_override_disabled %}
             <p class="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                该账号为 Django 超级用户或角色为「超级管理员」时，系统固定为全部能力开启，此处个性化不生效。
+                该账号为系统内置的全权限账户或「超级管理员」角色时，权限固定为全部开启，此处个性化不生效。
             </p>
             {% endif %}
             <div class="overflow-x-auto rounded-xl border border-slate-200 ring-1 ring-slate-900/[0.04]">

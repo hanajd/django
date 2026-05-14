@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from django.conf import settings
 from django.http import FileResponse, Http404
+from django.utils import timezone
 
 from apps.core import pipeline_service
 from apps.core.models import (
@@ -43,6 +44,25 @@ def library_disk_dir_and_rel_prefix(category: str) -> Tuple[Path, str]:
     raise ValueError(f"unsupported library category: {category}")
 
 
+def soft_delete_library_file(lf: LibraryFile) -> None:
+    """移入回收站（仅标记 deleted_at，不删磁盘）。"""
+    if lf.deleted_at is not None:
+        return
+    lf.deleted_at = timezone.now()
+    lf.save(update_fields=["deleted_at"])
+
+
+def hard_delete_library_file_disk_and_row(lf: LibraryFile) -> None:
+    """永久删除：删除磁盘文件并删除数据库行（可用 all_objects 取到的实例调用）。"""
+    try:
+        p = pipeline_service.library_absolute_path(lf.relative_path)
+        if p.is_file():
+            p.unlink()
+    except (ValueError, OSError):
+        pass
+    lf.delete()
+
+
 def save_library_binary_uploads(
     user,
     uploaded_files,
@@ -51,14 +71,22 @@ def save_library_binary_uploads(
     link_entity: str = "",
     link_object_id: Optional[int] = None,
     project_ids: Optional[List[int]] = None,
+    enforce_storage_quota: bool = True,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
     """
     将上传的文件写入磁盘并创建 LibraryFile。
 
+    ``enforce_storage_quota``：为 False 时不校验用户文件库配额（如系统自动生成的报告 PDF）。
+
     Returns:
         created: 每项含 id, original_name, relative_path, size, category, created_at (ISO)
-        skipped: 每项含 filename, reason（如 empty）
+        skipped: 每项含 filename, reason（如 empty / quota_exceeded）
     """
+    from apps.core.library_access import (
+        library_user_file_library_quota_bytes,
+        library_user_file_library_usage_bytes,
+    )
+
     pipeline_service.ensure_file_library_dirs()
     clean_project_ids: List[int] = []
     for x in (project_ids or []):
@@ -69,20 +97,28 @@ def save_library_binary_uploads(
         if i > 0:
             clean_project_ids.append(i)
     clean_project_ids = sorted(set(clean_project_ids))
-    # Keep explicit project bindings even if a project is currently inactive.
-    # taskNo-based APIs resolve a concrete project from business data, and users
-    # still need historical files to remain associated with that project.
     project_map = {p.pk: p for p in LibraryProject.objects.filter(pk__in=clean_project_ids)}
     dest_dir, rel_prefix = library_disk_dir_and_rel_prefix(category)
     dest_dir.mkdir(parents=True, exist_ok=True)
     created: List[Dict[str, Any]] = []
     skipped: List[Dict[str, str]] = []
+    staged: List[Tuple[str, bytes]] = []
     for f in uploaded_files:
         raw = f.read()
         name = getattr(f, "name", "") or ""
         if not raw:
             skipped.append({"filename": name, "reason": "empty"})
             continue
+        staged.append((name, raw))
+
+    usage_base = (
+        library_user_file_library_usage_bytes(user)
+        if (user is not None and enforce_storage_quota)
+        else 0
+    )
+    added_in_batch = 0
+
+    for name, raw in staged:
         sha256 = hashlib.sha256(raw).hexdigest()
         safe = safe_library_basename(name)
         ext = Path(safe).suffix.lower()
@@ -92,7 +128,6 @@ def save_library_binary_uploads(
                 content_sha256=sha256,
             ).first()
             if existing:
-                # OCR 文件按 hash 去重；若命中历史文件，仍需补齐当前项目关联。
                 if project_map:
                     for pid in project_map.keys():
                         LibraryFileProject.objects.get_or_create(
@@ -115,13 +150,56 @@ def save_library_binary_uploads(
                     }
                 )
                 continue
+            trashed_same = (
+                LibraryFile.all_objects.filter(
+                    category=LibraryFile.CATEGORY_UPLOAD,
+                    content_sha256=sha256,
+                    deleted_at__isnull=False,
+                )
+                .order_by("-deleted_at")
+                .first()
+            )
+            if trashed_same is not None:
+                trashed_same.deleted_at = None
+                trashed_same.save(update_fields=["deleted_at"])
+                if project_map:
+                    for pid in project_map.keys():
+                        LibraryFileProject.objects.get_or_create(
+                            library_file=trashed_same,
+                            project_id=pid,
+                            defaults={"created_by": user},
+                        )
+                added_in_batch += int(trashed_same.size or 0)
+                created.append(
+                    {
+                        "id": trashed_same.pk,
+                        "original_name": trashed_same.original_name,
+                        "relative_path": trashed_same.relative_path,
+                        "size": trashed_same.size,
+                        "category": trashed_same.category,
+                        "link_entity": trashed_same.link_entity,
+                        "link_object_id": trashed_same.link_object_id,
+                        "project_ids": list(project_map.keys()),
+                        "created_at": trashed_same.created_at.isoformat() if trashed_same.created_at else "",
+                        "reused_existing": True,
+                    }
+                )
+                continue
             disk_name = f"{sha256}{ext}" if ext else sha256
-            # OCR 列表显示名统一为 hash 文件名，避免“同名不同文件”歧义。
             display_name = disk_name
         else:
             uid = uuid.uuid4().hex
             disk_name = f"{uid}_{safe}"
             display_name = safe
+
+        if user is not None and enforce_storage_quota:
+            cap = library_user_file_library_quota_bytes(user)
+            if cap is not None:
+                used_so_far = usage_base + added_in_batch
+                if used_so_far + len(raw) > cap:
+                    skipped.append({"filename": name, "reason": "quota_exceeded"})
+                    continue
+
         rel = f"{rel_prefix}/{disk_name}"
         abs_p = dest_dir / disk_name
         if not abs_p.exists():
@@ -136,6 +214,7 @@ def save_library_binary_uploads(
             link_entity=link_entity or "",
             link_object_id=link_object_id,
         )
+        added_in_batch += len(raw)
         if project_map:
             for pid in project_map.keys():
                 LibraryFileProject.objects.get_or_create(

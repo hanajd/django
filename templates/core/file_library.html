@@ -18,7 +18,7 @@
 <div class="max-w-[1600px] mx-auto space-y-6 pb-8">
     <!-- 顶栏：分类切换 -->
     <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div class="flex flex-1 flex-wrap items-center gap-1.5 rounded-2xl border border-slate-200/90 bg-gradient-to-b from-slate-50 to-slate-100/90 p-1.5 shadow-inner">
+        <div id="guide-file-library-tabs" class="flex flex-1 flex-wrap items-center gap-1.5 rounded-2xl border border-slate-200/90 bg-gradient-to-b from-slate-50 to-slate-100/90 p-1.5 shadow-inner">
             {% for t in file_library_tabs %}
             <a href="{% url 'file_library' %}?tab={{ t.key }}{% if date_from and date_to %}&amp;date_from={{ date_from }}&amp;date_to={{ date_to }}{% endif %}{% if uploader_selected %}&amp;uploader={{ uploader_selected }}{% endif %}{% if project_selected %}&amp;project={{ project_selected }}{% endif %}"
                class="min-h-[2.5rem] flex-1 min-w-[5.5rem] whitespace-nowrap rounded-xl px-3 py-2 text-center text-sm font-medium transition-all duration-200 sm:flex-none sm:px-4
@@ -33,9 +33,10 @@
         </div>
         {% if role_perm.perm_process_pipeline %}
         <a href="{% url 'process_pipeline' %}"
-           class="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-500 hover:shadow-md">
+           class="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-500 hover:shadow-md"
+           title="在独立页面进行文档识别与结构化提取（与侧栏入口一致）">
             <i class="ri-flow-chart text-lg leading-none"></i>
-            流程处理
+            文档识别
         </a>
         {% endif %}
     </div>
@@ -48,7 +49,7 @@
     {% endif %}
 
     <!-- 筛选 -->
-    <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-6">
+    <section id="guide-file-library-filters" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-6">
         <div class="mb-5 flex gap-3 sm:items-start">
             <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
                 <i class="ri-filter-3-line text-xl"></i>
@@ -106,11 +107,22 @@
         </form>
     </section>
 
-    {% if tab == 'ocr' and role_perm.perm_file_upload %}
+    {% if file_library_quota_limited %}
+    <div class="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm ring-1 ring-slate-900/[0.04]">
+        文件库已用 <strong>{{ file_library_usage_bytes|filesizeformat }}</strong> / 配额 <strong>{{ file_library_quota_bytes|filesizeformat }}</strong>
+        <span class="text-slate-500">（系统管理员账户不占用个人配额）</span>
+    </div>
+    {% endif %}
+
+    {% if tab == 'trash' %}
+    <section class="rounded-2xl border border-amber-200/80 bg-amber-50/80 px-4 py-3 text-sm text-amber-950 shadow-sm">
+        <p class="leading-relaxed"><strong>回收站</strong>：移入回收站的内容约保留 <strong>{{ trash_days_notice }}</strong> 天，便于您在此期间恢复；超期后由系统自动彻底清理，无法再恢复。您可在此恢复或永久删除。</p>
+    </section>
+    {% elif tab == 'ocr' and role_perm.perm_file_upload %}
     <section class="rounded-2xl border border-dashed border-slate-300 bg-gradient-to-b from-white to-slate-50/80 p-6 shadow-sm transition hover:border-slate-400">
         <div class="mb-4 flex items-center gap-2 text-slate-900">
             <i class="ri-upload-cloud-2-line text-xl text-blue-600"></i>
-            <h3 class="text-sm font-semibold">上传到「OCR 文件」</h3>
+            <h3 class="text-sm font-semibold">上传到「待识别文件」</h3>
         </div>
         <p class="mb-4 text-xs leading-relaxed text-slate-500">可多次选择文件加入列表，在列表中移除不需要上传的项后再提交。</p>
         <div>
@@ -149,7 +161,7 @@
     <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04]">
         <div class="mb-4 flex items-center gap-2">
             <i class="ri-file-code-line text-xl text-violet-600"></i>
-            <h3 class="text-sm font-semibold text-slate-900">上传 JSON 到「JSON 文件」</h3>
+            <h3 class="text-sm font-semibold text-slate-900">上传到「数据文件」分类</h3>
         </div>
         <form method="post" enctype="multipart/form-data" class="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
             {% csrf_token %}
@@ -162,11 +174,11 @@
                 <input type="file" name="files" multiple accept=".json,application/json"
                        class="block w-full cursor-pointer text-sm file:mr-4 file:rounded-xl file:border-0 file:bg-violet-600 file:px-4 file:py-2.5 file:text-sm file:font-medium file:text-white file:shadow-sm hover:file:bg-violet-500">
             </div>
-            <button type="submit" class="inline-flex shrink-0 items-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-violet-500">上传 JSON</button>
+            <button type="submit" class="inline-flex shrink-0 items-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-violet-500">上传</button>
         </form>
     </section>
     {% elif tab == 'template' and role_perm.perm_file_upload %}
-    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04]">
+    <section id="guide-file-library-template-upload" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04]">
         <div class="mb-4 flex items-center gap-2">
             <i class="ri-layout-grid-line text-xl text-indigo-600"></i>
             <h3 class="text-sm font-semibold text-slate-900">上传到「模板」</h3>
@@ -262,6 +274,56 @@
     </div>
     {% endif %}
 
+    {% if tab == 'trash' %}
+    <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ring-1 ring-slate-900/[0.04]">
+        <div class="border-b border-slate-100 bg-slate-50/70 px-4 py-3 text-sm font-medium text-slate-800">回收站中的文件</div>
+        <div class="overflow-x-auto">
+            <table class="min-w-full text-left text-sm text-slate-700">
+                <thead class="border-b border-slate-100 bg-slate-50/90 text-xs font-semibold text-slate-500">
+                    <tr>
+                        <th class="px-4 py-3">文件</th>
+                        <th class="px-4 py-3">分类</th>
+                        <th class="px-4 py-3 whitespace-nowrap">移入时间</th>
+                        <th class="w-52 px-4 py-3 text-right">操作</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for f in files %}
+                    <tr>
+                        <td class="max-w-xl px-4 py-3">{% include "core/file_library_file_cell.html" %}</td>
+                        <td class="px-4 py-3 text-xs">{{ f.get_category_display }}</td>
+                        <td class="whitespace-nowrap px-4 py-3 text-xs text-slate-600">{{ f.deleted_at|date:"Y-m-d H:i" }}</td>
+                        <td class="px-4 py-3 text-right">
+                            <div class="inline-flex flex-wrap justify-end gap-2">
+                                <form method="post" action="{% url 'file_library' %}" class="inline">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="restore_library_file">
+                                    <input type="hidden" name="file_id" value="{{ f.pk }}">
+                                    {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
+                                    {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
+                                    <button type="submit" class="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100">恢复</button>
+                                </form>
+                                {% if role_perm.perm_file_delete %}
+                                <form method="post" action="{% url 'file_library' %}" class="inline" onsubmit="return confirm('确定永久删除？此操作不可恢复。');">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="purge_library_file_permanent">
+                                    <input type="hidden" name="file_id" value="{{ f.pk }}">
+                                    {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
+                                    {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
+                                    <button type="submit" class="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-800 hover:bg-red-100">彻底删除</button>
+                                </form>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="4" class="px-4 py-12 text-center text-slate-500">回收站为空</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+    {% else %}
     <!-- 文件列表 -->
     <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ring-1 ring-slate-900/[0.04]">
     <style>
@@ -308,7 +370,7 @@
                 <button type="submit" name="action" value="manual_export_submit_pdf"
                         formaction="{% url 'file_library' %}"
                         class="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-500"
-                        onclick="return confirm('确定对勾选的检测提交 JSON 手动导出 PDF？');">
+                        onclick="return confirm('确定对勾选的检测提交数据手动导出 PDF？');">
                     <i class="ri-file-pdf-line"></i>
                     手动导出 PDF
                 </button>
@@ -317,7 +379,7 @@
                 <button type="submit" name="action" value="manual_export_report_from_site_record"
                         formaction="{% url 'file_library' %}"
                         class="inline-flex items-center gap-1.5 rounded-xl bg-violet-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-violet-500"
-                        onclick="return confirm('{% if tab == 'site_record' %}勾选的多份现场记录 PDF 将按与「检测提交 JSON」相同的合并规则汇总为一份报告（同一业务块以先勾选为准）。请优先使用系统导出的现场记录 PDF（文件名中含项目、任务说明及任务编号），或保证每案仅有一份检测提交 JSON。确定生成 PDF？{% else %}多份现场记录将汇总为一份报告数据：同一业务块（如医院信息）以先勾选的为准。确定生成 PDF？{% endif %}');">
+                        onclick="return confirm('{% if tab == 'site_record' %}勾选的多份现场记录将按与「检测提交」相同的合并规则汇总为一份报告（同一业务块以先勾选为准）。请优先使用系统导出的现场记录（文件名中含项目、任务说明及任务编号），或保证每案仅有一份检测提交。确定生成 PDF？{% else %}多份现场记录将汇总为一份报告数据：同一业务块（如医院信息）以先勾选的为准。确定生成 PDF？{% endif %}');">
                     <i class="ri-draft-line"></i>
                     手动导出报告
                 </button>
@@ -528,6 +590,7 @@
     </div>
     {% endif %}
     </section>
+    {% endif %}
 </div>
 <script>
 (function () {

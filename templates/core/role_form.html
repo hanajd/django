@@ -114,7 +114,7 @@
                 <ul class="mt-3 space-y-3 text-xs leading-relaxed text-slate-600">
                     <li class="flex gap-2">
                         <i class="ri-user-settings-line mt-0.5 shrink-0 text-slate-400"></i>
-                        <span><strong class="text-slate-800">权责对等</strong>：权限与岗位职责一致；检测流程岗的环节操作还在「案件工作流」与 API 中校验。</span>
+                        <span><strong class="text-slate-800">权责对等</strong>：权限与岗位职责一致；检测流程岗在「案件工作流」及各业务环节中仍会按规则校验。</span>
                     </li>
                     <li class="flex gap-2">
                         <i class="ri-git-branch-line mt-0.5 shrink-0 text-slate-400"></i>
@@ -122,11 +122,11 @@
                     </li>
                     <li class="flex gap-2">
                         <i class="ri-smartphone-line mt-0.5 shrink-0 text-slate-400"></i>
-                        <span><strong class="text-slate-800">App 检测侧</strong>：仅 field_inspector、site_reviewer、report_author、report_auditor、authorized_signatory 及兼容用的 app_user 可参与任务分配与检测侧能力；模板测试等角色不在此集合内。</span>
+                        <span><strong class="text-slate-800">App 检测侧</strong>：仅现场检测、校核、报告编制、审核、授权签字等流程岗位，以及兼容用的通用 App 账号可参与任务分配与检测侧能力；模板测试等角色不在此集合内。</span>
                     </li>
                     <li class="flex gap-2">
                         <i class="ri-lock-2-line mt-0.5 shrink-0 text-slate-400"></i>
-                        <span><strong class="text-slate-800">数据范围</strong>：「文件库仅本人数据」用于落实岗位数据隔离；管理员类角色在代码中通常不受此项限制。</span>
+                        <span><strong class="text-slate-800">数据范围</strong>：「文件库仅本人数据」用于落实岗位数据隔离；系统管理员类角色通常不受此项限制。</span>
                     </li>
                 </ul>
                 {% if role %}

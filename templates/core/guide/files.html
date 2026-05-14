@@ -1,0 +1,42 @@
+{% extends "core/guide/section_base.html" %}
+{% block guide_section %}
+<section class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <h1 class="text-lg font-bold text-slate-900">文件库</h1>
+    <p class="text-slate-700">入口：左侧 <span class="guide-nav">文件库管理</span>。打开后请关注<strong>顶部分类标签</strong>（下以 <span class="guide-ui">紫底</span> 标出常见名称）：同一文件放进正确分类，后续填报、导出、合并才能被系统正确引用。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">一、模板</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li><strong>放什么</strong>：空白或半空白 PDF、坐标类 JSON、前端规则 JSON、与版式相关的配置导出等。</li>
+        <li><strong>什么时候用</strong>：新建或改版检测原始记录 / 报告版式时；需要试填、试导出 PDF 时。</li>
+        <li><strong>与模板编辑器的关系</strong>：先点击顶部 <span class="guide-ui">模板</span> 分类，在列表中找到目标 PDF，再点击该行上的 <span class="guide-ui">编辑模板</span> 进入 <span class="guide-nav">模板编辑器</span>（需具备模板编辑器权限）。在编辑器中保存的 JSON 一般也会回到本分类。</li>
+        <li><strong>操作建议</strong>：上传、删除、下载等操作通常对应行内的 <span class="guide-ui">上传</span>、<span class="guide-ui">下载</span> 等按钮；若呈灰色，请读页顶提示。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">二、现场记录</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li><strong>放什么</strong>：现场工作已形成、需要归档的<strong>现场记录类</strong> PDF 或相关结果（以单位定义为准）。</li>
+        <li><strong>什么时候用</strong>：点选顶部 <span class="guide-ui">现场记录</span> 分类后，再使用列表上方的上传、生成或导出类按钮（名称以界面为准）。在模板编辑器中也可将 <span class="guide-ui">导出已填写 PDF</span> 时的保存目标选为本分类。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">三、报告</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li><strong>放什么</strong>：对外出具的<strong>正式报告</strong> PDF 等。</li>
+        <li><strong>什么时候用</strong>：切换到 <span class="guide-ui">报告</span> 分类后管理成品；从模板编辑器导出时也可在保存目标下拉中选「报告」类选项。</li>
+        <li><strong>多份合并</strong>：在报告列表中按页面说明勾选多份文件后，点击 <span class="guide-ui">合并</span> 或类似名称按钮；若按钮不可用，请阅读页顶灰色说明。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">四、附件与其他分类</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>点击 <span class="guide-ui">附件</span>（若单位启用该分类）存放说明性文档、补充照片等，避免与正式记录、报告混淆。</li>
+        <li><strong>原始材料 / 识别结果</strong>等：若顶栏存在对应标签，按单位制度归档即可。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">五、通用操作提示</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>上传前确认<strong>当前项目</strong>是否已在 <span class="guide-nav">项目工作台</span> 中选中（若本页与项目绑定）。</li>
+        <li>下载、删除等若呈灰色：多为无写权限或流程锁定，以页面提示为准。</li>
+    </ul>
+
+    <p class="rounded-lg bg-slate-50 px-3 py-2 text-slate-600">小结：文件库回答的是——<strong>「资料按性质放在哪一类、哪一步该上传、后面哪个功能会引用」</strong>。</p>
+</section>
+{% endblock %}

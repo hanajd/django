@@ -29,6 +29,7 @@ INSTALLED_APPS = [
     # 第三方应用
     'rest_framework',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'django_filters',
     
@@ -45,6 +46,8 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'apps.core.middleware.WebSessionLeaseMiddleware',
+    'apps.core.middleware.PartyADemoSecurityMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -193,3 +196,29 @@ CORS_ALLOW_CREDENTIALS = True
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/login/'
+
+# 外网暴露演示账号 test（旧名 party_a_demo）或 perm_overrides.party_a_demo_restrictions 时的可选加固
+# PARTY_A_DEMO_ALLOWED_IPS：逗号分隔；支持单 IP 或 CIDR（如 203.0.113.0/24）。留空则不限制来源。
+PARTY_A_DEMO_ALLOWED_IPS = os.environ.get("PARTY_A_DEMO_ALLOWED_IPS", "").strip()
+# 仅在反向代理正确设置且仅可信客户端可达时设为 true，否则易被伪造 X-Forwarded-For
+PARTY_A_DEMO_TRUST_X_FORWARDED_FOR = (
+    os.environ.get("PARTY_A_DEMO_TRUST_X_FORWARDED_FOR", "").lower() in ("1", "true", "yes")
+)
+# 为 true 时演示账号无法使用「OCR 处理管线」页面（减轻 GPU/子进程负载）
+PARTY_A_DEMO_DISABLE_PIPELINE = (
+    os.environ.get("PARTY_A_DEMO_DISABLE_PIPELINE", "").lower() in ("1", "true", "yes")
+)
+
+# 同一账号：Web（Session）仅保留最后一次浏览器登录；平板（JWT 密码登录）仅保留最后一次 refresh 链。二者互不注销。
+# 设为 0/false/no/off 可关闭（例如内网调试多人共用后台账号）。
+AUTH_SINGLE_WEB_SESSION_PER_USER = os.environ.get(
+    "AUTH_SINGLE_WEB_SESSION_PER_USER", "1"
+).strip().lower() not in ("0", "false", "no", "off")
+# 为 true 时 Django 超级用户不受「单 Web 会话」限制（仍受平板 JWT 吊销策略影响，除非关闭下一项）。
+AUTH_SINGLE_WEB_SESSION_SKIP_SUPERUSER = os.environ.get(
+    "AUTH_SINGLE_WEB_SESSION_SKIP_SUPERUSER", ""
+).strip().lower() in ("1", "true", "yes")
+# 平板 /api 使用账号密码登录换 JWT 时，吊销该用户此前签发的 refresh（需安装 token_blacklist）。
+AUTH_REVOKE_PRIOR_REFRESH_TOKENS_ON_LOGIN = os.environ.get(
+    "AUTH_REVOKE_PRIOR_REFRESH_TOKENS_ON_LOGIN", "1"
+).strip().lower() not in ("0", "false", "no", "off")

@@ -30,6 +30,24 @@ logger = logging.getLogger(__name__)
 _MERGE_PT_SIHAO = 14.0
 _MERGE_PT_XIAOSI = 12.0
 
+# 报告合并封面/项目名称：优先从标题中识别的设备大类（后续版本可在此元组末尾追加新类型）。
+# 正则 alternation 按「长度降序、同长按字典序」排列，避免「DR」误匹配「动态DR」等子串。
+MERGED_REPORT_DEVICE_TYPE_LABELS: Tuple[str, ...] = (
+    "CT",
+    "DR",
+    "DSA",
+    "C型臂",
+    "胃肠机",
+    "动态DR",
+    "乳腺DR",
+    "口腔CBCT",
+    "牙科全景机",
+    "口内牙片机",
+)
+_MERGED_DEVICE_TYPE_RE = re.compile(
+    "(" + "|".join(re.escape(s) for s in sorted(MERGED_REPORT_DEVICE_TYPE_LABELS, key=lambda s: (-len(s), s))) + ")"
+)
+
 # 合并报告叠印固定框（物理页码 1-based，x0、y0、width、height；PyMuPDF 左上原点、y 向下）。
 # 与首份模板 PDF 版式对齐后固化；若模板改版需同步改此处或改为 overlay 传入。
 _MERGE_OVERLAY_FIXED_RECT_1BASED_XYWH: Dict[str, Tuple[int, float, float, float, float]] = {
@@ -2532,52 +2550,73 @@ def extract_cover_inspected_unit_fallback(pdf_path: str) -> str:
     return ""
 
 
-def _cn_digit_count_merge(n: int) -> str:
-    table = "一二三四五六七八九十"
-    if 1 <= n <= 10:
-        return table[n - 1]
-    return str(int(n))
-
-
 def extract_modality_abbr_from_title(title: str) -> str:
-    """从单份报告标题/设备名中抽取 DSA、DR、CT 等缩写（用于合并封面用语）。"""
+    """从单份报告标题/设备名中抽取合并用语设备类型（优先命中 MERGED_REPORT_DEVICE_TYPE_LABELS）。"""
     t = (title or "").strip()
-    m = re.search(r"[（(]\s*([A-Za-z0-9\-]{1,12})\s*[）)]", t)
+    if not t:
+        return ""
+
+    def _hit_known(s: str) -> str:
+        m = _MERGED_DEVICE_TYPE_RE.search(s)
+        return m.group(1) if m else ""
+
+    hit = _hit_known(t)
+    if hit:
+        return hit
+
+    # 括号内常见写法：（动态DR）（DSA）等；允许中英文混合
+    m = re.search(r"[（(]\s*([^）)]{1,32}?)\s*[）)]", t)
     if m:
-        return m.group(1).upper()
+        inner = (m.group(1) or "").strip()
+        hit = _hit_known(inner)
+        if hit:
+            return hit
+        if re.fullmatch(r"[A-Za-z0-9\-]{1,12}", inner):
+            up = inner.upper()
+            if up == "CBCT":
+                return "口腔CBCT"
+            return up
+
     m2 = re.search(r"\b([A-Z]{2,10})\b", t)
     if m2:
-        return m2.group(1).upper()
+        up = m2.group(1).upper()
+        if up == "CBCT":
+            return "口腔CBCT"
+        return up
+
     m3 = re.search(r"(DSA|DR|CR|CT|MR|MRI|LA|LINAC|CBCT|PET|ECT|RF|OCT)", t, re.I)
     if m3:
-        return m3.group(1).upper()
+        up = m3.group(1).upper()
+        if up == "CBCT":
+            return "口腔CBCT"
+        return up
     return ""
 
 
 def merged_cover_report_title_from_abbrs(abbrs: Sequence[str], n: int) -> str:
-    """如：DSA、DR、CT三台设备质量控制检测；超过三台为「前三种 + 等n台设备质量控制检测」。"""
+    """如：动态DR、胃肠机、DSA3台设备质量控制检测；超过三台为「前三种 + 等n台设备质量控制检测」。台数一律用阿拉伯数字。"""
     seq: List[str] = []
     for i in range(max(0, int(n))):
         raw = (abbrs[i] if i < len(abbrs) else "") or ""
         seq.append(raw.strip() or f"设备{i + 1}")
     if n <= 3:
         head = "、".join(seq[:n])
-        return f"{head}{_cn_digit_count_merge(n)}台设备质量控制检测"
+        return f"{head}{int(n)}台设备质量控制检测"
     head = "、".join(seq[:3])
-    return f"{head}等{n}台设备质量控制检测"
+    return f"{head}等{int(n)}台设备质量控制检测"
 
 
 def merged_device_phrase_for_evaluation(abbrs: Sequence[str], n: int) -> str:
-    """评价句中的设备短语（不含「质量控制检测」后缀）。"""
+    """评价句中的设备短语（不含「质量控制检测」后缀）；台数一律用阿拉伯数字。"""
     seq: List[str] = []
     for i in range(max(0, int(n))):
         raw = (abbrs[i] if i < len(abbrs) else "") or ""
         seq.append(raw.strip() or f"设备{i + 1}")
     if n <= 3:
         head = "、".join(seq[:n])
-        return f"{head}{_cn_digit_count_merge(n)}台设备"
+        return f"{head}{int(n)}台设备"
     head = "、".join(seq[:3])
-    return f"{head}等{n}台设备"
+    return f"{head}等{int(n)}台设备"
 
 
 def build_merged_report_overlay_fields(rows: List[dict], *, merge_date_str: str) -> dict:

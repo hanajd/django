@@ -13,7 +13,10 @@ urlpatterns = [
     
     # 主页和仪表盘
     path('', views.dashboard, name='dashboard'),
+    path('help/usage/<slug:page>/', views.backend_usage_guide, name='backend_usage_guide_page'),
     path('help/usage/', views.backend_usage_guide, name='backend_usage_guide'),
+    path('help/usage/tour/start/', views.usage_workflow_tour_start, name='usage_workflow_tour_start'),
+    path('help/usage/tour/finish/', views.usage_workflow_tour_finish, name='usage_workflow_tour_finish'),
     
     # 用户管理路由
     path('database/devices/', views.database_device_list, name='database_device_list'),

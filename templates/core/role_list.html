@@ -10,7 +10,7 @@
             <h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-900">角色列表</h1>
             <p class="mt-1 max-w-3xl text-sm leading-relaxed text-slate-600">
                 角色代码与检测流程岗位对应；同一用户在同一项目中仅能担任一个流程岗位（在「项目工作台」中维护）。
-                仅标记为「App 检测侧」的角色可参与任务分配与检测相关 API。
+                仅标记为「App 检测侧」的角色可参与任务分配与检测业务流程。
             </p>
         </div>
         <a href="{% url 'role_create' %}" class="inline-flex w-fit shrink-0 items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700">
@@ -26,7 +26,7 @@
             </span>
             <div>
                 <p class="font-medium text-slate-900">与《检测业务多角色与工作流说明》对齐</p>
-                <p class="mt-1 text-slate-600">检测员、校核员、编制人、审核人、授权签字人为流程岗；<code class="rounded bg-white px-1 py-0.5 text-xs font-mono text-slate-800 ring-1 ring-slate-200">super_admin</code> / <code class="rounded bg-white px-1 py-0.5 text-xs font-mono">admin</code> 侧重系统管理。编辑角色时权限按「基础操作 / 数据范围 / 流程与业务」三类分组配置。</p>
+                <p class="mt-1 text-slate-600">检测员、校核员、编制人、审核人、授权签字人为流程岗；<strong>超级管理员</strong>与<strong>普通管理员</strong>侧重系统管理。编辑角色时权限按「基础操作 / 数据范围 / 流程与业务」三类分组配置。</p>
             </div>
         </div>
     </div>
@@ -39,7 +39,7 @@
                         <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">角色</th>
                         <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">域</th>
                         <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">App 检测侧</th>
-                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">代码</th>
+                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">标识</th>
                         <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">描述</th>
                         <th class="px-5 py-3.5 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">用户数</th>
                         <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">更新</th>
@@ -55,7 +55,7 @@
                         </td>
                         <td class="whitespace-nowrap px-5 py-4">
                             {% if role.enterprise.in_app_side %}
-                            <span class="inline-flex items-center gap-1 text-emerald-700" title="可参与项目任务分配与检测侧 API">
+                            <span class="inline-flex items-center gap-1 text-emerald-700" title="可参与项目任务分配与检测业务流程">
                                 <i class="ri-checkbox-circle-fill text-base text-emerald-500"></i>
                                 <span class="text-xs font-medium">是</span>
                             </span>
@@ -66,8 +66,8 @@
                             </span>
                             {% endif %}
                         </td>
-                        <td class="whitespace-nowrap px-5 py-4">
-                            <code class="rounded-lg bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{{ role.code }}</code>
+                        <td class="whitespace-nowrap px-5 py-4 text-slate-600">
+                            <span class="rounded-lg bg-slate-50 px-2 py-1 text-xs font-medium ring-1 ring-slate-100">{{ role.code }}</span>
                         </td>
                         <td class="max-w-xs px-5 py-4 text-slate-600">
                             <span class="line-clamp-2" title="{{ role.description|default:'' }}">{{ role.description|default:"—" }}</span>
