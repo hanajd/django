@@ -2619,12 +2619,17 @@ def merged_device_phrase_for_evaluation(abbrs: Sequence[str], n: int) -> str:
     return f"{head}等{int(n)}台设备"
 
 
-def build_merged_report_overlay_fields(rows: List[dict], *, merge_date_str: str) -> dict:
+def build_merged_report_overlay_fields(
+    rows: List[dict], *, merge_date_str: str, cover_title_override: str | None = None
+) -> dict:
     """
     由 inspection_pdf_service 收集的 rows（含 title_line / inspected_org_hint / path）生成叠印字典。
 
     ``project_name_combined``：基本情况页「项目名称」单行叠字用，语义为 **受检单位名称 + 合并报告名称**，
     与封面「项目名称」两行（受检单位一行 + 报告名称一行）总文案一致。
+
+    ``cover_title_override``：若非空，封面第二行「合并报告名称」采用该串（如 {委托编号}{项目名称}），
+    否则仍按各份报告标题抽取设备类型拼接（原逻辑）。
     """
     n = max(0, len(rows))
     if n == 0:
@@ -2645,7 +2650,11 @@ def build_merged_report_overlay_fields(rows: List[dict], *, merge_date_str: str)
             org = extract_cover_inspected_unit_fallback(str(r.get("path") or ""))
             if org:
                 break
-    cover_title = merged_cover_report_title_from_abbrs(ab2, n)
+    ov = (cover_title_override or "").strip()
+    if ov:
+        cover_title = ov
+    else:
+        cover_title = merged_cover_report_title_from_abbrs(ab2, n)
     dev_eval = merged_device_phrase_for_evaluation(ab2, n)
     project_name = f"{org}{cover_title}"
     nos = "、".join(f"{i:02d}" for i in range(1, n + 1))

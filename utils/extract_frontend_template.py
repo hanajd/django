@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from utils.ollama_extract import generate_frontend_template_with_ollama
-from utils.unified_template_fields import materialize_unified_pdf_fields
+from utils.unified_template_fields import frontend_rect_from_materialized, materialize_unified_pdf_fields
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -73,22 +73,23 @@ def _build_frontend_field_items(pdf_fields: list[dict[str, Any]]) -> list[dict[s
         except (TypeError, ValueError):
             page = 1
         anchor_type = str(f.get("fieldType") or "text").lower() or "text"
-        out.append(
-            {
-                "id": field_id,
-                "title": title or placeholder or field_id,
-                "label": title or placeholder or field_id,
-                "type": _to_frontend_type(anchor_type),
-                "required": False,
-                "defaultValue": None,
-                "source": {
-                    "key": field_id_raw or placeholder or field_id,
-                    "pdfFieldId": pdf_field_id,
-                    "page": page,
-                    "anchorType": anchor_type,
-                },
-            }
-        )
+        row: dict[str, Any] = {
+            "id": field_id,
+            "title": title or placeholder or field_id,
+            "label": title or placeholder or field_id,
+            "type": _to_frontend_type(anchor_type),
+            "required": False,
+            "defaultValue": None,
+            "source": {
+                "key": field_id_raw or placeholder or field_id,
+                "pdfFieldId": pdf_field_id,
+                "anchorType": anchor_type,
+            },
+        }
+        rect = frontend_rect_from_materialized(f)
+        if rect is not None:
+            row["rect"] = rect
+        out.append(row)
     return out
 
 

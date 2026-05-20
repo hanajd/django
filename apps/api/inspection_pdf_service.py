@@ -4,7 +4,7 @@ from __future__ import annotations
 import copy
 import json as json_std
 import re
-from datetime import datetime
+from collections import defaultdict
 from typing import Sequence
 
 from django.db.models import Q
@@ -45,6 +45,31 @@ def resolve_manual_report_device_count(distinct_inspection_case_count: int) -> i
     return max(0, int(distinct_inspection_case_count))
 
 
+def site_record_name_for_submit_storage(task_no: str, project) -> str:
+    """
+    检测提交 JSON/签名落库文件名前缀：优先当前 taskNo 解析到的文件库任务名称，
+    否则取项目下首个「现场记录」任务名，再否则退回 taskNo（与现场记录业务归属一致）。
+    """
+    from apps.core.library_file_service import sanitize_library_original_filename_fragment
+
+    raw = ""
+    task = _resolve_library_task_for_task_no(task_no, project)
+    if task is not None:
+        raw = (getattr(task, "name", None) or "") or (getattr(task, "code", None) or "")
+    raw = str(raw).strip()
+    if not raw and project is not None:
+        t2 = (
+            project.library_tasks.filter(output_target=LibraryTask.OUTPUT_SITE_RECORD)
+            .order_by("code", "id")
+            .first()
+        )
+        if t2 is not None:
+            raw = (t2.name or t2.code or "").strip()
+    if not raw:
+        raw = str(task_no or "submit").strip().replace("/", "_")
+    return sanitize_library_original_filename_fragment(raw, 80)
+
+
 def _resolve_library_task_for_task_no(task_no: str, project=None):
     assignment_id = _parse_assignment_task_no(task_no)
     if assignment_id:
@@ -80,6 +105,115 @@ def _parse_assignment_task_no(task_no: str):
     return aid if aid > 0 else None
 
 
+def resolve_site_record_library_task_for_inspection_submit_file(
+    lf: LibraryFile, case: InspectionCase, project: LibraryProject | None
+) -> LibraryTask | None:
+    """
+    与文件库列表分组一致：检测提交文件所归属的「现场记录」文件库任务。
+    优先 M2M 绑定且 output_target=site_record 的任务；否则用案件 taskNo 在项目内解析。
+    """
+    if (
+        lf.category != LibraryFile.CATEGORY_INSPECTION_SUBMIT
+        or project is None
+        or case is None
+    ):
+        return None
+    site_tasks = [
+        t
+        for t in lf.library_tasks.all()
+        if getattr(t, "output_target", None) == LibraryTask.OUTPUT_SITE_RECORD
+    ]
+    if site_tasks:
+        return sorted(site_tasks, key=lambda x: ((x.code or ""), x.id))[0]
+    task_no = (case.case_no or "").strip()
+    if not task_no:
+        return None
+    lt = _resolve_library_task_for_task_no(task_no, project)
+    if lt is not None and lt.output_target == LibraryTask.OUTPUT_SITE_RECORD:
+        return lt
+    return None
+
+
+def _is_inspection_submit_json_linked_to_case(lf: LibraryFile) -> bool:
+    on = (lf.original_name or "").strip().lower()
+    if not on.endswith(".json"):
+        return False
+    if lf.category != LibraryFile.CATEGORY_INSPECTION_SUBMIT:
+        return False
+    if lf.link_entity != LibraryFile.LINK_ENTITY_INSPECTION_CASE or not lf.link_object_id:
+        return False
+    return True
+
+
+def dedupe_inspection_submit_selection_latest_per_site_record(
+    files_in_client_order: Sequence[LibraryFile],
+) -> tuple[list[LibraryFile], list[str]]:
+    """
+    对「检测提交」分类中、已关联 inspection 案件且扩展名为 .json 的文件按
+    **(案件 id, 现场记录任务 id 或 'none')** 分组，每组仅保留 ``created_at`` 最新的一条
+    （相同时间再比主键），其余从序列中剔除，避免手动导出 PDF / 手动导出报告时
+    同一路径下多版 JSON 重复套用或深度合并导致数据重叠。
+
+    不参与分组的文件（签名图、未关联案件、非 .json 等）保持原勾选顺序原样返回。
+    """
+    notes: list[str] = []
+    seq = list(files_in_client_order or [])
+    if not seq:
+        return [], notes
+
+    case_ids: list[int] = []
+    for lf in seq:
+        if not _is_inspection_submit_json_linked_to_case(lf):
+            continue
+        try:
+            case_ids.append(int(lf.link_object_id))
+        except (TypeError, ValueError):
+            continue
+    cases_by_id: dict[int, InspectionCase] = {}
+    if case_ids:
+        for c in InspectionCase.objects.filter(pk__in=sorted(set(case_ids))).select_related("library_project"):
+            cases_by_id[c.pk] = c
+
+    buckets: dict[tuple[int, str], list[LibraryFile]] = defaultdict(list)
+    for lf in seq:
+        if not _is_inspection_submit_json_linked_to_case(lf):
+            continue
+        try:
+            cid = int(lf.link_object_id)
+        except (TypeError, ValueError):
+            continue
+        case = cases_by_id.get(cid)
+        if case is None or not getattr(case, "library_project_id", None):
+            continue
+        project = case.library_project
+        st = resolve_site_record_library_task_for_inspection_submit_file(lf, case, project)
+        sk = str(st.pk) if st is not None else "none"
+        buckets[(cid, sk)].append(lf)
+
+    superseded: set[int] = set()
+    for (cid, sk), group in buckets.items():
+        if len(group) < 2:
+            continue
+        group_sorted = sorted(
+            group,
+            key=lambda f: (
+                -(f.created_at.timestamp() if f.created_at else 0.0),
+                -int(f.pk),
+            ),
+        )
+        winner = group_sorted[0]
+        for loser in group_sorted[1:]:
+            superseded.add(int(loser.pk))
+        site_lbl = "未绑定现场记录任务" if sk == "none" else f"现场记录任务 id={sk}"
+        notes.append(
+            f"案件 {cid} / {site_lbl} 下存在 {len(group)} 份检测提交 JSON，"
+            f"导出时仅保留最新一份「{winner.original_name or winner.pk}」，已忽略其余 {len(group) - 1} 份。"
+        )
+
+    out = [lf for lf in seq if int(lf.pk) not in superseded]
+    return out, notes
+
+
 def _display_task_no(task_no: str, project=None) -> str:
     raw = str(task_no or "").strip()
     if raw and raw.isdigit() and len(raw) <= 2:
@@ -95,64 +229,24 @@ def _display_task_no(task_no: str, project=None) -> str:
     return f"{idx:02d}"
 
 
-def _inspection_serial_for_case(inspection_case, project) -> str | None:
-    """
-    同一文件库项目下，本案件在「报告/受检设备」序列中的序号（01 起，按案件创建顺序）。
-    与项目内 library_tasks 列表位置脱钩，避免报告任务插在中间导致受检编号错位。
-    """
-    if inspection_case is None:
-        return None
-    lp_id = getattr(inspection_case, "library_project_id", None)
-    if lp_id is None and project is not None:
-        lp_id = getattr(project, "pk", None)
-    if lp_id is None:
-        return None
-    ids = list(
-        InspectionCase.objects.filter(library_project_id=lp_id)
-        .order_by("created_at", "id")
-        .values_list("id", flat=True)
-    )
-    try:
-        idx = ids.index(int(inspection_case.pk)) + 1
-    except (ValueError, TypeError):
-        return None
-    return f"{idx:02d}"
-
-
 def display_inspected_no_for_fill(inspection_case, project, task_no: str) -> str:
-    """模板/派生映射中的受检编号展示：优先项目内案件序号，否则回退为任务号展示规则。"""
-    serial = _inspection_serial_for_case(inspection_case, project)
+    """
+    模板/派生映射中的受检编号：按项目下报告任务顺序 01、02、…；
+    同报告下的现场记录与报告同号（见 report_source_tasks）。
+    """
+    from apps.core.project_numbering import inspected_serial_for_library_task
+
+    task_obj = _resolve_library_task_for_task_no(task_no, project)
+    serial = inspected_serial_for_library_task(task_obj, project)
     if serial is not None:
         return serial
     return _display_task_no(task_no, project)
 
 
 def _display_project_id(project) -> str:
-    if project is None:
-        return ""
-    code = str(getattr(project, "code", "") or "").strip()
-    if re.fullmatch(r"\d{8}", code):
-        return code
-    created_at = getattr(project, "created_at", None) or datetime.now()
-    if timezone.is_naive(created_at):
-        created_at = timezone.make_aware(created_at, timezone.get_current_timezone())
-    dt = timezone.localtime(created_at)
-    prefix = dt.strftime("%Y%m")
-    month_start = dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    if dt.month == 12:
-        next_month_start = dt.replace(year=dt.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-    else:
-        next_month_start = dt.replace(month=dt.month + 1, day=1, hour=0, minute=0, second=0, microsecond=0)
-    ids = list(
-        LibraryProject.objects.filter(created_at__gte=month_start, created_at__lt=next_month_start)
-        .order_by("created_at", "id")
-        .values_list("id", flat=True)
-    )
-    try:
-        idx = ids.index(project.id) + 1
-    except ValueError:
-        idx = 1
-    return f"{prefix}{idx:02d}"
+    from apps.core.project_numbering import project_public_id
+
+    return project_public_id(project)
 
 
 def _pick_submit_generation_tasks(task_no: str, project):
@@ -347,7 +441,7 @@ def _merge_inspection_payload_for_report_accumulator(base: dict, incoming: dict)
 def _task_no_strings_for_library_task(project, library_task: LibraryTask | None) -> list[str]:
     """
     项目内指向同一 LibraryTask 的 taskNo 可能为序号「01」…或分配号「ASG-{assignment_id}」。
-    用于将检测提交 JSON 文件名 `{taskNo}_submit_*.json` 与现场记录任务对齐。
+    用于将检测提交 JSON 与现场记录任务对齐：优先文件与任务的 M2M；兼容旧版文件名 `{taskNo}_submit_*.json`。
     """
     if project is None or library_task is None:
         return []
@@ -371,7 +465,7 @@ def _site_record_json_files_for_task(
     site_task: LibraryTask,
     candidates: Sequence[LibraryFile],
 ) -> list[LibraryFile]:
-    """从候选文件中挑出属于现场记录任务 site_task 的 JSON（旧：task M2M；新：检测提交文件名含 taskNo）。"""
+    """从候选文件中挑出属于现场记录任务 site_task 的 JSON（任务 M2M；或旧版「{taskNo}_submit_*.json」文件名）。"""
     nos = [n.lower() for n in _task_no_strings_for_library_task(project, site_task)]
     out: list[LibraryFile] = []
     seen: set[int] = set()
@@ -859,20 +953,51 @@ def _inspected_org_from_submit_row(row: dict) -> str:
     hi = sub.get("hospitalInfo") or {}
     if not isinstance(hi, dict):
         return ""
-    # 多数模板「受检单位」在 inspection2，「委托/申请单位」在 inspection；优先取受检侧
+    # 多数模板「受检单位」在 inspection2；name 常为机构全称；inspection 多为委托侧故置后
     for k in (
         "inspection2",
-        "inspection",
+        "name",
         "inspectedUnit",
         "inspectedOrganization",
         "hospitalName",
         "entityName",
         "commissionedUnit",
+        "inspection",
     ):
         v = hi.get(k)
         if isinstance(v, str) and v.strip():
             return v.strip()
     return ""
+
+
+def commission_no_from_merge_source_rows(rows: Sequence[dict]) -> str:
+    """从合并用溯源行中读取首份非空委托编号（兼容 reportInfo 多键名）。"""
+    for r in rows or ():
+        if not isinstance(r, dict):
+            continue
+        sub = r.get("submit")
+        if not isinstance(sub, dict):
+            continue
+        ri = sub.get("reportInfo") or {}
+        if not isinstance(ri, dict):
+            continue
+        for key in ("commissionNo", "entrustNo", "commission_no", "委托编号"):
+            v = ri.get(key)
+            if v in (None, ""):
+                continue
+            s = str(v).strip()
+            if s:
+                return s
+    return ""
+
+
+def _library_project_from_merge_report_files(files_ordered: Sequence[LibraryFile]) -> LibraryProject | None:
+    """合并所选报告同属一项目：取首份文件关联的项目。"""
+    for lf in files_ordered or ():
+        p = lf.projects.order_by("id").first()
+        if p is not None:
+            return p
+    return None
 
 
 def _per_report_title_line_for_merge(row: dict) -> str:
@@ -891,7 +1016,12 @@ def _per_report_title_line_for_merge(row: dict) -> str:
     return _friendly_library_report_stem(row.get("original_name") or "")
 
 
-def build_report_merge_overlay(files_ordered: Sequence[LibraryFile], merge_time=None) -> tuple[dict, str]:
+def build_report_merge_overlay(
+    files_ordered: Sequence[LibraryFile],
+    merge_time=None,
+    *,
+    source_rows: Sequence[dict] | None = None,
+) -> tuple[dict, str]:
     """
     构造合并 PDF 封面/「一、项目基本情况」页叠印所需字段；返回 (overlay_dict, hint)。
 
@@ -899,11 +1029,14 @@ def build_report_merge_overlay(files_ordered: Sequence[LibraryFile], merge_time=
     其前 3 页用作合并稿封面、声明、基本情况版式；叠印字段中的 ``project_name_combined`` 为
     **受检单位名称 + 合并报告名称**（与封面两行项目名称总语义一致）。
 
+    若传入 ``source_rows``，则不再重复调用 ``collect_report_merge_source_rows``（与导出文件名等共用同一溯源结果）。
+
     overlay 键由 utils.pdf_merge.apply_merged_report_merge_overlay 消费。
     """
+    from apps.api.inspection_report_make import merged_report_commission_project_basename
     from utils.pdf_merge import build_merged_report_overlay_fields
 
-    rows = collect_report_merge_source_rows(files_ordered)
+    rows = list(source_rows) if source_rows is not None else collect_report_merge_source_rows(files_ordered)
     if not rows:
         return {}, "无有效报告行"
     mt = merge_time if merge_time is not None else timezone.now()
@@ -920,7 +1053,16 @@ def build_report_merge_overlay(files_ordered: Sequence[LibraryFile], merge_time=
         hint_parts.append(f"部分报告已溯源检测提交（{traced_n}/{len(rows)}），其余自 PDF 文本识别补全")
     else:
         hint_parts.append("所选报告未关联案件或缺少检测提交 JSON，封面与基本情况已按 PDF 文本识别补全")
-    overlay = build_merged_report_overlay_fields(rows, merge_date_str=merge_date_str)
+    cover_title_override: str | None = None
+    proj = _library_project_from_merge_report_files(files_ordered)
+    if proj is not None:
+        com = commission_no_from_merge_source_rows(rows)
+        mn = merged_report_commission_project_basename(proj, com)
+        if mn and mn != "合并报告":
+            cover_title_override = mn
+    overlay = build_merged_report_overlay_fields(
+        rows, merge_date_str=merge_date_str, cover_title_override=cover_title_override
+    )
     return overlay, "；".join(hint_parts)
 
 

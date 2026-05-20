@@ -79,7 +79,7 @@
 5. `_sort_fields_by_coordinate_order`
 6. `_inject_underscore_section_rules`
 7. `_force_signature_step_last`
-8. `_strip_coordinate_keys`
+8. `_attach_rect_and_strip_legacy_coords`（写入 `rect: [page,x,y,w,h]`，移除散落坐标键）
 
 ---
 

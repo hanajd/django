@@ -358,6 +358,62 @@ class LibraryFile(models.Model):
         return "unsupported"
 
 
+class LibraryTaskFolder(models.Model):
+    """检测任务分类（可嵌套）：其下挂报告模板，现场记录模板挂在报告下。"""
+
+    parent = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="children",
+        verbose_name=_("上级分类"),
+    )
+    name = models.CharField(max_length=128, verbose_name=_("分类名称"))
+    sort_order = models.PositiveIntegerField(default=0, verbose_name=_("排序"))
+    notes = models.CharField(max_length=500, blank=True, default="", verbose_name=_("备注"))
+    is_active = models.BooleanField(default=True, verbose_name=_("启用"))
+    created_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="library_task_folders_created",
+        verbose_name=_("创建者"),
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("创建时间"))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_("更新时间"))
+
+    class Meta:
+        verbose_name = _("检测任务分类")
+        verbose_name_plural = verbose_name
+        ordering = ["sort_order", "name", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["parent", "name"],
+                name="uniq_task_folder_sibling_name",
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
+
+    def folder_segment(self) -> str:
+        return f"f-{self.pk}"
+
+    def ancestors_chain(self) -> list["LibraryTaskFolder"]:
+        chain: list[LibraryTaskFolder] = []
+        node: LibraryTaskFolder | None = self
+        while node is not None:
+            chain.append(node)
+            node = node.parent
+        chain.reverse()
+        return chain
+
+    def folder_path(self) -> str:
+        return "/".join(n.folder_segment() for n in self.ancestors_chain())
+
+
 class LibraryTask(models.Model):
     """文件库任务模板：与项目多对多；直接挂载的文件应为「模板」类。其它文件通过项目关联。"""
 
@@ -377,6 +433,15 @@ class LibraryTask(models.Model):
         db_index=True,
         verbose_name=_("PDF 输出目标"),
         help_text=_("决定该任务生成的 PDF 默认保存到现场记录或报告分类"),
+    )
+    task_folder = models.ForeignKey(
+        LibraryTaskFolder,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="report_tasks",
+        verbose_name=_("所属任务分类"),
+        help_text=_("仅报告类模板需选择；现场记录通过报告关联"),
     )
     report_source_tasks = models.ManyToManyField(
         "self",
@@ -515,11 +580,359 @@ class LibraryOCRProcessTask(models.Model):
         return f"OCRTask#{self.pk} {self.status}"
 
 
+class CommissionOrganization(models.Model):
+    """委托单位：医院（必选）→ 院区（可选）→ 科室（可选）。"""
+
+    LEVEL_HOSPITAL = "hospital"
+    LEVEL_CAMPUS = "campus"
+    LEVEL_DEPARTMENT = "department"
+    LEVEL_CHOICES = (
+        (LEVEL_HOSPITAL, _("医院")),
+        (LEVEL_CAMPUS, _("院区")),
+        (LEVEL_DEPARTMENT, _("科室")),
+    )
+    _LEVEL_PREFIX = {
+        LEVEL_HOSPITAL: "h",
+        LEVEL_CAMPUS: "c",
+        LEVEL_DEPARTMENT: "d",
+    }
+
+    level = models.CharField(
+        max_length=16,
+        choices=LEVEL_CHOICES,
+        default=LEVEL_HOSPITAL,
+        db_index=True,
+        verbose_name=_("层级"),
+    )
+    parent = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="children",
+        verbose_name=_("上级"),
+    )
+    name = models.CharField(max_length=255, db_index=True, verbose_name=_("本级名称"))
+    notes = models.CharField(max_length=500, blank=True, default="", verbose_name=_("备注"))
+    address = models.CharField(max_length=512, blank=True, default="", verbose_name=_("地址/位置"))
+    introduction = models.TextField(blank=True, default="", verbose_name=_("简介"))
+    merged_report_file = models.ForeignKey(
+        "LibraryFile",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="commission_orgs_merged_report",
+        verbose_name=_("合并报告"),
+        help_text=_("绑定该委托单位下属项目中已生成并归入文件库「报告」分类的 PDF 等成品文件"),
+    )
+    is_active = models.BooleanField(default=True, verbose_name=_("启用"))
+    created_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="commission_organizations",
+        verbose_name=_("创建者"),
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("创建时间"))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_("更新时间"))
+
+    class Meta:
+        verbose_name = _("委托单位")
+        verbose_name_plural = verbose_name
+        ordering = ["level", "name", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["name"],
+                condition=models.Q(parent__isnull=True),
+                name="uniq_commission_hospital_name",
+            ),
+            models.UniqueConstraint(
+                fields=["parent", "name"],
+                condition=models.Q(parent__isnull=False),
+                name="uniq_commission_org_sibling_name",
+            ),
+        ]
+
+    def __str__(self):
+        return self.full_display_name
+
+    @property
+    def level_prefix(self) -> str:
+        return self._LEVEL_PREFIX.get(self.level, "o")
+
+    def ancestors_chain(self) -> list["CommissionOrganization"]:
+        chain: list[CommissionOrganization] = []
+        node: CommissionOrganization | None = self
+        while node is not None:
+            chain.append(node)
+            node = node.parent
+        chain.reverse()
+        return chain
+
+    @property
+    def full_display_name(self) -> str:
+        parts = [n.name.strip() for n in self.ancestors_chain() if (n.name or "").strip()]
+        return " · ".join(parts) if parts else ""
+
+    @property
+    def level_label(self) -> str:
+        return dict(self.LEVEL_CHOICES).get(self.level, self.level)
+
+    def folder_segment(self) -> str:
+        return f"{self.level_prefix}-{self.pk}"
+
+    def folder_path(self) -> str:
+        return "/".join(n.folder_segment() for n in self.ancestors_chain())
+
+    def hospital_root(self) -> "CommissionOrganization":
+        chain = self.ancestors_chain()
+        return chain[0] if chain else self
+
+    def allowed_child_levels(self) -> list[str]:
+        if self.level == self.LEVEL_HOSPITAL:
+            return [self.LEVEL_CAMPUS, self.LEVEL_DEPARTMENT]
+        if self.level == self.LEVEL_CAMPUS:
+            return [self.LEVEL_DEPARTMENT]
+        return []
+
+    @property
+    def merged_report_label(self) -> str:
+        if self.level == self.LEVEL_HOSPITAL:
+            return _("医院总合并报告")
+        if self.level == self.LEVEL_CAMPUS:
+            return _("院区合并报告")
+        if self.level == self.LEVEL_DEPARTMENT:
+            return _("科室合并报告")
+        return _("合并报告")
+
+
+class CommissionOrgContact(models.Model):
+    """委托单位联系人（常用于科室，也可挂在院区/医院）。"""
+
+    organization = models.ForeignKey(
+        CommissionOrganization,
+        on_delete=models.CASCADE,
+        related_name="contacts",
+        verbose_name=_("所属层级"),
+    )
+    name = models.CharField(max_length=128, verbose_name=_("联系人"))
+    phone = models.CharField(max_length=64, blank=True, default="", verbose_name=_("联系电话"))
+    title = models.CharField(max_length=128, blank=True, default="", verbose_name=_("职务"))
+    sort_order = models.PositiveIntegerField(default=0, verbose_name=_("排序"))
+    is_active = models.BooleanField(default=True, verbose_name=_("启用"))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("创建时间"))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_("更新时间"))
+
+    class Meta:
+        verbose_name = _("委托单位联系人")
+        verbose_name_plural = verbose_name
+        ordering = ["sort_order", "id"]
+
+    def __str__(self):
+        return f"{self.name} ({self.phone or '-'})"
+
+
+class CommissionOrgEquipment(models.Model):
+    """科室下属检测设备；每台设备可关联一份已完成的检测报告文件。"""
+
+    department = models.ForeignKey(
+        CommissionOrganization,
+        on_delete=models.CASCADE,
+        related_name="equipments",
+        verbose_name=_("所属科室"),
+    )
+    name = models.CharField(max_length=255, verbose_name=_("设备名称"))
+    model = models.CharField(max_length=255, blank=True, default="", verbose_name=_("设备型号"))
+    serial_no = models.CharField(max_length=255, blank=True, default="", verbose_name=_("设备编号"))
+    manufacturer = models.CharField(max_length=255, blank=True, default="", verbose_name=_("生产厂家"))
+    location = models.CharField(max_length=512, blank=True, default="", verbose_name=_("设备位置"))
+    notes = models.CharField(max_length=500, blank=True, default="", verbose_name=_("备注"))
+    device_type = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+        verbose_name=_("设备类型"),
+        help_text=_("与任务模板库「设备类型」文件夹对应，如 CT、DR"),
+    )
+    report_task_bindings = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name=_("检测类型与报告模板"),
+        help_text=_('如 [{"inspection_type":"验收检测","report_task_id":1}]；未配置时使用默认 report_task'),
+    )
+    report_file = models.ForeignKey(
+        "LibraryFile",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="commission_org_equipments",
+        verbose_name=_("单台设备报告"),
+        help_text=_("该科室下属项目中已生成并归入文件库「报告」分类的成品文件（最近一次）"),
+    )
+    report_task = models.ForeignKey(
+        "LibraryTask",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="commission_org_equipments",
+        verbose_name=_("检测任务模板"),
+        help_text=_("未检测设备绑定的现场记录/报告任务模板，便于加入新项目开展检测"),
+    )
+    last_commission_no = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+        verbose_name=_("最近委托编号"),
+        help_text=_("最近一次完成检测对应的案件/任务编号"),
+    )
+    last_inspected_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("最近检测时间"),
+    )
+    sort_order = models.PositiveIntegerField(default=0, verbose_name=_("排序"))
+    is_active = models.BooleanField(default=True, verbose_name=_("启用"))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("创建时间"))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_("更新时间"))
+
+    class Meta:
+        verbose_name = _("委托单位设备")
+        verbose_name_plural = verbose_name
+        ordering = ["sort_order", "id"]
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def has_completed_inspection(self) -> bool:
+        return bool(self.report_file_id or self.last_inspected_at)
+
+
+class CommissionOrgEquipmentHistory(models.Model):
+    """设备历次检测记录（报告成品与提交快照）。"""
+
+    equipment = models.ForeignKey(
+        CommissionOrgEquipment,
+        on_delete=models.CASCADE,
+        related_name="inspection_histories",
+        verbose_name=_("设备"),
+    )
+    report_file = models.ForeignKey(
+        "LibraryFile",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="equipment_history_entries",
+        verbose_name=_("报告文件"),
+    )
+    library_project = models.ForeignKey(
+        "LibraryProject",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="equipment_history_entries",
+        verbose_name=_("所属项目"),
+    )
+    inspection_case = models.ForeignKey(
+        "InspectionCase",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="equipment_history_entries",
+        verbose_name=_("检验案件"),
+    )
+    commission_no = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+        db_index=True,
+        verbose_name=_("委托编号"),
+    )
+    inspected_at = models.DateTimeField(null=True, blank=True, verbose_name=_("检测完成时间"))
+    equipment_info = models.JSONField(default=dict, blank=True, verbose_name=_("设备信息快照"))
+    test_result = models.JSONField(default=dict, blank=True, verbose_name=_("检测结果快照"))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("记录时间"))
+
+    class Meta:
+        verbose_name = _("委托单位设备检测历史")
+        verbose_name_plural = verbose_name
+        ordering = ["-inspected_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["equipment", "report_file"],
+                condition=models.Q(report_file__isnull=False),
+                name="uniq_equipment_history_report_file",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.equipment_id} / {self.commission_no or '-'}"
+
+
+class LibraryProjectEquipment(models.Model):
+    """项目委托设备：一次检测委托可包含一台或多台同类型设备。"""
+
+    project = models.ForeignKey(
+        "LibraryProject",
+        on_delete=models.CASCADE,
+        related_name="project_equipments",
+        verbose_name=_("所属项目"),
+    )
+    equipment = models.ForeignKey(
+        CommissionOrgEquipment,
+        on_delete=models.CASCADE,
+        related_name="project_links",
+        verbose_name=_("受检设备"),
+    )
+    report_task = models.ForeignKey(
+        "LibraryTask",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="project_equipment_links",
+        verbose_name=_("报告/检测任务模板"),
+        help_text=_("本项目内该设备使用的任务模板链根节点，默认取自设备主数据"),
+    )
+    sort_order = models.PositiveIntegerField(default=0, verbose_name=_("排序"))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("加入时间"))
+
+    class Meta:
+        verbose_name = _("项目委托设备")
+        verbose_name_plural = verbose_name
+        ordering = ["sort_order", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["project", "equipment"],
+                name="uniq_project_equipment",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.project_id} / {self.equipment_id}"
+
+
 class LibraryProject(models.Model):
     """文件库项目：用于隔离与筛选跨分类文件。"""
 
     code = models.CharField(max_length=64, unique=True, db_index=True, verbose_name=_("项目编码"))
     name = models.CharField(max_length=128, db_index=True, verbose_name=_("项目名称"))
+    commission_org = models.ForeignKey(
+        CommissionOrganization,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="library_projects",
+        verbose_name=_("委托单位"),
+    )
+    commission_organization = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        db_index=True,
+        verbose_name=_("委托单位名称"),
+        help_text=_("与 commission_org.name 同步，便于检索与历史兼容"),
+    )
     description = models.CharField(max_length=255, blank=True, default="", verbose_name=_("描述"))
     is_active = models.BooleanField(default=True, verbose_name=_("启用"))
     created_by = models.ForeignKey(
@@ -529,6 +942,15 @@ class LibraryProject(models.Model):
         on_delete=models.SET_NULL,
         related_name="library_projects",
         verbose_name=_("创建者"),
+    )
+    primary_responsible = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="primary_responsible_library_projects",
+        verbose_name=_("主要负责人"),
+        help_text=_("本项目业务主责人，拥有该项目工作台内的完整配置与分配权限"),
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("创建时间"))
     updated_at = models.DateTimeField(auto_now=True, verbose_name=_("更新时间"))
@@ -1015,7 +1437,7 @@ class InspectionSubmissionInstrument(models.Model):
 
 
 class LibraryProjectWorkflowMember(models.Model):
-    """项目内流程岗位：同一用户在同一项目仅允许一个流程岗位。"""
+    """项目内流程参与人：同一岗位可有多人；同一用户在同一项目同一岗位仅登记一次。"""
 
     ROLE_FIELD_INSPECTOR = "field_inspector"
     ROLE_SITE_REVIEWER = "site_reviewer"
@@ -1076,16 +1498,15 @@ class LibraryProjectWorkflowMember(models.Model):
     @classmethod
     def ensure_for_project_assignment(cls, project, user):
         """
-        项目任务分配给某用户后：按该用户全局角色写入对应「流程岗位」槽位（每项目每岗位至多一人）。
-        若该岗位已有记录则更新为当前用户（与测试账号一人兼任多岗的模型一致）。
+        项目任务分配给某用户后：按该用户全局角色将其加入对应流程岗位（不挤占同岗位其他参与人）。
         """
         if project is None or user is None:
             return None
         wf = cls.default_workflow_role_for_user(user)
-        obj, _created = cls.objects.update_or_create(
+        obj, _created = cls.objects.get_or_create(
             project=project,
+            user=user,
             workflow_role=wf,
-            defaults={"user": user},
         )
         return obj
 
@@ -1095,8 +1516,8 @@ class LibraryProjectWorkflowMember(models.Model):
         ordering = ["project_id", "workflow_role", "user_id"]
         constraints = [
             models.UniqueConstraint(
-                fields=["project", "workflow_role"],
-                name="uniq_project_workflow_role_slot",
+                fields=["project", "user", "workflow_role"],
+                name="uniq_project_workflow_member_user_role",
             ),
         ]
 

@@ -12,5 +12,6 @@
 | [05-utils-and-pipelines.md](05-utils-and-pipelines.md) | `utils/`、PDF/模板规则、管线与 MinerU/Ollama |
 | [06-scripts-and-admin.md](06-scripts-and-admin.md) | `manage.py` 自定义命令、Django Admin |
 | [backend_usage_guide.md](backend_usage_guide.md) | 「后台使用说明」与流程练习相关代码清单 |
+| [后台管理系统说明（甲方版）.md](后台管理系统说明（甲方版）.md) | **面向甲方/业务用户**的后台能力总览、推荐流程与常见问题（无技术实现细节） |
 
 **说明**：业务规则以代码与数据库迁移为准；文档描述的是当前仓库结构，大改模块后请同步更新对应章节。

@@ -27,10 +27,12 @@ from apps.core import htmlpdf_service, pipeline_service
 from apps.core.library_file_service import save_library_binary_uploads
 from apps.core.models import (
     InspectionCase,
+    InspectionSubmission,
     InstrumentCatalog,
     LibraryFile,
     LibraryTask,
 )
+from utils.pdf_merge import extract_modality_abbr_from_title, merged_device_phrase_for_evaluation
 from utils.report_fill_helpers import merge_number_tokens_from_source, split_contact_name_phone
 
 # 报告质控区 steps 常把「检测条件/检测结果」绑到 testResult.test3、field30、testResult2 等 legacy 键；
@@ -46,11 +48,229 @@ def _report_defer_legacy_qc_submit_path(submit_path: str) -> bool:
     return bool(_REPORT_DEFER_LEGACY_QC_SUBMIT_PATH.match(s))
 
 
+def _normalize_test_year_yyyy(y: object) -> str:
+    """检测日期年份：规范为 4 位数字（yyyy）；无法按整数解析时退回去空白后的原字符串。"""
+    if y is None:
+        return ""
+    ys = str(y).strip()
+    if not ys:
+        return ""
+    if ys.isdigit():
+        n = int(ys)
+        if 0 <= n <= 9999:
+            return f"{n:04d}"
+    return ys
+
+
+# 模板 submitPath 常指向完整 ISO（如 2026-05-11T00:00:00.000），需拆入「检测日期_年」等只收片段的槽位
+_DATE_PART_YEAR_KEYS = frozenset({"检测日期_年", "检测年"})
+_DATE_PART_MONTH_KEYS = frozenset({"检测日期_月", "检测月"})
+_DATE_PART_DAY_KEYS = frozenset({"检测日期_日", "检测日"})
+
+
+def _parse_loose_datetime_for_submit(val: object) -> datetime | None:
+    """解析检测日期：支持 datetime/date、ISO 含 T、仅日期；与 Django parse_datetime 互补。"""
+    if val is None or val == "":
+        return None
+    if isinstance(val, datetime):
+        return val
+    if isinstance(val, date):
+        return datetime(val.year, val.month, val.day, 0, 0, 0)
+    s = str(val).strip()
+    if not s:
+        return None
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        pass
+    d = parse_datetime(s)
+    if isinstance(d, datetime):
+        return d
+    head = s.split("T", 1)[0].strip()
+    try:
+        parts = head.split("-")
+        if len(parts) >= 3:
+            y, m, d2 = int(parts[0]), int(parts[1]), int(parts[2])
+            return datetime(y, m, d2, 0, 0, 0)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return None
+
+
+def _coerce_iso_datetime_value_for_date_part_key(key: str, val: object) -> object:
+    """若语义键为检测日期年/月/日槽，且值为完整 ISO，则只写入对应片段（年为四位 yyyy）。"""
+    k = str(key or "").strip()
+    if not k:
+        return val
+    if k not in _DATE_PART_YEAR_KEYS and k not in _DATE_PART_MONTH_KEYS and k not in _DATE_PART_DAY_KEYS:
+        return val
+    dt = _parse_loose_datetime_for_submit(val)
+    if dt is None:
+        return val
+    if k in _DATE_PART_YEAR_KEYS:
+        return f"{dt.year:04d}"
+    if k in _DATE_PART_MONTH_KEYS:
+        return str(dt.month)
+    if k in _DATE_PART_DAY_KEYS:
+        return str(dt.day)
+    return val
+
+
+def _coerce_scalar_for_field_date_part_slots(field: dict, raw_sp: object) -> str:
+    """submitPath 等直读提交 JSON 的路径：若当前 PDF 格语义为「检测日期_年/月/日」，把 ISO 拆成片段再写入。"""
+    if isinstance(raw_sp, bool):
+        return str(raw_sp)
+    val_out = "" if raw_sp is None else str(raw_sp).strip()
+    if not val_out:
+        return val_out
+    for ck in _field_semantic_candidate_keys(field):
+        co = _coerce_iso_datetime_value_for_date_part_key(ck, val_out)
+        if co != val_out:
+            return str(co)
+    return val_out
+
+
+def _normalize_iso_strings_in_test_date_part_slots(value_mapping: dict) -> None:
+    """将已写入 value_mapping 的「年/月/日」槽位上的完整 ISO 字符串规范为数字片段（幂等）。"""
+    if not isinstance(value_mapping, dict):
+        return
+    for key_set, part in (
+        (_DATE_PART_YEAR_KEYS, "year"),
+        (_DATE_PART_MONTH_KEYS, "month"),
+        (_DATE_PART_DAY_KEYS, "day"),
+    ):
+        for sk in key_set:
+            if sk not in value_mapping:
+                continue
+            cur = value_mapping.get(sk)
+            cs = "" if cur is None else str(cur).strip()
+            if not cs or len(cs) <= 4 and "-" not in cs and "T" not in cs:
+                continue
+            dt = _parse_loose_datetime_for_submit(cur)
+            if dt is None:
+                continue
+            if part == "year":
+                value_mapping[sk] = f"{dt.year:04d}"
+            elif part == "month":
+                value_mapping[sk] = str(dt.month)
+            else:
+                value_mapping[sk] = str(dt.day)
+
+
+def _hospital_info_inspected_unit_name(hi: dict) -> str:
+    """hospitalInfo 中受检侧机构名（无模板语境时的兜底顺序）。
+
+    注意：不同库模板「受检单位」submitPath 可能挂在 inspection2（如 JS-001）或 inspection（如 JS-117）；
+    现场 PDF 回填应以模板 submitPath 写入 value_mapping 为准，本函数仅用于派生映射补缺。
+    """
+    if not isinstance(hi, dict):
+        return ""
+    for k in (
+        "inspection2",
+        "name",
+        "inspectedUnit",
+        "inspectedOrganization",
+        "hospitalName",
+        "entityName",
+        "commissionedUnit",
+        "inspection",
+    ):
+        v = hi.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+        if v not in (None, "") and not isinstance(v, (dict, list)):
+            s = str(v).strip()
+            if s:
+                return s
+    return ""
+
+
+def _hospital_info_inspected_unit_address(hi: dict) -> str:
+    if not isinstance(hi, dict):
+        return ""
+    for k in ("address", "inspectionAddress", "unitAddress", "hospitalAddress"):
+        v = hi.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+        if v not in (None, "") and not isinstance(v, (dict, list)):
+            s = str(v).strip()
+            if s:
+                return s
+    return ""
+
+
 def _build_submit_value_mapping(source_data: dict, map_id: str | None = None):
     mid = (map_id or "").strip() or DEFAULT_SUBMIT_PLACEHOLDER_MAP_ID
     if mid not in SUBMIT_PLACEHOLDER_MAPS:
         mid = DEFAULT_SUBMIT_PLACEHOLDER_MAP_ID
     return build_submit_value_mapping(source_data, mid)
+
+
+def _resolve_submitter_display_name(
+    inspection_case: InspectionCase | None,
+    project,
+    task_no: str,
+    source_data: dict,
+) -> str:
+    """主要检测人员等：优先检测提交记录/提交 JSON 文件的提交用户（可追溯现场编制人）。"""
+    tn = (task_no or "").strip()
+
+    def _user_disp(u: User | None) -> str:
+        if u is None:
+            return ""
+        fn = (u.get_full_name() or "").strip()
+        if fn:
+            return fn
+        return (u.username or "").strip()
+
+    if inspection_case is not None and project is not None:
+        if tn:
+            sub = (
+                InspectionSubmission.objects.filter(
+                    task_no=tn, case_id=inspection_case.pk, project_id=project.pk
+                )
+                .select_related("created_by")
+                .order_by("-submitted_at", "-updated_at", "-id")
+                .first()
+            )
+            if sub is not None:
+                s = _user_disp(sub.created_by)
+                if s:
+                    return s
+        lf = (
+            LibraryFile.objects.filter(
+                category=LibraryFile.CATEGORY_INSPECTION_SUBMIT,
+                link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
+                link_object_id=inspection_case.pk,
+                projects=project,
+            )
+            .select_related("created_by")
+            .order_by("-created_at", "-id")
+            .first()
+        )
+        if lf is not None:
+            s = _user_disp(lf.created_by)
+            if s:
+                return s
+
+    for k in ("submitterName", "submitter", "inspectorName", "authorName"):
+        v = source_data.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    uobj = source_data.get("user") or source_data.get("submittedBy")
+    if isinstance(uobj, dict):
+        n = (uobj.get("name") or uobj.get("displayName") or uobj.get("username") or "").strip()
+        if n:
+            return n
+    ri = source_data.get("reportInfo")
+    if isinstance(ri, dict):
+        for k in ("inspector", "author", "preparedBy", "inspectorName"):
+            v = ri.get(k)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+    return ""
 
 
 def _build_submit_derived_value_mapping(
@@ -71,22 +291,37 @@ def _build_submit_derived_value_mapping(
     hospital_info = source_data.get("hospitalInfo") or {}
     equipment_info = source_data.get("equipmentInfo") or {}
     test_result = source_data.get("testResult") or {}
-    hospital_name = str(hospital_info.get("name") or hospital_info.get("inspection") or "")
+    hospital_name = _hospital_info_inspected_unit_name(hospital_info)
     model = str(equipment_info.get("model") or "")
     device_name = str(equipment_info.get("deviceName") or "")
-    year = str(report_info.get("year") or "")
-    month = str(report_info.get("month") or "")
-    day = str(report_info.get("day") or "")
+    year = str(report_info.get("year") or "").strip()
+    month = str(report_info.get("month") or "").strip()
+    day = str(report_info.get("day") or "").strip()
     if not (year and month and day):
-        td = test_result.get("testDate")
-        if isinstance(td, str):
-            d = parse_datetime(td.strip())
-            if isinstance(d, datetime):
-                year, month, day = str(d.year), str(d.month), str(d.day)
+        d = _parse_loose_datetime_for_submit(test_result.get("testDate"))
+        if d is not None:
+            year, month, day = f"{d.year:04d}", str(d.month), str(d.day)
+    if not (year and month and day):
+        d = _parse_loose_datetime_for_submit(report_info.get("testDate"))
+        if d is not None:
+            year, month, day = f"{d.year:04d}", str(d.month), str(d.day)
     if not (year and month and day):
         dt_upd = _parse_source_updated_at(source_data)
         if dt_upd:
-            year, month, day = str(dt_upd.year), str(dt_upd.month), str(dt_upd.day)
+            year, month, day = f"{dt_upd.year:04d}", str(dt_upd.month), str(dt_upd.day)
+    year_yyyy = _normalize_test_year_yyyy(year)
+    month_s = str(month).strip() if month not in (None, "") else ""
+    day_s = str(day).strip() if day not in (None, "") else ""
+    date_cn_full = ""
+    month_z, day_z = month_s, day_s
+    if year_yyyy and month_s and day_s:
+        try:
+            mi, di = int(str(month_s).strip()), int(str(day_s).strip())
+            month_z = f"{mi:02d}"
+            day_z = f"{di:02d}"
+            date_cn_full = f"{year_yyyy}年{month_z}月{day_z}日"
+        except (TypeError, ValueError):
+            date_cn_full = f"{year_yyyy}年{month_s}月{day_s}日"
 
     def _test_line(block: dict):
         if not isinstance(block, dict):
@@ -115,7 +350,6 @@ def _build_submit_derived_value_mapping(
                 return _s(block.get(k))
         return ""
 
-    testman = ""
     if manual_device_count is not None:
         try:
             device_count = max(0, int(manual_device_count))
@@ -124,14 +358,17 @@ def _build_submit_derived_value_mapping(
     else:
         # 单份报告对应一台受检设备，默认台数为 1；多案合成导出由调用方传入 manual_device_count。
         device_count = 1
-    if project is not None:
+
+    submitter_name = _resolve_submitter_display_name(inspection_case, project, task_no, source_data)
+    if not submitter_name and project is not None:
         names = (
             User.objects.filter(site_records__case__library_project=project)
             .order_by("username")
             .values_list("username", flat=True)
             .distinct()
         )
-        testman = "、".join([n for n in names if n])
+        submitter_name = "、".join([n for n in names if n])
+    testman = submitter_name
 
     project_code = _display_project_id(project)
     inspected_display = display_inspected_no_for_fill(inspection_case, project, task_no)
@@ -143,6 +380,16 @@ def _build_submit_derived_value_mapping(
     project_title = ""
     if is_report and (hospital_name or report_template_name):
         project_title = f"{hospital_name}{report_template_name}"
+
+    n_eval = max(1, int(device_count)) if device_count else 1
+    title_for_abbr = report_template_name or device_name or model or ""
+    ab = extract_modality_abbr_from_title(title_for_abbr) or (device_name or model or "设备").strip()[:32] or "设备"
+    dev_eval = merged_device_phrase_for_evaluation([ab] * n_eval, n_eval)
+    org_for_eval = (hospital_name or "").strip()
+    assessment = (
+        f"应委托方要求，依据相关检测标准，对{org_for_eval}{dev_eval}进行了质量控制检测，结果表明：\n"
+        f"所检设备的质量控制相关参数均符合相关标准要求。"
+    )
 
     contact_name, contact_phone = split_contact_name_phone(
         str(hospital_info.get("contactPerson") or ""),
@@ -168,7 +415,7 @@ def _build_submit_derived_value_mapping(
 
     contact_name = (contact_name or str(hospital_info.get("contactPerson") or "")).strip()
     contact_phone = (contact_phone or str(hospital_info.get("contactPhone") or "")).strip()
-    addr = str(hospital_info.get("address") or "")
+    addr = _hospital_info_inspected_unit_address(hospital_info)
     rated = str(equipment_info.get("ratedParams") or "")
     mfr = str(equipment_info.get("manufacturer") or "")
     serial = str(equipment_info.get("serialNo") or "")
@@ -185,11 +432,8 @@ def _build_submit_derived_value_mapping(
         "testnumber": inspected_display,
         "deviceCount": str(device_count),
         "testman": testman,
-        "assessment": (
-            f"应委托方要求，依据相关检测标准，对{hospital_name}放射诊疗设备（{model} 型{device_name}）"
-            "进行了质量控制检测（验收检测），结果表明：\n所检设备的质量控制相关参数均符合相关标准要求。"
-        ),
-        "testDate": f"{year}年{month}月{day}日" if year and month and day else "",
+        "assessment": assessment,
+        "testDate": date_cn_full,
         "kerma_test": _test_line(kerma_typical),
         "kermaMax_test": _test_line({"controlMode": "最大比释动能", **(kerma_max_normal if isinstance(kerma_max_normal, dict) else {})}),
         "kermaMaxNormal_test": _test_line(kerma_max_normal),
@@ -218,29 +462,32 @@ def _build_submit_derived_value_mapping(
     derived["联系人"] = contact_name
     derived["联系电话"] = contact_phone
     derived["联系人电话"] = contact_phone
-    derived["受检设备台数"] = str(device_count)
+    derived["受检设备台数"] = f"{device_count}台"
     derived["设备名称"] = device_name
     derived["设备型号"] = model
     derived["额定参数"] = rated
     derived["生产厂家"] = mfr
     derived["设备编号"] = serial
     derived["设备所在场所"] = loc
-    if year and month and day:
-        derived["检测日期"] = f"{year}年{month}月{day}日"
-        derived["检测年"] = year
-        derived["检测月"] = month
-        derived["检测日"] = day
-        # JS-001 等模板拆分「检测日期_年/月/日」，与「检测年」等并列 id 不同，需单独对齐
-        derived["检测日期_年"] = year
-        derived["检测日期_月"] = month
-        derived["检测日期_日"] = day
+    derived["主要检测人员"] = submitter_name
+    derived["评价"] = assessment
+    if year_yyyy:
+        derived["检测年"] = year_yyyy
+        derived["检测日期_年"] = year_yyyy
+    if year_yyyy and month_s and day_s:
+        derived["检测日期"] = date_cn_full or f"{year_yyyy}年{month_s}月{day_s}日"
+        derived["检测月"] = month_z
+        derived["检测日"] = day_z
+        derived["检测日期_月"] = month_z
+        derived["检测日期_日"] = day_z
 
     if project_title:
         derived["项目名称"] = project_title
         derived["projectTitle"] = project_title
 
-    # 委托单位名称：同受检单位 → 受检单位名称；选「委托单位」→ 仅填提交的委托单位名称（无则留空）
+    # 委托单位：自定义委托且正文有名称则用该名称；否则（含未搜到委托单位）回退为受检单位名称
     _mode = str(hospital_info.get("commissionOrgMode") or "").strip()
+    _corg = ""
     if _mode == "customCommission":
         _corg = str(
             hospital_info.get("commissionOrganization")
@@ -249,7 +496,7 @@ def _build_submit_derived_value_mapping(
             or hospital_info.get("commission")
             or ""
         ).strip()
-    else:
+    if not _corg:
         _corg = hospital_name.strip() if hospital_name else ""
     if _corg:
         derived["委托单位名称"] = _corg
@@ -377,7 +624,7 @@ def _fill_template_fields_with_submit_legacy(
             if isinstance(site_fields, list):
                 _apply_template_field_sources_to_mapping(value_mapping, source_data, site_fields)
             _merge_mapping_fill_empty(merged_site_sem, _build_site_template_dynamic_semantic_mapping(parsed, source_data))
-        _merge_mapping_fill_empty(value_mapping, merged_site_sem)
+        _merge_site_dynamic_semantics_into_value_mapping(value_mapping, merged_site_sem)
     # 提交内嵌 steps（若有）再补缺；dynamicData 须先经现场记录模板解释 pdfFieldId，报告侧仅按占位符词条匹配
     _merge_mapping_fill_empty(value_mapping, _build_dynamic_data_semantic_mapping(source_data))
     submit_steps_legacy = source_data.get("steps")
@@ -425,6 +672,7 @@ def _fill_template_fields_with_submit_legacy(
             task_obj=task_obj,
         ),
     )
+    _normalize_iso_strings_in_test_date_part_slots(value_mapping)
     signature_map = {}
     if isinstance(bindings, dict):
         raw_sig_map = bindings.get("signature_map")
@@ -513,6 +761,28 @@ def _field_semantic_candidate_keys(field: dict) -> list[str]:
     return out
 
 
+# DSA/对比灵敏度等多行表：占位符 id 仅差「0.4mm / 7mm / 0.2mm」等厚度时，模糊匹配会串到相邻行。
+_MM_THICKNESS_IN_SEMANTIC_KEY_RE = re.compile(r"\d+(?:\.\d+)?mm", re.IGNORECASE)
+
+
+def _mm_thickness_tokens_in_semantic_key(s: str) -> frozenset[str]:
+    if not s:
+        return frozenset()
+    return frozenset(m.group(0).lower() for m in _MM_THICKNESS_IN_SEMANTIC_KEY_RE.finditer(str(s)))
+
+
+def _field_mm_thickness_tokens_for_qc_disambiguation(field: dict) -> frozenset[str]:
+    """从控件语义名（通常取长 id）提取厚度标记集合；无标记时返回空集表示不做厚度约束。"""
+    cands = [k for k in _field_semantic_candidate_keys(field) if k]
+    if not cands:
+        return frozenset()
+    blob = max(cands, key=len)
+    toks = _mm_thickness_tokens_in_semantic_key(blob)
+    if toks:
+        return toks
+    return _mm_thickness_tokens_in_semantic_key(" ".join(cands))
+
+
 def _value_is_field_label_echo(field: dict, val: object) -> bool:
     """
     库模板里常见「content / defaultValue = 占位符全文」；若当作 dynamicData 缺省写入 value_mapping，
@@ -582,6 +852,45 @@ def _is_single_item_verdict_text_field(field: dict) -> bool:
         if "单项判定" in str(k or ""):
             return True
     return False
+
+
+def _report_verdict_field_content_is_fail(s: str) -> bool:
+    """单项判定最终文案是否视为不合格（与 verdict 默认 failLabel 一致）。"""
+    t = (s or "").strip()
+    if not t:
+        return False
+    return "不合格" in t
+
+
+def _report_template_field_shows_fail_verdict(field: dict) -> bool:
+    if not isinstance(field, dict) or not _is_single_item_verdict_text_field(field):
+        return False
+    return _report_verdict_field_content_is_fail(str(field.get("content") or ""))
+
+
+def _patch_report_evaluation_field_after_verdicts(template_fields: list | None) -> None:
+    """
+    「评价」首段与合成报告一致；若任意单项判定为不合格，第二句改为提示核对/复测。
+    须在单项判定第二遍推算完成后调用。
+    """
+    if not isinstance(template_fields, list):
+        return
+    ok_tail = "所检设备的质量控制相关参数均符合相关标准要求。"
+    fail_tail = "所检设备的质量控制相关参数有部分不合格，请仔细核对或重新检测。"
+    flat: list = []
+    _walk_template_field_dicts(template_fields, flat)
+    for f in flat:
+        if not isinstance(f, dict):
+            continue
+        if (f.get("fieldType") or "").lower() != "text":
+            continue
+        keys = _field_semantic_candidate_keys(f)
+        if not any((k or "").strip() == "评价" for k in keys):
+            continue
+        cur = str(f.get("content") or "")
+        if fail_tail in cur or ok_tail not in cur:
+            continue
+        f["content"] = cur.replace(ok_tail, fail_tail, 1)
 
 
 def _find_template_field_by_semantic_key(template_fields: list, key: str):
@@ -703,13 +1012,15 @@ def _apply_template_field_sources_to_mapping(
         for key in _field_semantic_candidate_keys(f):
             if not key:
                 continue
+            coerced = _coerce_iso_datetime_value_for_date_part_key(key, val)
             if not overwrite and value_mapping.get(key) not in (None, ""):
                 continue
-            value_mapping[key] = val
+            value_mapping[key] = coerced
         pid = _field_pdf_id(f)
         if pid:
+            coerced_pid = _coerce_iso_datetime_value_for_date_part_key(pid, val)
             if overwrite or value_mapping.get(pid) in (None, ""):
-                value_mapping[pid] = val
+                value_mapping[pid] = coerced_pid
 
 
 def _walk_template_field_dicts(fields: list | None, acc: list) -> None:
@@ -1300,6 +1611,9 @@ def _instrument_slot_index_for_instrument_select_field(field_id: str) -> int | N
         return n if n >= 1 else None
     if s.lower() == "instrument":
         return 1
+    # JS-117 等：单格「检测仪器」字段 id 为 testInstrument（非 testInstrument1）
+    if s.lower() == "testinstrument":
+        return 1
     return None
 
 
@@ -1316,6 +1630,7 @@ def _collect_instrument_slot_lines_from_steps_instrument_select(
     dd = source_data.get("dynamicData")
     if not isinstance(dd, dict):
         dd = {}
+    dd = _normalize_dynamic_data_f_slots(dd)
     guard = _instrument_guard_scalar_tokens(source_data)
     for fld in _flatten_unified_form_steps_to_fields_deep(site_steps_merged):
         if not isinstance(fld, dict):
@@ -1360,6 +1675,72 @@ def _collect_instrument_slot_lines_from_steps_instrument_select(
             if ls in guard:
                 continue
             out[slot] = line
+    return out
+
+
+def _collect_instrument_slot_lines_from_steps_instruments_text_bind(
+    source_data: dict, site_steps_merged: list | None
+) -> dict[int, str]:
+    """
+    库模板将整表 instruments 绑在 type=text/textarea 上（如 JS-117 testInstrument + f67），
+    仅写 dynamicData.f67 而不落根级 instruments[] 时，从该 pdfFieldId 槽取展示串。
+    与 instrument_select 分支互补；不处理 instrument_select（避免重复）。
+    """
+    out: dict[int, str] = {}
+    if not isinstance(source_data, dict) or not site_steps_merged:
+        return out
+    dd = source_data.get("dynamicData")
+    if not isinstance(dd, dict):
+        dd = {}
+    dd = _normalize_dynamic_data_f_slots(dd)
+    guard = _instrument_guard_scalar_tokens(source_data)
+    for fld in _flatten_unified_form_steps_to_fields_deep(site_steps_merged):
+        if not isinstance(fld, dict):
+            continue
+        if str(fld.get("type") or "").lower() == "instrument_select":
+            continue
+        ftyp = str(fld.get("type") or "").lower()
+        if ftyp and ftyp not in ("text", "textarea"):
+            continue
+        src = fld.get("source") if isinstance(fld.get("source"), dict) else {}
+        sp = str(src.get("submitPath") or "").strip()
+        if sp != "instruments":
+            continue
+        fid = str(fld.get("id") or "").strip()
+        slot = _instrument_slot_index_for_instrument_select_field(fid)
+        if slot is None or slot < 1 or slot > _INSTRUMENT_DD_MAX_SLOTS:
+            slot = 1
+        pid = str(src.get("pdfFieldId") or fld.get("pdfFieldId") or "").strip()
+        if not pid:
+            continue
+        raw = _unwrap_dynamic_data_cell_value(dd.get(pid))
+        if raw in (None, ""):
+            raw = fld.get("value")
+            if isinstance(raw, (dict, list, bool)):
+                raw = None
+        if raw in (None, ""):
+            continue
+        line = ""
+        if isinstance(raw, dict):
+            line = format_instrument_display_from_submit_item(raw)
+        elif isinstance(raw, bool):
+            continue
+        elif isinstance(raw, int):
+            rs = str(raw)
+            line = (_resolve_instrument_id_display(source_data, rs) or "").strip()
+        elif isinstance(raw, float) and raw.is_integer():
+            rs = str(int(raw))
+            line = (_resolve_instrument_id_display(source_data, rs) or "").strip()
+        else:
+            rs = str(raw).strip()
+            if rs:
+                line = (_resolve_instrument_id_display(source_data, rs) or "").strip() or rs
+        if not (line or "").strip():
+            continue
+        ls = line.strip()
+        if ls in guard:
+            continue
+        out[slot] = ls
     return out
 
 
@@ -1489,6 +1870,7 @@ def _collect_instrument_slot_lines_from_submit(
     dd = source_data.get("dynamicData")
     if not isinstance(dd, dict):
         dd = {}
+    dd = _normalize_dynamic_data_f_slots(dd)
     raw_list = source_data.get("instruments")
     if not isinstance(raw_list, list):
         raw_list = []
@@ -1547,6 +1929,14 @@ def _collect_instrument_slot_lines_from_submit(
             out[i] = line
     if site_steps_merged:
         for si, ln in _collect_instrument_slot_lines_from_steps_instrument_select(
+            source_data, site_steps_merged
+        ).items():
+            if not ln:
+                continue
+            prev = (out.get(si) or "").strip()
+            if not prev:
+                out[si] = ln
+        for si, ln in _collect_instrument_slot_lines_from_steps_instruments_text_bind(
             source_data, site_steps_merged
         ).items():
             if not ln:
@@ -1760,17 +2150,12 @@ def _inject_hospital_equipment_cn_aliases(value_mapping: dict, source_data: dict
                 continue
             value_mapping[key] = s
 
-    # 受检单位：部分模板用 inspection；标准键为 name
-    hospital_display = hi.get("name")
-    if hospital_display in (None, ""):
-        hospital_display = hi.get("inspection")
+    hospital_display = _hospital_info_inspected_unit_name(hi)
     put(
         ["受检单位名称", "医院名称", "单位名称", "医疗机构名称", "受检单位", "hospitalname"],
         hospital_display,
     )
-    addr = hi.get("address")
-    if addr in (None, ""):
-        addr = hi.get("inspectionAddress")
+    addr = _hospital_info_inspected_unit_address(hi)
     put(["受检单位地址", "单位地址", "地址"], addr)
     # 联系人/电话：优先拆分「委托单位联系人/电话」整格（commissionContactPhone）
     _cn, _ph = split_contact_name_phone(
@@ -3026,6 +3411,7 @@ def _pick_value_by_placeholder_keyword_in_mapping(
             needles.append(v)
     needles.sort(key=len, reverse=True)
     cands_joined = " ".join(k for k in _field_semantic_candidate_keys(field) if k)
+    ftoks_mm = _field_mm_thickness_tokens_for_qc_disambiguation(field)
     guard_qc_condition_cell = (
         "检测条件" in cands_joined
         and "判定标准" not in cands_joined
@@ -3045,6 +3431,10 @@ def _pick_value_by_placeholder_keyword_in_mapping(
                 continue
             if _dsa_report_field_rejects_value_key(field, key):
                 continue
+            if ftoks_mm:
+                ktoks = _mm_thickness_tokens_in_semantic_key(key)
+                if ktoks and ftoks_mm != ktoks:
+                    continue
             if guard_qc_condition_cell:
                 if "判定标准" in key or "单项判定" in key:
                     continue
@@ -3402,6 +3792,7 @@ def _best_similar_mapping_key(
     *,
     key_filter,
     min_ratio: float = 0.52,
+    thickness_tokens: frozenset[str] | None = None,
 ) -> str | None:
     if not target or not isinstance(value_mapping, dict):
         return None
@@ -3412,6 +3803,10 @@ def _best_similar_mapping_key(
             continue
         if not key_filter(k):
             continue
+        if thickness_tokens:
+            kt = _mm_thickness_tokens_in_semantic_key(k)
+            if kt and thickness_tokens != kt:
+                continue
         if v in (None, "") or isinstance(v, (dict, list)):
             continue
         r = _string_similarity_ratio(target, k)
@@ -3479,10 +3874,18 @@ def _pick_qc_condition_result_by_similarity(
         return _is_whole_cell_qc_condition_mapping_key(k)
 
     pred = _is_condition_key if want_condition else _is_result_key
-    hit = _best_similar_mapping_key(target, value_mapping, key_filter=pred, min_ratio=min_ratio)
+    ftoks = _mm_thickness_tokens_in_semantic_key(target)
+    thick = ftoks if ftoks else None
+    hit = _best_similar_mapping_key(
+        target, value_mapping, key_filter=pred, min_ratio=min_ratio, thickness_tokens=thick
+    )
     if not hit:
         hit = _best_similar_mapping_key(
-            target, value_mapping, key_filter=pred, min_ratio=min_ratio_loose
+            target,
+            value_mapping,
+            key_filter=pred,
+            min_ratio=min_ratio_loose,
+            thickness_tokens=thick,
         )
     if not hit:
         return None
@@ -3897,6 +4300,78 @@ def _merge_mapping_fill_empty(base: dict, extra: dict) -> None:
         base[k] = v
 
 
+_F_SLOT_DD_KEY = re.compile(r"^[fF]\d+\Z")
+
+
+def _unwrap_dynamic_data_cell_value(val: object) -> object:
+    """部分客户端将 dynamicData[fN] 写成 { value / text / content }；解包为可写入 PDF 的标量。"""
+    if isinstance(val, dict) and val:
+        for kk in ("value", "text", "content", "displayValue"):
+            inner = val.get(kk)
+            if inner in (None, ""):
+                continue
+            if isinstance(inner, (dict, list)):
+                continue
+            return inner
+    return val
+
+
+def _normalize_dynamic_data_f_slots(dd: dict | None) -> dict:
+    """将 dynamicData 中 F8、f8 等槽键规范为 f8，与模板 pdfFieldId 一致。"""
+    if not isinstance(dd, dict) or not dd:
+        return dd if isinstance(dd, dict) else {}
+    out = {**dd}
+    for k, v in list(dd.items()):
+        if not isinstance(k, str):
+            continue
+        ks = k.strip()
+        if not _F_SLOT_DD_KEY.match(ks):
+            continue
+        canon = ks.lower()
+        if canon == ks:
+            continue
+        if out.get(canon) in (None, "") and v not in (None, ""):
+            out[canon] = v
+    return out
+
+
+def _merge_site_dynamic_semantics_into_value_mapping(value_mapping: dict, merged_site_sem: dict) -> None:
+    """合并「库现场模板 + dynamicData」解释的词条。
+
+    先补缺；再对「当前值等于键名」（常见占位回声）或明显桩值用 dynamicData 侧真值覆盖，
+    否则 submitPath 已写入标签串「受检单位」会占住键，导致 f8 有值仍无法进入 PDF。
+    """
+    if not isinstance(value_mapping, dict) or not isinstance(merged_site_sem, dict):
+        return
+    _merge_mapping_fill_empty(value_mapping, merged_site_sem)
+    junk_stubs = frozenset({"-", "—", "－", "/", "无", "暂无", "N/A", "n/a"})
+    for k, v in merged_site_sem.items():
+        if not k:
+            continue
+        if v in (None, "") or isinstance(v, (dict, list, bool)):
+            continue
+        if isinstance(v, str) and not v.strip():
+            continue
+        v_use = _coerce_iso_datetime_value_for_date_part_key(k, v)
+        cur = value_mapping.get(k)
+        if cur in (None, ""):
+            value_mapping[k] = v_use
+            continue
+        if not isinstance(cur, str):
+            continue
+        cs = cur.strip()
+        if not cs:
+            value_mapping[k] = v_use
+            continue
+        ks = str(k).strip()
+        if cs == ks:
+            value_mapping[k] = v_use
+            continue
+        if cs in junk_stubs:
+            value_mapping[k] = v_use
+            continue
+
+
 def _submit_field_semantic_label_keys(fld: dict) -> list[str]:
     """前端 steps 里单控件可参与报告匹配的语义名（与模板 placeholder/title 对齐，不用 pdfFieldId）。"""
     raw: list[str] = []
@@ -3935,6 +4410,7 @@ def _build_dynamic_data_semantic_mapping_from_steps(
     dd = source_data.get("dynamicData")
     if not isinstance(dd, dict):
         dd = {}
+    dd = _normalize_dynamic_data_f_slots(dd)
     out: dict[str, Any] = {}
 
     def add_for_field(val: object, fld: dict) -> None:
@@ -3951,7 +4427,7 @@ def _build_dynamic_data_semantic_mapping_from_steps(
         for key in _submit_field_semantic_label_keys(fld):
             if out.get(key) not in (None, ""):
                 continue
-            out[key] = val
+            out[key] = _coerce_iso_datetime_value_for_date_part_key(key, val)
         src2 = fld.get("source") if isinstance(fld.get("source"), dict) else {}
         pid_w = str(src2.get("pdfFieldId") or fld.get("pdfFieldId") or "").strip()
         if (
@@ -3978,7 +4454,7 @@ def _build_dynamic_data_semantic_mapping_from_steps(
                     val = dv
             # 与 _build_dynamic_data_semantic_mapping_from_flat_pdf_fields 一致：歧义 f 号仍读 dd，语义键靠唯一条目 id。
             if val in (None, "") and pid:
-                val = dd.get(pid)
+                val = _unwrap_dynamic_data_cell_value(dd.get(pid))
             add_for_field(val, fld)
             nested = fld.get("fields") or fld.get("children")
             if isinstance(nested, list):
@@ -4021,6 +4497,7 @@ def _build_dynamic_data_semantic_mapping_from_flat_pdf_fields(
     dd = source_data.get("dynamicData")
     if not isinstance(dd, dict):
         dd = {}
+    dd = _normalize_dynamic_data_f_slots(dd)
     out: dict[str, Any] = {}
     flat: list = []
     _walk_template_field_dicts(fields if isinstance(fields, list) else None, flat)
@@ -4040,7 +4517,7 @@ def _build_dynamic_data_semantic_mapping_from_flat_pdf_fields(
         # 歧义 pdfFieldId：仍从 dynamicData 取同一 f 槽（多格复写同值），
         # 唯一条目 id 已在下方 _field_semantic_candidate_keys 循环写入，避免共享 f 号键串位。
         if val in (None, "") and pid:
-            val = dd.get(pid)
+            val = _unwrap_dynamic_data_cell_value(dd.get(pid))
         if val is None or val == "":
             continue
         if isinstance(val, (dict, list)):
@@ -4060,7 +4537,7 @@ def _build_dynamic_data_semantic_mapping_from_flat_pdf_fields(
                 continue
             if out.get(key) not in (None, ""):
                 continue
-            out[key] = val
+            out[key] = _coerce_iso_datetime_value_for_date_part_key(key, val)
         pid_w = _field_pdf_id(fld)
         if (
             pid_w
@@ -4087,11 +4564,12 @@ def _merge_dynamic_data_placeholder_named_keys(dd: dict | None, into: dict[str, 
         ks = str(k or "").strip()
         if not ks or _DD_PDF_FIELD_ID_KEY.match(ks):
             continue
+        v = _unwrap_dynamic_data_cell_value(v)
         if v in (None, "") or isinstance(v, (dict, list, bool)):
             continue
         if into.get(ks) not in (None, ""):
             continue
-        into[ks] = v
+        into[ks] = _coerce_iso_datetime_value_for_date_part_key(ks, v)
 
 
 def _template_id_from_parsed_template(parsed: dict | None) -> str:
@@ -4130,19 +4608,24 @@ def _build_site_template_dynamic_semantic_mapping(parsed: dict, source_data: dic
     另将 dynamicData 中以非 f 号命名的键视为占位符直挂（多模板场景勿依赖 f 号跨表映射）。
     """
     out: dict[str, Any] = {}
+    sd = source_data
+    dd0 = source_data.get("dynamicData") if isinstance(source_data.get("dynamicData"), dict) else None
+    if isinstance(dd0, dict) and dd0:
+        sd = dict(source_data)
+        sd["dynamicData"] = _normalize_dynamic_data_f_slots(dd0)
     steps = _parsed_template_steps_list(parsed)
     if steps:
         amb = _collect_ambiguous_pdf_field_ids_from_steps(steps)
-        chunk = _build_dynamic_data_semantic_mapping_from_steps(steps, source_data, amb)
+        chunk = _build_dynamic_data_semantic_mapping_from_steps(steps, sd, amb)
         _merge_mapping_fill_empty(out, chunk)
     site_fields = parsed.get("fields") if isinstance(parsed.get("fields"), list) else []
     if site_fields:
         amb2 = _collect_ambiguous_pdf_field_ids_from_flat_fields(site_fields)
         chunk2 = _build_dynamic_data_semantic_mapping_from_flat_pdf_fields(
-            site_fields, source_data, amb2
+            site_fields, sd, amb2
         )
         _merge_mapping_fill_empty(out, chunk2)
-    dd = source_data.get("dynamicData")
+    dd = sd.get("dynamicData")
     if isinstance(dd, dict):
         _merge_dynamic_data_placeholder_named_keys(dd, out)
     return out
@@ -4414,7 +4897,7 @@ def _fill_template_fields_with_submit_enhanced(
                             if isinstance(raw_sp, bool):
                                 return raw_sp
                             return _coerce_picked_value_for_pdf_checkbox(field, raw_sp)
-                        return str(raw_sp).strip() if not isinstance(raw_sp, bool) else str(raw_sp)
+                        return _coerce_scalar_for_field_date_part_slots(field, raw_sp)
         if ft == "text":
             fid_agg = str(field.get("id") or field.get("fieldId") or "").strip()
             if fid_agg in ("检测仪器", "testInstrument"):
@@ -4568,7 +5051,7 @@ def _fill_template_fields_with_submit_enhanced(
         ) and not _value_is_field_label_echo(field, deferred_raw_sp):
             if ft == "check":
                 return _coerce_picked_value_for_pdf_checkbox(field, deferred_raw_sp)
-            return str(deferred_raw_sp).strip()
+            return _coerce_scalar_for_field_date_part_slots(field, deferred_raw_sp)
         return ""
 
     def _report_merge_condition_result_text(field: dict, picked) -> str:
@@ -4881,6 +5364,13 @@ def _fill_template_fields_with_submit_enhanced(
         field["content"] = _auto_verdict_text_if_applicable(
             field, "" if c0 is None else str(c0)
         )
+    if task_obj is not None and getattr(task_obj, "output_target", None) == LibraryTask.OUTPUT_REPORT:
+        if any(
+            _report_template_field_shows_fail_verdict(f)
+            for f in flat_report_fields
+            if isinstance(f, dict)
+        ):
+            _patch_report_evaluation_field_after_verdicts(template_fields)
     return template_fields
 
 
@@ -5037,8 +5527,19 @@ def _build_filled_template_fields_for_task(
             tpl_lookup = dict(parsed["lookupTables"])
         has_layout_field = any(
             isinstance(f, dict)
-            and "page" in f
-            and (all(k in f for k in ("x0", "y0", "x1", "y1")) or all(k in f for k in ("x", "y", "w", "h")))
+            and (
+                (
+                    "page" in f
+                    and (
+                        all(k in f for k in ("x0", "y0", "x1", "y1"))
+                        or all(k in f for k in ("x", "y", "w", "h"))
+                    )
+                )
+                or (
+                    isinstance(f.get("rect"), (list, tuple))
+                    and len(f.get("rect") or []) >= 5
+                )
+            )
             for f in fields
         )
         if not has_layout_field:
@@ -5290,7 +5791,7 @@ def _prepare_backfill_value_mapping(
                 _merge_mapping_fill_empty(
                     merged_site_sem, _build_site_template_dynamic_semantic_mapping(parsed, source_data)
                 )
-        _merge_mapping_fill_empty(value_mapping, merged_site_sem)
+        _merge_site_dynamic_semantics_into_value_mapping(value_mapping, merged_site_sem)
     _skip_rl_sp = task_obj is not None and getattr(
         task_obj, "output_target", None
     ) == LibraryTask.OUTPUT_REPORT
@@ -5316,7 +5817,10 @@ def _prepare_backfill_value_mapping(
     _inject_shield_zone_operator_row_criteria(value_mapping, const_for_tpl)
     _inject_submit_dot_path_aliases(value_mapping, source_data)
     _merge_mapping_fill_empty(value_mapping, _build_dynamic_data_semantic_mapping(source_data))
-    value_mapping.update(
+    # 派生字段仅补缺：避免覆盖现场模板 submitPath 已写入的词条（如 JS-117 受检单位在 inspection，
+    # JS-001 在 inspection2；统一用「模板先写、派生后补」避免互相压错）。
+    _merge_mapping_fill_empty(
+        value_mapping,
         _build_submit_derived_value_mapping(
             source_data,
             project=project,
@@ -5324,7 +5828,7 @@ def _prepare_backfill_value_mapping(
             task_obj=task_obj,
             inspection_case=inspection_case,
             manual_device_count=manual_device_count,
-        )
+        ),
     )
     if isinstance(report_template_fields, list):
         _apply_template_field_sources_to_mapping(
@@ -5380,7 +5884,7 @@ def _prepare_backfill_value_mapping(
         elif vf1 != com_fill and ("；" in vf1 or len(vf1) > len(com_fill) + 8):
             value_mapping["f1"] = com_fill
     # KAP 单位：须在 value_mapping 全部合并后再注入，避免后续 _merge 或步骤别名用 f56 串值覆盖布尔/长键。
-    _inject_kap_area_product_unit_checkbox_aliases(value_mapping, source_data)
+    _normalize_iso_strings_in_test_date_part_slots(value_mapping)
     return value_mapping
 
 
@@ -5525,6 +6029,36 @@ def build_exported_inspection_pdf_original_name(
     if len(friendly) + len(suffix) > max_total:
         friendly = friendly[: max(1, max_total - len(suffix))].rstrip("_")
     return f"{friendly}{suffix}"
+
+
+def build_merged_report_pdf_original_name(project, commission_no: str = "") -> str:
+    """
+    文件库「多份报告合并」导出 PDF 的展示文件名：{委托编号}{项目名称}.pdf
+    委托编号优先取各份报告溯源到的 reportInfo.commissionNo（由调用方传入）；缺省时仅用项目名称。
+    """
+    return f"{merged_report_commission_project_basename(project, commission_no)}.pdf"
+
+
+def merged_report_commission_project_basename(project, commission_no: str = "") -> str:
+    """
+    合并报告在文件名与封面「项目名称」第二行共用的主文案：{委托编号}{项目名称}（无分隔符）。
+    空委托编号不占位；片段经路径安全过滤。与 build_report_merge_overlay 叠印一致。
+    """
+    com_raw = str(commission_no or "").strip()
+    com = _sanitize_export_pdf_name_fragment(com_raw, 48) if com_raw else ""
+    pn_raw = (getattr(project, "name", "") or "").strip() if project is not None else ""
+    pn = _sanitize_export_pdf_name_fragment(pn_raw, 120) if pn_raw else ""
+    core = f"{com}{pn}".strip("_")
+    if not core and project is not None:
+        cc = str(getattr(project, "code", "") or "").strip()
+        nm = str(getattr(project, "name", "") or "").strip()
+        if cc and nm:
+            core = _sanitize_export_pdf_name_fragment(f"{cc}_{nm}", 140)
+        elif cc or nm:
+            core = _sanitize_export_pdf_name_fragment(cc or nm, 140)
+    if not core:
+        core = "合并报告"
+    return core
 
 
 def _persist_filled_pdf_from_submit(

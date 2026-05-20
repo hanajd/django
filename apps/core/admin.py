@@ -7,6 +7,7 @@ from django.contrib.auth.models import User
 from apps.core.models import (
     BizContact,
     BizDevice,
+    CommissionOrganization,
     InspectionCase,
     InspectionCaseWorkflowState,
     InspectedOrganization,
@@ -17,6 +18,7 @@ from apps.core.models import (
     LibraryOCRProcessTask,
     LibraryTask,
     LibraryTaskAssignment,
+    LibraryTaskFolder,
     Menu,
     Report,
     Role,
@@ -75,6 +77,12 @@ class LibraryFileTaskInline(admin.TabularInline):
     extra = 0
 
 
+class LibraryTaskFolderAdmin(admin.ModelAdmin):
+    list_display = ("name", "parent", "sort_order", "is_active", "updated_at")
+    list_filter = ("is_active",)
+    search_fields = ("name",)
+
+
 class LibraryTaskAdmin(admin.ModelAdmin):
     list_display = ("code", "name", "output_target", "created_by", "created_at")
     list_filter = ("output_target",)
@@ -126,10 +134,25 @@ class ReportAdmin(admin.ModelAdmin):
     search_fields = ("report_no",)
 
 
+class CommissionOrganizationAdmin(admin.ModelAdmin):
+    list_display = ("name", "level", "parent", "is_active", "created_by", "updated_at")
+    list_filter = ("is_active", "level")
+    search_fields = ("name", "notes")
+    raw_id_fields = ("parent",)
+
+
 class LibraryProjectAdmin(admin.ModelAdmin):
-    list_display = ("code", "name", "is_active", "created_by", "created_at")
+    list_display = (
+        "code",
+        "name",
+        "commission_organization",
+        "is_active",
+        "primary_responsible",
+        "created_by",
+        "created_at",
+    )
     list_filter = ("is_active",)
-    search_fields = ("code", "name")
+    search_fields = ("code", "name", "commission_organization")
     filter_horizontal = ("library_tasks",)
 
 
@@ -153,9 +176,11 @@ admin.site.register(User, CustomUserAdmin)
 admin.site.register(Role, RoleAdmin)
 admin.site.register(Menu, MenuAdmin)
 admin.site.register(LibraryFile, LibraryFileAdmin)
+admin.site.register(LibraryTaskFolder, LibraryTaskFolderAdmin)
 admin.site.register(LibraryTask, LibraryTaskAdmin)
 admin.site.register(LibraryTaskAssignment, LibraryTaskAssignmentAdmin)
 admin.site.register(LibraryOCRProcessTask, LibraryOCRProcessTaskAdmin)
+admin.site.register(CommissionOrganization, CommissionOrganizationAdmin)
 admin.site.register(LibraryProject, LibraryProjectAdmin)
 admin.site.register(LibraryProjectWorkflowMember, LibraryProjectWorkflowMemberAdmin)
 admin.site.register(InspectionCaseWorkflowState, InspectionCaseWorkflowStateAdmin)

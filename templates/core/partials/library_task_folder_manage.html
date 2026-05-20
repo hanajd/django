@@ -1,0 +1,37 @@
+{# 任务分类（文件夹）维护 #}
+{% if can_manage_templates %}
+<details class="rounded-2xl border border-violet-200 bg-violet-50/40 overflow-hidden group mb-3" open>
+    <summary class="px-3 py-2.5 cursor-pointer text-sm font-medium text-violet-900 list-none flex items-center justify-between">
+        <span><i class="ri-folder-add-line mr-1"></i>任务分类</span>
+        <i class="ri-arrow-down-s-line text-violet-400 group-open:rotate-180"></i>
+    </summary>
+    <div class="px-3 pb-3 border-t border-violet-100 space-y-3">
+        <form method="post" class="space-y-2">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create_task_folder">
+            <input type="hidden" name="edit" value="1">
+            {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
+            <label class="block text-xs text-violet-800">新建分类（可建子分类）</label>
+            <select name="parent_folder_id" class="w-full text-xs px-2 py-2 rounded-lg border border-violet-200 bg-white">
+                <option value="">— 顶级（如验收检测）—</option>
+                {% for f in task_folder_rows %}
+                <option value="{{ f.id }}" {% if explorer_current_folder_id == f.id|stringformat:'s' %}selected{% endif %}>{{ f.name }}</option>
+                {% endfor %}
+            </select>
+            <input type="text" name="folder_name" required placeholder="分类名称 *"
+                   class="w-full text-sm px-2 py-2 rounded-lg border border-violet-200">
+            <button type="submit" class="w-full py-2 rounded-lg bg-violet-700 text-white text-xs font-medium hover:bg-violet-800">添加分类</button>
+        </form>
+        {% if explorer_current_folder_id and explorer_current_folder_id != uncategorized_folder_key %}
+        <form method="post" onsubmit="return confirm('删除该分类？须先移出下属报告与子分类。');">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="delete_task_folder">
+            <input type="hidden" name="folder_id" value="{{ explorer_current_folder_id }}">
+            <input type="hidden" name="edit" value="1">
+            {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
+            <button type="submit" class="w-full py-2 rounded-lg bg-white text-rose-700 text-xs font-medium ring-1 ring-rose-200 hover:bg-rose-50">删除当前分类</button>
+        </form>
+        {% endif %}
+    </div>
+</details>
+{% endif %}

@@ -7,7 +7,7 @@
     <div id="guide-project-header" class="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
             <h1 class="text-2xl font-bold text-slate-900 tracking-tight">项目工作台</h1>
-            <p class="mt-1 text-sm text-slate-500 max-w-2xl">在同一页面完成项目选择、任务模板关联、流程与成员、文件绑定及 App 分配，减少在菜单间来回切换。</p>
+            <p class="mt-1 text-sm text-slate-500 max-w-2xl">以「委托情况」绑定受检设备（可多台同型号）并关联检测任务模板，系统自动同步报告与现场记录任务；在同一页面完成流程、分配与提交跟踪。{% if not hide_project_workbench_files_tab %}非模板类文件请在「文件」页补充。{% endif %}</p>
         </div>
         {% if show_library_task_nav %}
         <a href="{% url 'library_task_management' %}{% if selected_project_id %}?return_project={{ selected_project_id }}{% endif %}"
@@ -18,88 +18,30 @@
         {% endif %}
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-[minmax(240px,280px)_minmax(0,1fr)] gap-6 items-start">
-        <!-- 左侧：项目列表 -->
-        <aside id="guide-project-sidebar" class="lg:sticky lg:top-4 space-y-4">
-            <div class="rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden">
-                <div class="px-4 py-3 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white flex items-center justify-between">
-                    <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">项目</span>
-                    <span class="text-xs text-slate-400">{{ projects|length }} 个</span>
-                </div>
-                <div class="p-2">
-                    <input type="search" id="project-filter" placeholder="筛选编码或名称…"
-                           class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 mb-2">
-                    <nav class="max-h-[min(60vh,28rem)] overflow-y-auto space-y-0.5 pr-1" id="project-nav">
-                        {% for p in projects %}
-                        <a href="?project_id={{ p.id }}&tab={{ workbench_tab }}"
-                           data-filter="{{ p.code }} {{ p.name }}"
-                           class="proj-nav-item flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm transition-colors {% if selected_project_id == p.id|stringformat:'s' %}bg-indigo-50 text-indigo-900 ring-1 ring-indigo-200 font-medium{% else %}text-slate-700 hover:bg-slate-50{% endif %} {% if not p.is_active %}opacity-60{% endif %}">
-                            <span class="truncate flex-1"><span class="font-mono text-xs text-slate-500">{{ p.code }}</span> · {{ p.name }}</span>
-                            {% if not p.is_active %}<span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">停</span>{% endif %}
-                        </a>
-                        {% empty %}
-                        {% if workbench_projects_limited_to_task_assignments %}
-                        <div class="px-3 py-4 text-left text-xs leading-relaxed text-slate-600 space-y-2">
-                            <p class="font-medium text-slate-700">当前账号下列表受数据范围限制</p>
-                            <p>在「文件库仅本人数据」且未开启「分配文件库任务」时，左侧列出<strong>已向您分配任务的项目</strong>以及<strong>您本人创建的检测项目</strong>。</p>
-                            <p class="text-slate-500">若仍为空：请使用下方「新建项目」（需具备「创建检测项目」权限），或由管理员在「分配」中为您配置任务；仅创建空项目而未挂载任务时，不会自动出现分配记录。</p>
-                        </div>
-                        {% else %}
-                        <p class="px-3 py-6 text-sm text-slate-400 text-center">暂无项目</p>
-                        {% endif %}
-                        {% endfor %}
-                    </nav>
-                </div>
-            </div>
-
-            {% if can_assign_tasks or role_perm.perm_create_library_project %}
-            <details id="guide-project-create" class="rounded-2xl border border-dashed border-indigo-200 bg-indigo-50/30 overflow-hidden group">
-                <summary class="px-4 py-3 cursor-pointer text-sm font-medium text-indigo-900 list-none flex items-center justify-between">
-                    <span><i class="ri-add-circle-line align-middle mr-1"></i> 新建项目</span>
-                    <i class="ri-arrow-down-s-line text-slate-400 group-open:rotate-180 transition-transform"></i>
-                </summary>
-                <div class="px-4 pb-4 pt-0 border-t border-indigo-100/80">
-                    <p class="text-xs text-slate-600 mt-3 mb-3">编码可留空；创建后可继续在右侧关联任务模板。</p>
-                    <form method="post" class="space-y-3">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="create_project">
-                        <input type="text" name="project_code" placeholder="项目编码（可选）" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm">
-                        <input type="text" name="project_name" placeholder="项目名称 *" required class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm">
-                        <input type="text" name="project_desc" placeholder="描述（可选）" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm">
-                        {% if all_library_tasks %}
-                        <div class="max-h-32 overflow-y-auto rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
-                            {% for t in all_library_tasks %}
-                            <label class="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50">
-                                <input type="checkbox" name="task_ids" value="{{ t.id }}" class="rounded border-slate-300 text-indigo-600">
-                                <span class="truncate"><span class="font-mono text-xs text-slate-500">{{ t.code }}</span> · {{ t.name }}</span>
-                            </label>
-                            {% endfor %}
-                        </div>
-                        {% endif %}
-                        <button type="submit" class="w-full py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">创建</button>
-                    </form>
-                </div>
-            </details>
-            {% endif %}
-        </aside>
+    <div id="library-explorer-dnd-scope" class="grid grid-cols-1 lg:grid-cols-[minmax(260px,300px)_minmax(0,1fr)] gap-6 items-start"
+         {% if explorer_dnd_enabled %}data-folder-explorer-dnd="1" data-dnd-enabled="true" data-dnd-mode="workbench" data-dnd-allow-org-move="{% if explorer_dnd_allow_org_move %}1{% else %}0{% endif %}" data-post-url="{{ explorer_dnd_post_url }}" data-fl-path="{{ fl_path|default:'' }}"{% endif %}>
+        {% include "core/partials/library_workbench_explorer.html" %}
 
         <!-- 右侧主区 -->
         <main class="min-w-0 rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden">
             {% if not selected_project %}
-            <div class="flex flex-col items-center justify-center py-20 px-6 text-center">
-                <div class="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
-                    <i class="ri-folder-open-line text-3xl text-slate-400"></i>
-                </div>
-                <h2 class="text-lg font-semibold text-slate-800">请选择左侧项目</h2>
-                <p class="mt-2 text-sm text-slate-500 max-w-md">选择项目后，可在此切换「概览 / 任务与模板 / 流程 / 文件 / 分配 / 提交」标签完成配置。</p>
+            <div class="p-4 sm:p-6">
+                {% include "core/partials/folder_explorer_main.html" with explorer_base_url=workbench_explorer_base folder_breadcrumbs=folder_breadcrumbs folder_entries=folder_entries files_at_path=files_at_path explorer_dnd_enabled=explorer_dnd_enabled explorer_dnd_allow_org_move=explorer_dnd_allow_org_move explorer_dnd_post_url=explorer_dnd_post_url fl_path=fl_path %}
+                {% if not folder_entries %}
+                <p class="mt-6 text-center text-sm text-slate-500">在左侧树或上方进入医院、院区或科室，再打开项目进入工作台。组织维护请至<a href="{% url 'hospital_info_manage' %}" class="text-indigo-600 underline">医院信息管理</a>。</p>
+                {% endif %}
             </div>
             {% else %}
             <div class="border-b border-slate-100 px-4 sm:px-6 py-4 bg-gradient-to-r from-white to-slate-50/80 flex flex-wrap items-center justify-between gap-3">
                 <div>
                     <div class="text-xs text-slate-500 mb-0.5">当前项目</div>
                     <div class="flex flex-wrap items-baseline gap-2">
-                        <span class="font-mono text-sm text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">{{ selected_project.code }}</span>
                         <span class="text-lg font-semibold text-slate-900">{{ selected_project.name }}</span>
+                        <span class="text-sm text-slate-600">· {{ selected_project.commission_organization|default:"—" }}</span>
+                        <span class="font-mono text-xs text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md" title="委托编号">{{ selected_project.code }}</span>
+                        {% if selected_project.primary_responsible %}
+                        <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">主要负责人：{{ selected_project.primary_responsible.username }}</span>
+                        {% endif %}
                         {% if not selected_project.is_active %}
                         <span class="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">已停用</span>
                         {% endif %}
@@ -117,10 +59,20 @@
                 {% endif %}
             </div>
 
+            {% if can_edit_project_workbench %}
+            <div class="mx-4 sm:mx-6 mb-2">
+                <button type="button" id="open-project-edit-modal"
+                        class="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-indigo-200 bg-indigo-50 text-sm font-medium text-indigo-800 hover:bg-indigo-100 shadow-sm">
+                    <i class="ri-edit-line"></i> 编辑项目 / 委托单位
+                </button>
+            </div>
+            {% endif %}
+
+
             <!-- 标签栏 -->
             <div id="guide-project-workbench-tabs" class="flex flex-wrap gap-1 px-3 sm:px-4 py-2 bg-slate-50/90 border-b border-slate-100">
                 {% for key, label in workbench_tabs %}
-                <a href="?project_id={{ selected_project_id }}&tab={{ key }}"
+                <a href="?project_id={{ selected_project_id }}{{ workbench_fl_query }}&tab={{ key }}"
                    class="px-3.5 py-2 rounded-lg text-sm font-medium transition-colors {% if workbench_tab == key %}bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200/80{% else %}text-slate-600 hover:text-slate-900 hover:bg-white/70{% endif %}">
                     {{ label }}
                 </a>
@@ -131,70 +83,36 @@
                 {% if workbench_tab == 'overview' %}
                 <div class="grid sm:grid-cols-3 gap-4 mb-8">
                     <div class="rounded-xl border border-slate-100 bg-slate-50/80 p-4">
-                        <div class="text-xs font-medium text-slate-500 uppercase">关联任务模板</div>
-                        <div class="mt-1 text-2xl font-bold text-slate-900">{{ project_task_ids|length }}</div>
-                        <a href="?project_id={{ selected_project_id }}&tab=tasks" class="mt-2 inline-block text-xs text-indigo-600 hover:underline">去维护 →</a>
+                        <div class="text-xs font-medium text-slate-500 uppercase">委托设备</div>
+                        <div class="mt-1 text-2xl font-bold text-slate-900">{{ project_commission_equipment_cards|length }}</div>
+                        <a href="?project_id={{ selected_project_id }}{{ workbench_fl_query }}&tab=commission" class="mt-2 inline-block text-xs text-indigo-600 hover:underline">去维护 →</a>
                     </div>
                     <div class="rounded-xl border border-slate-100 bg-slate-50/80 p-4">
                         <div class="text-xs font-medium text-slate-500 uppercase">已分配用户</div>
                         <div class="mt-1 text-2xl font-bold text-slate-900">{{ project_assignees|length }}</div>
-                        <a href="?project_id={{ selected_project_id }}&tab=assign" class="mt-2 inline-block text-xs text-indigo-600 hover:underline">去分配 →</a>
+                        <a href="?project_id={{ selected_project_id }}{{ workbench_fl_query }}&tab=assign" class="mt-2 inline-block text-xs text-indigo-600 hover:underline">去分配 →</a>
                     </div>
                     <div class="rounded-xl border border-slate-100 bg-slate-50/80 p-4">
                         <div class="text-xs font-medium text-slate-500 uppercase">检测提交</div>
                         <div class="mt-1 text-2xl font-bold text-slate-900">{{ project_submissions|length }}</div>
-                        <a href="?project_id={{ selected_project_id }}&tab=submissions" class="mt-2 inline-block text-xs text-indigo-600 hover:underline">查看 →</a>
+                        <a href="?project_id={{ selected_project_id }}{{ workbench_fl_query }}&tab=submissions" class="mt-2 inline-block text-xs text-indigo-600 hover:underline">查看 →</a>
                     </div>
                 </div>
                 <div class="rounded-xl border border-indigo-100 bg-indigo-50/40 p-4 text-sm text-indigo-950">
-                    <strong class="font-semibold">推荐工作流：</strong>先在「任务与模板」把任务挂到本项目 → 在「任务模板库」绑定版式 PDF 与配套数据文件 → 「流程」配置成员与报告来源 → 「文件」补充非模板类文件 → 「分配」下发给检测 App 用户。
+                    <strong class="font-semibold">推荐工作流：</strong>「<a href="?project_id={{ selected_project_id }}{{ workbench_fl_query }}&tab=commission" class="underline font-medium">委托情况</a>」绑定设备 → 「<a href="?project_id={{ selected_project_id }}{{ workbench_fl_query }}&tab=assign" class="underline font-medium">分配</a>」由高权限账号指定<strong>主要负责人</strong>，再向检测人员<strong>手动</strong>同步任务 → 「流程」登记参与人{% if not hide_project_workbench_files_tab %} → 「文件」由高权限或已分配人员补充{% endif %}。
                 </div>
                 {% endif %}
 
-                {% if workbench_tab == 'tasks' %}
-                <div id="guide-project-bind-workspace" class="rounded-xl border border-indigo-100 bg-indigo-50/30 p-5">
-                    {% if selected_project and can_edit_project_workbench %}
-                    <div>
-                        <h3 class="text-base font-semibold text-slate-900 mb-1">任务模板与项目</h3>
-                        <p class="text-xs text-slate-600 mb-4">勾选任务后加入或移出本项目；模板文件绑定请在 <a href="{% url 'library_task_management' %}?return_project={{ selected_project_id }}" class="text-indigo-700 font-medium underline">任务模板库</a> 中完成。</p>
-                        {% if not all_library_tasks %}
-                        <p class="text-sm text-amber-800">尚无可用任务模板，请先在任务模板库中创建。</p>
-                        {% else %}
-                        <form method="post" class="space-y-4">
-                            {% csrf_token %}
-                            <input type="hidden" name="project_id" value="{{ selected_project_id }}">
-                            <div class="max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
-                                {% for t in all_library_tasks %}
-                                <label class="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 cursor-pointer text-sm">
-                                    <input type="checkbox" name="task_ids" value="{{ t.id }}" class="rounded border-slate-300 text-indigo-600" {% if t.id in project_task_ids %}checked{% endif %}>
-                                    <span><span class="font-mono text-xs text-slate-500">{{ t.code }}</span> · {{ t.name }}</span>
-                                    {% if can_assign_tasks %}
-                                    <a href="{% url 'library_task_management' %}?manage_task={{ t.id }}&return_project={{ selected_project_id }}" class="ml-auto text-xs text-indigo-600 hover:underline shrink-0" onclick="event.stopPropagation();">编辑模板</a>
-                                    {% endif %}
-                                </label>
-                                {% endfor %}
-                            </div>
-                            <div class="flex flex-wrap gap-2">
-                                <button type="submit" name="action" value="bind_tasks" class="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">加入项目</button>
-                                <button type="submit" name="action" value="unbind_tasks" class="px-4 py-2 rounded-xl bg-slate-200 text-slate-800 text-sm font-medium hover:bg-slate-300">从项目移除</button>
-                            </div>
-                        </form>
-                        {% endif %}
-                    </div>
-                    {% elif selected_project and not can_edit_project_workbench %}
-                    <p class="text-sm text-slate-500">您无权修改项目与任务的关联。</p>
-                    {% else %}
-                    <p class="text-sm text-slate-600">请先在左侧选择一个项目，再在此勾选要关联的任务模板。</p>
-                    {% endif %}
-                </div>
+                {% if workbench_tab == 'commission' %}
+                {% include "core/partials/library_project_commission_tab.html" %}
                 {% endif %}
 
                 {% if workbench_tab == 'workflow' %}
                     {% if selected_project and can_edit_project_workbench %}
                     <div class="space-y-6">
                         <div class="rounded-xl border border-teal-100 bg-teal-50/40 p-5">
-                            <h3 class="text-base font-semibold text-slate-900 mb-2">检测流程与成员</h3>
-                            <p class="text-xs text-slate-600 mb-4">顺序：检测员 → 校核员 → 编制人 → 审核人 → 授权签字人；签发日期以终审为准。每岗位至多一名成员；同一用户可兼任多个岗位（测试沙箱账号进入工作台时会默认把五岗都填为本人）。</p>
+                            <h3 class="text-base font-semibold text-slate-900 mb-2">检测流程与参与人</h3>
+                            <p class="text-xs text-slate-600 mb-4">顺序：检测员 → 校核员 → 编制人 → 审核人 → 授权签字人；签发日期以终审为准。同一岗位可登记<strong>多名参与人</strong>（如多名检测员、校核员）；下方添加不会替换同岗位其他人。项目<strong>主要负责人</strong>在「分配」页指定。</p>
                             <div class="flex flex-wrap gap-2 text-xs text-slate-700 mb-6">
                                 {% for code, title in workflow_stage_definitions %}
                                 <span class="inline-flex items-center px-2.5 py-1 rounded-full bg-white border border-teal-200">{{ title }}</span>
@@ -250,7 +168,7 @@
                                         {% endfor %}
                                     </select>
                                 </div>
-                                <button type="submit" class="px-4 py-2 rounded-xl bg-teal-700 text-white text-sm font-medium hover:bg-teal-800">保存成员</button>
+                                <button type="submit" class="px-4 py-2 rounded-xl bg-teal-700 text-white text-sm font-medium hover:bg-teal-800">添加参与人</button>
                             </form>
                             <h4 class="text-xs font-semibold text-slate-700 mt-6 mb-2">案件当前环节</h4>
                             {% if project_workflow_cases %}
@@ -275,58 +193,19 @@
                             <p class="text-xs text-slate-500">暂无关联案件。</p>
                             {% endif %}
                         </div>
-
-                        {% if has_report_source_task_column %}
-                        <div class="rounded-xl border border-violet-100 bg-violet-50/40 p-5">
-                            <h3 class="text-base font-semibold text-slate-900 mb-2">报告与现场记录任务</h3>
-                            <p class="text-xs text-slate-600 mb-4">选择报告任务后勾选来源现场记录任务。</p>
-                            {% if not project_report_tasks %}
-                            <p class="text-sm text-slate-500">当前项目暂无「报告」类任务。</p>
-                            {% else %}
-                            <form method="get" class="mb-4 flex flex-wrap gap-3">
-                                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
-                                <input type="hidden" name="tab" value="workflow">
-                                <select name="report_task_id" class="px-3 py-2 border border-slate-200 rounded-lg text-sm min-w-[16rem]" onchange="this.form.submit()">
-                                    {% for rt in project_report_tasks %}
-                                    <option value="{{ rt.id }}" {% if selected_report_task_id == rt.id|stringformat:'s' %}selected{% endif %}>{{ rt.code }} · {{ rt.name }}</option>
-                                    {% endfor %}
-                                </select>
-                            </form>
-                            <form method="post" class="space-y-3">
-                                {% csrf_token %}
-                                <input type="hidden" name="action" value="update_project_report_sources">
-                                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
-                                <input type="hidden" name="report_task_id" value="{{ selected_report_task_id }}">
-                                <div class="rounded-xl border border-slate-200 bg-white max-h-48 overflow-y-auto">
-                                    {% if project_site_tasks %}
-                                        {% for st in project_site_tasks %}
-                                        <label class="flex items-center gap-3 px-4 py-2.5 border-b border-slate-100 last:border-0 hover:bg-slate-50 cursor-pointer text-sm">
-                                            <input type="checkbox" name="source_site_task_ids" value="{{ st.id }}" class="rounded border-slate-300 text-violet-600" {% if st.id in selected_report_source_ids %}checked{% endif %}>
-                                            <span><span class="font-mono text-xs text-slate-500">{{ st.code }}</span> · {{ st.name }}</span>
-                                        </label>
-                                        {% endfor %}
-                                    {% else %}
-                                    <div class="px-4 py-8 text-sm text-slate-500 text-center">暂无可选现场记录任务</div>
-                                    {% endif %}
-                                </div>
-                                <button type="submit" class="px-4 py-2 rounded-xl bg-violet-600 text-white text-sm font-medium hover:bg-violet-700">保存关联</button>
-                            </form>
-                            {% endif %}
-                        </div>
-                        {% endif %}
                     </div>
                     {% else %}
                     <p class="text-sm text-slate-500">您无权维护流程配置。</p>
                     {% endif %}
                 {% endif %}
 
-                {% if workbench_tab == 'files' %}
+                {% if workbench_tab == 'files' and not hide_project_workbench_files_tab %}
                 <div class="rounded-xl border border-emerald-100 bg-emerald-50/30 p-5">
                     <h3 class="text-base font-semibold text-slate-900 mb-2">项目文件</h3>
                     <p class="text-xs text-slate-600 mb-4">按分类勾选后加入或移出项目（不删除文件本体）。</p>
                     {% if not selected_project %}
-                    {% elif not can_edit_project_workbench %}
-                    <p class="text-sm text-slate-500">您无权维护项目文件关联。</p>
+                    {% elif not can_edit_project_files %}
+                    <p class="text-sm text-slate-500">您无权维护项目文件关联（主要负责人请在「分配」页手动同步任务；模板文件随委托设备自动挂载）。</p>
                     {% else %}
                     <form method="get" class="mb-4 flex flex-wrap gap-3">
                         <input type="hidden" name="project_id" value="{{ selected_project_id }}">
@@ -383,9 +262,37 @@
                 {% if workbench_tab == 'assign' %}
                     {% if can_edit_project_workbench %}
                     <div class="space-y-8">
+                        {% if can_assign_on_selected_project %}
+                        <div class="rounded-xl border border-amber-100 bg-amber-50/50 p-5">
+                            <h3 class="text-base font-semibold text-slate-900 mb-1">项目主要负责人</h3>
+                            <p class="text-xs text-slate-600 mb-4">由高权限账号指定<strong>一名</strong>主要负责人：可维护委托情况、指定流程参与人，并在下方手动向参与人同步任务；<strong>不能</strong>编辑「文件」标签中的项目文件。任务模板<strong>不会</strong>自动分配给任何人。{% if selected_project.primary_responsible %}当前：<strong>{{ selected_project.primary_responsible.username }}</strong>{% else %}尚未指定。{% endif %}</p>
+                            {% if not app_users_for_assign %}
+                            <p class="text-sm text-amber-800">没有可指定的检测侧账号。</p>
+                            {% else %}
+                            <form method="post" class="grid sm:grid-cols-2 gap-4 max-w-2xl">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="set_primary_responsible">
+                                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                                <div>
+                                    <label class="block text-xs font-medium text-slate-600 mb-1">主要负责人</label>
+                                    <select name="assignee" required class="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white">
+                                        <option value="">请选择</option>
+                                        {% for u in app_users_for_assign %}
+                                        <option value="{{ u.pk }}" {% if selected_project.primary_responsible_id == u.pk %}selected{% endif %}>{{ u.username }}{% if u.get_full_name %}（{{ u.get_full_name }}）{% endif %}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="flex items-end">
+                                    <button type="submit" class="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700">确认主要负责人</button>
+                                </div>
+                            </form>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+
                         <div class="rounded-xl border border-blue-100 bg-blue-50/40 p-5">
-                            <h3 class="text-base font-semibold text-slate-900 mb-1">{% if participant_assign_self_only %}将本项目任务同步到本人账号{% else %}向 App 用户分配本项目{% endif %}</h3>
-                            <p class="text-xs text-slate-600 mb-4">{% if participant_assign_self_only %}点击下方按钮可为本人补齐本项目下全部任务模板的分配（不会为他人分配）。{% else %}分配后用户可在检测 App 中看到该项目及已关联的任务模板。{% endif %}</p>
+                            <h3 class="text-base font-semibold text-slate-900 mb-1">{% if participant_assign_self_only %}将本项目任务同步到本人账号{% else %}向参与人同步任务{% endif %}</h3>
+                            <p class="text-xs text-slate-600 mb-4">{% if participant_assign_self_only %}为本人补齐本项目下全部任务模板（不会为他人分配）。{% else %}向检测员、校核员等<strong>多名参与人</strong>同步任务；对方可在 App 中看到本项目及任务。与「主要负责人」不同，此处不限人数。{% endif %}</p>
                             {% if not app_users_for_assign %}
                             <p class="text-sm text-amber-800">没有可分配的检测侧账号。</p>
                             {% else %}
@@ -405,13 +312,13 @@
                                     </select>
                                 </div>
                                 <div class="flex items-end">
-                                    <button type="submit" class="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700">确认分配</button>
+                                    <button type="submit" class="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700">确认同步</button>
                                 </div>
                             </form>
                             {% endif %}
                         </div>
 
-                        {% if can_assign_tasks and project_assignees %}
+                        {% if can_assign_on_selected_project and project_assignees %}
                         <div>
                             <h4 class="text-sm font-semibold text-slate-800 mb-3">成员与编辑权限</h4>
                             <div class="rounded-xl border border-slate-200 divide-y divide-slate-100 bg-white">
@@ -471,7 +378,7 @@
                                             </td>
                                             <td class="px-4 py-2 whitespace-nowrap">
                                                 {% if a.assignee %}
-                                                {% if can_assign_tasks or a.assignee.id == user.id %}
+                                                {% if can_assign_on_selected_project or a.assignee.id == user.id %}
                                                 <form method="post" class="inline" onsubmit="return confirm('撤回该用户在本项目上的分配？');">
                                                     {% csrf_token %}
                                                     <input type="hidden" name="action" value="unassign_project">
@@ -556,16 +463,20 @@
         </main>
     </div>
 </div>
+{% if can_edit_project_workbench and selected_project %}
+{% include "core/partials/commission_org_picker_modal.html" %}
+{% endif %}
 <script>
 (function () {
     var f = document.getElementById('project-filter');
-    var nav = document.getElementById('project-nav');
-    if (f && nav) {
+    var tree = document.querySelector('.folder-explorer-tree');
+    if (f && tree) {
         f.addEventListener('input', function () {
             var q = (f.value || '').toLowerCase();
-            nav.querySelectorAll('.proj-nav-item').forEach(function (a) {
-                var t = (a.getAttribute('data-filter') || '').toLowerCase();
-                a.style.display = !q || t.indexOf(q) >= 0 ? '' : 'none';
+            tree.querySelectorAll('li').forEach(function (li) {
+                var a = li.querySelector(':scope > a');
+                var text = (a && (a.getAttribute('title') || a.textContent) || '').toLowerCase();
+                li.style.display = !q || text.indexOf(q) >= 0 ? '' : 'none';
             });
         });
     }
@@ -576,5 +487,209 @@
         });
     }
 })();
+
+(function () {
+    var modal = document.getElementById('project-edit-modal');
+    var openBtn = document.getElementById('open-project-edit-modal');
+    if (!modal || !openBtn) return;
+
+    var treeEl = document.getElementById('commission-org-picker-data');
+    var initialEl = document.getElementById('project-picker-initial-data');
+    if (!treeEl || !initialEl) return;
+
+    var hospitals = JSON.parse(treeEl.textContent);
+    var initial = JSON.parse(initialEl.textContent);
+    var orgById = {};
+
+    function walk(nodes) {
+        (nodes || []).forEach(function (n) {
+            orgById[n.id] = n;
+            walk(n.children);
+        });
+    }
+    walk(hospitals);
+
+    var pathIds = Array.isArray(initial.path) ? initial.path.slice() : [];
+    var selectedOrgId = initial.orgId || null;
+
+    var grid = document.getElementById('picker-folder-grid');
+    var crumbs = document.getElementById('picker-breadcrumbs');
+    var labelEl = document.getElementById('picker-selected-label');
+    var hiddenOrg = document.getElementById('picker-commission-org-id');
+    var selectCurrentBtn = document.getElementById('picker-select-current-btn');
+    var hintEl = document.getElementById('picker-hint');
+    var form = document.getElementById('project-edit-modal-form');
+
+    function levelIcon(level) {
+        if (level === 'hospital') return 'ri-hospital-line text-rose-500';
+        if (level === 'campus') return 'ri-building-2-line text-amber-600';
+        if (level === 'department') return 'ri-stethoscope-line text-teal-600';
+        return 'ri-folder-fill text-amber-500';
+    }
+
+    function currentOrg() {
+        if (!pathIds.length) return null;
+        return orgById[pathIds[pathIds.length - 1]] || null;
+    }
+
+    function currentChildren() {
+        if (!pathIds.length) return hospitals;
+        var cur = currentOrg();
+        return cur && cur.children ? cur.children : [];
+    }
+
+    function updateSelectionUI() {
+        if (selectedOrgId && orgById[selectedOrgId]) {
+            labelEl.textContent = orgById[selectedOrgId].full_display_name;
+            hiddenOrg.value = String(selectedOrgId);
+        } else {
+            labelEl.innerHTML = '<span class="text-slate-400">请进入并选择委托单位层级</span>';
+            hiddenOrg.value = '';
+        }
+        var cur = currentOrg();
+        selectCurrentBtn.disabled = !cur;
+    }
+
+    function renderCrumbs() {
+        crumbs.innerHTML = '';
+        var rootBtn = document.createElement('button');
+        rootBtn.type = 'button';
+        rootBtn.className = 'hover:text-indigo-600 font-medium';
+        rootBtn.textContent = '全部医院';
+        rootBtn.addEventListener('click', function () {
+            pathIds = [];
+            render();
+        });
+        crumbs.appendChild(rootBtn);
+        pathIds.forEach(function (oid, idx) {
+            var sep = document.createElement('span');
+            sep.className = 'text-slate-300';
+            sep.textContent = '/';
+            crumbs.appendChild(sep);
+            var o = orgById[oid];
+            if (!o) return;
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'hover:text-indigo-600 truncate max-w-[8rem]';
+            btn.textContent = o.name;
+            btn.addEventListener('click', function () {
+                pathIds = pathIds.slice(0, idx + 1);
+                render();
+            });
+            crumbs.appendChild(btn);
+        });
+    }
+
+    function renderGrid() {
+        grid.innerHTML = '';
+        var children = currentChildren();
+        if (!children.length) {
+            var empty = document.createElement('p');
+            empty.className = 'col-span-2 text-center text-sm text-slate-400 py-8';
+            empty.textContent = pathIds.length ? '此层级下暂无下级，可点「选当前层级」' : '暂无医院，请先在「医院信息管理」中创建';
+            grid.appendChild(empty);
+            return;
+        }
+        children.forEach(function (node) {
+            var card = document.createElement('div');
+            card.className = 'flex flex-col rounded-xl border border-slate-200 bg-white p-3 hover:border-indigo-300 hover:shadow-sm transition-all';
+            var top = document.createElement('button');
+            top.type = 'button';
+            top.className = 'flex flex-col items-center gap-1.5 text-center flex-1 w-full';
+            top.innerHTML = '<span class="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-50"><i class="' + levelIcon(node.level) + ' text-xl"></i></span><span class="text-sm font-medium text-slate-900 line-clamp-2">' + escapeHtml(node.name) + '</span><span class="text-[10px] text-slate-500">' + escapeHtml(node.level_label) + '</span>';
+            top.addEventListener('click', function () {
+                if (node.children && node.children.length) {
+                    pathIds.push(node.id);
+                    render();
+                } else {
+                    selectOrg(node.id);
+                }
+            });
+            card.appendChild(top);
+            var pick = document.createElement('button');
+            pick.type = 'button';
+            pick.className = 'mt-2 w-full py-1 text-[11px] font-medium text-indigo-700 rounded-lg border border-indigo-100 bg-indigo-50/80 hover:bg-indigo-100';
+            pick.textContent = '选此层级';
+            pick.addEventListener('click', function (e) {
+                e.stopPropagation();
+                selectOrg(node.id);
+            });
+            card.appendChild(pick);
+            grid.appendChild(card);
+        });
+    }
+
+    function escapeHtml(s) {
+        var d = document.createElement('div');
+        d.textContent = s || '';
+        return d.innerHTML;
+    }
+
+    function selectOrg(id) {
+        selectedOrgId = id;
+        updateSelectionUI();
+        if (hintEl) {
+            hintEl.classList.remove('hidden');
+            hintEl.textContent = '已选择：' + (orgById[id] ? orgById[id].full_display_name : '');
+        }
+    }
+
+    function render() {
+        renderCrumbs();
+        renderGrid();
+        updateSelectionUI();
+        var cur = currentOrg();
+        if (hintEl) {
+            if (cur) {
+                hintEl.classList.remove('hidden');
+                hintEl.textContent = '当前位置：' + cur.full_display_name + ' — 可进入下级，或点「选当前层级」/「选此层级」';
+            } else {
+                hintEl.classList.add('hidden');
+            }
+        }
+    }
+
+    selectCurrentBtn.addEventListener('click', function () {
+        var cur = currentOrg();
+        if (cur) selectOrg(cur.id);
+    });
+
+    form.addEventListener('submit', function (e) {
+        var cur = currentOrg();
+        if (cur) {
+            hiddenOrg.value = String(cur.id);
+        }
+        if (!hiddenOrg.value) {
+            e.preventDefault();
+            alert('请先进入委托单位层级；保存时将使用当前位置（医院 / 院区 / 科室均可，后两级可省略）');
+        }
+    });
+
+    function openModal() {
+        pathIds = Array.isArray(initial.path) ? initial.path.slice() : [];
+        selectedOrgId = initial.orgId || null;
+        render();
+        modal.classList.remove('hidden');
+        modal.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('overflow-hidden');
+    }
+
+    function closeModal() {
+        modal.classList.add('hidden');
+        modal.setAttribute('aria-hidden', 'true');
+        document.body.classList.remove('overflow-hidden');
+    }
+
+    openBtn.addEventListener('click', openModal);
+    modal.querySelectorAll('[data-modal-dismiss]').forEach(function (el) {
+        el.addEventListener('click', closeModal);
+    });
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
+    });
+
+    render();
+})();
 </script>
+{% include "core/partials/library_explorer_dnd_include.html" %}
 {% endblock %}

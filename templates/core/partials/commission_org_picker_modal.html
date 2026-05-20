@@ -1,0 +1,61 @@
+{# 编辑项目：悬浮窗内逐级选择已有委托单位（医院 → 院区 → 科室），任一层级可保存 #}
+<div id="project-edit-modal" class="fixed inset-0 z-[80] hidden" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="project-edit-modal-title">
+    <div class="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px]" data-modal-dismiss></div>
+    <div class="absolute inset-0 flex items-center justify-center p-4 sm:p-6 pointer-events-none">
+        <div class="pointer-events-auto w-full max-w-lg max-h-[min(90vh,640px)] flex flex-col rounded-2xl border border-slate-200 bg-white shadow-2xl ring-1 ring-slate-900/10 overflow-hidden">
+            <div class="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-white to-slate-50/90 shrink-0">
+                <div>
+                    <h2 id="project-edit-modal-title" class="text-lg font-semibold text-slate-900">编辑项目</h2>
+                    <p class="mt-0.5 text-xs text-slate-500">逐级进入已有委托单位；可在医院、院区或科室任一层点「选当前层级」（院区/科室可省略）。组织维护请至<a href="{% url 'hospital_info_manage' %}" class="text-indigo-600 underline">医院信息管理</a>。</p>
+                </div>
+                <button type="button" class="shrink-0 p-2 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100" data-modal-dismiss aria-label="关闭">
+                    <i class="ri-close-line text-xl"></i>
+                </button>
+            </div>
+
+            <form method="post" id="project-edit-modal-form" class="flex flex-col flex-1 min-h-0">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="update_project_meta">
+                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                <input type="hidden" name="tab" value="{{ workbench_tab }}">
+                <input type="hidden" name="commission_org_id" id="picker-commission-org-id" value="{% if project_picker_initial.orgId %}{{ project_picker_initial.orgId }}{% endif %}">
+
+                <div class="px-5 py-4 space-y-4 overflow-y-auto flex-1 min-h-0">
+                    <div>
+                        <label for="picker-project-name" class="block text-xs font-medium text-slate-600 mb-1">项目名称</label>
+                        <input type="text" name="project_name" id="picker-project-name" required
+                               value="{{ selected_project.name }}"
+                               class="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-medium text-slate-600 mb-1">委托单位</label>
+                        <div id="picker-selected-label" class="mb-2 px-3 py-2 rounded-lg bg-indigo-50 text-sm text-indigo-900 border border-indigo-100 min-h-[2.5rem] flex items-center">
+                            {% if selected_project.commission_org %}
+                            {{ selected_project.commission_org.full_display_name }}
+                            {% else %}
+                            <span class="text-slate-400">请进入并选择委托单位层级</span>
+                            {% endif %}
+                        </div>
+
+                        <nav id="picker-breadcrumbs" class="flex flex-wrap items-center gap-1 text-xs text-slate-600 mb-2 px-0.5" aria-label="路径"></nav>
+
+                        <div id="picker-folder-grid" class="grid grid-cols-2 gap-2 min-h-[8rem] max-h-[14rem] overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/50 p-2">
+                        </div>
+
+                        <p id="picker-hint" class="mt-2 text-[11px] text-slate-500 leading-relaxed hidden"></p>
+                    </div>
+                </div>
+
+                <div class="shrink-0 px-5 py-4 border-t border-slate-100 bg-slate-50/80 flex flex-wrap items-center justify-end gap-2">
+                    <button type="button" class="px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50" data-modal-dismiss>取消</button>
+                    <button type="button" id="picker-select-current-btn" class="px-4 py-2 rounded-xl border border-indigo-200 bg-indigo-50 text-sm font-medium text-indigo-800 hover:bg-indigo-100 disabled:opacity-40 disabled:cursor-not-allowed" disabled>选当前层级</button>
+                    <button type="submit" class="px-5 py-2 rounded-xl bg-indigo-600 text-sm font-semibold text-white hover:bg-indigo-700 shadow-sm">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{{ commission_org_picker_tree|json_script:"commission-org-picker-data" }}
+{{ project_picker_initial|json_script:"project-picker-initial-data" }}

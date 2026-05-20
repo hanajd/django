@@ -1,0 +1,151 @@
+{# 项目工作台 · 委托情况（设备为中心） #}
+<div class="rounded-xl border border-rose-100 bg-rose-50/30 p-5 space-y-6">
+    <div>
+        <h3 class="text-base font-semibold text-slate-900 mb-1">委托情况 · 受检设备</h3>
+        <p class="text-xs text-slate-600 max-w-3xl">
+            一次检测委托可包含一台或多台设备（支持多台同型号）。每台设备绑定<strong>检测任务模板</strong>后，系统会自动将关联的<strong>报告模板</strong>与<strong>现场记录</strong>任务同步到本项目；版式维护请在
+            <a href="{% url 'library_task_management' %}?return_project={{ selected_project_id }}" class="text-rose-700 font-medium underline">任务模板库</a> 完成。
+        </p>
+    </div>
+
+    {% if not project_has_hospital %}
+    <p class="text-sm text-amber-800 rounded-xl bg-amber-50 px-4 py-3 ring-1 ring-amber-200">
+        请先在「编辑项目 / 委托单位」中将本项目绑定到<strong>医院</strong>，方可从该医院下属科室选择设备。
+    </p>
+    {% elif selected_project and can_edit_project_workbench %}
+
+    {% if project_commission_equipment_cards %}
+    <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+        <table class="min-w-full text-sm">
+            <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+                <tr>
+                    <th class="px-4 py-2.5 text-left">设备</th>
+                    <th class="px-4 py-2.5 text-left">科室</th>
+                    <th class="px-4 py-2.5 text-left">检测状态</th>
+                    <th class="px-4 py-2.5 text-left">报告任务模板</th>
+                    <th class="px-4 py-2.5 text-left">现场记录</th>
+                    <th class="px-4 py-2.5 w-40"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for card in project_commission_equipment_cards %}
+                <tr class="border-t border-slate-100 align-top">
+                    <td class="px-4 py-3">
+                        <div class="font-medium text-slate-900">{{ card.equipment.name }}</div>
+                        {% if card.equipment.model or card.equipment.serial_no %}
+                        <div class="text-xs text-slate-500 mt-0.5">
+                            {% if card.equipment.model %}{{ card.equipment.model }}{% endif %}
+                            {% if card.equipment.serial_no %} · {{ card.equipment.serial_no }}{% endif %}
+                        </div>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-slate-600 text-xs">{{ card.department_label }}</td>
+                    <td class="px-4 py-3">
+                        <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium ring-1 {{ card.status.badge_class }}">{{ card.status.label }}</span>
+                        <div class="text-xs text-slate-500 mt-1 max-w-[14rem]">{{ card.status.hint }}</div>
+                    </td>
+                    <td class="px-4 py-3">
+                        {% if can_edit_project_workbench %}
+                        <form method="post" class="flex flex-wrap items-center gap-2">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="update_project_equipment_report_task">
+                            <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                            {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
+                            <input type="hidden" name="link_id" value="{{ card.link.id }}">
+                            <select name="report_task_id" class="text-xs px-2 py-1.5 rounded-lg border border-slate-200 max-w-[14rem]" required>
+                                <option value="">— 选择模板 —</option>
+                                {% for opt in project_report_task_options %}
+                                <option value="{{ opt.id }}" {% if card.report_task and card.report_task.id == opt.id %}selected{% endif %}>{{ opt.label }}</option>
+                                {% endfor %}
+                            </select>
+                            <button type="submit" class="text-xs text-indigo-600 hover:underline shrink-0">保存</button>
+                        </form>
+                        {% else %}
+                        <span class="text-xs text-slate-700">{{ card.report_task_label }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-xs text-slate-600">
+                        {% if card.site_task_labels %}
+                        <ul class="space-y-0.5">
+                            {% for sl in card.site_task_labels %}
+                            <li>{{ sl }}</li>
+                            {% endfor %}
+                        </ul>
+                        {% else %}
+                        <span class="text-slate-400">—</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3">
+                        {% if can_edit_project_workbench %}
+                        <form method="post" class="inline" onsubmit="return confirm('从本次委托中移除该设备？（不会删除设备主数据）');">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="unbind_project_equipment">
+                            <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                            {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
+                            <input type="hidden" name="link_id" value="{{ card.link.id }}">
+                            <button type="submit" class="text-xs text-rose-600 hover:underline">移除</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-sm text-slate-500 rounded-xl bg-white px-4 py-6 text-center ring-1 ring-slate-200">尚未绑定受检设备，请在下方勾选加入本次委托。</p>
+    {% endif %}
+
+    <div class="rounded-xl border border-slate-200 bg-white p-4">
+        <h4 class="text-sm font-semibold text-slate-900 mb-2">添加设备到本次委托</h4>
+        {% if project_equipment_scope_label %}
+        <p class="text-xs text-slate-600 mb-2 rounded-lg bg-slate-50 px-3 py-2 ring-1 ring-slate-200">
+            当前范围：<strong>{{ project_equipment_scope_label }}</strong>及其下属科室的设备；不可跨同级院区或科室选择。
+        </p>
+        {% endif %}
+        <p class="text-xs text-slate-500 mb-3">可多选同型号多台设备；须已在设备主数据中绑定报告模板。请先在左侧进入对应科室或院区再绑定设备。</p>
+        {% if project_available_equipments %}
+        <form method="post" class="space-y-3">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="bind_project_equipments">
+            <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+            {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
+            <div class="max-h-72 overflow-y-auto rounded-lg border border-slate-100 divide-y divide-slate-100">
+                {% for eq in project_available_equipments %}
+                <label class="flex items-start gap-3 px-4 py-3 hover:bg-slate-50 cursor-pointer text-sm">
+                    <input type="checkbox" name="equipment_ids" value="{{ eq.id }}" class="mt-1 rounded border-slate-300 text-rose-600">
+                    <span>
+                        <span class="font-medium text-slate-900">{{ eq.name }}</span>
+                        {% if eq.model or eq.serial_no %}
+                        <span class="text-slate-500 text-xs"> · {{ eq.model }}{% if eq.serial_no %} / {{ eq.serial_no }}{% endif %}</span>
+                        {% endif %}
+                        <span class="block text-xs text-slate-500 mt-0.5">{{ eq.department.full_display_name }}</span>
+                        {% if eq.report_task %}
+                        <span class="block text-xs text-indigo-600 mt-0.5">模板：{{ eq.report_task.code }} · {{ eq.report_task.name }}</span>
+                        {% else %}
+                        <span class="block text-xs text-amber-700 mt-0.5">未绑模板（加入前请在医院信息中绑定）</span>
+                        {% endif %}
+                    </span>
+                </label>
+                {% endfor %}
+            </div>
+            <button type="submit" class="px-4 py-2 rounded-xl bg-rose-600 text-white text-sm font-medium hover:bg-rose-700">加入本次委托</button>
+        </form>
+        {% else %}
+        <p class="text-sm text-slate-500">
+            {% if project_equipment_scope_label %}
+            {{ project_equipment_scope_label }}范围内可加入的设备已全部在本项目中，或尚未在<a href="{% url 'hospital_info_manage' %}" class="text-indigo-600 underline">医院信息管理</a>录入。
+            若需其他科室/院区的设备，请先在左侧进入对应委托单位层级。
+            {% else %}
+            该医院下可加入的设备已全部在本项目中，或尚未在医院信息管理录入设备。
+            {% endif %}
+        </p>
+        {% endif %}
+    </div>
+
+    {% elif selected_project %}
+    <p class="text-sm text-slate-500">您无权修改项目委托设备。</p>
+    {% else %}
+    <p class="text-sm text-slate-600">请先在左侧选择一个项目。</p>
+    {% endif %}
+</div>

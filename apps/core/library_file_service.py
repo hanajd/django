@@ -1,9 +1,11 @@
 """文件库二进制上传与下载响应（Web 与 API 共用）。"""
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -24,6 +26,91 @@ from apps.core.models import (
 def safe_library_basename(name: str) -> str:
     base = os.path.basename(name.replace("\\", "/"))
     return base[:240] if base else "unnamed"
+
+
+def sanitize_library_original_filename_fragment(s: str, max_len: int = 120) -> str:
+    """用户可见文件名片段：去路径非法字符，压缩空白，限制长度（与导出 PDF 片段规则一致）。"""
+    s = (s or "").strip()
+    s = re.sub(r'[/\\:*?"<>|\r\n\x00-\x1f]', "_", s)
+    s = re.sub(r"\s+", "_", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    if len(s) > max_len:
+        s = s[:max_len].rstrip("_")
+    return s or "x"
+
+
+@dataclass(frozen=True)
+class InspectionSubmitBatchStorage:
+    """检测提交单次落盘：委托编号 / 时间戳批次目录。"""
+
+    commission_code: str
+    batch_timestamp: str
+
+
+def library_commission_code_for_project(project) -> str:
+    code = sanitize_library_original_filename_fragment(
+        str(getattr(project, "code", "") or "").strip() or f"project_{getattr(project, 'pk', 0)}",
+        64,
+    )
+    return code or "unknown"
+
+
+def library_batch_timestamp(dt=None) -> str:
+    ts = dt or timezone.now()
+    local = timezone.localtime(ts)
+    return local.strftime("%Y%m%d%H%M%S")
+
+
+def make_inspection_submit_batch_storage(project) -> InspectionSubmitBatchStorage:
+    return InspectionSubmitBatchStorage(
+        commission_code=library_commission_code_for_project(project),
+        batch_timestamp=library_batch_timestamp(),
+    )
+
+
+def inspection_submit_relative_path(
+    batch: InspectionSubmitBatchStorage,
+    filename: str,
+    *,
+    subdir: str = "",
+) -> str:
+    """相对 FILE_LIBRARY_ROOT 的路径：inspection_submits/{委托编号}/{时间戳}/[{subdir}/]{文件名}"""
+    parts = [
+        "inspection_submits",
+        batch.commission_code,
+        batch.batch_timestamp,
+    ]
+    sub = (subdir or "").strip().strip("/")
+    if sub:
+        parts.append(sub)
+    parts.append(safe_library_basename(filename))
+    return "/".join(parts)
+
+
+def library_media_url(relative_path: str) -> str:
+    rel = (relative_path or "").replace("\\", "/").lstrip("/")
+    return f"{str(settings.MEDIA_URL).rstrip('/')}/file_library/{rel}"
+
+
+def classify_inspection_submit_library_file(lf: LibraryFile) -> str:
+    """
+    检测提交类文件分组：data（JSON）| signature | photo | legacy。
+    新路径含 /signatures/、/photos/；旧版平铺文件按扩展名与文件名推断。
+    """
+    rel = (lf.relative_path or "").replace("\\", "/").lower()
+    name = (lf.original_name or "")
+    if "/signatures/" in rel or "签名" in name:
+        return "signature"
+    if "/photos/" in rel:
+        return "photo"
+    if name.lower().endswith(".json") or "填写数据" in name:
+        return "data"
+    ext = Path(name).suffix.lower()
+    if ext in (".png", ".jpg", ".jpeg", ".webp", ".gif") and "签名" in name:
+        return "signature"
+    if ext in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+        return "photo"
+    return "legacy"
 
 
 def library_disk_dir_and_rel_prefix(category: str) -> Tuple[Path, str]:
@@ -72,6 +159,8 @@ def save_library_binary_uploads(
     link_object_id: Optional[int] = None,
     project_ids: Optional[List[int]] = None,
     enforce_storage_quota: bool = True,
+    submit_batch: Optional[InspectionSubmitBatchStorage] = None,
+    submit_subdir: str = "",
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
     """
     将上传的文件写入磁盘并创建 LibraryFile。
@@ -187,6 +276,12 @@ def save_library_binary_uploads(
                 continue
             disk_name = f"{sha256}{ext}" if ext else sha256
             display_name = disk_name
+        elif (
+            category == LibraryFile.CATEGORY_INSPECTION_SUBMIT
+            and submit_batch is not None
+        ):
+            disk_name = safe
+            display_name = safe
         else:
             uid = uuid.uuid4().hex
             disk_name = f"{uid}_{safe}"
@@ -200,8 +295,18 @@ def save_library_binary_uploads(
                     skipped.append({"filename": name, "reason": "quota_exceeded"})
                     continue
 
-        rel = f"{rel_prefix}/{disk_name}"
-        abs_p = dest_dir / disk_name
+        if (
+            category == LibraryFile.CATEGORY_INSPECTION_SUBMIT
+            and submit_batch is not None
+        ):
+            rel = inspection_submit_relative_path(
+                submit_batch, disk_name, subdir=submit_subdir
+            )
+            abs_p = Path(settings.FILE_LIBRARY_ROOT) / rel
+            abs_p.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            rel = f"{rel_prefix}/{disk_name}"
+            abs_p = dest_dir / disk_name
         if not abs_p.exists():
             abs_p.write_bytes(raw)
         lf = LibraryFile.objects.create(
@@ -256,6 +361,18 @@ def parse_project_ids(raw_values: List[str]) -> List[int]:
         seen.add(i)
         uniq.append(i)
     return uniq
+
+
+def rename_library_template_file(lf: LibraryFile, new_display_name: str) -> str | None:
+    """重命名模板文件显示名（不移动磁盘路径，便于任务模板库维护）。"""
+    if lf.category != LibraryFile.CATEGORY_TEMPLATE:
+        return "仅支持「模板」分类文件"
+    name = safe_library_basename((new_display_name or "").strip())
+    if not name.lower().endswith((".pdf", ".json")):
+        return "文件名须保留 .pdf 或 .json 扩展名"
+    lf.original_name = name
+    lf.save(update_fields=["original_name", "updated_at"])
+    return None
 
 
 def attach_files_to_projects(file_ids: List[int], project_ids: List[int], user=None) -> None:

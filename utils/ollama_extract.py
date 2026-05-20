@@ -69,7 +69,7 @@ def build_devices_prompt(md: str, source_file_hint: int) -> str:
 - 定义：文本里直接说明设备是什么的短语/英文，比如“X-RAY TUBE HOUSING ASSEMBLY”“X射线管组件”
 - 匹配关键词：找文本里大写的设备功能/部件名词，比如TUBE、ASSEMBLY、SYSTEM、SCANNER等
 - 示例：如果文本里有“X-RAY TUBE HOUSING ASSEMBLY”，设备名称尽量翻译成中文名称
-- 注意：不要把厂家名、型号号当成设备名称
+- 注意：不要把厂家名、型号代码当成设备名称
 
 【2. 设备型号】
 - 定义：厂家给设备/部件的型号代码，通常是字母+数字的组合
@@ -84,7 +84,7 @@ def build_devices_prompt(md: str, source_file_hint: int) -> str:
 - 注意：序列号是唯一的串号，不是型号代码
 
 【4. 生产厂家】
-- 定义：设备的制造商全称+地址+国别
+- 定义：设备的制造商全称，不要包含地址、城市、国家，只用写出公司全称即可
 - 匹配关键词：找文本开头/上方的公司名，通常包含“Medical Systems”“GmbH”“Co., Ltd”，后面跟着地址、城市、国家
 - 示例：文本里“Philips Medical Systems DMC GmbH, Röntgenstraße 24, 22335 Hamburg / GERMANY”就是厂家信息
 - 注意：不要只写“Philips”，要写完整识别到的内容

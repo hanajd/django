@@ -1,0 +1,61 @@
+<li class="folder-tree-item {% if depth > 0 %}ml-2{% endif %}{% if node.drop_accepts and explorer_dnd_enabled %} folder-tree-drop-target{% endif %}"
+    {% if node.drop_accepts and explorer_dnd_enabled %}data-drop-accepts="{{ node.drop_accepts }}" data-drop-id="{{ node.drop_id }}" data-drop-org-level="{{ node.org_level }}"{% endif %}>
+    {% if node.children %}
+    <details class="folder-tree-branch group/branch" {% if node.expanded %}open{% endif %}>
+        <summary class="flex items-center gap-0.5 min-w-0 list-none cursor-pointer rounded-lg hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
+            <span class="flex h-7 w-5 shrink-0 items-center justify-center text-slate-400 pointer-events-none" aria-hidden="true">
+                <i class="ri-arrow-right-s-line text-sm transition-transform duration-200 group-open/branch:rotate-90"></i>
+            </span>
+            {% if picker_mode %}
+            <button type="button"
+                    data-co-picker-node
+                    data-co-path="{{ node.path }}"
+                    data-co-label="{{ node.label }}"
+                    class="co-picker-node flex flex-1 items-center gap-2 min-w-0 py-1.5 pr-1 rounded-lg text-left transition-colors {% if nav_path == node.path %}bg-indigo-50 text-indigo-900 ring-1 ring-indigo-200/80 font-medium{% else %}text-slate-700 hover:bg-slate-50/80{% endif %}"
+                    onclick="event.stopPropagation();">
+                <i class="{% if node.node_type == 'hospital' %}ri-hospital-line text-rose-500{% elif node.node_type == 'campus' %}ri-building-2-line text-amber-600{% elif node.node_type == 'department' %}ri-stethoscope-line text-teal-600{% elif nav_path == node.path %}ri-folder-open-fill text-amber-500{% else %}ri-folder-fill text-amber-500{% endif %} shrink-0"></i>
+                <span class="truncate flex-1" title="{{ node.label }}">{{ node.label }}</span>
+                {% if node.count %}<span class="text-[10px] tabular-nums text-slate-400 shrink-0">{{ node.count }}</span>{% endif %}
+            </button>
+            {% else %}
+            <a href="{{ explorer_base_url }}{% if explorer_base_url and '?' in explorer_base_url %}&{% else %}?{% endif %}{{ nav_path_key|default:'fl_path' }}={{ node.path|urlencode }}{{ node.link_suffix }}"
+               class="library-dnd-source flex flex-1 items-center gap-2 min-w-0 py-1.5 pr-1 rounded-lg transition-colors {% if nav_path == node.path %}bg-indigo-50 text-indigo-900 ring-1 ring-indigo-200/80 font-medium{% else %}text-slate-700 hover:bg-slate-50/80{% endif %}{% if node.drag_type and explorer_dnd_enabled %} cursor-grab active:cursor-grabbing{% endif %}"
+               {% if node.drag_type and explorer_dnd_enabled %}draggable="true" data-drag-type="{{ node.drag_type }}" data-drag-id="{{ node.drag_id }}" data-org-level="{{ node.org_level }}"{% endif %}
+               onclick="event.stopPropagation();">
+                <i class="{% if node.node_type == 'project' %}ri-file-text-line text-slate-400{% elif node.node_type == 'report' %}ri-file-chart-line text-violet-500{% elif node.node_type == 'site' %}ri-file-paper-2-line text-cyan-600{% elif node.node_type == 'task' %}ri-stack-line text-indigo-500{% elif node.node_type == 'hospital' %}ri-hospital-line text-rose-500{% elif node.node_type == 'campus' %}ri-building-2-line text-amber-600{% elif node.node_type == 'department' %}ri-stethoscope-line text-teal-600{% elif nav_path == node.path %}ri-folder-open-fill text-amber-500{% else %}ri-folder-fill text-amber-500{% endif %} shrink-0"></i>
+                <span class="truncate flex-1" title="{{ node.label }}">{{ node.label }}</span>
+                {% if node.count %}<span class="text-[10px] tabular-nums text-slate-400 shrink-0">{{ node.count }}</span>{% endif %}
+            </a>
+            {% endif %}
+        </summary>
+        <ul class="mt-0.5 space-y-0.5 ml-3 border-l border-slate-200 pl-1.5">
+            {% for child in node.children %}
+            {% include "core/partials/folder_explorer_tree_node.html" with node=child depth=depth|add:1 explorer_dnd_enabled=explorer_dnd_enabled nav_path=nav_path nav_path_key=nav_path_key picker_mode=picker_mode %}
+            {% endfor %}
+        </ul>
+    </details>
+    {% else %}
+    <div class="flex items-center gap-0.5 min-w-0 {% if not picker_mode %}pl-5{% endif %}">
+        {% if picker_mode %}
+        <span class="flex h-7 w-5 shrink-0" aria-hidden="true"></span>
+        <button type="button"
+                data-co-picker-node
+                data-co-path="{{ node.path }}"
+                data-co-label="{{ node.label }}"
+                class="co-picker-node flex flex-1 items-center gap-2 min-w-0 py-1.5 px-1.5 rounded-lg text-left transition-colors {% if nav_path == node.path %}bg-indigo-50 text-indigo-900 ring-1 ring-indigo-200/80 font-medium{% else %}text-slate-700 hover:bg-slate-50{% endif %}">
+            <i class="{% if node.node_type == 'hospital' %}ri-hospital-line text-rose-500{% elif node.node_type == 'campus' %}ri-building-2-line text-amber-600{% elif node.node_type == 'department' %}ri-stethoscope-line text-teal-600{% elif nav_path == node.path %}ri-folder-open-fill text-amber-500{% else %}ri-folder-fill text-amber-500{% endif %} shrink-0"></i>
+            <span class="truncate flex-1" title="{{ node.label }}">{{ node.label }}</span>
+            {% if node.count %}<span class="text-[10px] tabular-nums text-slate-400 shrink-0">{{ node.count }}</span>{% endif %}
+        </button>
+        {% else %}
+        <a href="{{ explorer_base_url }}{% if explorer_base_url and '?' in explorer_base_url %}&{% else %}?{% endif %}{{ nav_path_key|default:'fl_path' }}={{ node.path|urlencode }}{{ node.link_suffix }}"
+           class="library-dnd-source flex flex-1 items-center gap-2 min-w-0 py-1.5 px-1.5 rounded-lg transition-colors {% if nav_path == node.path %}bg-indigo-50 text-indigo-900 ring-1 ring-indigo-200/80 font-medium{% else %}text-slate-700 hover:bg-slate-50{% endif %}{% if node.drag_type and explorer_dnd_enabled %} cursor-grab active:cursor-grabbing{% endif %}"
+           {% if node.drag_type and explorer_dnd_enabled %}draggable="true" data-drag-type="{{ node.drag_type }}" data-drag-id="{{ node.drag_id }}" data-org-level="{{ node.org_level }}"{% endif %}>
+            <i class="{% if node.node_type == 'project' %}ri-file-text-line text-slate-400{% elif node.node_type == 'report' %}ri-file-chart-line text-violet-500{% elif node.node_type == 'site' %}ri-file-paper-2-line text-cyan-600{% elif node.node_type == 'task' %}ri-stack-line text-indigo-500{% elif node.node_type == 'hospital' %}ri-hospital-line text-rose-500{% elif node.node_type == 'campus' %}ri-building-2-line text-amber-600{% elif node.node_type == 'department' %}ri-stethoscope-line text-teal-600{% elif nav_path == node.path %}ri-folder-open-fill text-amber-500{% else %}ri-folder-fill text-amber-500{% endif %} shrink-0"></i>
+            <span class="truncate flex-1" title="{{ node.label }}">{{ node.label }}</span>
+            {% if node.count %}<span class="text-[10px] tabular-nums text-slate-400 shrink-0">{{ node.count }}</span>{% endif %}
+        </a>
+        {% endif %}
+    </div>
+    {% endif %}
+</li>

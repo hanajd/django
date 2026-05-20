@@ -1,0 +1,64 @@
+{# 医院信息管理：按当前位置新建下级（医院 → 院区可省略 → 科室可省略） #}
+<div class="space-y-4 text-sm">
+    {% if folder_breadcrumbs %}
+    <nav class="flex flex-wrap items-center gap-0.5 text-[11px] text-slate-600 rounded-lg bg-slate-50 px-2 py-1.5 ring-1 ring-slate-100" aria-label="当前位置">
+        <i class="ri-folder-2-line text-amber-500 shrink-0"></i>
+        {% for crumb in folder_breadcrumbs %}
+        {% if not forloop.first %}<span class="text-slate-300">/</span>{% endif %}
+        <span class="truncate max-w-[8rem]" title="{{ crumb.label }}">{{ crumb.label }}</span>
+        {% endfor %}
+    </nav>
+    {% endif %}
+
+    {% if not explorer_org %}
+    <form method="post" class="space-y-3">
+        {% csrf_token %}
+        <input type="hidden" name="edit" value="1">
+        <input type="hidden" name="action" value="create_commission_organization">
+        <input type="hidden" name="org_level" value="hospital">
+        {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
+        <p class="text-xs font-medium text-slate-800">新建医院（顶级）</p>
+        <p class="text-[11px] text-slate-500">创建后可在其下添加院区、科室；院区与科室层均可按需省略。</p>
+        <input type="text" name="org_name" placeholder="医院名称 *" required
+               class="w-full px-3 py-2.5 text-sm rounded-xl bg-slate-50 ring-1 ring-slate-200 border-0 focus:ring-2 focus:ring-indigo-400">
+        <input type="text" name="org_notes" placeholder="备注（可选）"
+               class="w-full px-3 py-2.5 text-sm rounded-xl bg-slate-50 ring-1 ring-slate-200 border-0">
+        <button type="submit" class="w-full py-2.5 rounded-xl bg-slate-900 text-white text-sm font-medium hover:bg-slate-800">创建</button>
+    </form>
+    {% elif explorer_org_child_levels %}
+    <form method="post" class="space-y-3">
+        {% csrf_token %}
+        <input type="hidden" name="edit" value="1">
+        <input type="hidden" name="action" value="create_commission_organization">
+        <input type="hidden" name="parent_id" value="{{ explorer_org.pk }}">
+        {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
+        <p class="text-xs text-slate-600">
+            在 <strong class="text-slate-900">{{ explorer_org.name }}</strong>
+            <span class="text-slate-400">（{{ explorer_org.level_label }}）</span> 下新建：
+        </p>
+        <div class="space-y-1.5">
+            {% for lv, lv_label in explorer_org_child_levels %}
+            <label class="flex items-center gap-2.5 px-2.5 py-2 rounded-xl border border-transparent hover:bg-slate-50 cursor-pointer has-[:checked]:border-indigo-200 has-[:checked]:bg-indigo-50/50">
+                <input type="radio" name="org_level" value="{{ lv }}" class="text-indigo-600" {% if forloop.first %}checked{% endif %}>
+                <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-50">
+                    {% if lv == 'campus' %}<i class="ri-building-2-line text-amber-600"></i>{% else %}<i class="ri-stethoscope-line text-teal-600"></i>{% endif %}
+                </span>
+                <span>
+                    <span class="block text-xs font-medium text-slate-800">{{ lv_label }}</span>
+                    <span class="block text-[10px] text-slate-500">{% if lv == 'campus' %}仅建院区，其下可再建科室{% else %}可直接挂在当前{% if explorer_org.level == 'hospital' %}医院{% else %}院区{% endif %}下{% endif %}</span>
+                </span>
+            </label>
+            {% endfor %}
+        </div>
+        <input type="text" name="org_name" placeholder="名称 *" required
+               class="w-full px-3 py-2.5 text-sm rounded-xl bg-white ring-1 ring-slate-200 border-0 focus:ring-2 focus:ring-indigo-400">
+        <input type="text" name="org_notes" placeholder="备注（可选）"
+               class="w-full px-3 py-2.5 text-sm rounded-xl bg-white ring-1 ring-slate-200 border-0">
+        <button type="submit" class="w-full py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">创建</button>
+    </form>
+    {% else %}
+    <p class="text-sm text-slate-600 rounded-xl bg-slate-50 px-3 py-3 ring-1 ring-slate-100">
+        「{{ explorer_org.name }}」为科室层级，无法在其下新建下级。请在左侧选中上级医院或院区后再新建。
+    </p>
+    {% endif %}
+</div>

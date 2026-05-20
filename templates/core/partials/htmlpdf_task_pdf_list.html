@@ -1,0 +1,12 @@
+{% if task_pdfs %}
+<ul class="space-y-1.5">
+    {% for pdf in task_pdfs %}
+    <li class="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 ring-1 ring-slate-100">
+        <span class="text-sm text-slate-800 truncate min-w-0">{{ pdf.name }}</span>
+        <a href="{{ pdf.editor_url }}" class="shrink-0 text-sm font-medium text-indigo-600 hover:text-indigo-800">编辑版式</a>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<p class="text-xs text-slate-400 italic">未绑定模板 PDF · <a href="{% url 'library_task_management' %}?manage_task={{ task_id }}&edit=1" class="text-indigo-600 hover:underline">去绑定</a></p>
+{% endif %}

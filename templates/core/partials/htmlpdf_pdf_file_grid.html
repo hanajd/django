@@ -1,0 +1,31 @@
+{# 模板 PDF 文件网格：task_pdfs 为含 id/name/editor_url 的字典列表 #}
+{% if task_pdfs %}
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+    {% for pdf in task_pdfs %}
+    <a href="{{ pdf.editor_url }}"
+       class="group flex items-start gap-3 p-4 rounded-2xl border border-slate-200/90 bg-white hover:border-violet-300 hover:shadow-md hover:shadow-violet-100/50 transition-all ring-1 ring-transparent hover:ring-violet-200/60">
+        <span class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-rose-50 to-violet-50 text-rose-600 group-hover:from-violet-100 group-hover:to-indigo-100 group-hover:text-violet-700 transition-colors">
+            <i class="ri-file-pdf-2-line text-2xl"></i>
+        </span>
+        <span class="min-w-0 flex-1 text-left">
+            <span class="block text-sm font-medium text-slate-900 truncate group-hover:text-violet-900" title="{{ pdf.name }}">{{ pdf.name }}</span>
+            <span class="block text-xs text-slate-500 mt-0.5">点击编辑版式</span>
+        </span>
+        <i class="ri-arrow-right-s-line text-slate-300 group-hover:text-violet-500 shrink-0 mt-1 transition-colors"></i>
+    </a>
+    {% endfor %}
+</div>
+{% else %}
+<div class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 px-6 py-10 text-center">
+    <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-slate-300 shadow-sm mb-3">
+        <i class="ri-file-pdf-line text-2xl"></i>
+    </div>
+    <p class="text-sm text-slate-600">该模板尚未绑定 PDF 版式文件</p>
+    {% if show_library_task_nav and task_id %}
+    <a href="{% url 'library_task_management' %}?manage_task={{ task_id }}&edit=1{% if fl_path %}&fl_path={{ fl_path|urlencode }}{% endif %}"
+       class="inline-flex items-center gap-1 mt-3 text-sm font-medium text-indigo-600 hover:text-indigo-800">
+        <i class="ri-link"></i> 前往任务模板库绑定
+    </a>
+    {% endif %}
+</div>
+{% endif %}

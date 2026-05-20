@@ -1,0 +1,400 @@
+{# 选中机构：现代化卡片详情 #}
+{% with chain=explorer_org.ancestors_chain %}
+{# 概览英雄卡 #}
+<article class="rounded-3xl overflow-hidden shadow-[0_8px_40px_-12px_rgba(15,23,42,0.12)] ring-1 ring-slate-200/60">
+    <div class="px-6 py-5 bg-gradient-to-r {% if explorer_org.level == 'hospital' %}from-rose-500 to-rose-600{% elif explorer_org.level == 'campus' %}from-amber-500 to-orange-500{% else %}from-teal-500 to-emerald-600{% endif %} text-white">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/20 text-xs font-medium backdrop-blur-sm">
+                    {% if explorer_org.level == 'hospital' %}<i class="ri-hospital-line"></i>{% elif explorer_org.level == 'campus' %}<i class="ri-building-2-line"></i>{% else %}<i class="ri-stethoscope-line"></i>{% endif %}
+                    {{ explorer_org.level_label }}
+                </span>
+                <h2 class="mt-2 text-xl sm:text-2xl font-bold tracking-tight">{{ explorer_org.name }}</h2>
+                <p class="mt-1 text-sm text-white/85">{{ explorer_org.full_display_name }}</p>
+            </div>
+            {% if explorer_org.merged_report_file %}
+            <a href="{% url 'file_preview' explorer_org.merged_report_file_id %}" target="_blank" rel="noopener"
+               class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/15 text-xs font-medium backdrop-blur-sm max-w-xs truncate hover:bg-white/25 transition"
+               title="{{ explorer_org.merged_report_file.original_name }}">
+                <i class="ri-file-pdf-line shrink-0"></i>
+                已绑报告
+            </a>
+            {% endif %}
+        </div>
+        {% if chain|length > 1 %}
+        <nav class="mt-4 flex flex-wrap gap-1 text-xs text-white/75" aria-label="层级路径">
+            {% for node in chain %}
+            <a href="{{ hospital_info_base }}?fl_path={{ node.folder_path|urlencode }}{% if hospital_info_edit %}&amp;edit=1{% endif %}"
+               class="hover:text-white transition {% if node.pk == explorer_org.pk %}text-white font-medium{% endif %}">{{ node.name }}</a>{% if not forloop.last %}<span class="mx-1 opacity-50">/</span>{% endif %}
+            {% endfor %}
+        </nav>
+        {% endif %}
+    </div>
+</article>
+
+<div class="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 mb-5 shadow-sm ring-1 ring-slate-200/80">
+    {% if hospital_info_edit %}
+    <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-800 ring-1 ring-amber-200/80">
+        <i class="ri-edit-2-line"></i> 编辑中
+    </span>
+    <div class="flex flex-wrap items-center gap-2">
+    <form method="post" class="inline"
+          onsubmit="return confirm('确定删除该{{ explorer_org.level_label }}「{{ explorer_org.name }}」？\n须先删除其下所有院区/科室及科室内设备；医院还须无关联项目。此操作不可恢复。');">
+        {% csrf_token %}
+        <input type="hidden" name="edit" value="1">
+        <input type="hidden" name="action" value="delete_commission_organization">
+        <input type="hidden" name="org_id" value="{{ explorer_org.pk }}">
+        <input type="hidden" name="fl_path" value="{{ fl_path }}">
+        <button type="submit"
+                class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium text-rose-700 bg-rose-50 ring-1 ring-rose-200 hover:bg-rose-100 transition">
+            <i class="ri-delete-bin-line"></i> 删除{{ explorer_org.level_label }}
+        </button>
+    </form>
+    <a href="{{ hospital_info_url_read }}"
+       class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium text-slate-600 bg-slate-50 ring-1 ring-slate-200 hover:bg-slate-100 transition">
+        <i class="ri-close-circle-line"></i> 取消编辑
+    </a>
+    </div>
+    {% else %}
+    <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-slate-50 text-slate-600 ring-1 ring-slate-200/80">
+        <i class="ri-eye-line"></i> 浏览模式
+    </span>
+    <a href="{{ hospital_info_url_edit }}"
+       class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm transition">
+        <i class="ri-edit-line"></i> 编辑
+    </a>
+    {% endif %}
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+    {# 基本信息卡 #}
+    <article class="rounded-3xl bg-white p-6 shadow-[0_4px_24px_-8px_rgba(15,23,42,0.08)] ring-1 ring-slate-200/60 lg:col-span-2">
+        <header class="flex items-center gap-3 mb-5">
+            <span class="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
+                <i class="ri-information-line text-xl"></i>
+            </span>
+            <div>
+                <h3 class="text-base font-semibold text-slate-900">基本信息</h3>
+                <p class="text-xs text-slate-500">名称、地址与备注</p>
+            </div>
+        </header>
+        {% if hospital_info_edit %}
+        <form method="post" class="space-y-4">
+            {% csrf_token %}
+            <input type="hidden" name="edit" value="1">
+            <input type="hidden" name="action" value="save_org_hospital_info">
+            <input type="hidden" name="org_id" value="{{ explorer_org.pk }}">
+            <input type="hidden" name="fl_path" value="{{ fl_path }}">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <label class="block">
+                    <span class="text-xs font-medium text-slate-600">本级名称 *</span>
+                    <input type="text" name="org_name" value="{{ explorer_org.name }}" required
+                           class="mt-1.5 w-full px-3 py-2.5 text-sm rounded-xl border-0 bg-slate-50 ring-1 ring-slate-200 focus:ring-2 focus:ring-indigo-400">
+                </label>
+                <label class="block">
+                    <span class="text-xs font-medium text-slate-600">
+                        {% if explorer_org.level == 'hospital' %}医院地址{% elif explorer_org.level == 'campus' %}院区地址{% else %}科室位置{% endif %}
+                    </span>
+                    <input type="text" name="org_address" value="{{ explorer_org.address }}"
+                           placeholder="详细地址或楼层"
+                           class="mt-1.5 w-full px-3 py-2.5 text-sm rounded-xl border-0 bg-slate-50 ring-1 ring-slate-200 focus:ring-2 focus:ring-indigo-400">
+                </label>
+            </div>
+            {% if explorer_org.level == 'hospital' %}
+            <label class="block">
+                <span class="text-xs font-medium text-slate-600">医院简介</span>
+                <textarea name="org_introduction" rows="3"
+                          class="mt-1.5 w-full px-3 py-2.5 text-sm rounded-xl border-0 bg-slate-50 ring-1 ring-slate-200 focus:ring-2 focus:ring-indigo-400"
+                          placeholder="医院概况、资质说明等">{{ explorer_org.introduction }}</textarea>
+            </label>
+            {% endif %}
+            <label class="block">
+                <span class="text-xs font-medium text-slate-600">备注</span>
+                <input type="text" name="org_notes" value="{{ explorer_org.notes }}"
+                       class="mt-1.5 w-full px-3 py-2.5 text-sm rounded-xl border-0 bg-slate-50 ring-1 ring-slate-200 focus:ring-2 focus:ring-indigo-400">
+            </label>
+            <button type="submit" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 shadow-sm transition">
+                <i class="ri-save-line"></i> 保存基本信息
+            </button>
+        </form>
+        {% else %}
+        <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 text-sm">
+            <div>
+                <dt class="text-xs font-medium text-slate-500">本级名称</dt>
+                <dd class="mt-1 font-medium text-slate-900">{{ explorer_org.name }}</dd>
+            </div>
+            <div>
+                <dt class="text-xs font-medium text-slate-500">
+                    {% if explorer_org.level == 'hospital' %}医院地址{% elif explorer_org.level == 'campus' %}院区地址{% else %}科室位置{% endif %}
+                </dt>
+                <dd class="mt-1 text-slate-800">{% if explorer_org.address %}{{ explorer_org.address }}{% else %}<span class="text-slate-400">—</span>{% endif %}</dd>
+            </div>
+            {% if explorer_org.level == 'hospital' %}
+            <div class="sm:col-span-2">
+                <dt class="text-xs font-medium text-slate-500">医院简介</dt>
+                <dd class="mt-1 text-slate-800 whitespace-pre-wrap">{% if explorer_org.introduction %}{{ explorer_org.introduction }}{% else %}<span class="text-slate-400">—</span>{% endif %}</dd>
+            </div>
+            {% endif %}
+            <div class="{% if explorer_org.level == 'hospital' %}sm:col-span-2{% endif %}">
+                <dt class="text-xs font-medium text-slate-500">备注</dt>
+                <dd class="mt-1 text-slate-800">{% if explorer_org.notes %}{{ explorer_org.notes }}{% else %}<span class="text-slate-400">—</span>{% endif %}</dd>
+            </div>
+        </dl>
+        {% endif %}
+    </article>
+
+    {# 合并报告卡 #}
+    <article class="rounded-3xl bg-white p-6 shadow-[0_4px_24px_-8px_rgba(15,23,42,0.08)] ring-1 ring-slate-200/60">
+        <header class="flex items-center gap-3 mb-4">
+            <span class="flex h-10 w-10 items-center justify-center rounded-2xl bg-violet-50 text-violet-600">
+                <i class="ri-file-chart-line text-xl"></i>
+            </span>
+            <div>
+                <h3 class="text-base font-semibold text-slate-900">{{ explorer_org.merged_report_label }}</h3>
+                <p class="text-xs text-slate-500">从本机构下属项目的文件库「报告」成品中选择</p>
+            </div>
+        </header>
+        {% if explorer_org.merged_report_file %}
+        <p class="mb-3 text-sm text-slate-600 flex flex-wrap items-center gap-2">
+            <span class="truncate">当前：{{ explorer_org.merged_report_file.original_name }}</span>
+            <a href="{% url 'file_preview' explorer_org.merged_report_file_id %}" target="_blank" rel="noopener"
+               class="inline-flex items-center gap-1 text-violet-700 hover:text-violet-900 text-xs font-medium">
+                <i class="ri-external-link-line"></i> 预览
+            </a>
+        </p>
+        {% elif not hospital_info_edit %}
+        <p class="text-sm text-slate-600"><span class="text-slate-400">未绑定</span></p>
+        {% endif %}
+        {% if hospital_info_edit %}
+        <form method="post" class="space-y-4">
+            {% csrf_token %}
+            <input type="hidden" name="edit" value="1">
+            <input type="hidden" name="action" value="save_org_hospital_info">
+            <input type="hidden" name="save_scope" value="merged_report">
+            <input type="hidden" name="org_id" value="{{ explorer_org.pk }}">
+            <input type="hidden" name="fl_path" value="{{ fl_path }}">
+            <input type="hidden" name="org_name" value="{{ explorer_org.name }}">
+            <input type="hidden" name="org_address" value="{{ explorer_org.address }}">
+            <input type="hidden" name="org_notes" value="{{ explorer_org.notes }}">
+            {% if explorer_org.level == 'hospital' %}
+            <input type="hidden" name="org_introduction" value="{{ explorer_org.introduction }}">
+            {% endif %}
+            {% if report_file_options %}
+            <select name="merged_report_file_id"
+                    class="w-full px-3 py-2.5 text-sm rounded-xl border-0 bg-slate-50 ring-1 ring-slate-200 focus:ring-2 focus:ring-violet-400">
+                <option value="">— 未绑定 —</option>
+                {% for opt in report_file_options %}
+                <option value="{{ opt.id }}" {% if explorer_org.merged_report_file_id == opt.id %}selected{% endif %}>
+                    {{ opt.label }}
+                </option>
+                {% endfor %}
+            </select>
+            {% else %}
+            <p class="text-sm text-amber-800 bg-amber-50 rounded-xl px-3 py-2.5 ring-1 ring-amber-100">
+                {% if org_project_count %}
+                暂无可选报告：请先在相关项目中完成填报并在文件库「报告」分类生成 PDF。
+                {% else %}
+                本机构下尚无检测项目，请先在项目工作台创建项目并完成检测流程。
+                {% endif %}
+            </p>
+            {% endif %}
+            <button type="submit" class="w-full py-2.5 rounded-xl bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 transition" {% if not report_file_options %}disabled{% endif %}>
+                保存报告绑定
+            </button>
+        </form>
+        {% endif %}
+    </article>
+
+    {# 统计摘要卡 #}
+    <article class="rounded-3xl bg-white p-6 shadow-[0_4px_24px_-8px_rgba(15,23,42,0.08)] ring-1 ring-slate-200/60 flex flex-col justify-center">
+        <dl class="grid grid-cols-2 {% if not org_equipments_editable %}sm:grid-cols-3{% endif %} gap-4 text-center">
+            <div class="rounded-2xl bg-teal-50/80 py-4 px-3">
+                <dt class="text-xs text-teal-700/80 font-medium">联系人</dt>
+                <dd class="mt-1 text-2xl font-bold text-teal-800">{{ org_contacts|length }}</dd>
+            </div>
+            <div class="rounded-2xl bg-violet-50/80 py-4 px-3">
+                <dt class="text-xs text-violet-700/80 font-medium">{% if org_equipment_pick_department %}下属设备{% else %}设备{% endif %}</dt>
+                <dd class="mt-1 text-2xl font-bold text-violet-800">{{ org_equipments|length }}</dd>
+            </div>
+            {% if not org_equipments_editable %}
+            <div class="rounded-2xl bg-slate-50 py-4 px-3">
+                <dt class="text-xs text-slate-500 font-medium">关联项目</dt>
+                <dd class="mt-1 text-2xl font-bold text-slate-700">{{ org_project_count }}</dd>
+            </div>
+            {% endif %}
+        </dl>
+    </article>
+</div>
+
+{# 联系人卡 #}
+<article class="rounded-3xl bg-white p-6 shadow-[0_4px_24px_-8px_rgba(15,23,42,0.08)] ring-1 ring-slate-200/60">
+    <header class="flex flex-wrap items-center justify-between gap-3 mb-5">
+        <div class="flex items-center gap-3">
+            <span class="flex h-10 w-10 items-center justify-center rounded-2xl bg-teal-50 text-teal-600">
+                <i class="ri-contacts-book-line text-xl"></i>
+            </span>
+            <div>
+                <h3 class="text-base font-semibold text-slate-900">联系人</h3>
+                <p class="text-xs text-slate-500">{% if explorer_org.level == 'department' %}科室对接人{% else %}可维护本级联系人{% endif %}</p>
+            </div>
+        </div>
+    </header>
+
+    {% if org_contacts %}
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+        {% for c in org_contacts %}
+        <div class="group relative rounded-2xl bg-gradient-to-br from-slate-50 to-white p-4 ring-1 ring-slate-200/80 hover:ring-teal-200 transition">
+            <div class="flex items-start gap-3">
+                <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-teal-100 text-teal-700 font-semibold text-lg">
+                    {{ c.name|slice:":1" }}
+                </span>
+                <div class="min-w-0 flex-1">
+                    <p class="font-semibold text-slate-900 truncate">{{ c.name }}</p>
+                    {% if c.title %}<p class="text-xs text-slate-500 mt-0.5">{{ c.title }}</p>{% endif %}
+                    {% if c.phone %}
+                    <a href="tel:{{ c.phone }}" class="mt-2 inline-flex items-center gap-1 text-sm text-teal-700 hover:text-teal-900">
+                        <i class="ri-phone-line"></i> {{ c.phone }}
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
+            {% if hospital_info_edit %}
+            <form method="post" class="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition"
+                  onsubmit="return confirm('确定删除该联系人？');">
+                {% csrf_token %}
+                <input type="hidden" name="edit" value="1">
+                <input type="hidden" name="action" value="delete_org_contact">
+                <input type="hidden" name="contact_id" value="{{ c.id }}">
+                <input type="hidden" name="fl_path" value="{{ fl_path }}">
+                <button type="submit" class="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600" title="删除">
+                    <i class="ri-delete-bin-line"></i>
+                </button>
+            </form>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% elif not hospital_info_edit %}
+    <p class="text-sm text-slate-500 mb-4">暂无联系人</p>
+    {% endif %}
+
+    {% if hospital_info_edit %}
+    <form method="post" class="rounded-2xl border border-dashed border-teal-200 bg-teal-50/30 p-4">
+        {% csrf_token %}
+        <input type="hidden" name="edit" value="1">
+        <input type="hidden" name="action" value="save_org_contact">
+        <input type="hidden" name="org_id" value="{{ explorer_org.pk }}">
+        <input type="hidden" name="fl_path" value="{{ fl_path }}">
+        <p class="text-xs font-medium text-teal-900 mb-3">添加联系人</p>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <input type="text" name="contact_name" placeholder="姓名 *" required
+                   class="px-3 py-2 text-sm rounded-xl bg-white ring-1 ring-slate-200 focus:ring-2 focus:ring-teal-400 border-0">
+            <input type="text" name="contact_phone" placeholder="电话"
+                   class="px-3 py-2 text-sm rounded-xl bg-white ring-1 ring-slate-200 focus:ring-2 focus:ring-teal-400 border-0">
+            <input type="text" name="contact_title" placeholder="职务"
+                   class="px-3 py-2 text-sm rounded-xl bg-white ring-1 ring-slate-200 focus:ring-2 focus:ring-teal-400 border-0">
+        </div>
+        <button type="submit" class="mt-3 w-full sm:w-auto px-5 py-2 rounded-xl bg-teal-600 text-white text-sm font-medium hover:bg-teal-700">
+            添加
+        </button>
+    </form>
+    {% endif %}
+</article>
+
+{# 设备卡片区 #}
+<article class="rounded-3xl bg-white p-6 shadow-[0_4px_24px_-8px_rgba(15,23,42,0.08)] ring-1 ring-slate-200/60">
+    <header class="flex flex-wrap items-start justify-between gap-3 mb-5">
+        <div class="flex items-center gap-3">
+            <span class="flex h-10 w-10 items-center justify-center rounded-2xl bg-violet-50 text-violet-600">
+                <i class="ri-device-line text-xl"></i>
+            </span>
+            <div>
+                <h3 class="text-base font-semibold text-slate-900">单位设备</h3>
+                <p class="text-xs text-slate-500 max-w-xl">
+                    汇总本单位及下级科室设备。未检测需绑定任务模板；报告编制完成后自动更新。支持查看历史、将任务加入新项目，供复测时对比上次结果。
+                </p>
+            </div>
+        </div>
+        {% if hospital_info_edit %}
+        <button type="button" data-eq-add
+                class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 shadow-sm">
+            <i class="ri-add-line"></i> 添加设备
+        </button>
+        {% endif %}
+    </header>
+
+    {% if equipment_cards %}
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {% for card in equipment_cards %}
+        {% with eq=card.equipment st=card.status %}
+        <div class="rounded-2xl ring-1 ring-slate-200/80 overflow-hidden bg-slate-50/50 flex flex-col">
+            <div class="px-4 py-3 bg-white border-b border-slate-100">
+                <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                        {% if org_equipment_pick_department or not hospital_info_edit %}
+                        <p class="text-[10px] font-medium text-violet-700 truncate mb-1" title="{{ eq.department.full_display_name }}">
+                            <i class="ri-stethoscope-line"></i> {{ eq.department.full_display_name }}
+                        </p>
+                        {% endif %}
+                        <p class="font-semibold text-slate-900">{{ eq.name }}</p>
+                        {% if eq.model or eq.serial_no %}
+                        <p class="text-xs text-slate-500 mt-0.5">{{ eq.model }}{% if eq.serial_no %} · {{ eq.serial_no }}{% endif %}</p>
+                        {% endif %}
+                    </div>
+                    <span class="shrink-0 inline-flex px-2 py-0.5 rounded-lg text-[10px] font-semibold ring-1 {{ st.badge_class }}">{{ st.label }}</span>
+                </div>
+                <p class="mt-2 text-[11px] text-slate-600 leading-snug">{{ st.hint }}</p>
+            </div>
+            <dl class="px-4 py-3 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs flex-1">
+                <div><dt class="text-slate-400">厂家</dt><dd class="text-slate-800">{% if eq.manufacturer %}{{ eq.manufacturer }}{% else %}—{% endif %}</dd></div>
+                <div><dt class="text-slate-400">位置</dt><dd class="text-slate-800">{% if eq.location %}{{ eq.location }}{% else %}—{% endif %}</dd></div>
+                {% if eq.report_task %}
+                <div class="col-span-2"><dt class="text-slate-400">报告模板</dt><dd class="text-slate-800 truncate">{{ eq.report_task.code }} · {{ eq.report_task.name }}</dd></div>
+                {% endif %}
+            </dl>
+            <div class="px-3 py-3 bg-white border-t border-slate-100 flex flex-wrap gap-1.5">
+                <button type="button" data-eq-history="{{ eq.id }}" data-eq-name="{{ eq.name|escape }}"
+                        class="px-2.5 py-1 rounded-lg text-[11px] font-medium text-slate-700 bg-slate-100 hover:bg-slate-200">
+                    <i class="ri-history-line"></i> 历史记录
+                </button>
+                {% if eq.report_file %}
+                <a href="{% url 'file_preview' eq.report_file_id %}" target="_blank" rel="noopener"
+                   class="px-2.5 py-1 rounded-lg text-[11px] font-medium text-violet-800 bg-violet-50 hover:bg-violet-100">
+                    <i class="ri-file-pdf-line"></i> 最新报告
+                </a>
+                {% endif %}
+                {% if hospital_info_edit %}
+                <button type="button" data-eq-project="{{ eq.id }}" data-eq-can-bind="{% if card.can_bind_project %}1{% else %}0{% endif %}"
+                        class="px-2.5 py-1 rounded-lg text-[11px] font-medium text-indigo-800 bg-indigo-50 hover:bg-indigo-100{% if not card.can_bind_project %} opacity-50{% endif %}"
+                        title="{% if card.can_bind_project %}将检测任务加入项目{% else %}请先编辑设备并绑定检测任务模板；已检测设备需已关联报告{% endif %}">
+                    <i class="ri-folder-add-line"></i> 加入项目
+                </button>
+                <button type="button" data-eq-edit="{{ eq.id }}"
+                        class="px-2.5 py-1 rounded-lg text-[11px] font-medium text-violet-800 bg-violet-50 hover:bg-violet-100">
+                    <i class="ri-edit-line"></i> 编辑
+                </button>
+                <form method="post" class="inline" onsubmit="return confirm('确定删除该设备？');">
+                    {% csrf_token %}
+                    <input type="hidden" name="edit" value="1">
+                    <input type="hidden" name="action" value="delete_equipment">
+                    <input type="hidden" name="equipment_id" value="{{ eq.id }}">
+                    <input type="hidden" name="fl_path" value="{{ fl_path }}">
+                    <button type="submit" class="px-2.5 py-1 rounded-lg text-[11px] font-medium text-red-600 hover:bg-red-50">删除</button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+        {% endwith %}
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-sm text-slate-500 py-6 text-center rounded-2xl bg-slate-50 ring-1 ring-dashed ring-slate-200">
+        {% if hospital_info_edit %}暂无设备，点击「添加设备」录入{% else %}下属科室暂无设备{% endif %}
+    </p>
+    {% endif %}
+</article>
+
+{% if hospital_info_edit %}
+{% include "core/partials/hospital_info_equipment_modals.html" %}
+{% endif %}
+{% endwith %}

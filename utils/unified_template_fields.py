@@ -90,6 +90,124 @@ def compact_unified_pdf_fields_for_storage(fields: List[Any]) -> List[Dict[str, 
     return [_field_dict_to_compact_row(m) for m in materialized]
 
 
+def frontend_rect_from_field(field: Dict[str, Any]) -> List[float] | None:
+    """从导出过程中的栏位对象提取 ``[page, x, y, w, h]``（与模板 pdf.fields.rect 一致）。"""
+    if not isinstance(field, dict):
+        return None
+    existing = field.get("rect")
+    if isinstance(existing, (list, tuple)) and len(existing) >= 5:
+        try:
+            return [
+                int(existing[0]),
+                round(float(existing[1]), 2),
+                round(float(existing[2]), 2),
+                round(float(existing[3]), 2),
+                round(float(existing[4]), 2),
+            ]
+        except (TypeError, ValueError):
+            pass
+    src = field.get("source") if isinstance(field.get("source"), dict) else {}
+    try:
+        page = int(field.get("page", src.get("page", 1)) or 1)
+    except (TypeError, ValueError):
+        page = 1
+    bbox = field.get("__bbox")
+    if isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
+        try:
+            x, y, w, h = float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])
+        except (TypeError, ValueError):
+            x = y = w = h = 0.0
+    else:
+        try:
+            x = float(field.get("x") if field.get("x") is not None else src.get("x", 0))
+            y = float(field.get("y") if field.get("y") is not None else src.get("y", 0))
+            w = float(field.get("w") if field.get("w") is not None else src.get("w", 0))
+            h = float(field.get("h") if field.get("h") is not None else src.get("h", 0))
+        except (TypeError, ValueError):
+            return None
+    if w <= 0 and h <= 0:
+        return None
+    return [page, round(x, 2), round(y, 2), round(w, 2), round(h, 2)]
+
+
+def frontend_rect_from_materialized(mf: Dict[str, Any]) -> List[float] | None:
+    """从 materialize 后的 pdf 栏位字典生成 rect。"""
+    if not isinstance(mf, dict):
+        return None
+    rect = mf.get("rect")
+    if isinstance(rect, (list, tuple)) and len(rect) >= 5:
+        try:
+            return [
+                int(rect[0]),
+                round(float(rect[1]), 2),
+                round(float(rect[2]), 2),
+                round(float(rect[3]), 2),
+                round(float(rect[4]), 2),
+            ]
+        except (TypeError, ValueError):
+            pass
+    try:
+        page = int(mf.get("page") or 1)
+        x = float(mf.get("x") or 0)
+        y = float(mf.get("y") or 0)
+        w = float(mf.get("w") or 0)
+        h = float(mf.get("h") or 0)
+    except (TypeError, ValueError):
+        return None
+    if w <= 0 and h <= 0:
+        return None
+    return [page, round(x, 2), round(y, 2), round(w, 2), round(h, 2)]
+
+
+def enrich_frontend_steps_rect_from_pdf_fields(
+    frontend_obj: Dict[str, Any], pdf_fields: List[Any]
+) -> Dict[str, Any]:
+    """为 steps 内缺 ``rect`` 的栏位按 ``source.pdfFieldId`` 从 ``pdf.fields`` 补坐标。"""
+    if not isinstance(frontend_obj, dict):
+        return frontend_obj
+    by_pid: Dict[str, List[float]] = {}
+    for raw in materialize_unified_pdf_fields([f for f in (pdf_fields or []) if isinstance(f, dict)]):
+        pid = str(raw.get("pdfFieldId") or "").strip()
+        if not pid or pid in by_pid:
+            continue
+        rect = frontend_rect_from_materialized(raw)
+        if rect is not None:
+            by_pid[pid] = rect
+
+    def _apply_to_field(field: Dict[str, Any]) -> None:
+        if not isinstance(field, dict) or field.get("rect"):
+            return
+        src = field.get("source") if isinstance(field.get("source"), dict) else {}
+        pid = str(src.get("pdfFieldId") or "").strip()
+        if pid and pid in by_pid:
+            field["rect"] = list(by_pid[pid])
+
+    for step in frontend_obj.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        for section in step.get("sections") or []:
+            if not isinstance(section, dict):
+                continue
+            for field in section.get("fields") or []:
+                if isinstance(field, dict):
+                    _apply_to_field(field)
+            matrix = section.get("matrix")
+            if not isinstance(matrix, dict):
+                continue
+            for field in matrix.get("headerFields") or []:
+                if isinstance(field, dict):
+                    _apply_to_field(field)
+            for row in matrix.get("rows") or []:
+                if not isinstance(row, dict):
+                    continue
+                cells = row.get("cells")
+                if isinstance(cells, dict):
+                    for cell in cells.values():
+                        if isinstance(cell, dict):
+                            _apply_to_field(cell)
+    return frontend_obj
+
+
 def _field_dict_to_compact_row(mf: Dict[str, Any]) -> Dict[str, Any]:
     page = int(mf.get("page") or 1)
     x = round(float(mf.get("x") or 0), 2)

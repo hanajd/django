@@ -186,13 +186,239 @@
             padding-top: 12px;
             border-top: 1px solid #e5e6eb;
         }
+        .formula-modal-backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            background: rgba(29, 33, 41, 0.42);
+        }
+        .formula-modal-backdrop.open {
+            display: flex;
+        }
+        .formula-modal {
+            width: min(920px, calc(100vw - 48px));
+            max-height: min(820px, calc(100vh - 48px));
+            display: flex;
+            flex-direction: column;
+            border-radius: 8px;
+            background: #fff;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.24);
+            overflow: hidden;
+        }
+        .formula-modal-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 16px 20px;
+            border-bottom: 1px solid #e5e6eb;
+            background: #fff;
+        }
+        .formula-modal-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #1d2129;
+            margin-bottom: 4px;
+        }
+        .formula-modal-subtitle {
+            font-size: 12px;
+            color: #86909c;
+            line-height: 1.45;
+        }
+        .formula-modal-close {
+            width: 32px;
+            height: 32px;
+            border: 1px solid #e5e6eb;
+            border-radius: 7px;
+            background: #fff;
+            color: #4e5969;
+            cursor: pointer;
+            font-size: 20px;
+            line-height: 1;
+        }
+        .formula-modal-close:hover {
+            border-color: #165dff;
+            color: #165dff;
+            background: #f2f6ff;
+        }
+        .formula-modal-body {
+            flex: 1;
+            min-height: 0;
+            overflow: auto;
+            padding: 16px 20px 20px;
+            background: #f7f8fa;
+        }
+        .formula-modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            padding: 12px 20px;
+            border-top: 1px solid #e5e6eb;
+            background: #fff;
+        }
+        .formula-modal-footer button {
+            padding: 7px 14px;
+            border-radius: 7px;
+            border: 1px solid #dcdfe6;
+            background: #fff;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .formula-modal-footer button.primary {
+            border-color: #165dff;
+            background: #165dff;
+            color: #fff;
+        }
         .formula-panel h4 {
             font-size: 14px;
             color: #1d2129;
-            margin-bottom: 8px;
+            margin-bottom: 10px;
+        }
+        .formula-empty {
+            padding: 14px;
+            border: 1px dashed #c9d8ff;
+            border-radius: 8px;
+            background: #f7faff;
+            color: #4e5969;
+            font-size: 12px;
+            line-height: 1.55;
+        }
+        .formula-selected-card {
+            padding: 12px;
+            border: 1px solid #dbe5ff;
+            border-radius: 8px;
+            background: #f7faff;
+            margin-bottom: 12px;
+        }
+        .formula-selected-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .formula-selected-id {
+            font-size: 16px;
+            font-weight: 700;
+            color: #165dff;
+            font-family: Consolas, monospace;
+        }
+        .formula-selected-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #1d2129;
+            word-break: break-word;
+        }
+        .formula-selected-meta {
+            font-size: 12px;
+            color: #6b7785;
+            line-height: 1.45;
+        }
+        .formula-pill {
+            display: inline-flex;
+            align-items: center;
+            height: 22px;
+            padding: 0 8px;
+            border-radius: 999px;
+            background: #e8f0ff;
+            color: #165dff;
+            font-size: 11px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .formula-section {
+            margin-bottom: 12px;
+            padding: 12px;
+            border: 1px solid #edf1f7;
+            border-radius: 8px;
+            background: #fff;
+        }
+        .formula-section-head {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        .formula-step {
+            flex-shrink: 0;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: #165dff;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 700;
+        }
+        .formula-section-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #1d2129;
+            margin-bottom: 2px;
+        }
+        .formula-section-desc {
+            font-size: 12px;
+            color: #86909c;
+            line-height: 1.45;
+        }
+        .formula-mode-row,
+        .formula-chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        .formula-mode-btn,
+        .formula-tool-btn,
+        .formula-chip,
+        .formula-field-chip {
+            border: 1px solid #dcdfe6;
+            background: #fff;
+            color: #4e5969;
+            border-radius: 7px;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+        }
+        .formula-mode-btn {
+            padding: 7px 10px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .formula-mode-btn.active {
+            background: #165dff;
+            border-color: #165dff;
+            color: #fff;
+            box-shadow: 0 4px 10px rgba(22, 93, 255, 0.18);
+        }
+        .formula-tool-btn,
+        .formula-chip {
+            min-height: 30px;
+            padding: 6px 10px;
+            font-size: 12px;
+        }
+        .formula-tool-btn:hover,
+        .formula-chip:hover,
+        .formula-field-chip:hover {
+            border-color: #165dff;
+            color: #165dff;
+            background: #f2f6ff;
+        }
+        .formula-tool-btn.danger {
+            color: #f53f3f;
+            border-color: #ffd4d4;
+        }
+        .formula-tool-btn.danger:hover {
+            background: #fff2f0;
+            border-color: #f53f3f;
         }
         .formula-block {
-            margin-bottom: 12px;
+            margin-bottom: 10px;
         }
         .formula-block label {
             display: block;
@@ -207,24 +433,182 @@
             line-height: 1.45;
             margin-top: 4px;
         }
+        .formula-fn-help {
+            margin-top: 10px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            background: #f7f8fa;
+            border: 1px solid #e5e6eb;
+            font-size: 12px;
+            line-height: 1.55;
+            color: #4e5969;
+        }
+        .formula-fn-help h5 {
+            margin: 0 0 6px 0;
+            font-size: 12px;
+            font-weight: 600;
+            color: #1d2129;
+        }
+        .formula-fn-help ul {
+            margin: 0 0 8px 16px;
+            padding: 0;
+        }
+        .formula-fn-help li { margin-bottom: 4px; }
+        .formula-fn-help code {
+            font-size: 11px;
+            background: #e5e6eb;
+            padding: 1px 4px;
+            border-radius: 4px;
+            font-family: Consolas, monospace;
+        }
+        .formula-fn-help .formula-fn-note {
+            margin: 0;
+            font-size: 11px;
+            color: #86909c;
+        }
+        .formula-field-tools {
+            margin-top: 10px;
+        }
+        .formula-search {
+            width: 100%;
+            margin-bottom: 8px;
+        }
+        .formula-field-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 6px;
+            max-height: 170px;
+            overflow-y: auto;
+            padding-right: 2px;
+        }
+        .formula-field-chip {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            min-height: 34px;
+            padding: 6px 8px;
+            text-align: left;
+            font-size: 12px;
+        }
+        .formula-field-chip code {
+            flex-shrink: 0;
+            color: #165dff;
+            font-family: Consolas, monospace;
+            font-weight: 700;
+            background: transparent;
+        }
+        .formula-field-chip span {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: #4e5969;
+        }
+        .formula-field-empty {
+            padding: 10px;
+            border-radius: 7px;
+            background: #f7f8fa;
+            color: #86909c;
+            font-size: 12px;
+            text-align: center;
+        }
         .formula-panel textarea,
-        .formula-panel input[type="text"] {
+        .formula-panel input[type="text"],
+        .formula-panel select,
+        .formula-modal textarea,
+        .formula-modal input[type="text"],
+        .formula-modal select {
             width: 100%;
             box-sizing: border-box;
             border: 1px solid #e5e6eb;
             border-radius: 6px;
-            padding: 6px 8px;
+            padding: 7px 9px;
             font-size: 12px;
             font-family: Consolas, "Microsoft YaHei", monospace;
+            outline: none;
+            transition: border-color 0.15s, box-shadow 0.15s;
         }
-        .formula-panel textarea {
-            min-height: 52px;
+        .formula-panel textarea:focus,
+        .formula-panel input[type="text"]:focus,
+        .formula-panel select:focus,
+        .formula-modal textarea:focus,
+        .formula-modal input[type="text"]:focus,
+        .formula-modal select:focus {
+            border-color: #165dff;
+            box-shadow: 0 0 0 2px rgba(22, 93, 255, 0.12);
+        }
+        .formula-panel textarea,
+        .formula-modal textarea {
+            min-height: 70px;
             resize: vertical;
         }
-        .formula-panel .row2 {
+        .formula-panel .row2,
+        .formula-modal .row2 {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 8px;
+        }
+        .formula-input-label {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 5px;
+            font-size: 12px;
+            color: #4e5969;
+            font-weight: 600;
+        }
+        .formula-status {
+            margin-top: 8px;
+            padding: 8px 10px;
+            border-radius: 7px;
+            font-size: 12px;
+            line-height: 1.45;
+            border: 1px solid #e5e6eb;
+            background: #f7f8fa;
+            color: #4e5969;
+        }
+        .formula-status.ok {
+            border-color: #b7ebc5;
+            background: #f6ffed;
+            color: #247a35;
+        }
+        .formula-status.warn {
+            border-color: #ffe1a8;
+            background: #fffaf0;
+            color: #ad6800;
+        }
+        .formula-status.error {
+            border-color: #ffccc7;
+            background: #fff2f0;
+            color: #c0362c;
+        }
+        .formula-preview {
+            margin-top: 8px;
+            padding: 8px 10px;
+            border-radius: 7px;
+            background: #f7f8fa;
+            color: #1d2129;
+            font-size: 12px;
+            line-height: 1.45;
+            word-break: break-all;
+        }
+        .formula-preview code {
+            font-family: Consolas, monospace;
+            color: #165dff;
+            font-weight: 700;
+        }
+        .judgment-main-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+        }
+        .formula-quick-title {
+            margin-bottom: 6px;
+            font-size: 12px;
+            color: #4e5969;
+            font-weight: 600;
         }
         .formula-actions {
             display: flex;
@@ -233,8 +617,8 @@
             margin-top: 8px;
         }
         .formula-actions button {
-            padding: 5px 10px;
-            border-radius: 6px;
+            padding: 6px 10px;
+            border-radius: 7px;
             border: 1px solid #dcdfe6;
             background: #fff;
             font-size: 12px;
@@ -255,8 +639,39 @@
             margin-top: 8px;
             font-size: 12px;
             color: #4e5969;
+            line-height: 1.45;
         }
         .formula-manual-row input { margin-top: 2px; }
+        .field-row--selected {
+            background: #edf4ff;
+            border-color: #165dff;
+            box-shadow: 0 0 0 2px rgba(22, 93, 255, 0.12);
+        }
+        .field-row-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 2px;
+        }
+        .field-row-tag {
+            display: inline-flex;
+            align-items: center;
+            height: 18px;
+            padding: 0 6px;
+            border-radius: 999px;
+            font-size: 11px;
+            color: #4e5969;
+            background: #f2f3f5;
+            white-space: nowrap;
+        }
+        .field-row-tag.has-formula {
+            color: #165dff;
+            background: #e8f0ff;
+        }
+        .field-row-tag.has-judgment {
+            color: #247a35;
+            background: #e8ffea;
+        }
         .field-row-actions {
             display: flex;
             flex-direction: column;
@@ -275,6 +690,13 @@
         }
         .field-row button:hover {
             background: #fff2f0;
+        }
+        .field-row button.rule-btn {
+            border-color: #165dff;
+            color: #165dff;
+        }
+        .field-row button.rule-btn:hover {
+            background: #f2f6ff;
         }
         .pdf-scroll {
             flex: 1;
@@ -577,7 +999,7 @@
         <button id="btnFillRight" type="button">向右填</button>
         <button id="btnFillLeft" type="button">向左填</button>
         <button id="btnAddText" type="button" title="在 PDF 上拖出矩形，作为文字填写区域">框选文字填写区</button>
-        <button id="btnAutoRedBoxes" type="button" title="识别 PDF 中的红色文字并自动生成填写框">自动框选</button>
+        <button id="btnAutoRedBoxes" type="button" title="识别 PDF 中的红色文字并自动生成填写框">按红字自动框选</button>
         <button id="btnAddCheck" type="button" title="拖出小框作为勾选位置">添加勾选框</button>
         <button id="btnAddImage" type="button" title="拖出区域用于粘贴或上传图片">添加图片区域</button>
         </div>
@@ -593,15 +1015,29 @@
     <div class="main">
         <aside class="sidebar">
             <h3>填写区列表</h3>
-            <p class="sidebar-hint">序号与画布角标一致；悬停列表或控件会联动高亮；点击行内空白处可滚动定位到对应控件；标签可直接在下方输入框修改，画布会同步更新。「自动框选」仅识别 PDF 中红色字体区域，填写内容在画布上以红字显示。选中某一栏后，可在下方「公式与判定」用 f 编号填写算术公式与合格标准（详见项目文档 json公式说明.md）。</p>
+            <p class="sidebar-hint">点击列表或 PDF 上的填写框即可定位栏位；标签可直接修改。需要自动计算或合格判断时，点击行内「规则」打开编辑弹窗。</p>
             <div id="fieldList"></div>
-            <div class="formula-panel" id="fieldFormulaPanelWrap">
-                <h4>公式与判定（当前栏位）</h4>
-                <div id="fieldFormulaPanel"></div>
-            </div>
         </aside>
         <div class="pdf-scroll">
             <div id="pdfContainer" class="pdf-container"></div>
+        </div>
+    </div>
+
+    <div class="formula-modal-backdrop" id="formulaModalBackdrop" aria-hidden="true">
+        <div class="formula-modal" role="dialog" aria-modal="true" aria-labelledby="formulaModalTitle">
+            <div class="formula-modal-header">
+                <div>
+                    <div class="formula-modal-title" id="formulaModalTitle">公式与判定</div>
+                    <div class="formula-modal-subtitle" id="formulaModalSubtitle">为当前栏位设置自动计算和合格标准。</div>
+                </div>
+                <button class="formula-modal-close" id="formulaModalClose" type="button" title="关闭">×</button>
+            </div>
+            <div class="formula-modal-body">
+                <div id="fieldFormulaPanel"></div>
+            </div>
+            <div class="formula-modal-footer">
+                <button id="formulaModalDone" class="primary" type="button">完成</button>
+            </div>
         </div>
     </div>
 
@@ -636,6 +1072,10 @@
         let btnSaveMatrixTemplate = document.getElementById('saveMatrixTemplate');
         const imageFilePicker = document.getElementById('imageFilePicker');
         const templateJsonSelect = document.getElementById('templateJsonSelect');
+        const formulaModalBackdrop = document.getElementById('formulaModalBackdrop');
+        const formulaModalClose = document.getElementById('formulaModalClose');
+        const formulaModalDone = document.getElementById('formulaModalDone');
+        const formulaModalSubtitle = document.getElementById('formulaModalSubtitle');
         if (!HTMLPDF_SHOW_MATRIX_BETA_TOOLBAR) {
             const strip = (el) => {
                 if (el && el.parentNode) el.parentNode.removeChild(el);
@@ -747,6 +1187,13 @@
             document.querySelectorAll('.field-row--highlight').forEach(r => r.classList.remove('field-row--highlight'));
         }
 
+        function updateSelectedFieldRows() {
+            document.querySelectorAll('.field-row--selected').forEach(r => r.classList.remove('field-row--selected'));
+            if (!selectedFieldId) return;
+            const row = document.querySelector('.field-row[data-field-id="' + selectedFieldId + '"]');
+            if (row) row.classList.add('field-row--selected');
+        }
+
         function attachFieldHoverSync(wrap, id) {
             wrap.addEventListener('mouseenter', () => setRowHighlightForField(id, true));
             wrap.addEventListener('mouseleave', () => setRowHighlightForField(id, false));
@@ -778,6 +1225,37 @@
         }
 
         let selectedFieldId = null;
+        let formulaModalOpen = false;
+
+        function openFormulaModal(id) {
+            const f = getFieldById(id);
+            if (!f) return;
+            selectedFieldId = f.id;
+            formulaModalOpen = true;
+            updateSelectedFieldRows();
+            clearAllRowHighlights();
+            setRowHighlightForField(f.id, true);
+            if (formulaModalSubtitle) {
+                formulaModalSubtitle.textContent = getFieldFormulaId(f, fields.indexOf(f)) + ' · ' + getFieldShortName(f);
+            }
+            renderFormulaPanel();
+            if (formulaModalBackdrop) {
+                formulaModalBackdrop.classList.add('open');
+                formulaModalBackdrop.setAttribute('aria-hidden', 'false');
+            }
+            setTimeout(() => {
+                const firstInput = document.querySelector('#fieldFormulaPanel textarea, #fieldFormulaPanel input[type="text"]');
+                if (firstInput) firstInput.focus();
+            }, 0);
+        }
+
+        function closeFormulaModal() {
+            formulaModalOpen = false;
+            if (formulaModalBackdrop) {
+                formulaModalBackdrop.classList.remove('open');
+                formulaModalBackdrop.setAttribute('aria-hidden', 'true');
+            }
+        }
 
         function ensureJudgmentObj(f) {
             if (!f) return;
@@ -832,54 +1310,522 @@
             const re = new RegExp('^' + esc + '\\s*=\\s*(.+)$', 'i');
             const m = s.match(re);
             if (m) s = String(m[1] || '').trim();
+            s = s
+                .replace(/[，]/g, ',')
+                .replace(/[（]/g, '(')
+                .replace(/[）]/g, ')')
+                .replace(/[×]/g, '*')
+                .replace(/[÷]/g, '/')
+                .replace(/[％]/g, '%');
             return s;
+        }
+
+        function getFieldFormulaId(f, fallbackIndex) {
+            if (!f) return '';
+            const raw = (f.pdfFieldId && /^f\d+$/i.test(String(f.pdfFieldId)))
+                ? String(f.pdfFieldId).toLowerCase()
+                : String(f.id || '').trim();
+            if (raw) return raw;
+            return typeof fallbackIndex === 'number' ? ('f' + (fallbackIndex + 1)) : '';
+        }
+
+        function getFieldShortName(f) {
+            const label = String((f && (f.placeholder || f.originalPlaceholder || f.title)) || '').trim();
+            return label || (f ? fieldTypeLabel(f.fieldType || 'text') : '未命名栏位');
+        }
+
+        function hasFieldJudgment(f) {
+            if (!f) return false;
+            ensureJudgmentObj(f);
+            return !!(String(f.judgmentCriteriaByTestType.acceptance || '').trim()
+                || String(f.judgmentCriteriaByTestType.status || '').trim());
+        }
+
+        function updateFieldRowIndicators(id) {
+            const f = getFieldById(id);
+            const row = document.querySelector('.field-row[data-field-id="' + id + '"]');
+            if (!f || !row) return;
+            const textCol = row.querySelector('.field-row-text');
+            if (!textCol) return;
+            let meta = row.querySelector('.field-row-meta');
+            if (meta) meta.remove();
+            meta = document.createElement('div');
+            meta.className = 'field-row-meta';
+            if (String(f.fieldExpression || '').trim()) {
+                const tag = document.createElement('span');
+                tag.className = 'field-row-tag has-formula';
+                tag.textContent = '已设公式';
+                meta.appendChild(tag);
+            }
+            if (hasFieldJudgment(f)) {
+                const tag = document.createElement('span');
+                tag.className = 'field-row-tag has-judgment';
+                tag.textContent = '已设判定';
+                meta.appendChild(tag);
+            }
+            if (meta.children.length) textCol.appendChild(meta);
+        }
+
+        function stripQuotedStringsForFormulaCheck(s) {
+            let r = '';
+            let i = 0;
+            const str = String(s || '');
+            while (i < str.length) {
+                const ch = str[i];
+                if (ch === "'" || ch === '"') {
+                    const q = ch;
+                    i++;
+                    while (i < str.length) {
+                        if (str[i] === '\\') {
+                            i += 2;
+                            continue;
+                        }
+                        if (str[i] === q) {
+                            i++;
+                            break;
+                        }
+                        i++;
+                    }
+                    r += ' ';
+                    continue;
+                }
+                r += ch;
+                i++;
+            }
+            return r;
+        }
+
+        function validateFormulaExpression(expr, currentId) {
+            const raw = String(expr || '').trim();
+            if (!raw) {
+                return { level: 'warn', message: '未填写公式。只需要直接录入的栏位可以留空。' };
+            }
+            const escPid = String(currentId || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            if (escPid && new RegExp('^\\s*' + escPid + '\\s*=', 'i').test(raw)) {
+                return { level: 'error', message: '这里只填写等号右边，例如 max(f1,f2)，不要写「' + currentId + '= …」整段。' };
+            }
+            let forEquals = stripQuotedStringsForFormulaCheck(raw);
+            forEquals = forEquals
+                .replace(/<=/g, '  ')
+                .replace(/>=/g, '  ')
+                .replace(/==/g, '  ')
+                .replace(/!=/g, '  ');
+            if (/=/.test(forEquals)) {
+                return { level: 'error', message: '公式里不要使用单独的「=」表示相等；比较请用 <=、>=、==、!=，或改用「是否成立」类函数 if(条件, 真时的值, 假时的值)。' };
+            }
+            const low = raw.toLowerCase();
+            const forbidden = ['__', 'import', 'exec(', 'eval(', 'open(', 'compile(', 'globals', 'locals', 'getattr', 'setattr', 'lambda', 'class ', 'def '];
+            for (let j = 0; j < forbidden.length; j++) {
+                if (low.indexOf(forbidden[j]) !== -1) {
+                    return { level: 'error', message: '公式含有不允许的写法，请删除后重试。' };
+                }
+            }
+            const bare = stripQuotedStringsForFormulaCheck(raw);
+            if (/[^A-Za-z0-9_\s.,+\-*/%():?<>&|!~\[\]{}fF'"]/.test(bare)) {
+                return { level: 'error', message: '公式中含有无法识别的符号。请使用栏位编号（如 f12）、数字、括号、运算符，以及下方列出的英文函数名。' };
+            }
+            const refs = raw.match(/f\d+/gi) || [];
+            const known = new Set(fields.map(item => getFieldFormulaId(item)).filter(Boolean));
+            const missing = refs.map(x => x.toLowerCase()).filter(x => !known.has(x));
+            if (missing.length) {
+                return { level: 'error', message: '找不到栏位：' + Array.from(new Set(missing)).join('、') + '。请从下方栏位按钮插入。' };
+            }
+            if (refs.map(x => x.toLowerCase()).includes(String(currentId || '').toLowerCase())) {
+                return { level: 'error', message: '公式不能引用当前栏位自己，否则会形成循环计算。' };
+            }
+            let balance = 0;
+            for (let k = 0; k < raw.length; k++) {
+                const ch = raw[k];
+                if (ch === '(') balance += 1;
+                if (ch === ')') balance -= 1;
+                if (balance < 0) break;
+            }
+            if (balance !== 0) {
+                return { level: 'error', message: '括号没有成对闭合，请检查左括号和右括号数量。' };
+            }
+            if (/[+\-*/%]\s*$/.test(raw.trim())) {
+                return { level: 'error', message: '公式末尾不能是 + - * / %，请补上后面的栏位或数字。' };
+            }
+            if (/,\s*$/.test(raw.trim())) {
+                return { level: 'warn', message: '公式以逗号结尾，可能尚未写完（例如函数里还缺参数）。' };
+            }
+            if (/(f\d+|\d+(?:\.\d+)?)\s+(f\d+|\d+(?:\.\d+)?)/i.test(raw)) {
+                return { level: 'error', message: '两个栏位或数字紧挨在一起，中间请写上 + - * / 等运算符，或放进函数的括号里。' };
+            }
+            if (/[+*/%]\s*[+*/%]/.test(raw) || /(^|[(])\s*[*/%]/.test(raw) || /[+\-*/%]\s*[)]/.test(raw)) {
+                return { level: 'error', message: '运算符位置不完整，请检查是否多写或漏写了数字/栏位。' };
+            }
+            return { level: 'ok', message: '公式格式看起来可以保存（与动态表单、导出计算使用同一套规则）。' };
+        }
+
+        function validateJudgmentText(raw) {
+            const s = normalizeJudgmentCriteriaInput(raw);
+            if (!s) return { level: 'warn', message: '未填写判定标准。没有合格判定的栏位可以留空。' };
+            const ok = /^(<=|>=|<|>|=)(f\d+|\d+(?:\.\d+)?)$/i.test(s)
+                || /^(f\d+|\d+(?:\.\d+)?)±\d+(?:\.\d+)?$/i.test(s)
+                || /^\d+(?:\.\d+)?-\d+(?:\.\d+)?$/.test(s);
+            if (ok) return { level: 'ok', message: '判定写法可识别。' };
+            return { level: 'warn', message: '系统会原样保存。建议使用 <=20、<=f23、>=f12、f23±10 或 10-20 这类写法。' };
+        }
+
+        function normalizeJudgmentCriteriaInput(raw) {
+            return String(raw || '')
+                .trim()
+                .replace(/[，]/g, ',')
+                .replace(/[＜]/g, '<')
+                .replace(/[＞]/g, '>')
+                .replace(/[＝]/g, '=')
+                .replace(/[≤]/g, '<=')
+                .replace(/[≥]/g, '>=')
+                .replace(/[＋]/g, '+')
+                .replace(/[－]/g, '-')
+                .replace(/\+\/-/g, '±')
+                .replace(/\+-/g, '±')
+                .replace(/\s+/g, '')
+                .replace(/f(\d+)/gi, (_, n) => 'f' + n);
+        }
+
+        function setFormulaStatus(el, result) {
+            if (!el || !result) return;
+            el.className = 'formula-status ' + result.level;
+            el.textContent = result.message;
+        }
+
+        function createFormulaSection(step, title, desc) {
+            const section = document.createElement('div');
+            section.className = 'formula-section';
+            const head = document.createElement('div');
+            head.className = 'formula-section-head';
+            const stepEl = document.createElement('div');
+            stepEl.className = 'formula-step';
+            stepEl.textContent = String(step);
+            const text = document.createElement('div');
+            const titleEl = document.createElement('div');
+            titleEl.className = 'formula-section-title';
+            titleEl.textContent = title;
+            const descEl = document.createElement('div');
+            descEl.className = 'formula-section-desc';
+            descEl.textContent = desc;
+            text.appendChild(titleEl);
+            text.appendChild(descEl);
+            head.appendChild(stepEl);
+            head.appendChild(text);
+            section.appendChild(head);
+            return section;
+        }
+
+        function insertTextAtCursor(input, text, options = {}) {
+            if (!input) return;
+            const value = String(input.value || '');
+            const start = input.selectionStart != null ? input.selectionStart : value.length;
+            const end = input.selectionEnd != null ? input.selectionEnd : start;
+            const before = value.slice(0, start);
+            const after = value.slice(end);
+            let inserted = String(text || '');
+            if (options.surroundSelection && start !== end) {
+                inserted = String(text || '').replace('__SEL__', value.slice(start, end));
+            }
+            input.value = before + inserted + after;
+            const cursorOffset = options.cursorOffset != null ? options.cursorOffset : inserted.length;
+            const pos = Math.max(0, before.length + cursorOffset);
+            input.focus();
+            input.setSelectionRange(pos, pos);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
         }
 
         function renderFormulaPanel() {
             const host = document.getElementById('fieldFormulaPanel');
             if (!host) return;
-            const f = selectedFieldId ? getFieldById(selectedFieldId) : null;
+                const f = selectedFieldId ? getFieldById(selectedFieldId) : null;
             host.innerHTML = '';
             if (!f) {
-                const p = document.createElement('p');
-                p.className = 'formula-hint';
-                p.textContent = '请先在上方列表点击某一栏，或点击画布上文本框使其获得焦点，再在此处填写公式与判定。';
+                const p = document.createElement('div');
+                p.className = 'formula-empty';
+                p.textContent = '请先在左侧栏位列表点击「公式/判定」按钮。';
                 host.appendChild(p);
                 return;
             }
             ensureJudgmentObj(f);
-            const rawPid = (f.pdfFieldId && /^f\d+$/i.test(String(f.pdfFieldId)))
-                ? String(f.pdfFieldId).toLowerCase()
-                : String(f.id || '').trim();
-            const pid = rawPid || 'f?';
+            const currentIndex = fields.indexOf(f);
+            const pid = getFieldFormulaId(f, currentIndex) || 'f?';
+            const fieldName = getFieldShortName(f);
+            if (formulaModalSubtitle) {
+                formulaModalSubtitle.textContent = pid + ' · ' + fieldName;
+            }
 
-            const h = document.createElement('div');
-            h.className = 'formula-hint';
-            h.textContent = '当前 pdfFieldId：' + pid + '（与 JSON、现场判定引擎一致）';
-            host.appendChild(h);
+            const summary = document.createElement('div');
+            summary.className = 'formula-selected-card';
+            const summaryTop = document.createElement('div');
+            summaryTop.className = 'formula-selected-top';
+            const idEl = document.createElement('div');
+            idEl.className = 'formula-selected-id';
+            idEl.textContent = pid;
+            const pill = document.createElement('span');
+            pill.className = 'formula-pill';
+            pill.textContent = fieldTypeLabel(f.fieldType || 'text') + ' · 第' + f.page + '页';
+            summaryTop.appendChild(idEl);
+            summaryTop.appendChild(pill);
+            const nameEl = document.createElement('div');
+            nameEl.className = 'formula-selected-title';
+            nameEl.textContent = fieldName;
+            const metaEl = document.createElement('div');
+            metaEl.className = 'formula-selected-meta';
+            metaEl.textContent = '保存时会写入模板 JSON；字段编号与现场判定引擎一致。';
+            summary.appendChild(summaryTop);
+            summary.appendChild(nameEl);
+            summary.appendChild(metaEl);
+            host.appendChild(summary);
 
-            const b1 = document.createElement('div');
-            b1.className = 'formula-block';
-            const l1 = document.createElement('label');
-            l1.textContent = '算术公式（只填右边）';
-            b1.appendChild(l1);
+            const formulaSection = createFormulaSection(1, '计算公式', '需要自动算结果时在这里写规则；可直接加减乘除，也可用下面「常用函数」插入（与 App 动态表单、导出计算一致）。不计算的栏位请留空。');
+            const formulaLabel = document.createElement('div');
+            formulaLabel.className = 'formula-input-label';
+            const formulaLabelText = document.createElement('span');
+            formulaLabelText.textContent = '公式内容';
+            const formulaLabelHint = document.createElement('span');
+            formulaLabelHint.textContent = pid + ' =';
+            formulaLabel.appendChild(formulaLabelText);
+            formulaLabel.appendChild(formulaLabelHint);
             const t1 = document.createElement('textarea');
             t1.spellcheck = false;
-            t1.placeholder = '例：f34+f35  或  (f12+f13)/2\n也可粘贴整式：' + pid + '=f34+f35，保存时会自动去掉左边的「' + pid + '=」';
+            t1.placeholder = '例：f34+f35、max(f1,f2)、if(f10>0, f11, 0)、round(avg(f1,f2,f3), 2)';
             t1.value = String(f.fieldExpression || '');
-            t1.addEventListener('input', () => {
+            const preview = document.createElement('div');
+            preview.className = 'formula-preview';
+            const formulaStatus = document.createElement('div');
+            formulaStatus.className = 'formula-status warn';
+            const previewPrefix = document.createElement('span');
+            previewPrefix.textContent = '保存为：';
+            const previewCode = document.createElement('code');
+            preview.appendChild(previewPrefix);
+            preview.appendChild(previewCode);
+            const syncFormulaUi = () => {
                 f.fieldExpression = normalizeFieldExpressionInput(t1.value, pid);
-            });
+                previewCode.textContent = pid + ' = ' + (f.fieldExpression || '空');
+                setFormulaStatus(formulaStatus, validateFormulaExpression(f.fieldExpression, pid));
+                updateFieldRowIndicators(f.id);
+            };
+            t1.addEventListener('input', syncFormulaUi);
             t1.addEventListener('blur', () => {
                 f.fieldExpression = normalizeFieldExpressionInput(t1.value, pid);
                 t1.value = String(f.fieldExpression || '');
+                syncFormulaUi();
             });
-            b1.appendChild(t1);
-            const h1 = document.createElement('div');
-            h1.className = 'formula-hint';
-            h1.textContent = '保存到模板 JSON 的字段名为 fieldExpression；仅允许 f 数字与 + - * / % ( )。';
-            b1.appendChild(h1);
-            host.appendChild(b1);
+            formulaSection.appendChild(formulaLabel);
+            formulaSection.appendChild(t1);
+
+            const opRow = document.createElement('div');
+            opRow.className = 'formula-chip-row';
+            [
+                ['+', '+'],
+                ['-', '-'],
+                ['×', '*'],
+                ['÷', '/'],
+                ['%', '%'],
+                ['( )', '()', -1]
+            ].forEach(([label, value, offset]) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'formula-tool-btn';
+                btn.textContent = label;
+                btn.addEventListener('click', () => insertTextAtCursor(t1, value, { cursorOffset: offset == null ? String(value).length : offset }));
+                opRow.appendChild(btn);
+            });
+            formulaSection.appendChild(opRow);
+
+            const fnRow = document.createElement('div');
+            fnRow.className = 'formula-chip-row';
+            const fnInserts = [
+                ['max', 'max()', -1],
+                ['min', 'min()', -1],
+                ['sum', 'sum()', -1],
+                ['avg', 'avg()', -1],
+                ['abs', 'abs()', -1],
+                ['round', 'round(, 2)', 6],
+                ['parseNum', 'parseNum()', -1],
+                ['if', 'if(,,)', 3],
+                ['lookup', 'lookup("", {})', 8],
+                ['unitFactor', 'unitFactor(, "")', 11]
+            ];
+            fnInserts.forEach(([label, snippet, off]) => {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'formula-tool-btn';
+                b.textContent = label;
+                b.title = '插入「' + snippet + '」骨架，再补全栏位编号或数字';
+                b.addEventListener('click', () => insertTextAtCursor(t1, snippet, { cursorOffset: off }));
+                fnRow.appendChild(b);
+            });
+            formulaSection.appendChild(fnRow);
+
+            const fnHelp = document.createElement('div');
+            fnHelp.className = 'formula-fn-help';
+            fnHelp.innerHTML = ''
+                + '<h5>可以用的函数（白话说明）</h5>'
+                + '<ul>'
+                + '<li><code>max(…)</code> / <code>min(…)</code>：在一串数字或栏位里取<strong>最大</strong>或<strong>最小</strong>。例：<code>max(f1,f2,f3)</code>。</li>'
+                + '<li><code>sum(…)</code> / <code>avg(…)</code>：<strong>求和</strong>与<strong>平均值</strong>。例：<code>avg(f1,f2)</code>。</li>'
+                + '<li><code>abs(…)</code>：取绝对值，把负数变成正数。</li>'
+                + '<li><code>round(数值, 小数位)</code>：四舍五入保留几位小数。例：<code>round(f1, 2)</code>。</li>'
+                + '<li><code>if(条件, 成立时, 不成立时)</code>：按条件二选一。条件里可用 <code>&gt;</code> <code>&lt;</code> <code>&gt;=</code> <code>&lt;=</code> <code>==</code> <code>!=</code>，多个条件可用 <code>&&</code>（并且）或 <code>||</code>（或者）。</li>'
+                + '<li><code>parseNum(栏位或文字)</code>：从带单位的文字里<strong>抠出第一个数字</strong>再参与计算。</li>'
+                + '<li><code>lookup(表名, {列名: 栏位…})</code>：在<strong>对照表</strong>里按多列匹配，取出对应结果（表名、列名由模板配置决定）。</li>'
+                + '<li><code>unitFactor(当前选项, "枚举名")</code>：按<strong>单位/选项</strong>换成统一倍数再算（枚举名与模板里配置一致）。</li>'
+                + '</ul>'
+                + '<p class="formula-fn-note">栏位一律用 <code>f数字</code>（如 f12）。除法用 <code>/</code>；与写 Excel 类似，但函数名请用上面英文。若公式较复杂，可先点按钮插入骨架再改。</p>'
+                + '<p class="formula-fn-note">进阶：还可使用 <code>coalesce</code>（依次取第一个有值的）、<code>len</code>、<code>toBool</code>、<code>isEmpty</code> 等；CT 剂量类模板可能提供 <code>ctdiw</code>。条件里可写 <code>&&</code>（并且）、<code>||</code>（或者）。</p>';
+            formulaSection.appendChild(fnHelp);
+
+            const fieldTools = document.createElement('div');
+            fieldTools.className = 'formula-field-tools';
+            const quickTitle = document.createElement('div');
+            quickTitle.className = 'formula-quick-title';
+            quickTitle.textContent = '点击栏位插入到公式';
+            const search = document.createElement('input');
+            search.type = 'text';
+            search.className = 'formula-search';
+            search.placeholder = '搜索编号或标签';
+            const grid = document.createElement('div');
+            grid.className = 'formula-field-grid';
+            const renderFieldChips = () => {
+                grid.innerHTML = '';
+                const q = String(search.value || '').trim().toLowerCase();
+                const candidates = fields
+                    .filter(o => o.id !== f.id && (o.fieldType || 'text') === 'text')
+                    .filter(o => {
+                        if (!q) return true;
+                        const blob = (getFieldFormulaId(o) + ' ' + getFieldShortName(o)).toLowerCase();
+                        return blob.includes(q);
+                    })
+                    .slice(0, 40);
+                if (!candidates.length) {
+                    const empty = document.createElement('div');
+                    empty.className = 'formula-field-empty';
+                    empty.textContent = q ? '没有匹配的文本栏位' : '暂无可引用的文本栏位';
+                    grid.appendChild(empty);
+                    return;
+                }
+                candidates.forEach(o => {
+                    const fid = getFieldFormulaId(o);
+                    const chip = document.createElement('button');
+                    chip.type = 'button';
+                    chip.className = 'formula-field-chip';
+                    const code = document.createElement('code');
+                    code.textContent = fid;
+                    const label = document.createElement('span');
+                    label.textContent = getFieldShortName(o);
+                    chip.appendChild(code);
+                    chip.appendChild(label);
+                    chip.title = fid + ' · ' + getFieldShortName(o);
+                    chip.addEventListener('click', () => insertTextAtCursor(t1, fid));
+                    grid.appendChild(chip);
+                });
+            };
+            search.addEventListener('input', renderFieldChips);
+            fieldTools.appendChild(quickTitle);
+            fieldTools.appendChild(search);
+            fieldTools.appendChild(grid);
+            formulaSection.appendChild(fieldTools);
+            formulaSection.appendChild(preview);
+            formulaSection.appendChild(formulaStatus);
+            host.appendChild(formulaSection);
+            renderFieldChips();
+            syncFormulaUi();
+
+            const judgmentSection = createFormulaSection(2, '合格判定', '填写验收和状态两个检测类型的规则；多数情况下可以让两项相同。');
+            const quickTemplates = document.createElement('div');
+            quickTemplates.className = 'formula-chip-row';
+            const applyJudgmentTemplate = (template) => {
+                const base = (f.judgmentCriteriaByTestType.acceptance || f.fieldExpression || pid || 'f1').trim();
+                let next = '';
+                if (template === '<=') next = '<=';
+                if (template === '>=') next = '>=';
+                if (template === 'range') next = '0-100';
+                if (template === 'tol') next = (base && !/^[<>≤≥=]/.test(base)) ? (base + '±10') : (pid + '±10');
+                acceptanceInput.value = next;
+                statusInput.value = next;
+                f.judgmentCriteriaByTestType.acceptance = next;
+                f.judgmentCriteriaByTestType.status = next;
+                f.judgmentCriteriaManual = true;
+                cbMan.checked = true;
+                syncJudgmentUi();
+            };
+            [
+                ['≤ 上限', '<='],
+                ['≥ 下限', '>='],
+                ['范围', 'range'],
+                ['± 允差', 'tol']
+            ].forEach(([label, value]) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'formula-chip';
+                btn.textContent = label;
+                btn.addEventListener('click', () => applyJudgmentTemplate(value));
+                quickTemplates.appendChild(btn);
+            });
+            judgmentSection.appendChild(quickTemplates);
+
+            const row2 = document.createElement('div');
+            row2.className = 'row2';
+            const accWrap = document.createElement('div');
+            const la = document.createElement('div');
+            la.className = 'formula-input-label';
+            const laText = document.createElement('span');
+            laText.textContent = '验收 acceptance';
+            la.appendChild(laText);
+            const acceptanceInput = document.createElement('input');
+            acceptanceInput.type = 'text';
+            acceptanceInput.value = f.judgmentCriteriaByTestType.acceptance;
+            acceptanceInput.placeholder = '<=25.0';
+            accWrap.appendChild(la);
+            accWrap.appendChild(acceptanceInput);
+            const stWrap = document.createElement('div');
+            const ls = document.createElement('div');
+            ls.className = 'formula-input-label';
+            const lsText = document.createElement('span');
+            lsText.textContent = '状态 status';
+            ls.appendChild(lsText);
+            const statusInput = document.createElement('input');
+            statusInput.type = 'text';
+            statusInput.value = f.judgmentCriteriaByTestType.status;
+            statusInput.placeholder = '默认可与验收相同';
+            stWrap.appendChild(ls);
+            stWrap.appendChild(statusInput);
+            row2.appendChild(accWrap);
+            row2.appendChild(stWrap);
+            judgmentSection.appendChild(row2);
+
+            const copyRow = document.createElement('div');
+            copyRow.className = 'formula-actions';
+            const copyBtn = document.createElement('button');
+            copyBtn.type = 'button';
+            copyBtn.className = 'primary';
+            copyBtn.textContent = '状态同验收';
+            copyBtn.addEventListener('click', () => {
+                statusInput.value = acceptanceInput.value;
+                statusInput.dispatchEvent(new Event('input', { bubbles: true }));
+            });
+            const autoBtn = document.createElement('button');
+            autoBtn.type = 'button';
+            autoBtn.textContent = '从标签识别';
+            autoBtn.addEventListener('click', () => {
+                if (f.judgmentCriteriaManual) {
+                    alert('已开启人工锁定。请先取消「人工锁定」再从标签识别。');
+                    return;
+                }
+                const g = inferJudgmentCriteriaStrings(f);
+                if (!g.acceptance && !g.status) {
+                    alert('未从当前标签中识别到判定标准。可以把「≤25.0」「f23±10」等写进侧栏标签后再试。');
+                    return;
+                }
+                acceptanceInput.value = g.acceptance;
+                statusInput.value = g.status || g.acceptance;
+                f.judgmentCriteriaByTestType.acceptance = acceptanceInput.value;
+                f.judgmentCriteriaByTestType.status = statusInput.value;
+                syncJudgmentUi();
+            });
+            copyRow.appendChild(copyBtn);
+            copyRow.appendChild(autoBtn);
+            judgmentSection.appendChild(copyRow);
 
             const cbMan = document.createElement('input');
             cbMan.type = 'checkbox';
@@ -888,131 +1834,82 @@
             cbMan.addEventListener('change', () => {
                 f.judgmentCriteriaManual = !!cbMan.checked;
             });
-
-            const b2 = document.createElement('div');
-            b2.className = 'formula-block';
-            const l2 = document.createElement('label');
-            l2.textContent = '判定标准（按检测类型）';
-            b2.appendChild(l2);
-            const row2 = document.createElement('div');
-            row2.className = 'row2';
-            const accWrap = document.createElement('div');
-            const la = document.createElement('div');
-            la.className = 'formula-hint';
-            la.style.fontWeight = '600';
-            la.textContent = '验收 acceptance';
-            const ia = document.createElement('input');
-            ia.type = 'text';
-            ia.value = f.judgmentCriteriaByTestType.acceptance;
-            ia.placeholder = '<=25.0';
-            ia.addEventListener('input', () => {
-                f.judgmentCriteriaByTestType.acceptance = ia.value;
-                f.judgmentCriteriaManual = true;
-                cbMan.checked = true;
-            });
-            accWrap.appendChild(la);
-            accWrap.appendChild(ia);
-            const stWrap = document.createElement('div');
-            const ls = document.createElement('div');
-            ls.className = 'formula-hint';
-            ls.style.fontWeight = '600';
-            ls.textContent = '状态 status';
-            const is = document.createElement('input');
-            is.type = 'text';
-            is.value = f.judgmentCriteriaByTestType.status;
-            is.placeholder = '可与验收相同';
-            is.addEventListener('input', () => {
-                f.judgmentCriteriaByTestType.status = is.value;
-                f.judgmentCriteriaManual = true;
-                cbMan.checked = true;
-            });
-            stWrap.appendChild(ls);
-            stWrap.appendChild(is);
-            row2.appendChild(accWrap);
-            row2.appendChild(stWrap);
-            b2.appendChild(row2);
-            const h2 = document.createElement('div');
-            h2.className = 'formula-hint';
-            h2.textContent = '示例：<=20.0、>=f33、f23±10.0（对称允差）。手写 f23+-10.0 在自动检索时会规范为 f23±10.0。';
-            b2.appendChild(h2);
-            host.appendChild(b2);
-
-            const actions = document.createElement('div');
-            actions.className = 'formula-actions';
-            const btnPick = document.createElement('button');
-            btnPick.type = 'button';
-            btnPick.className = 'primary';
-            btnPick.textContent = '把选中的 f 号插入公式';
-            const sel = document.createElement('select');
-            sel.style.flex = '1';
-            sel.style.minWidth = '0';
-            sel.appendChild(new Option('— 选择栏位 —', ''));
-            fields.forEach((o) => {
-                if (o.id === f.id) return;
-                const lab = String(o.placeholder || o.id || '').slice(0, 24);
-                sel.appendChild(new Option(o.id + ' · ' + lab, o.id));
-            });
-            btnPick.addEventListener('click', () => {
-                const v = String(sel.value || '').trim();
-                if (!v) {
-                    alert('请先在右侧下拉框选择要插入的栏位。');
-                    return;
-                }
-                t1.focus();
-                const start = t1.selectionStart != null ? t1.selectionStart : t1.value.length;
-                const end = t1.selectionEnd != null ? t1.selectionEnd : start;
-                const before = t1.value.slice(0, start);
-                const after = t1.value.slice(end);
-                t1.value = before + v + after;
-                f.fieldExpression = normalizeFieldExpressionInput(t1.value, pid);
-                const pos = start + v.length;
-                t1.setSelectionRange(pos, pos);
-            });
-            actions.appendChild(btnPick);
-            actions.appendChild(sel);
-            host.appendChild(actions);
-
-            const btnAuto = document.createElement('button');
-            btnAuto.type = 'button';
-            btnAuto.textContent = '自动检索判定（读标签文案）';
-            btnAuto.addEventListener('click', () => {
-                if (f.judgmentCriteriaManual) {
-                    alert('已勾选「判定已由人工定型」。请先取消勾选再自动检索；未勾选时以您手写的判定为准。');
-                    return;
-                }
-                const g = inferJudgmentCriteriaStrings(f);
-                if (!g.acceptance && !g.status) {
-                    alert('未从当前标签中识别到判定标准。请手工填写，或把「≤25.0」「f23±10」等写进侧栏标签后再试。');
-                    return;
-                }
-                f.judgmentCriteriaByTestType.acceptance = g.acceptance;
-                f.judgmentCriteriaByTestType.status = g.status || g.acceptance;
-                renderFormulaPanel();
-            });
-            host.appendChild(btnAuto);
-
             const manRow = document.createElement('div');
             manRow.className = 'formula-manual-row';
             const lbMan = document.createElement('label');
             lbMan.htmlFor = 'judgmentCriteriaManualCb';
-            lbMan.textContent = '判定已由人工定型：打开后「自动检索」不会改写上方两行（推荐在改好标准后勾选）';
+            lbMan.textContent = '人工锁定：开启后，从标签识别不会覆盖上面的判定。';
             manRow.appendChild(cbMan);
             manRow.appendChild(lbMan);
-            host.appendChild(manRow);
+            judgmentSection.appendChild(manRow);
 
-            const clr = document.createElement('div');
-            clr.className = 'formula-actions';
-            const btnClr = document.createElement('button');
-            btnClr.type = 'button';
-            btnClr.textContent = '清空本栏公式与判定';
-            btnClr.addEventListener('click', () => {
+            const judgmentStatus = document.createElement('div');
+            judgmentStatus.className = 'formula-status warn';
+            const syncJudgmentUi = () => {
+                const acceptanceValue = normalizeJudgmentCriteriaInput(acceptanceInput.value);
+                const statusValue = normalizeJudgmentCriteriaInput(statusInput.value);
+                f.judgmentCriteriaByTestType.acceptance = acceptanceValue;
+                f.judgmentCriteriaByTestType.status = statusValue;
+                const acc = validateJudgmentText(acceptanceValue);
+                const st = validateJudgmentText(statusValue);
+                if (acceptanceValue || statusValue) {
+                    if (acc.level === 'ok' && (!statusValue || st.level === 'ok')) {
+                        setFormulaStatus(judgmentStatus, { level: 'ok', message: '判定标准可保存。' });
+                    } else {
+                        setFormulaStatus(judgmentStatus, { level: 'warn', message: acc.level !== 'ok' ? acc.message : st.message });
+                    }
+                } else {
+                    setFormulaStatus(judgmentStatus, { level: 'warn', message: '未填写判定标准。没有合格判定的栏位可以留空。' });
+                }
+                updateFieldRowIndicators(f.id);
+            };
+            acceptanceInput.addEventListener('input', () => {
+                f.judgmentCriteriaManual = true;
+                cbMan.checked = true;
+                syncJudgmentUi();
+            });
+            acceptanceInput.addEventListener('blur', () => {
+                acceptanceInput.value = normalizeJudgmentCriteriaInput(acceptanceInput.value);
+                syncJudgmentUi();
+            });
+            statusInput.addEventListener('input', () => {
+                f.judgmentCriteriaManual = true;
+                cbMan.checked = true;
+                syncJudgmentUi();
+            });
+            statusInput.addEventListener('blur', () => {
+                statusInput.value = normalizeJudgmentCriteriaInput(statusInput.value);
+                syncJudgmentUi();
+            });
+            judgmentSection.appendChild(judgmentStatus);
+            host.appendChild(judgmentSection);
+            syncJudgmentUi();
+
+            const clearRow = document.createElement('div');
+            clearRow.className = 'formula-actions';
+            const btnClrFormula = document.createElement('button');
+            btnClrFormula.type = 'button';
+            btnClrFormula.className = 'formula-tool-btn';
+            btnClrFormula.textContent = '清空公式';
+            btnClrFormula.addEventListener('click', () => {
+                f.fieldExpression = '';
+                t1.value = '';
+                syncFormulaUi();
+            });
+            const btnClrAll = document.createElement('button');
+            btnClrAll.type = 'button';
+            btnClrAll.className = 'formula-tool-btn danger';
+            btnClrAll.textContent = '清空本栏规则';
+            btnClrAll.addEventListener('click', () => {
                 f.fieldExpression = '';
                 f.judgmentCriteriaByTestType = { acceptance: '', status: '' };
                 f.judgmentCriteriaManual = false;
                 renderFormulaPanel();
+                updateFieldRowIndicators(f.id);
             });
-            clr.appendChild(btnClr);
-            host.appendChild(clr);
+            clearRow.appendChild(btnClrFormula);
+            clearRow.appendChild(btnClrAll);
+            host.appendChild(clearRow);
         }
 
         function refreshFieldList() {
@@ -1021,7 +1918,7 @@
             if (!fields.length) {
                 el.textContent = '暂无输入框';
                 selectedFieldId = null;
-                renderFormulaPanel();
+                closeFormulaModal();
                 return;
             }
             fields.forEach((f, idx) => {
@@ -1029,6 +1926,7 @@
                 const tk = fieldTypeKey(ft);
                 const row = document.createElement('div');
                 row.className = 'field-row';
+                if (selectedFieldId === f.id) row.classList.add('field-row--selected');
                 row.dataset.fieldId = f.id;
                 const main = document.createElement('div');
                 main.className = 'field-row-main';
@@ -1056,14 +1954,37 @@
                 });
                 const idSpan = document.createElement('span');
                 idSpan.className = 'field-row-id';
-                idSpan.textContent = f.id;
+                idSpan.textContent = getFieldFormulaId(f, idx) || f.id;
+                const meta = document.createElement('div');
+                meta.className = 'field-row-meta';
+                if (String(f.fieldExpression || '').trim()) {
+                    const tag = document.createElement('span');
+                    tag.className = 'field-row-tag has-formula';
+                    tag.textContent = '已设公式';
+                    meta.appendChild(tag);
+                }
+                if (hasFieldJudgment(f)) {
+                    const tag = document.createElement('span');
+                    tag.className = 'field-row-tag has-judgment';
+                    tag.textContent = '已设判定';
+                    meta.appendChild(tag);
+                }
                 textCol.appendChild(title);
                 textCol.appendChild(labelInput);
                 textCol.appendChild(idSpan);
+                if (meta.children.length) textCol.appendChild(meta);
                 main.appendChild(badge);
                 main.appendChild(textCol);
                 const actions = document.createElement('div');
                 actions.className = 'field-row-actions';
+                const ruleBtn = document.createElement('button');
+                ruleBtn.type = 'button';
+                ruleBtn.className = 'rule-btn';
+                ruleBtn.textContent = '公式/判定';
+                ruleBtn.addEventListener('click', ev => {
+                    ev.stopPropagation();
+                    openFormulaModal(f.id);
+                });
                 const del = document.createElement('button');
                 del.type = 'button';
                 del.textContent = '删除';
@@ -1071,6 +1992,7 @@
                     ev.stopPropagation();
                     removeField(f.id);
                 });
+                actions.appendChild(ruleBtn);
                 actions.appendChild(del);
                 row.appendChild(main);
                 row.appendChild(actions);
@@ -1079,7 +2001,7 @@
                     clearAllRowHighlights();
                     setRowHighlightForField(f.id, true);
                     selectedFieldId = f.id;
-                    renderFormulaPanel();
+                    updateSelectedFieldRows();
                     scrollFieldIntoView(f.id);
                 });
                 row.addEventListener('mouseenter', () => setCanvasHoverForField(f.id, true));
@@ -1087,7 +2009,7 @@
                 el.appendChild(row);
             });
             updateFieldBadges();
-            renderFormulaPanel();
+            if (formulaModalOpen) renderFormulaPanel();
         }
 
         function removeField(id) {
@@ -1097,7 +2019,10 @@
             if (item.wrap) item.wrap.remove();
             else item.el?.remove();
             fields.splice(idx, 1);
-            if (selectedFieldId === id) selectedFieldId = null;
+            if (selectedFieldId === id) {
+                selectedFieldId = null;
+                closeFormulaModal();
+            }
             refreshFieldList();
             applyAllNamingMarks();
         }
@@ -1187,7 +2112,8 @@
                     selectedFieldId = f.id;
                     clearAllRowHighlights();
                     setRowHighlightForField(f.id, true);
-                    renderFormulaPanel();
+                    updateSelectedFieldRows();
+                    if (formulaModalOpen) renderFormulaPanel();
                 });
                 meta.pageDiv.appendChild(wrap);
                 f.wrap = wrap;
@@ -1218,7 +2144,8 @@
                     selectedFieldId = f.id;
                     clearAllRowHighlights();
                     setRowHighlightForField(f.id, true);
-                    renderFormulaPanel();
+                    updateSelectedFieldRows();
+                    if (formulaModalOpen) renderFormulaPanel();
                 });
                 meta.pageDiv.appendChild(wrap);
                 f.wrap = wrap;
@@ -1241,14 +2168,16 @@
                 selectedFieldId = f.id;
                 clearAllRowHighlights();
                 setRowHighlightForField(f.id, true);
-                renderFormulaPanel();
+                updateSelectedFieldRows();
+                if (formulaModalOpen) renderFormulaPanel();
             });
             wrap.addEventListener('mousedown', (ev) => {
                 if (ev.target === i) return;
                 selectedFieldId = f.id;
                 clearAllRowHighlights();
                 setRowHighlightForField(f.id, true);
-                renderFormulaPanel();
+                updateSelectedFieldRows();
+                if (formulaModalOpen) renderFormulaPanel();
             });
             wrap.appendChild(badge);
             wrap.appendChild(i);
@@ -1262,6 +2191,7 @@
 
         function renderPdfAndFields(pdfUrl, loadedFields = []) {
             pdfReady = false;
+            closeFormulaModal();
             fields = (loadedFields || []).map(f => {
                 const normalized = normalizeFieldSize(f);
                 if (!Object.prototype.hasOwnProperty.call(normalized, 'originalPlaceholder')) {
@@ -1841,7 +2771,7 @@
                     credentials: 'same-origin',
                     body: JSON.stringify({})
                 });
-                const data = await parseJsonResponseOrThrow(res, '自动框选失败');
+                const data = await parseJsonResponseOrThrow(res, '按红字自动框选失败');
                 const list = data.fields || [];
                 if (!list.length) {
                     alert('未检测到红色文本区域。请确认 PDF 中待填项为红色字体，或改用「框选文字填写区」手动划框。');
@@ -1936,6 +2866,7 @@
             fields = loadedFields;
             fieldIdSeq = fields.length ? Math.max(...fields.map(f => parseInt(f.id.slice(1)) || 0)) + 1 : 1;
             selectedFieldId = null;
+            closeFormulaModal();
             fields.forEach(f => mountField(f));
             refreshFieldList();
             const tm = (d && d.template_meta && typeof d.template_meta === 'object') ? d.template_meta : {};
@@ -2065,6 +2996,17 @@
             };
             reader.readAsDataURL(file);
         };
+
+        if (formulaModalClose) formulaModalClose.onclick = closeFormulaModal;
+        if (formulaModalDone) formulaModalDone.onclick = closeFormulaModal;
+        if (formulaModalBackdrop) {
+            formulaModalBackdrop.addEventListener('mousedown', e => {
+                if (e.target === formulaModalBackdrop) closeFormulaModal();
+            });
+        }
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape' && formulaModalOpen) closeFormulaModal();
+        });
 
         function buildFieldsPayload() {
             return fields.map(i => {
@@ -2336,13 +3278,16 @@
                 }
             }).catch(err => alert(err.message));
         };
-        pdfContainer.addEventListener('focusin', e => {
+            pdfContainer.addEventListener('focusin', e => {
             const ta = e.target.closest('.input-box');
             if (!ta || !pdfContainer.contains(ta)) return;
             const wrap = ta.closest('.field-wrap');
             if (!wrap || !wrap.dataset.fieldId) return;
+            selectedFieldId = wrap.dataset.fieldId;
             clearAllRowHighlights();
             setRowHighlightForField(wrap.dataset.fieldId, true);
+            updateSelectedFieldRows();
+            if (formulaModalOpen) renderFormulaPanel();
             const row = document.querySelector('.field-row[data-field-id="' + wrap.dataset.fieldId + '"]');
             if (row) row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         });
@@ -2354,8 +3299,11 @@
                 return;
             }
             if (e.target.closest('.input-box')) return;
+            selectedFieldId = wrap.dataset.fieldId;
             clearAllRowHighlights();
             setRowHighlightForField(wrap.dataset.fieldId, true);
+            updateSelectedFieldRows();
+            if (formulaModalOpen) renderFormulaPanel();
             const row = document.querySelector('.field-row[data-field-id="' + wrap.dataset.fieldId + '"]');
             if (row) row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         });

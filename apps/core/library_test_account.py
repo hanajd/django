@@ -1,4 +1,7 @@
-"""测试沙箱账号：将可见项目上的任务分配与流程岗位默认同步为当前用户。"""
+"""可选工具：将某项目上的任务分配与流程岗位同步为指定用户（管理命令或运维脚本使用）。
+
+项目工作台与演示账号**不再**在页面加载时自动调用，以便 test 等账号在界面内自行完成「分配」体验全流程。
+"""
 from __future__ import annotations
 
 from django.db import transaction
@@ -37,11 +40,15 @@ def sync_project_for_solo_tester(project: LibraryProject, user) -> None:
     if all_file_ids:
         attach_files_to_projects(sorted(all_file_ids), [project.pk], user)
 
+    if project.primary_responsible_id != user.id:
+        project.primary_responsible = user
+        project.save(update_fields=["primary_responsible", "updated_at"])
+
     for role_code, _label in LibraryProjectWorkflowMember.WORKFLOW_ROLE_CHOICES:
-        LibraryProjectWorkflowMember.objects.update_or_create(
+        LibraryProjectWorkflowMember.objects.get_or_create(
             project=project,
+            user=user,
             workflow_role=role_code,
-            defaults={"user": user},
         )
 
 

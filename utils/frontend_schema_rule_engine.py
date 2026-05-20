@@ -3,7 +3,7 @@ import hashlib
 import re
 from typing import Any, Dict, List, Tuple
 
-from utils.unified_template_fields import materialize_unified_pdf_fields
+from utils.unified_template_fields import frontend_rect_from_field, materialize_unified_pdf_fields
 from utils.pdf_field_formulas import merge_field_formulas_into_frontend
 
 
@@ -1097,15 +1097,21 @@ def _normalize_pdf_field(item: Dict[str, Any], idx: int) -> Dict[str, Any]:
     return out
 
 
-def _strip_coordinate_keys(payload: Dict[str, Any]) -> Dict[str, Any]:
-    def _strip_field_obj(field: Dict[str, Any]) -> None:
+def _attach_rect_and_strip_legacy_coords(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """为前端 steps 内各栏位写入 ``rect``，并移除散落的 page/x/y/w/h 与内部排序键。"""
+
+    def _finalize_field_obj(field: Dict[str, Any]) -> None:
+        rect = frontend_rect_from_field(field)
+        if rect is not None:
+            field["rect"] = rect
         for key in ("pdfAnchor", "page", "x", "y", "w", "h", "pdfFieldId"):
             field.pop(key, None)
         field.pop("__order", None)
         field.pop("__bbox", None)
         src = field.get("source")
         if isinstance(src, dict):
-            src.pop("hierarchyKey", None)
+            for key in ("page", "x", "y", "w", "h", "pages", "hierarchyKey"):
+                src.pop(key, None)
 
     for step in payload.get("steps", []):
         if not isinstance(step, dict):
@@ -1116,13 +1122,13 @@ def _strip_coordinate_keys(payload: Dict[str, Any]) -> Dict[str, Any]:
             for field in section.get("fields", []):
                 if not isinstance(field, dict):
                     continue
-                _strip_field_obj(field)
+                _finalize_field_obj(field)
             matrix = section.get("matrix")
             if not isinstance(matrix, dict):
                 continue
             for field in matrix.get("headerFields", []):
                 if isinstance(field, dict):
-                    _strip_field_obj(field)
+                    _finalize_field_obj(field)
             for row in matrix.get("rows", []):
                 if not isinstance(row, dict):
                     continue
@@ -1131,7 +1137,7 @@ def _strip_coordinate_keys(payload: Dict[str, Any]) -> Dict[str, Any]:
                     continue
                 for cell in cells.values():
                     if isinstance(cell, dict):
-                        _strip_field_obj(cell)
+                        _finalize_field_obj(cell)
     return payload
 
 
@@ -3080,7 +3086,7 @@ def _finalize_frontend_schema_result(result: Dict[str, Any], *, merge_split_date
     result = _sort_fields_by_coordinate_order(result)
     result = _force_signature_step_last(result)
     result = _inject_visibility_conditional_rules(result)
-    result = _strip_coordinate_keys(result)
+    result = _attach_rect_and_strip_legacy_coords(result)
     result = _coerce_radio_select_defaults_to_string(result)
     return result
 

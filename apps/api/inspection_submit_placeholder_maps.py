@@ -8,7 +8,7 @@
 - path: path=[...] 嵌套读取；可选 cast=str|round|eq|not|bool
 - const: value=固定字符串
 - 模板键 commissionNo（委托编号）、testnumber（受检编号）不在此表配置，由 PDF 填充时的派生映射写入（与任务/项目 API 一致）
-- test_date: part=year|month|day；可选 from=testDate（默认，testResult.testDate）或 updatedAt（根字段 updatedAt ISO）
+- test_date: part=year|month|day；可选 from=testDate（默认，testResult.testDate 与 reportInfo.testDate）或 updatedAt（根字段 updatedAt ISO）
   来自 updatedAt 时：月、日为该日期的月、日；年为公历四位去掉前缀「202」（如 2026→6）；非 202 开头年份则取末两位
 - concat: parts=[子规则, ...] 按顺序拼接为字符串
 """
@@ -63,20 +63,22 @@ def _to_bool(v: Any) -> bool:
 
 
 def _parse_source_test_date(source_data: dict) -> datetime | None:
-    raw = _nested_get(source_data, ["testResult", "testDate"], "")
-    if not raw:
-        return None
-    if isinstance(raw, datetime):
-        return raw
-    text = str(raw).strip()
-    if not text:
-        return None
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        return datetime.fromisoformat(text)
-    except ValueError:
-        return None
+    for path in (["testResult", "testDate"], ["reportInfo", "testDate"]):
+        raw = _nested_get(source_data, path, "")
+        if not raw:
+            continue
+        if isinstance(raw, datetime):
+            return raw
+        text = str(raw).strip()
+        if not text:
+            continue
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            return datetime.fromisoformat(text)
+        except ValueError:
+            continue
+    return None
 
 
 def _parse_source_updated_at(source_data: dict) -> datetime | None:

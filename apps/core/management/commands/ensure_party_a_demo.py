@@ -9,19 +9,27 @@
 若库里仍是旧名 ``party_a_demo``，执行 ``python manage.py ensure_party_a_demo``（默认 ``--username test``）
 即可在无其它「test」用户时自动重命名；若已存在重名，请在「用户管理」中手工处理。
 
-需要把演示项目下任务分配给该用户时，再带上 ``--project-code``（及可选 ``--create-project-if-missing``）执行。
+需要把演示账号与项目绑定时，带上 ``--project-code``（及可选 ``--create-project-if-missing``）即可；
+**默认不会**写入 ``LibraryTaskAssignment`` 或同步流程岗（便于 test 在「分配」页自行操作）；若仍需命令行一键写入，请加 ``--assign-project-tasks``。
 
 示例::
 
     # 仅用户（含旧名 party_a_demo → test）
     python manage.py ensure_party_a_demo --username test --password '强密码'
 
-    # 用户 + 项目任务分配
+    # 用户 + 关联演示项目（不自动分配任务；登录后在项目「分配」页自行分配）
     python manage.py ensure_party_a_demo \\
         --username test \\
         --password '强密码' \\
         --project-code DEMO_PARTY_A \\
         --create-project-if-missing
+
+    # 运维一键：仍写入任务分配并同步流程岗（旧行为）
+    python manage.py ensure_party_a_demo \\
+        --username test \\
+        --password '强密码' \\
+        --project-code DEMO_PARTY_A \\
+        --assign-project-tasks
 """
 
 from django.contrib.auth.models import User
@@ -55,7 +63,9 @@ _PARTY_A_OVERRIDES = {
 
 class Command(BaseCommand):
     help = (
-        "创建或更新甲方演示账号：全检测链能力 + 仅本人/已分配项目数据（提供 --project-code 时还会写入项目任务分配）；"
+        "创建或更新甲方演示账号：全检测链能力 + 仅本人/已分配项目数据。"
+        "提供 --project-code 时默认只关联/创建项目，不自动写入任务分配（便于在界面「分配」体验流程）；"
+        "加 --assign-project-tasks 可恢复命令行一键分配。"
         "不向他人分配文件库任务（perm_assign_tasks 关闭），"
         "但可在任务模板库新建并维护本人创建的任务模板（perm_library_task_templates_write）。"
         "省略 --project-code 时只更新用户与权限覆盖，不调整任何项目。"
@@ -87,6 +97,14 @@ class Command(BaseCommand):
             default="",
             help="与 --create-project-if-missing 联用：新建项目的显示名称，默认同 project-code",
         )
+        parser.add_argument(
+            "--assign-project-tasks",
+            action="store_true",
+            help=(
+                "仅在与 --project-code 联用且项目已挂载 LibraryTask 时生效："
+                "写入该用户在本项目上的任务分配并同步流程岗位（旧版一键行为）。默认关闭，便于在网页「分配」中自行体验。"
+            ),
+        )
 
     def handle(self, *args, **options):
         username = (options["username"] or "").strip()
@@ -95,6 +113,7 @@ class Command(BaseCommand):
         project_code = (options.get("project_code") or "").strip()
         create_if_missing = bool(options.get("create_project_if_missing"))
         project_name = (options.get("project_name") or "").strip()
+        assign_project_tasks = bool(options.get("assign_project_tasks"))
 
         if not username:
             self.stderr.write(self.style.ERROR("username 不能为空"))
@@ -200,16 +219,20 @@ class Command(BaseCommand):
             project.created_by = user
             project.save(update_fields=["created_by", "updated_at"])
 
+        if assign_project_tasks and project.primary_responsible_id != user.id:
+            project.primary_responsible = user
+            project.save(update_fields=["primary_responsible", "updated_at"])
+
         task_qs = project.library_tasks.all()
         n_tasks = task_qs.count()
         if n_tasks == 0:
             self.stdout.write(
                 self.style.WARNING(
-                    "当前项目未挂载任何文件库任务：请在「项目管理」中为该项目关联 LibraryTask 后，"
-                    "重新执行本命令（相同参数）以写入任务分配。"
+                    "当前项目未挂载任何文件库任务：请在「项目管理 → 任务与模板」中为该项目关联 LibraryTask 后，"
+                    "在「分配」页面向本人分配；若需命令行一键写入，请重新执行并加 --assign-project-tasks。"
                 )
             )
-        else:
+        elif assign_project_tasks:
             created = 0
             for lt in task_qs:
                 _, was_created = LibraryTaskAssignment.objects.get_or_create(
@@ -226,15 +249,23 @@ class Command(BaseCommand):
                     f"共 {n_tasks} 个模板，本次新建分配记录 {created} 条。"
                 )
             )
+            from apps.core.library_test_account import sync_project_for_solo_tester
 
-        from apps.core.library_test_account import sync_project_for_solo_tester
-
-        sync_project_for_solo_tester(project, user)
-        self.stdout.write(
-            self.style.SUCCESS(
-                "已同步：五个流程岗位默认指向该用户；任务分配与模板文件关联已按项目当前挂载任务整理。"
+            sync_project_for_solo_tester(project, user)
+            self.stdout.write(
+                self.style.SUCCESS(
+                    "已同步：五个流程岗位默认指向该用户；任务分配与模板文件关联已按项目当前挂载任务整理。"
+                )
             )
-        )
+        else:
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f"已关联项目 {project.code}（已挂载 {n_tasks} 个任务模板）。"
+                    f"未加 --assign-project-tasks：已跳过自动任务分配与流程岗同步；"
+                    f"请使用「{username}」登录后在「项目管理 → 分配」中向本人分配以体验完整流程。"
+                )
+            )
+
         self.stdout.write(
             self.style.SUCCESS(
                 f"用户「{username}」已绑定角色 {_BASE_ROLE_CODE}；"

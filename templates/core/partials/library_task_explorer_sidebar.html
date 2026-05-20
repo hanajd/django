@@ -1,0 +1,38 @@
+{# 任务模板库：任务分类 → 报告 → 现场记录 #}
+<aside id="guide-task-sidebar" class="lg:sticky lg:top-4 space-y-4">
+    {% if task_library_edit %}
+    {% include "core/partials/library_task_folder_manage.html" %}
+    {% endif %}
+
+    <div class="rounded-2xl border border-slate-200/90 bg-white shadow-sm overflow-hidden flex flex-col max-h-[min(70vh,36rem)]">
+        <div class="px-4 py-3 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white shrink-0">
+            <h2 class="text-xs font-semibold uppercase tracking-wide text-slate-500">任务 · 报告 · 现场记录</h2>
+            {% if task_explorer_dnd_enabled %}
+            <p class="text-[11px] text-slate-500 mt-1">按住报告名称拖动到目标分类。</p>
+            {% endif %}
+            <input type="search" id="task-filter" placeholder="筛选分类或模板…"
+                   class="mt-2 w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <div class="flex-1 overflow-y-auto p-2 min-h-0">
+            {% include "core/partials/folder_explorer_tree.html" with explorer_base_url=task_explorer_base tree_root_label=tree_root_label nav_path=fl_path nav_path_key="fl_path" folder_tree_nodes=folder_tree_nodes explorer_dnd_enabled=task_explorer_dnd_enabled %}
+        </div>
+    </div>
+
+    {% if can_manage_templates and task_library_edit %}
+    <div class="p-1 space-y-2">
+        {% if explorer_current_report_id %}
+        <a href="{% url 'library_task_management' %}?fl_path={{ fl_path|urlencode }}&manage_task={{ explorer_current_report_id }}&new_site=1&edit=1{% if return_project_id %}&return_project={{ return_project_id }}{% endif %}"
+           class="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl bg-cyan-700 text-white text-sm font-medium hover:bg-cyan-800">
+            <i class="ri-stethoscope-line"></i> 新建现场记录
+        </a>
+        {% elif explorer_current_folder_id %}
+        <a href="{% url 'library_task_management' %}?fl_path={{ fl_path|urlencode }}&new_report=1&edit=1{% if return_project_id %}&return_project={{ return_project_id }}{% endif %}"
+           class="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">
+            <i class="ri-file-chart-line"></i> 新建报告模板
+        </a>
+        {% else %}
+        <p class="text-xs text-center text-slate-500 px-2">请先在左侧树中选中任务分类，再新建报告；在报告下新建现场记录。</p>
+        {% endif %}
+    </div>
+    {% endif %}
+</aside>

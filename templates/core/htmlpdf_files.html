@@ -3,35 +3,67 @@
 {% block page_title %}模板编辑器{% endblock %}
 
 {% block content %}
-<div id="guide-htmlpdf-entry" class="bg-white rounded-lg shadow p-6">
-    <p class="text-sm text-gray-600 mb-4">
-        请选择「模板」分类中的 PDF 文件，点击 <span class="font-medium text-gray-800">编辑模板</span> 进入模板编辑器。
-    </p>
-    <div class="overflow-x-auto">
-        <table class="min-w-full text-sm text-left text-gray-700">
-            <thead class="bg-gray-50 text-gray-600 uppercase text-xs">
-                <tr>
-                    <th class="px-3 py-2">文件名</th>
-                    <th class="px-3 py-2">上传者</th>
-                    <th class="px-3 py-2">时间</th>
-                    <th class="px-3 py-2">操作</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for f in template_pdf_files %}
-                <tr class="border-b border-gray-100 hover:bg-gray-50">
-                    <td class="px-3 py-2">{{ f.original_name }}</td>
-                    <td class="px-3 py-2">{% if f.created_by %}{{ f.created_by.username }}{% else %}—{% endif %}</td>
-                    <td class="px-3 py-2">{{ f.created_at|date:"Y-m-d H:i" }}</td>
-                    <td class="px-3 py-2">
-                        <a href="{% url 'htmlpdf_editor_open' f.pk %}" class="text-indigo-600 hover:underline">编辑模板</a>
-                    </td>
-                </tr>
-                {% empty %}
-                <tr><td colspan="4" class="px-3 py-8 text-center text-gray-400">模板分类中暂无 PDF 文件</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
+<div id="guide-htmlpdf-entry" class="min-h-[calc(100vh-8rem)]">
+    <header class="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+            <p class="text-xs font-semibold uppercase tracking-widest text-violet-600/90 mb-1">版式编辑</p>
+            <h1 class="text-xl font-bold text-slate-900 tracking-tight">按任务模板库目录浏览</h1>
+            <p class="mt-1.5 text-sm text-slate-500 max-w-xl leading-relaxed">
+                左侧为<strong>任务分类 → 报告 → 现场记录</strong>文件夹树；节点旁数字为可编辑 PDF 数量。选中报告或现场记录后，右侧显示版式文件。
+            </p>
+        </div>
+        {% if show_library_task_nav %}
+        <a href="{{ task_library_url }}"
+           class="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-white text-sm font-medium text-slate-700 shadow-sm ring-1 ring-slate-200/80 hover:ring-violet-200 hover:text-violet-700 transition shrink-0">
+            <i class="ri-stack-line text-lg"></i>
+            任务模板库
+        </a>
+        {% endif %}
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-[minmax(260px,300px)_minmax(0,1fr)] gap-5 items-start">
+        {# 左侧：文件夹树 #}
+        <aside class="lg:sticky lg:top-4 rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/80 overflow-hidden flex flex-col max-h-[min(72vh,40rem)]">
+            <div class="px-4 py-3 border-b border-slate-100 bg-gradient-to-r from-violet-50/60 to-white shrink-0">
+                <h2 class="text-xs font-semibold uppercase tracking-wide text-slate-500 flex items-center gap-2">
+                    <i class="ri-folder-3-line text-violet-500"></i>
+                    模板目录
+                </h2>
+                <input type="search" id="htmlpdf-tree-filter" placeholder="筛选分类或模板…"
+                       class="mt-2 w-full px-3 py-2 text-sm rounded-xl border border-slate-200 focus:ring-2 focus:ring-violet-400 focus:border-violet-300">
+            </div>
+            <div class="flex-1 overflow-y-auto p-2 min-h-0" id="htmlpdf-tree-panel">
+                {% include "core/partials/folder_explorer_tree.html" with explorer_base_url=htmlpdf_explorer_base tree_root_label="全部任务模板" nav_path=fl_path nav_path_key="fl_path" folder_tree_nodes=folder_tree_nodes explorer_dnd_enabled=False %}
+            </div>
+        </aside>
+
+        {# 右侧：当前路径 / PDF 文件 #}
+        <main class="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/80 p-5 sm:p-6 min-h-[min(72vh,40rem)]">
+            {% include "core/partials/htmlpdf_explorer_detail.html" %}
+        </main>
     </div>
 </div>
+
+<script>
+(function () {
+    var input = document.getElementById('htmlpdf-tree-filter');
+    var panel = document.getElementById('htmlpdf-tree-panel');
+    if (!input || !panel) return;
+    input.addEventListener('input', function () {
+        var q = (input.value || '').trim().toLowerCase();
+        panel.querySelectorAll('.folder-tree-item').forEach(function (li) {
+            var label = (li.textContent || '').toLowerCase();
+            var match = !q || label.indexOf(q) >= 0;
+            li.style.display = match ? '' : 'none';
+            if (match && q) {
+                var details = li.closest('details');
+                while (details) {
+                    details.open = true;
+                    details = details.parentElement ? details.parentElement.closest('details') : null;
+                }
+            }
+        });
+    });
+})();
+</script>
 {% endblock %}

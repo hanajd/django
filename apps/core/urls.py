@@ -40,6 +40,18 @@ urlpatterns = [
     # 文件库与处理流程
     path('files/', views.file_library, name='file_library'),
     path('files/projects/', views.library_projects, name='library_projects'),
+    path('files/commission-manage/', views.commission_manage, name='commission_manage'),
+    path('files/hospital-info/', views.hospital_info_manage, name='hospital_info_manage'),
+    path(
+        'files/hospital-info/api/equipment/',
+        views.hospital_info_equipment_api,
+        name='hospital_info_equipment_api',
+    ),
+    path(
+        'files/hospital-info/api/equipment/history/',
+        views.hospital_info_equipment_history_api,
+        name='hospital_info_equipment_history_api',
+    ),
     path('files/task-management/', views.library_task_management, name='library_task_management'),
     path('files/library-tasks/', views.redirect_to_task_management),
     path('files/tasks/', views.redirect_to_task_management),

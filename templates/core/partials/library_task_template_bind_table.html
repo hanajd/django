@@ -1,0 +1,26 @@
+<table class="min-w-full text-sm text-left">
+    <thead class="bg-slate-50 text-slate-500 text-xs uppercase sticky top-0 border-b border-slate-100">
+        <tr>
+            <th class="px-3 py-2 w-10"><span class="sr-only">选择</span></th>
+            <th class="px-3 py-2">文件名</th>
+            <th class="px-3 py-2 w-24">状态</th>
+        </tr>
+    </thead>
+    <tbody class="divide-y divide-slate-100">
+        {% for f in bind_files %}
+        <tr class="hover:bg-slate-50/80">
+            <td class="px-3 py-2"><input type="checkbox" name="file_ids" value="{{ f.id }}" class="row-task-file rounded border-slate-300 text-indigo-600"></td>
+            <td class="px-3 py-2 text-slate-800">{{ f.original_name }}</td>
+            <td class="px-3 py-2">
+                {% if f.id in task_mgmt_linked_ids %}
+                <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">已关联</span>
+                {% else %}
+                <span class="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">未关联</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="3" class="px-3 py-6 text-center text-slate-400 text-xs">该分组暂无文件</td></tr>
+        {% endfor %}
+    </tbody>
+</table>

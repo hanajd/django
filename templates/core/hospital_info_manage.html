@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}医院信息管理{% endblock %}
+{% block page_title %}医院信息管理{% endblock %}
+
+{% block content %}
+<div class="min-h-[calc(100vh-6rem)] bg-gradient-to-br from-slate-50 via-white to-indigo-50/30">
+    <div class="max-w-[1680px] mx-auto px-4 sm:px-6 py-8">
+        {# 页头 #}
+        <header class="mb-8 flex flex-wrap items-end justify-between gap-4">
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-widest text-indigo-600/80 mb-1">委托单位主数据</p>
+                <h1 class="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">医院信息管理</h1>
+                <p class="mt-2 text-sm text-slate-500 max-w-2xl">
+                    维护医院、院区、科室信息与设备；报告绑定请选择下属检测项目在文件库「报告」分类中已生成的成品 PDF（项目填报导出或合并后的实际报告）。
+                </p>
+            </div>
+            {% if show_library_task_nav %}
+            <a href="{% url 'library_task_management' %}"
+               class="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-white text-sm font-medium text-slate-700 shadow-sm ring-1 ring-slate-200/80 hover:ring-indigo-200 hover:text-indigo-700 transition">
+                <i class="ri-stack-line text-lg"></i>
+                任务模板库
+            </a>
+            {% endif %}
+        </header>
+
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+            {# 左侧：组织树卡片 #}
+            <div class="xl:col-span-4 space-y-4">
+                <article class="rounded-3xl bg-white/90 backdrop-blur-sm shadow-[0_8px_40px_-12px_rgba(15,23,42,0.12)] ring-1 ring-slate-200/60 overflow-hidden flex flex-col max-h-[min(78vh,44rem)]">
+                    <div class="px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-rose-50/80 to-white">
+                        <div class="flex items-center justify-between gap-2">
+                            <h2 class="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                                <span class="flex h-8 w-8 items-center justify-center rounded-xl bg-rose-100 text-rose-600">
+                                    <i class="ri-node-tree text-lg"></i>
+                                </span>
+                                组织架构
+                            </h2>
+                            {% if hospital_info_edit %}
+                            <button type="button" id="btn-open-create-org"
+                                    class="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-900 text-white hover:bg-slate-800 transition">
+                                <i class="ri-add-line"></i> 新建
+                            </button>
+                            {% endif %}
+                        </div>
+                        <input type="search" id="hospital-tree-filter" placeholder="搜索医院、院区、科室…"
+                               class="mt-3 w-full px-3 py-2 text-sm rounded-xl border-0 bg-white ring-1 ring-slate-200 focus:ring-2 focus:ring-indigo-400">
+                    </div>
+                    <div class="flex-1 overflow-y-auto p-3 min-h-0">
+                        {% include "core/partials/folder_explorer_tree.html" with explorer_base_url=hospital_info_explorer_base tree_root_label="全部医院" nav_path=fl_path nav_path_key="fl_path" folder_tree_nodes=folder_tree_nodes explorer_dnd_enabled=False %}
+                    </div>
+                </article>
+            </div>
+
+            {# 右侧：详情卡片区 #}
+            <div class="xl:col-span-8 space-y-5">
+                {% if explorer_org %}
+                {% include "core/partials/hospital_info_detail_panel.html" %}
+                {% else %}
+                <article class="rounded-3xl bg-white/90 backdrop-blur-sm shadow-[0_8px_40px_-12px_rgba(15,23,42,0.1)] ring-1 ring-slate-200/60 p-12 sm:p-16 text-center">
+                    <div class="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-indigo-100 to-rose-100 text-indigo-600 mb-6">
+                        <i class="ri-hospital-line text-4xl"></i>
+                    </div>
+                    <h2 class="text-lg font-semibold text-slate-900">选择要查看的机构</h2>
+                    <p class="mt-2 text-sm text-slate-500 max-w-md mx-auto">
+                        在左侧树中点击医院、院区或科室，可浏览地址、简介、合并报告、联系人与科室设备；点击「编辑」后再进行修改。
+                    </p>
+                </article>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{# 新建层级弹窗（仅编辑模式） #}
+{% if hospital_info_edit %}
+<dialog id="create-org-dialog" class="rounded-3xl shadow-2xl border-0 p-0 w-full max-w-md backdrop:bg-slate-900/40 open:animate-in">
+    <div class="p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold text-slate-900">
+                {% if explorer_org and explorer_org_child_levels %}在「{{ explorer_org.name }}」下新建{% elif explorer_org %}新建{% else %}新建医院{% endif %}
+            </h3>
+            <button type="button" data-close-create-org class="p-2 rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+                <i class="ri-close-line text-xl"></i>
+            </button>
+        </div>
+        {% include "core/partials/hospital_info_org_sidebar.html" %}
+    </div>
+</dialog>
+{% endif %}
+
+<script>
+(function () {
+    var dlg = document.getElementById('create-org-dialog');
+    var openBtn = document.getElementById('btn-open-create-org');
+    if (dlg && openBtn) {
+        openBtn.addEventListener('click', function () { dlg.showModal(); });
+        dlg.querySelectorAll('[data-close-create-org]').forEach(function (el) {
+            el.addEventListener('click', function () { dlg.close(); });
+        });
+    }
+    var inp = document.getElementById('hospital-tree-filter');
+    if (!inp) return;
+    inp.addEventListener('input', function () {
+        var q = (inp.value || '').trim().toLowerCase();
+        document.querySelectorAll('.folder-tree-item').forEach(function (li) {
+            var label = (li.querySelector('[title]') || {}).textContent || '';
+            label = label.toLowerCase();
+            var show = !q || label.indexOf(q) >= 0;
+            li.style.display = show ? '' : 'none';
+            if (show && q) {
+                var d = li.closest('details');
+                while (d) { d.open = true; d = d.parentElement && d.parentElement.closest('details'); }
+            }
+        });
+    });
+})();
+</script>
+{% endblock %}

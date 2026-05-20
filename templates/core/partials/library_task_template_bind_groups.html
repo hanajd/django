@@ -1,0 +1,31 @@
+{# 任务模板绑定：按模板文件类型分组展示 #}
+{% with pdf_files=task_mgmt_files_grouped.pdf json_files=task_mgmt_files_grouped.json other_files=task_mgmt_files_grouped.other %}
+<div class="space-y-3">
+    <details class="rounded-xl border border-slate-200 bg-white overflow-hidden group" {% if pdf_files %}open{% endif %}>
+        <summary class="px-4 py-2.5 cursor-pointer text-sm font-medium text-slate-800 list-none flex items-center justify-between bg-slate-50/80">
+            <span>模板 PDF <span class="text-slate-400 font-normal">({{ pdf_files|length }})</span></span>
+            <i class="ri-arrow-down-s-line text-slate-400 group-open:rotate-180"></i>
+        </summary>
+        <div class="max-h-52 overflow-y-auto">{% include "core/partials/library_task_template_bind_table.html" with bind_files=pdf_files %}</div>
+    </details>
+    <details class="rounded-xl border border-slate-200 bg-white overflow-hidden group" {% if json_files and not pdf_files %}open{% endif %}>
+        <summary class="px-4 py-2.5 cursor-pointer text-sm font-medium text-slate-800 list-none flex items-center justify-between bg-slate-50/80">
+            <span>模板 JSON <span class="text-slate-400 font-normal">({{ json_files|length }})</span></span>
+            <i class="ri-arrow-down-s-line text-slate-400 group-open:rotate-180"></i>
+        </summary>
+        <div class="max-h-52 overflow-y-auto">{% include "core/partials/library_task_template_bind_table.html" with bind_files=json_files %}</div>
+    </details>
+    {% if other_files %}
+    <details class="rounded-xl border border-slate-200 bg-white overflow-hidden group">
+        <summary class="px-4 py-2.5 cursor-pointer text-sm font-medium text-slate-800 list-none flex items-center justify-between bg-slate-50/80">
+            <span>其它模板文件 <span class="text-slate-400 font-normal">({{ other_files|length }})</span></span>
+            <i class="ri-arrow-down-s-line text-slate-400 group-open:rotate-180"></i>
+        </summary>
+        <div class="max-h-52 overflow-y-auto">{% include "core/partials/library_task_template_bind_table.html" with bind_files=other_files %}</div>
+    </details>
+    {% endif %}
+    {% if not pdf_files and not json_files and not other_files %}
+    <p class="text-sm text-slate-400 text-center py-8 rounded-xl border border-dashed border-slate-200">文件库中暂无模板分类文件，请先在文件库上传。</p>
+    {% endif %}
+</div>
+{% endwith %}

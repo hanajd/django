@@ -1,0 +1,26 @@
+{# 文件夹树：folder_tree_nodes 为 TreeNode 列表；explorer_base_url 为带 query 的列表页 URL（不含路径参数） #}
+<nav class="folder-explorer-tree text-sm" aria-label="文件夹导航">
+    <ul class="space-y-0.5">
+        <li>
+            {% if picker_mode %}
+            <button type="button"
+                    data-co-picker-node
+                    data-co-path=""
+                    data-co-label="{{ tree_root_label|default:'全部委托单位' }}"
+                    class="co-picker-node w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition-colors {% if not nav_path %}bg-indigo-50 font-medium text-indigo-900 ring-1 ring-indigo-200/80{% else %}text-slate-700 hover:bg-slate-50{% endif %}">
+                <i class="ri-folder-2-line text-amber-500 shrink-0"></i>
+                <span class="truncate">{{ tree_root_label|default:"根目录" }}</span>
+            </button>
+            {% else %}
+            <a href="{{ explorer_base_url }}"
+               class="flex items-center gap-2 px-2 py-1.5 rounded-lg {% if not nav_path %}bg-slate-100 font-medium text-slate-900 ring-1 ring-slate-200{% else %}text-slate-600 hover:bg-slate-50{% endif %}">
+                <i class="ri-folder-2-line text-amber-500"></i>
+                <span class="truncate">{{ tree_root_label|default:"根目录" }}</span>
+            </a>
+            {% endif %}
+        </li>
+        {% for node in folder_tree_nodes %}
+        {% include "core/partials/folder_explorer_tree_node.html" with node=node depth=0 explorer_dnd_enabled=explorer_dnd_enabled nav_path=nav_path nav_path_key=nav_path_key picker_mode=picker_mode %}
+        {% endfor %}
+    </ul>
+</nav>

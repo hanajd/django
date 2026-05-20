@@ -3,8 +3,10 @@
 {% block page_title %}文件库{% endblock %}
 
 {% block content %}
+{% include "core/partials/file_library_commission_org_modal.html" %}
 {% if role_perm.perm_file_delete %}
 {% for f in files %}
+{% if f.file_library_may_delete %}
 <form id="del-form-{{ f.pk }}" method="post" action="{% url 'file_library_delete' f.pk %}" class="hidden">
     {% csrf_token %}
     {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
@@ -12,39 +14,52 @@
     {% if uploader_selected %}<input type="hidden" name="uploader" value="{{ uploader_selected }}">{% endif %}
     {% if project_selected %}<input type="hidden" name="project" value="{{ project_selected }}">{% endif %}
 </form>
+{% endif %}
 {% endfor %}
 {% endif %}
 
-<div class="max-w-[1600px] mx-auto space-y-6 pb-8">
-    <!-- 顶栏：分类切换 -->
-    <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div id="guide-file-library-tabs" class="flex flex-1 flex-wrap items-center gap-1.5 rounded-2xl border border-slate-200/90 bg-gradient-to-b from-slate-50 to-slate-100/90 p-1.5 shadow-inner">
+<div class="max-w-[1680px] mx-auto pb-8">
+    <div id="library-explorer-dnd-scope" class="grid grid-cols-1 xl:grid-cols-[minmax(168px,200px)_minmax(200px,240px)_minmax(0,1fr)] gap-4 items-start"
+         {% if explorer_dnd_enabled %}data-folder-explorer-dnd="1" data-dnd-enabled="true" data-dnd-mode="{{ explorer_dnd_mode }}" data-post-url="{{ explorer_dnd_post_url }}" data-fl-path="{{ fl_path|default:'' }}" data-tab="{{ tab }}" data-date-from="{{ date_from|default:'' }}" data-date-to="{{ date_to|default:'' }}" data-uploader="{{ uploader_selected|default:'' }}"{% endif %}>
+        <aside class="xl:sticky xl:top-4 space-y-3">
+            <div id="guide-file-library-tabs" class="rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden">
+                <div class="px-3 py-2.5 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
+                    <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">文件分类</span>
+                </div>
+                <nav class="p-1.5 space-y-0.5">
             {% for t in file_library_tabs %}
-            <a href="{% url 'file_library' %}?tab={{ t.key }}{% if date_from and date_to %}&amp;date_from={{ date_from }}&amp;date_to={{ date_to }}{% endif %}{% if uploader_selected %}&amp;uploader={{ uploader_selected }}{% endif %}{% if project_selected %}&amp;project={{ project_selected }}{% endif %}"
-               class="min-h-[2.5rem] flex-1 min-w-[5.5rem] whitespace-nowrap rounded-xl px-3 py-2 text-center text-sm font-medium transition-all duration-200 sm:flex-none sm:px-4
-                      {% if tab == t.key %}
-                      bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/80
-                      {% else %}
-                      text-slate-600 hover:bg-white/70 hover:text-slate-900
-                      {% endif %}">
-                {{ t.label }}
+            <a href="{% url 'file_library' %}?tab={{ t.key }}{% if date_from and date_to %}&amp;date_from={{ date_from }}&amp;date_to={{ date_to }}{% endif %}{% if uploader_selected %}&amp;uploader={{ uploader_selected }}{% endif %}{% if project_selected %}&amp;project={{ project_selected }}{% endif %}{% if co_path %}&amp;co_path={{ co_path|urlencode }}{% elif commission_org_raw %}&amp;commission_org={{ commission_org_raw }}{% endif %}{% if fl_path %}&amp;fl_path={{ fl_path|urlencode }}{% endif %}"
+               class="flex items-center gap-2 px-2.5 py-2.5 rounded-lg text-sm font-medium transition-colors {% if tab == t.key %}bg-indigo-50 text-indigo-900 ring-1 ring-indigo-200/80{% else %}text-slate-600 hover:bg-slate-50{% endif %}">
+                <i class="ri-folder{% if tab == t.key %}-open{% endif %}-line text-lg shrink-0 {% if tab == t.key %}text-indigo-600{% else %}text-slate-400{% endif %}"></i>
+                <span class="truncate">{{ t.label }}</span>
             </a>
             {% endfor %}
-        </div>
+                </nav>
+            </div>
         {% if role_perm.perm_process_pipeline %}
         <a href="{% url 'process_pipeline' %}"
-           class="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-500 hover:shadow-md"
-           title="在独立页面进行文档识别与结构化提取（与侧栏入口一致）">
-            <i class="ri-flow-chart text-lg leading-none"></i>
+           class="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50 text-sm font-medium text-emerald-900 hover:bg-emerald-100">
+            <i class="ri-flow-chart text-lg"></i>
             文档识别
         </a>
         {% endif %}
-    </div>
+        </aside>
+
+        <aside class="rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden xl:sticky xl:top-4 flex flex-col max-h-[min(72vh,40rem)]">
+            <div class="px-3 py-2.5 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white shrink-0">
+                <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">文件夹</span>
+            </div>
+            <div class="flex-1 overflow-y-auto p-2 min-h-0">
+                {% include "core/partials/folder_explorer_tree.html" with explorer_base_url=explorer_base_url tree_root_label=tree_root_label nav_path=fl_path nav_path_key="fl_path" folder_tree_nodes=folder_tree_nodes explorer_dnd_enabled=explorer_dnd_enabled %}
+            </div>
+        </aside>
+
+        <div class="min-w-0 space-y-6">
 
     {% if file_scope_own_only %}
     <div class="flex gap-3 rounded-2xl border border-amber-200/80 bg-amber-50/90 px-4 py-3 text-sm text-amber-900 shadow-sm">
         <i class="ri-shield-user-line mt-0.5 shrink-0 text-lg text-amber-600"></i>
-        <p class="leading-relaxed">已开启「文件库仅本人数据」：除<strong>模板</strong>分类另有规则外，列表以本人上传或已分配项目关联的文件为主；是否可上传、下载、预览、删除等仍由角色权限控制。{% if file_library_template_shared_browse %}在<strong>模板</strong>分类中，您还可浏览<strong>任务模板级共享</strong>的模板文件（含其他角色创建、且绑定在您可访问项目所挂载任务上的模板），便于多项目复用。{% endif %}</p>
+        <p class="leading-relaxed">已开启「文件库仅本人数据」：除<strong>模板</strong>分类另有规则外，列表以本人上传或已分配项目关联的文件为主；是否可上传、下载、预览、删除等仍由角色权限控制。{% if file_library_template_shared_browse %}在<strong>模板</strong>分类中，您还可浏览<strong>任务模板级共享</strong>的模板文件（含其他角色创建、且绑定在您可访问项目所挂载任务上的模板），便于多项目复用。{% endif %}<span class="block mt-2 text-amber-950/90">删除与回收站操作：默认仅能处理<strong>本人上传</strong>的文件；删除他人文件需系统管理员（超级用户或超级管理员/普通管理员角色）。</span></p>
     </div>
     {% endif %}
 
@@ -57,18 +72,40 @@
             <div class="min-w-0 flex-1">
                 <h2 class="text-base font-semibold tracking-tight text-slate-900">筛选条件</h2>
                 <p class="mt-1 text-xs leading-relaxed text-slate-500">创建日期须同时选择起止日，含首尾最多 30 天。{% if not file_scope_own_only %}上传者筛选仅作用于当前 Tab 与上述日期范围内的记录。{% endif %}选择某一检测项目时，仍会包含未绑定项目的记录，便于核对遗漏关联。</p>
-                <p class="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600 ring-1 ring-slate-100">{% if tab == 'template' %}<strong>模板</strong>视图按环节任务一级分组；列内为展示名、类型与简要关联，存储文件名可在行内「系统文件名」展开查看。{% else %}默认按<strong>检测项目 → 报告环节</strong>二级分组；项目与环节名称见分组标题，列内为展示名、类型与委托号等摘要，存储路径同上展开查看。{% endif %}预览受权限控制；无预览权限时可下载后本地打开。下方检索仅匹配当前已加载且已展开的行。</p>
+                <p class="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600 ring-1 ring-slate-100">{% if tab == 'template' %}<strong>模板</strong>视图按环节任务一级分组；<strong>分组展开行最左侧复选框</strong>可勾选该环节下全部文件（无需展开）。列内为展示名、类型与简要关联，存储文件名可在行内「系统文件名」展开查看。{% elif tab == 'inspection_submit' %}<strong>检测提交</strong>按<strong>检测项目 → 报告环节 → 现场记录环节</strong>三级分组（与提交所绑定的文件库任务一致）；未解析到现场记录任务时归入「未绑定现场记录任务」。每一级分组<strong>展开行最左侧复选框</strong>可勾选该分支下全部文件（<strong>无需展开</strong>子分组即可操作）。手动导出 PDF/报告时，若同一案件且同一路径「现场记录」下存在多份 JSON，系统<strong>仅自动采用创建时间最新的一份</strong>，避免多版数据重叠。{% else %}默认按<strong>检测项目 → 报告环节</strong>二级分组；<strong>分组展开行最左侧复选框</strong>可勾选该分支下全部文件（无需展开子分组）。项目与环节名称见分组标题，列内为展示名、类型与委托号等摘要，存储路径同上展开查看。{% endif %}预览受权限控制；无预览权限时可下载后本地打开。下方检索仅匹配当前已加载且已展开的行。</p>
             </div>
         </div>
         <form method="get" id="file-library-date-filter" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-12 lg:items-end">
             <input type="hidden" name="tab" value="{{ tab }}">
+            {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
+            {% if co_path %}<input type="hidden" name="co_path" value="{{ co_path }}">{% elif commission_org_raw %}<input type="hidden" name="commission_org" value="{{ commission_org_raw }}">{% endif %}
+            <div class="sm:col-span-2 lg:col-span-3">
+                <span class="mb-1.5 block text-xs font-medium text-slate-600">委托单位</span>
+                <div class="flex flex-wrap items-center gap-2">
+                    <button type="button" id="open-file-lib-org-modal"
+                            class="inline-flex items-center gap-2 min-w-0 max-w-full rounded-xl border px-3 py-2.5 text-sm font-medium shadow-sm transition {% if co_path %}border-indigo-300 bg-indigo-50 text-indigo-900 ring-1 ring-indigo-200/80{% else %}border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50{% endif %}">
+                        <i class="ri-hospital-line text-lg shrink-0 {% if co_path %}text-indigo-600{% else %}text-slate-400{% endif %}"></i>
+                        <span class="truncate text-left">
+                            {% if explorer_co_org %}{{ explorer_co_org.full_display_name }}{% else %}选择委托单位…{% endif %}
+                        </span>
+                        <i class="ri-arrow-down-s-line text-slate-400 shrink-0"></i>
+                    </button>
+                    {% if co_path %}
+                    <a href="{{ co_explorer_base }}"
+                       class="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                       title="清除委托单位筛选">
+                        <i class="ri-close-line"></i> 清除
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
             <div class="sm:col-span-2 lg:col-span-3">
                 <label for="project" class="mb-1.5 block text-xs font-medium text-slate-600">检测项目</label>
                 <select name="project" id="project"
                         class="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-900 shadow-sm transition focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20">
                     <option value="">全部项目</option>
                     {% for p in projects %}
-                    <option value="{{ p.id }}" {% if project_selected == p.id|stringformat:"s" %}selected{% endif %}>{{ p.code }} · {{ p.name }}</option>
+                    <option value="{{ p.id }}" {% if project_selected == p.id|stringformat:"s" %}selected{% endif %}>{% if p.commission_organization %}{{ p.commission_organization }} · {% endif %}{{ p.name }}（{{ p.code }}）</option>
                     {% endfor %}
                 </select>
             </div>
@@ -99,9 +136,9 @@
                     <i class="ri-search-line text-base"></i>
                     应用筛选
                 </button>
-                <a href="{% url 'file_library' %}?tab={{ tab }}{% if uploader_selected %}&amp;uploader={{ uploader_selected }}{% endif %}{% if project_selected %}&amp;project={{ project_selected }}{% endif %}" class="inline-flex items-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50">清除日期</a>
+                <a href="{% url 'file_library' %}?tab={{ tab }}{% if uploader_selected %}&amp;uploader={{ uploader_selected }}{% endif %}{% if project_selected %}&amp;project={{ project_selected }}{% endif %}{% if co_path %}&amp;co_path={{ co_path|urlencode }}{% elif commission_org_raw %}&amp;commission_org={{ commission_org_raw }}{% endif %}{% if fl_path %}&amp;fl_path={{ fl_path|urlencode }}{% endif %}" class="inline-flex items-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50">清除日期</a>
                 {% if not file_scope_own_only and uploader_selected %}
-                <a href="{% url 'file_library' %}?tab={{ tab }}{% if date_from and date_to %}&amp;date_from={{ date_from }}&amp;date_to={{ date_to }}{% endif %}" class="inline-flex items-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50">清除上传者</a>
+                <a href="{% url 'file_library' %}?tab={{ tab }}{% if date_from and date_to %}&amp;date_from={{ date_from }}&amp;date_to={{ date_to }}{% endif %}{% if co_path %}&amp;co_path={{ co_path|urlencode }}{% elif commission_org_raw %}&amp;commission_org={{ commission_org_raw }}{% endif %}{% if fl_path %}&amp;fl_path={{ fl_path|urlencode }}{% endif %}" class="inline-flex items-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50">清除上传者</a>
                 {% endif %}
             </div>
         </form>
@@ -116,7 +153,7 @@
 
     {% if tab == 'trash' %}
     <section class="rounded-2xl border border-amber-200/80 bg-amber-50/80 px-4 py-3 text-sm text-amber-950 shadow-sm">
-        <p class="leading-relaxed"><strong>回收站</strong>：移入回收站的内容约保留 <strong>{{ trash_days_notice }}</strong> 天，便于您在此期间恢复；超期后由系统自动彻底清理，无法再恢复。您可在此恢复或永久删除。</p>
+        <p class="leading-relaxed"><strong>回收站</strong>：移入回收站的内容约保留 <strong>{{ trash_days_notice }}</strong> 天，便于您在此期间恢复；超期后由系统自动彻底清理，无法再恢复。可勾选多条后<strong>批量恢复</strong>或<strong>批量彻底删除</strong>；单行右侧仍支持单条操作。</p>
     </section>
     {% elif tab == 'ocr' and role_perm.perm_file_upload %}
     <section class="rounded-2xl border border-dashed border-slate-300 bg-gradient-to-b from-white to-slate-50/80 p-6 shadow-sm transition hover:border-slate-400">
@@ -275,12 +312,37 @@
     {% endif %}
 
     {% if tab == 'trash' %}
-    <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ring-1 ring-slate-900/[0.04]">
+    {% if role_perm.perm_file_delete and files %}
+    <form id="trash-bulk-form" method="post" action="{% url 'file_library' %}" class="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm ring-1 ring-slate-900/[0.04]">
+        {% csrf_token %}
+        <input type="hidden" name="tab" value="trash">
+        {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
+        {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
+        {% if uploader_selected %}<input type="hidden" name="uploader" value="{{ uploader_selected }}">{% endif %}
+        {% if project_selected %}<input type="hidden" name="project" value="{{ project_selected }}">{% endif %}
+        <label class="inline-flex cursor-pointer select-none items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">
+            <input type="checkbox" id="trash-check-all" class="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30" aria-label="全选当前列表">
+            <span>全选</span>
+        </label>
+        <button type="submit" name="action" value="restore_library_files_bulk"
+                class="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-xs font-semibold text-emerald-900 hover:bg-emerald-100">
+            <i class="ri-restart-line"></i> 恢复所选
+        </button>
+        <button type="submit" name="action" value="purge_library_files_permanent_bulk"
+                class="inline-flex items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2 text-xs font-semibold text-red-900 hover:bg-red-100"
+                onclick="var n=document.querySelectorAll('#trash-table-section input.row-check:checked').length; if(!n){ alert('请勾选要彻底删除的文件'); return false;} return confirm('确定永久删除所选的 '+n+' 个文件？此操作不可恢复。');">
+            <i class="ri-delete-bin-7-line"></i> 彻底删除所选
+        </button>
+        <span class="text-xs text-slate-500">与单行操作相同：默认仅能处理本人上传项；管理员可处理可见范围内的他人项。</span>
+    </form>
+    {% endif %}
+    <section id="trash-table-section" class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ring-1 ring-slate-900/[0.04]">
         <div class="border-b border-slate-100 bg-slate-50/70 px-4 py-3 text-sm font-medium text-slate-800">回收站中的文件</div>
         <div class="overflow-x-auto">
             <table class="min-w-full text-left text-sm text-slate-700">
                 <thead class="border-b border-slate-100 bg-slate-50/90 text-xs font-semibold text-slate-500">
                     <tr>
+                        {% if role_perm.perm_file_delete %}<th class="w-12 px-4 py-3"></th>{% endif %}
                         <th class="px-4 py-3">文件</th>
                         <th class="px-4 py-3">分类</th>
                         <th class="px-4 py-3 whitespace-nowrap">移入时间</th>
@@ -290,26 +352,38 @@
                 <tbody class="divide-y divide-slate-100">
                     {% for f in files %}
                     <tr>
+                        {% if role_perm.perm_file_delete %}
+                        <td class="px-4 py-3 align-top">
+                            {% if f.file_library_may_delete %}
+                            <input type="checkbox" name="ids" value="{{ f.pk }}" form="trash-bulk-form"
+                                   class="row-check mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30" aria-label="选中 {{ f.original_name }}">
+                            {% else %}
+                            <span class="text-slate-300" title="无权操作">—</span>
+                            {% endif %}
+                        </td>
+                        {% endif %}
                         <td class="max-w-xl px-4 py-3">{% include "core/file_library_file_cell.html" %}</td>
                         <td class="px-4 py-3 text-xs">{{ f.get_category_display }}</td>
                         <td class="whitespace-nowrap px-4 py-3 text-xs text-slate-600">{{ f.deleted_at|date:"Y-m-d H:i" }}</td>
                         <td class="px-4 py-3 text-right">
                             <div class="inline-flex flex-wrap justify-end gap-2">
+                                {% if role_perm.perm_file_delete and f.file_library_may_delete %}
                                 <form method="post" action="{% url 'file_library' %}" class="inline">
                                     {% csrf_token %}
                                     <input type="hidden" name="action" value="restore_library_file">
                                     <input type="hidden" name="file_id" value="{{ f.pk }}">
                                     {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
                                     {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
+                                    {% if project_selected %}<input type="hidden" name="project" value="{{ project_selected }}">{% endif %}
                                     <button type="submit" class="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100">恢复</button>
                                 </form>
-                                {% if role_perm.perm_file_delete %}
                                 <form method="post" action="{% url 'file_library' %}" class="inline" onsubmit="return confirm('确定永久删除？此操作不可恢复。');">
                                     {% csrf_token %}
                                     <input type="hidden" name="action" value="purge_library_file_permanent">
                                     <input type="hidden" name="file_id" value="{{ f.pk }}">
                                     {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
                                     {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
+                                    {% if project_selected %}<input type="hidden" name="project" value="{{ project_selected }}">{% endif %}
                                     <button type="submit" class="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-800 hover:bg-red-100">彻底删除</button>
                                 </form>
                                 {% endif %}
@@ -317,24 +391,41 @@
                         </td>
                     </tr>
                     {% empty %}
-                    <tr><td colspan="4" class="px-4 py-12 text-center text-slate-500">回收站为空</td></tr>
+                    <tr><td colspan="{% if role_perm.perm_file_delete %}5{% else %}4{% endif %}" class="px-4 py-12 text-center text-slate-500">回收站为空</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
     </section>
+    {% if role_perm.perm_file_delete %}
+    <script>
+    (function () {
+        var master = document.getElementById('trash-check-all');
+        if (!master) return;
+        function rowBoxes() {
+            return Array.prototype.slice.call(document.querySelectorAll('#trash-table-section input.row-check[name="ids"]'));
+        }
+        master.addEventListener('change', function () {
+            rowBoxes().forEach(function (cb) { cb.checked = master.checked; });
+        });
+    })();
+    </script>
+    {% endif %}
     {% else %}
     <!-- 文件列表 -->
     <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ring-1 ring-slate-900/[0.04]">
     <style>
         .file-lib-project > summary,
         .file-lib-report > summary,
+        .file-lib-site > summary,
         .file-lib-task > summary { list-style: none; }
         .file-lib-project > summary::-webkit-details-marker,
         .file-lib-report > summary::-webkit-details-marker,
+        .file-lib-site > summary::-webkit-details-marker,
         .file-lib-task > summary::-webkit-details-marker { display: none; }
         .file-lib-project[open] > summary .fl-chevron-proj { transform: rotate(90deg); }
         .file-lib-report[open] > summary .fl-chevron-rpt { transform: rotate(90deg); }
+        .file-lib-site[open] > summary .fl-chevron-site { transform: rotate(90deg); }
         .file-lib-task[open] > summary .fl-chevron-task { transform: rotate(90deg); }
     </style>
     {% if file_library_row_selection %}
@@ -362,8 +453,8 @@
                 {% endif %}
                 {% if file_library_row_selection %}
                 <label class="inline-flex cursor-pointer select-none items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50">
-                    <input type="checkbox" id="check-all" class="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30" aria-label="全选所有分组中的文件">
-                    全选
+                    <input type="checkbox" id="check-all" class="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30" aria-label="全选当前已展开分组内的文件">
+                    <span>全选已展开</span>
                 </label>
                 {% endif %}
                 {% if can_manual_export_submit_pdf %}
@@ -395,12 +486,19 @@
                 {% endif %}
             </div>
             <div class="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                {% if can_batch_delete %}<span class="inline-flex items-center gap-1 rounded-lg bg-white px-2 py-1 ring-1 ring-slate-200/80"><i class="ri-checkbox-multiple-line text-slate-400"></i>勾选后可批量删除</span>{% endif %}
-                {% if file_library_row_selection and not can_batch_delete %}<span class="inline-flex items-center gap-1 rounded-lg bg-white px-2 py-1 ring-1 ring-slate-200/80"><i class="ri-checkbox-multiple-line text-slate-400"></i>勾选后可导出或合并</span>{% endif %}
+                {% if file_library_row_selection and tab == 'inspection_submit' %}<span class="inline-flex items-center gap-1 rounded-lg bg-white px-2 py-1 ring-1 ring-slate-200/80"><i class="ri-checkbox-multiple-line text-slate-400"></i>分组行首勾选含未展开子级；导出时同现场记录下多版 JSON 仅取最新</span>
+                {% elif file_library_row_selection %}<span class="inline-flex items-center gap-1 rounded-lg bg-white px-2 py-1 ring-1 ring-slate-200/80"><i class="ri-checkbox-multiple-line text-slate-400"></i>分组展开行左侧复选框可勾选整段分支（无需展开子分组）</span>
+                {% endif %}
+                {% if can_batch_delete %}<span class="inline-flex items-center gap-1 rounded-lg bg-white px-2 py-1 ring-1 ring-slate-200/80"><i class="ri-checkbox-multiple-line text-slate-400"></i>「全选已展开」只勾当前展开分组；分组行首可勾选整段分支；删除仅限本人上传</span>{% endif %}
+                {% if file_library_row_selection and not can_batch_delete %}<span class="inline-flex items-center gap-1 rounded-lg bg-white px-2 py-1 ring-1 ring-slate-200/80"><i class="ri-checkbox-multiple-line text-slate-400"></i>顶部「全选已展开」仅勾选当前展开分组；分组行首复选框可选中整段分支（无需展开子级）</span>{% endif %}
                 {% if role_perm.perm_file_download %}<span class="inline-flex items-center gap-1 rounded-lg bg-white px-2 py-1 ring-1 ring-slate-200/80"><i class="ri-download-2-line text-slate-400"></i>可下载</span>{% endif %}
                 {% if role_perm.perm_file_preview %}<span class="inline-flex items-center gap-1 rounded-lg bg-white px-2 py-1 ring-1 ring-slate-200/80"><i class="ri-eye-line text-slate-400"></i>可预览</span>{% endif %}
-                {% if file_library_nested_mode == 'library_task' %}
-                <span class="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 font-medium text-slate-600 ring-1 ring-slate-200/80"><i class="ri-expand-up-down-line text-slate-400"></i>分组：环节任务</span>
+                {% if file_library_use_explorer %}
+                <span class="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 font-medium text-slate-600 ring-1 ring-slate-200/80"><i class="ri-folder-3-line text-slate-400"></i>文件夹导航：逐级进入子文件夹查看文件</span>
+                {% elif file_library_nested_mode == 'library_task' %}
+                <span class="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 font-medium text-slate-600 ring-1 ring-slate-200/80"><i class="ri-expand-up-down-line text-slate-400"></i>分组：现场记录 / 报告 → 环节任务</span>
+                {% elif file_library_nested_mode == 'project_report_site' %}
+                <span class="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 font-medium text-slate-600 ring-1 ring-slate-200/80"><i class="ri-expand-up-down-line text-slate-400"></i>分组：项目 / 报告 / 现场记录 / 记录·签名·照片</span>
                 {% else %}
                 <span class="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 font-medium text-slate-600 ring-1 ring-slate-200/80"><i class="ri-expand-up-down-line text-slate-400"></i>分组：项目 / 报告</span>
                 {% endif %}
@@ -413,7 +511,7 @@
             </div>
         </div>
 
-        {% if file_library_nested_groups %}
+        {% if file_library_nested_groups or file_library_use_explorer %}
         <div class="border-b border-slate-100 bg-gradient-to-b from-white to-slate-50/80 px-4 py-3 sm:px-5">
             <label for="file-lib-live-search" class="mb-1.5 block text-xs font-medium text-slate-600">列表内检索</label>
             <div class="relative max-w-xl">
@@ -424,18 +522,26 @@
             </div>
             <p id="file-lib-live-search-hint" class="mt-2 hidden text-xs leading-relaxed text-slate-500"></p>
         </div>
+        {% if file_library_use_explorer %}
+        <div class="px-4 py-4 sm:px-5">
+            {% include "core/partials/folder_explorer_main.html" with explorer_base_url=explorer_base_url folder_breadcrumbs=folder_breadcrumbs folder_entries=folder_entries files_at_path=files_at_path explorer_dnd_enabled=explorer_dnd_enabled explorer_dnd_post_url=explorer_dnd_post_url explorer_dnd_mode=explorer_dnd_mode fl_path=fl_path tab=tab date_from=date_from date_to=date_to uploader_selected=uploader_selected %}
+        </div>
+        {% else %}
         <div class="divide-y divide-slate-100">
             {% if file_library_nested_mode == 'library_task' %}
             {% for tg in file_library_nested_groups %}
             <details class="file-lib-task bg-white">
-                <summary class="flex cursor-pointer list-none items-start gap-3 bg-slate-50/50 px-4 py-3.5 text-left transition-colors hover:bg-slate-100/80 sm:px-5 sm:py-4">
-                    <i class="ri-arrow-right-s-line fl-chevron-task mt-0.5 shrink-0 text-lg leading-none text-indigo-500 transition-transform duration-200"></i>
-                    <div class="min-w-0 flex-1">
+                <summary class="flex cursor-pointer list-none items-center gap-3 bg-slate-50/50 px-4 py-3.5 text-left transition-colors hover:bg-slate-100/80 sm:px-5 sm:py-4">
+                    {% if file_library_row_selection %}
+                    <input type="checkbox" class="file-lib-level-check h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30" title="勾选本环节下全部文件（无需展开）" aria-label="全选本环节分组下全部文件">
+                    {% endif %}
+                    <i class="ri-arrow-right-s-line fl-chevron-task shrink-0 text-lg leading-none text-indigo-500 transition-transform duration-200"></i>
+                    <div class="min-w-0 flex-1 self-start">
                         <div class="text-xs font-medium uppercase tracking-wide text-slate-500">环节任务（模板分组）</div>
                         <div class="mt-0.5 text-sm font-semibold leading-snug text-slate-900 break-words">{{ tg.task_heading }}</div>
                         <div class="mt-0.5 text-xs text-slate-500">多项目可共用同一环节；一行若绑多个环节，会归在编码排序后的第一个分组下。</div>
                     </div>
-                    <span class="shrink-0 rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-semibold tabular-nums text-indigo-900">{{ tg.file_count }} 个文件</span>
+                    <span class="shrink-0 self-center rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-semibold tabular-nums text-indigo-900">{{ tg.file_count }} 个文件</span>
                 </summary>
                 <div class="border-t border-slate-100 bg-slate-50/50 px-2 pb-3 pt-1 sm:px-4">
                     <div class="overflow-x-auto rounded-xl border border-slate-200/80 bg-white shadow-sm">
@@ -443,9 +549,7 @@
                             <thead>
                                 <tr class="border-b border-slate-100 bg-slate-50/90">
                                     {% if file_library_row_selection %}
-                                    <th scope="col" class="w-12 px-3 py-2.5 align-middle">
-                                        <span class="sr-only">选择</span>
-                                    </th>
+                                    <th scope="col" class="w-12 px-3 py-2.5 align-middle"><span class="sr-only">逐行勾选</span></th>
                                     {% endif %}
                                     <th scope="col" class="min-w-[14rem] px-3 py-2.5 text-xs font-semibold text-slate-500">文件信息</th>
                                     <th scope="col" class="min-w-[5.5rem] px-3 py-2.5 text-xs font-semibold text-slate-500">上传者</th>
@@ -458,7 +562,11 @@
                                 <tr class="file-lib-row transition-colors hover:bg-slate-50/90" data-file-lib-search="{{ f.file_library_search_blob|default:''|escape }}">
                                     {% if file_library_row_selection %}
                                     <td class="px-3 py-3 align-top">
+                                        {% if f.file_library_may_delete %}
                                         <input type="checkbox" name="ids" value="{{ f.pk }}" class="row-check mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30">
+                                        {% else %}
+                                        <span class="mt-1 inline-block text-xs text-slate-400" title="仅可删除本人上传的文件">—</span>
+                                        {% endif %}
                                     </td>
                                     {% endif %}
                                     <td class="max-w-xl px-3 py-3 align-top">
@@ -474,7 +582,7 @@
                                                 <i class="ri-download-2-line"></i>下载
                                             </a>
                                             {% endif %}
-                                            {% if role_perm.perm_file_delete %}
+                                            {% if role_perm.perm_file_delete and f.file_library_may_delete %}
                                             <button type="submit" form="del-form-{{ f.pk }}"
                                                     class="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50/80 px-2.5 py-1.5 text-xs font-medium text-red-800 transition hover:border-red-300 hover:bg-red-100"
                                                     onclick="return confirm('确定删除该文件？');">
@@ -491,28 +599,139 @@
                 </div>
             </details>
             {% endfor %}
-            {% else %}
+            {% elif file_library_nested_mode == 'project_report_site' %}
             {% for pg in file_library_nested_groups %}
             <details class="file-lib-project bg-white">
-                <summary class="flex cursor-pointer list-none items-start gap-3 bg-slate-50/50 px-4 py-3.5 text-left transition-colors hover:bg-slate-100/80 sm:px-5 sm:py-4">
-                    <i class="ri-arrow-right-s-line fl-chevron-proj mt-0.5 shrink-0 text-lg leading-none text-blue-500 transition-transform duration-200"></i>
-                    <div class="min-w-0 flex-1">
+                <summary class="flex cursor-pointer list-none items-center gap-3 bg-slate-50/50 px-4 py-3.5 text-left transition-colors hover:bg-slate-100/80 sm:px-5 sm:py-4">
+                    {% if file_library_row_selection %}
+                    <input type="checkbox" class="file-lib-level-check h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30" title="勾选本项目下全部文件（含未展开子分组，无需展开）" aria-label="全选本检测项目下全部文件">
+                    {% endif %}
+                    <i class="ri-arrow-right-s-line fl-chevron-proj shrink-0 text-lg leading-none text-blue-500 transition-transform duration-200"></i>
+                    <div class="min-w-0 flex-1 self-start">
                         <div class="text-xs font-medium uppercase tracking-wide text-slate-500">检测项目</div>
                         <div class="mt-0.5 text-sm font-semibold leading-snug text-slate-900 break-words">{{ pg.project_heading }}</div>
-                        <div class="mt-0.5 text-xs text-slate-500">展开后选择报告分组查看文件列表。</div>
+                        <div class="mt-0.5 text-xs text-slate-500">展开后按报告环节与现场记录环节查看检测提交文件。</div>
                     </div>
-                    <span class="shrink-0 rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold tabular-nums text-blue-900">{{ pg.file_count }} 个文件</span>
+                    <span class="shrink-0 self-center rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold tabular-nums text-blue-900">{{ pg.file_count }} 个文件</span>
                 </summary>
                 <div class="border-t border-slate-100 bg-white pl-2 sm:pl-4">
                     {% for rg in pg.reports %}
                     <details class="file-lib-report border-b border-slate-100 last:border-b-0">
-                        <summary class="flex cursor-pointer list-none items-start gap-3 bg-white py-3 pl-2 pr-4 text-left transition-colors hover:bg-slate-50 sm:pl-3 sm:pr-5">
-                            <i class="ri-arrow-right-s-line fl-chevron-rpt mt-0.5 shrink-0 text-base leading-none text-violet-500 transition-transform duration-200"></i>
-                            <div class="min-w-0 flex-1">
+                        <summary class="flex cursor-pointer list-none items-center gap-3 bg-white py-3 pl-2 pr-4 text-left transition-colors hover:bg-slate-50 sm:pl-3 sm:pr-5">
+                            {% if file_library_row_selection %}
+                            <input type="checkbox" class="file-lib-level-check h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30" title="勾选本报告下全部文件（含各现场记录子分组，无需展开）" aria-label="全选本报告环节下全部文件">
+                            {% endif %}
+                            <i class="ri-arrow-right-s-line fl-chevron-rpt shrink-0 text-base leading-none text-violet-500 transition-transform duration-200"></i>
+                            <div class="min-w-0 flex-1 self-start">
                                 <div class="text-[11px] font-medium uppercase tracking-wide text-slate-500">报告环节</div>
                                 <div class="mt-0.5 text-sm font-medium leading-snug text-slate-800 break-words">{{ rg.report_heading }}</div>
                             </div>
-                            <span class="shrink-0 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-violet-900">{{ rg.files|length }} 个</span>
+                            <span class="shrink-0 self-center rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-violet-900">{{ rg.file_count }} 个</span>
+                        </summary>
+                        <div class="border-t border-slate-100 bg-slate-50/30 pl-1 sm:pl-2">
+                            {% for sg in rg.site_records %}
+                            <details class="file-lib-site border-b border-slate-100/80 last:border-b-0">
+                                <summary class="flex cursor-pointer list-none items-center gap-3 bg-slate-50/30 py-2.5 pl-2 pr-3 text-left transition-colors hover:bg-slate-100/60 sm:pl-3 sm:pr-4">
+                                    {% if file_library_row_selection %}
+                                    <input type="checkbox" class="file-lib-level-check h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30" title="勾选本现场记录分组内全部文件（无需展开）" aria-label="全选本现场记录环节下全部文件">
+                                    {% endif %}
+                                    <i class="ri-arrow-right-s-line fl-chevron-site shrink-0 text-sm leading-none text-cyan-600 transition-transform duration-200"></i>
+                                    <div class="min-w-0 flex-1 self-start">
+                                        <div class="text-[10px] font-medium uppercase tracking-wide text-slate-500">现场记录环节</div>
+                                        <div class="mt-0.5 text-sm font-medium leading-snug text-slate-800 break-words">{{ sg.site_heading }}</div>
+                                    </div>
+                                    <span class="shrink-0 self-center rounded-full bg-cyan-100 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-cyan-900">{{ sg.files|length }} 个</span>
+                                </summary>
+                                <div class="bg-slate-50/50 px-2 pb-3 pt-1 sm:px-3">
+                                    <div class="overflow-x-auto rounded-xl border border-slate-200/80 bg-white shadow-sm">
+                                        <table class="min-w-full text-left text-sm text-slate-700">
+                                            <thead>
+                                                <tr class="border-b border-slate-100 bg-slate-50/90">
+                                                    {% if file_library_row_selection %}
+                                                    <th scope="col" class="w-12 px-3 py-2.5 align-middle"><span class="sr-only">逐行勾选</span></th>
+                                                    {% endif %}
+                                                    <th scope="col" class="min-w-[14rem] px-3 py-2.5 text-xs font-semibold text-slate-500">文件信息</th>
+                                                    <th scope="col" class="min-w-[5.5rem] px-3 py-2.5 text-xs font-semibold text-slate-500">上传者</th>
+                                                    <th scope="col" class="whitespace-nowrap px-3 py-2.5 text-xs font-semibold text-slate-500">创建时间</th>
+                                                    <th scope="col" class="w-36 px-3 py-2.5 text-right text-xs font-semibold text-slate-500">操作</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody class="divide-y divide-slate-100">
+                                                {% for f in sg.files %}
+                                                <tr class="file-lib-row transition-colors hover:bg-slate-50/90" data-file-lib-search="{{ f.file_library_search_blob|default:''|escape }}">
+                                                    {% if file_library_row_selection %}
+                                                    <td class="px-3 py-3 align-top">
+                                                        {% if f.file_library_may_delete %}
+                                                        <input type="checkbox" name="ids" value="{{ f.pk }}" class="row-check mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30">
+                                                        {% else %}
+                                                        <span class="mt-1 inline-block text-xs text-slate-400" title="仅可删除本人上传的文件">—</span>
+                                                        {% endif %}
+                                                    </td>
+                                                    {% endif %}
+                                                    <td class="max-w-xl px-3 py-3 align-top">
+                                                        {% include "core/file_library_file_cell.html" %}
+                                                    </td>
+                                                    <td class="px-3 py-3 align-top text-xs font-medium text-slate-800 break-words">{{ f.file_library_uploader_display }}</td>
+                                                    <td class="whitespace-nowrap px-3 py-3 align-top text-xs tabular-nums text-slate-600">{{ f.created_at|date:"Y-m-d H:i" }}</td>
+                                                    <td class="px-3 py-3 align-top text-right">
+                                                        <div class="inline-flex flex-col items-end gap-1.5 sm:flex-row sm:flex-wrap sm:justify-end sm:gap-2">
+                                                            {% if role_perm.perm_file_download %}
+                                                            <a href="{% url 'file_library_download' f.pk %}"
+                                                               class="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50/80 px-2.5 py-1.5 text-xs font-medium text-emerald-800 transition hover:border-emerald-300 hover:bg-emerald-100">
+                                                                <i class="ri-download-2-line"></i>下载
+                                                            </a>
+                                                            {% endif %}
+                                                            {% if role_perm.perm_file_delete and f.file_library_may_delete %}
+                                                            <button type="submit" form="del-form-{{ f.pk }}"
+                                                                    class="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50/80 px-2.5 py-1.5 text-xs font-medium text-red-800 transition hover:border-red-300 hover:bg-red-100"
+                                                                    onclick="return confirm('确定删除该文件？');">
+                                                                <i class="ri-delete-bin-line"></i>删除
+                                                            </button>
+                                                            {% endif %}
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </details>
+                            {% endfor %}
+                        </div>
+                    </details>
+                    {% endfor %}
+                </div>
+            </details>
+            {% endfor %}
+            {% else %}
+            {% for pg in file_library_nested_groups %}
+            <details class="file-lib-project bg-white">
+                <summary class="flex cursor-pointer list-none items-center gap-3 bg-slate-50/50 px-4 py-3.5 text-left transition-colors hover:bg-slate-100/80 sm:px-5 sm:py-4">
+                    {% if file_library_row_selection %}
+                    <input type="checkbox" class="file-lib-level-check h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30" title="勾选本项目下全部文件（含未展开报告分组，无需展开）" aria-label="全选本检测项目下全部文件">
+                    {% endif %}
+                    <i class="ri-arrow-right-s-line fl-chevron-proj shrink-0 text-lg leading-none text-blue-500 transition-transform duration-200"></i>
+                    <div class="min-w-0 flex-1 self-start">
+                        <div class="text-xs font-medium uppercase tracking-wide text-slate-500">检测项目</div>
+                        <div class="mt-0.5 text-sm font-semibold leading-snug text-slate-900 break-words">{{ pg.project_heading }}</div>
+                        <div class="mt-0.5 text-xs text-slate-500">展开后选择报告分组查看文件列表。</div>
+                    </div>
+                    <span class="shrink-0 self-center rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold tabular-nums text-blue-900">{{ pg.file_count }} 个文件</span>
+                </summary>
+                <div class="border-t border-slate-100 bg-white pl-2 sm:pl-4">
+                    {% for rg in pg.reports %}
+                    <details class="file-lib-report border-b border-slate-100 last:border-b-0">
+                        <summary class="flex cursor-pointer list-none items-center gap-3 bg-white py-3 pl-2 pr-4 text-left transition-colors hover:bg-slate-50 sm:pl-3 sm:pr-5">
+                            {% if file_library_row_selection %}
+                            <input type="checkbox" class="file-lib-level-check h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30" title="勾选本报告下全部文件（含未展开表内行，无需展开）" aria-label="全选本报告环节下全部文件">
+                            {% endif %}
+                            <i class="ri-arrow-right-s-line fl-chevron-rpt shrink-0 text-base leading-none text-violet-500 transition-transform duration-200"></i>
+                            <div class="min-w-0 flex-1 self-start">
+                                <div class="text-[11px] font-medium uppercase tracking-wide text-slate-500">报告环节</div>
+                                <div class="mt-0.5 text-sm font-medium leading-snug text-slate-800 break-words">{{ rg.report_heading }}</div>
+                            </div>
+                            <span class="shrink-0 self-center rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-violet-900">{{ rg.files|length }} 个</span>
                         </summary>
                         <div class="bg-slate-50/50 px-2 pb-3 pt-1 sm:px-3">
                             <div class="overflow-x-auto rounded-xl border border-slate-200/80 bg-white shadow-sm">
@@ -520,9 +739,7 @@
                                     <thead>
                                         <tr class="border-b border-slate-100 bg-slate-50/90">
                                             {% if file_library_row_selection %}
-                                            <th scope="col" class="w-12 px-3 py-2.5 align-middle">
-                                                <span class="sr-only">选择</span>
-                                            </th>
+                                            <th scope="col" class="w-12 px-3 py-2.5 align-middle"><span class="sr-only">逐行勾选</span></th>
                                             {% endif %}
                                             <th scope="col" class="min-w-[14rem] px-3 py-2.5 text-xs font-semibold text-slate-500">文件信息</th>
                                             <th scope="col" class="min-w-[5.5rem] px-3 py-2.5 text-xs font-semibold text-slate-500">上传者</th>
@@ -535,7 +752,11 @@
                                         <tr class="file-lib-row transition-colors hover:bg-slate-50/90" data-file-lib-search="{{ f.file_library_search_blob|default:''|escape }}">
                                             {% if file_library_row_selection %}
                                             <td class="px-3 py-3 align-top">
+                                                {% if f.file_library_may_delete %}
                                                 <input type="checkbox" name="ids" value="{{ f.pk }}" class="row-check mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30">
+                                                {% else %}
+                                                <span class="mt-1 inline-block text-xs text-slate-400" title="仅可删除本人上传的文件">—</span>
+                                                {% endif %}
                                             </td>
                                             {% endif %}
                                             <td class="max-w-xl px-3 py-3 align-top">
@@ -551,7 +772,7 @@
                                                         <i class="ri-download-2-line"></i>下载
                                                     </a>
                                                     {% endif %}
-                                                    {% if role_perm.perm_file_delete %}
+                                                    {% if role_perm.perm_file_delete and f.file_library_may_delete %}
                                                     <button type="submit" form="del-form-{{ f.pk }}"
                                                             class="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50/80 px-2.5 py-1.5 text-xs font-medium text-red-800 transition hover:border-red-300 hover:bg-red-100"
                                                             onclick="return confirm('确定删除该文件？');">
@@ -573,6 +794,7 @@
             {% endfor %}
             {% endif %}
         </div>
+        {% endif %}
         {% else %}
         <div class="px-4 py-16 text-center sm:px-6">
             <div class="mx-auto flex max-w-sm flex-col items-center">
@@ -591,8 +813,140 @@
     {% endif %}
     </section>
     {% endif %}
+        </div>
+    </div>
 </div>
 <script>
+(function () {
+    function initFileLibOrgPicker() {
+        var modal = document.getElementById('file-lib-org-modal');
+        var openBtn = document.getElementById('open-file-lib-org-modal');
+        if (!modal || !openBtn) return;
+
+        var baseUrl = modal.getAttribute('data-base-url') || '';
+        var selectedPath = modal.getAttribute('data-initial-co-path') || '';
+        var selectedLabel = modal.getAttribute('data-initial-co-label') || '全部委托单位';
+        var labelEl = document.getElementById('file-lib-org-selected-label');
+        var confirmBtn = document.getElementById('file-lib-org-confirm');
+        var clearBtn = document.getElementById('file-lib-org-clear');
+        var orgFilter = document.getElementById('file-lib-org-filter');
+        var orgWrap = document.getElementById('file-lib-org-tree-wrap');
+        var orgTree = orgWrap && orgWrap.querySelector('.folder-explorer-tree');
+        var panel = modal.querySelector('.pointer-events-auto');
+
+        function buildFilterUrl(coPath) {
+            if (!coPath) return baseUrl;
+            var sep = baseUrl.indexOf('?') >= 0 ? '&' : '?';
+            return baseUrl + sep + 'co_path=' + encodeURIComponent(coPath);
+        }
+
+        function syncPickerHighlight() {
+            modal.querySelectorAll('[data-co-picker-node]').forEach(function (btn) {
+                var p = btn.getAttribute('data-co-path') || '';
+                var on = p === selectedPath;
+                btn.classList.toggle('bg-indigo-50', on);
+                btn.classList.toggle('text-indigo-900', on);
+                btn.classList.toggle('ring-1', on);
+                btn.classList.toggle('ring-indigo-200/80', on);
+                btn.classList.toggle('font-medium', on);
+            });
+        }
+
+        function setSelection(coPath, label) {
+            selectedPath = coPath || '';
+            selectedLabel = label || '全部委托单位';
+            if (labelEl) labelEl.textContent = selectedLabel;
+            syncPickerHighlight();
+        }
+
+        function openOrgModal() {
+            selectedPath = modal.getAttribute('data-initial-co-path') || '';
+            selectedLabel = modal.getAttribute('data-initial-co-label') || '全部委托单位';
+            if (labelEl) labelEl.textContent = selectedLabel;
+            syncPickerHighlight();
+            modal.classList.remove('hidden');
+            modal.setAttribute('aria-hidden', 'false');
+            document.body.classList.add('overflow-hidden');
+            if (orgFilter) orgFilter.value = '';
+            if (orgTree) {
+                orgTree.querySelectorAll('li').forEach(function (li) { li.style.display = ''; });
+            }
+            if (orgFilter) orgFilter.focus();
+        }
+
+        function closeOrgModal() {
+            modal.classList.add('hidden');
+            modal.setAttribute('aria-hidden', 'true');
+            document.body.classList.remove('overflow-hidden');
+        }
+
+        openBtn.addEventListener('click', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            openOrgModal();
+        });
+
+        modal.querySelectorAll('[data-org-modal-dismiss]').forEach(function (el) {
+            el.addEventListener('click', function (e) {
+                e.preventDefault();
+                closeOrgModal();
+            });
+        });
+
+        if (panel) {
+            panel.addEventListener('click', function (e) {
+                e.stopPropagation();
+            });
+        }
+
+        modal.querySelectorAll('[data-co-picker-node]').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                setSelection(
+                    btn.getAttribute('data-co-path') || '',
+                    btn.getAttribute('data-co-label') || btn.textContent.trim()
+                );
+            });
+        });
+
+        if (confirmBtn) {
+            confirmBtn.addEventListener('click', function () {
+                window.location.href = buildFilterUrl(selectedPath);
+            });
+        }
+
+        if (clearBtn) {
+            clearBtn.addEventListener('click', function () {
+                setSelection('', '全部委托单位');
+            });
+        }
+
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+                closeOrgModal();
+            }
+        });
+
+        if (orgFilter && orgTree) {
+            orgFilter.addEventListener('input', function () {
+                var q = (orgFilter.value || '').toLowerCase();
+                orgTree.querySelectorAll('li').forEach(function (li) {
+                    var btn = li.querySelector('[data-co-picker-node]');
+                    var text = (btn && (btn.getAttribute('data-co-label') || btn.textContent) || '').toLowerCase();
+                    li.style.display = !q || text.indexOf(q) >= 0 ? '' : 'none';
+                });
+            });
+        }
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initFileLibOrgPicker);
+    } else {
+        initFileLibOrgPicker();
+    }
+})();
+
 (function () {
     var project = "{{ project_selected|default:''|escapejs }}";
     if (project) {
@@ -613,9 +967,120 @@
             }
         });
     }
+    var batchForm = document.getElementById('batch-form');
+    function allAncestorDetailsOpen(el) {
+        var p = el.parentElement;
+        while (p) {
+            if (p.tagName === 'DETAILS' && !p.open) {
+                return false;
+            }
+            p = p.parentElement;
+        }
+        return true;
+    }
+    function queryRowChecksInExpanded() {
+        var out = [];
+        document.querySelectorAll('input.row-check[name="ids"]').forEach(function (cb) {
+            if (allAncestorDetailsOpen(cb)) {
+                out.push(cb);
+            }
+        });
+        return out;
+    }
+    function queryAllRowChecks() {
+        return Array.prototype.slice.call(document.querySelectorAll('input.row-check[name="ids"]'));
+    }
+    function syncTopCheckAll() {
+        var top = document.getElementById('check-all');
+        if (!top) {
+            return;
+        }
+        var exp = queryRowChecksInExpanded();
+        if (!exp.length) {
+            top.checked = false;
+            top.indeterminate = false;
+            return;
+        }
+        var c = exp.filter(function (b) { return b.checked; }).length;
+        top.checked = c === exp.length;
+        top.indeterminate = c > 0 && c < exp.length;
+    }
+    function syncLevelChecksFromDom() {
+        document.querySelectorAll('.file-lib-level-check').forEach(function (lc) {
+            var det = lc.closest('details');
+            if (!det) {
+                return;
+            }
+            var boxes = Array.prototype.slice.call(det.querySelectorAll('input.row-check[name="ids"]'));
+            if (!boxes.length) {
+                lc.checked = false;
+                lc.indeterminate = false;
+                lc.disabled = true;
+                return;
+            }
+            lc.disabled = false;
+            var n = boxes.length;
+            var c = boxes.filter(function (b) { return b.checked; }).length;
+            lc.checked = c === n;
+            lc.indeterminate = c > 0 && c < n;
+        });
+    }
+    function syncAllSelectionUi() {
+        syncLevelChecksFromDom();
+        syncTopCheckAll();
+    }
+    if (batchForm) {
+        batchForm.addEventListener('click', function (e) {
+            if (e.target.classList && e.target.classList.contains('file-lib-level-check')) {
+                e.stopPropagation();
+            }
+        }, true);
+        batchForm.addEventListener('mousedown', function (e) {
+            if (e.target.classList && e.target.classList.contains('file-lib-level-check')) {
+                e.stopPropagation();
+            }
+        }, true);
+    }
     document.getElementById('check-all')?.addEventListener('change', function () {
-        document.querySelectorAll('.row-check').forEach(function (cb) { cb.checked = this.checked; }.bind(this));
+        var on = this.checked;
+        if (on) {
+            var exp = queryRowChecksInExpanded();
+            if (!exp.length) {
+                this.checked = false;
+                alert('请先在左侧展开需要操作的分组（多级分组需逐层展开），再使用「全选已展开」；也可使用分组行首复选框（无需展开子级）。');
+                return;
+            }
+            exp.forEach(function (cb) { cb.checked = true; });
+        } else {
+            queryAllRowChecks().forEach(function (cb) { cb.checked = false; });
+        }
+        syncAllSelectionUi();
     });
+    batchForm?.addEventListener('change', function (e) {
+        var t = e.target;
+        if (t && t.classList && t.classList.contains('file-lib-level-check')) {
+            var det = t.closest('details');
+            if (!det || !batchForm || !batchForm.contains(det)) {
+                return;
+            }
+            var on = t.checked;
+            t.indeterminate = false;
+            det.querySelectorAll('input.row-check[name="ids"]').forEach(function (cb) {
+                cb.checked = on;
+            });
+            syncAllSelectionUi();
+            return;
+        }
+        if (t && t.matches && t.matches('input.row-check[name="ids"]')) {
+            syncAllSelectionUi();
+        }
+    });
+    document.querySelectorAll('details.file-lib-task, details.file-lib-project, details.file-lib-report, details.file-lib-site').forEach(function (det) {
+        det.addEventListener('toggle', function () {
+            syncTopCheckAll();
+        });
+    });
+    syncAllSelectionUi();
     var df = document.getElementById('date_from');
     var dt = document.getElementById('date_to');
     var form = document.getElementById('file-library-date-filter');
@@ -740,4 +1205,5 @@
 })();
 {% endif %}
 </script>
+{% include "core/partials/library_explorer_dnd_include.html" %}
 {% endblock %}

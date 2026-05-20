@@ -1,0 +1,106 @@
+{# 委托单位：以「文件夹」形式维护 医院 → 院区（可省略）→ 科室（可省略） #}
+<div class="space-y-3 text-sm">
+    <p class="text-[11px] text-slate-500 leading-relaxed px-0.5">
+        与左侧树一致：每一级是一个<strong>文件夹</strong>。可只有医院；或医院→科室（跳过院区）；或医院→院区→科室。
+    </p>
+
+    {% if folder_breadcrumbs %}
+    <nav class="flex flex-wrap items-center gap-0.5 text-[11px] text-slate-600 rounded-lg bg-slate-50 px-2 py-1.5 ring-1 ring-slate-100" aria-label="当前文件夹路径">
+        <i class="ri-folder-2-line text-amber-500 shrink-0"></i>
+        {% for crumb in folder_breadcrumbs %}
+        {% if not forloop.first %}<span class="text-slate-300">/</span>{% endif %}
+        {% if forloop.last %}
+        <span class="font-medium text-slate-800 truncate max-w-[7rem]" title="{{ crumb.label }}">{{ crumb.label }}</span>
+        {% else %}
+        <a href="{{ workbench_explorer_base }}{% if crumb.path %}{% if '?' in workbench_explorer_base %}&{% else %}?{% endif %}fl_path={{ crumb.path|urlencode }}{% endif %}"
+           class="hover:text-indigo-600 truncate max-w-[6rem]" title="{{ crumb.label }}">{{ crumb.label }}</a>
+        {% endif %}
+        {% endfor %}
+    </nav>
+    {% endif %}
+
+    {% if explorer_org %}
+    <div class="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
+        <p class="text-xs font-medium text-slate-700 flex items-center gap-1.5">
+            <i class="{% if explorer_org.level == 'hospital' %}ri-hospital-line text-rose-500{% elif explorer_org.level == 'campus' %}ri-building-2-line text-amber-600{% else %}ri-stethoscope-line text-teal-600{% endif %}"></i>
+            当前文件夹
+        </p>
+        <p class="text-xs text-slate-600 pl-5">{{ explorer_org.full_display_name }}</p>
+    </div>
+    {% else %}
+    <p class="text-[11px] text-slate-500 px-0.5">当前在<strong>根目录</strong>，可新建医院文件夹；进入下级后可新建院区或科室文件夹。</p>
+    {% endif %}
+
+    {% if explorer_org_child_levels %}
+    <form method="post" class="rounded-xl border border-dashed border-indigo-200 bg-indigo-50/40 p-3 space-y-2.5">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="create_commission_organization">
+        <input type="hidden" name="parent_id" value="{{ explorer_org.pk }}">
+        {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
+        <p class="text-xs font-semibold text-indigo-900 flex items-center gap-1">
+            <i class="ri-folder-add-line"></i> 新建子文件夹
+        </p>
+        <p class="text-[11px] text-indigo-800/90">在「{{ explorer_org.name }}」下创建（院区、科室可只建其一）</p>
+        <div class="space-y-1.5">
+            {% for lv, lv_label in explorer_org_child_levels %}
+            <label class="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-transparent hover:bg-white/80 cursor-pointer has-[:checked]:border-indigo-200 has-[:checked]:bg-white">
+                <input type="radio" name="org_level" value="{{ lv }}" class="text-indigo-600" {% if forloop.first %}checked{% endif %}>
+                <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-50">
+                    {% if lv == 'campus' %}<i class="ri-building-2-line text-amber-600"></i>{% else %}<i class="ri-stethoscope-line text-teal-600"></i>{% endif %}
+                </span>
+                <span>
+                    <span class="block text-xs font-medium text-slate-800">{{ lv_label }}文件夹</span>
+                    <span class="block text-[10px] text-slate-500">{% if lv == 'campus' %}仅院区层，其下可再建科室{% else %}可直接挂在当前医院或院区下{% endif %}</span>
+                </span>
+            </label>
+            {% endfor %}
+        </div>
+        <input type="text" name="org_name" placeholder="文件夹名称 *" required
+               class="w-full px-2.5 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500/30">
+        <input type="text" name="org_notes" placeholder="备注（可选）"
+               class="w-full px-2.5 py-2 text-sm border border-slate-200 rounded-lg bg-white">
+        <button type="submit" class="w-full py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">
+            <i class="ri-add-line align-middle"></i> 创建文件夹
+        </button>
+    </form>
+    {% elif not explorer_org %}
+    <form method="post" class="rounded-xl border border-dashed border-slate-300 bg-slate-50/90 p-3 space-y-2.5">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="create_commission_organization">
+        <input type="hidden" name="org_level" value="hospital">
+        <p class="text-xs font-semibold text-slate-800 flex items-center gap-1">
+            <i class="ri-folder-add-line text-amber-600"></i> 新建医院文件夹
+        </p>
+        <p class="text-[11px] text-slate-500">顶级文件夹，其下可建院区文件夹和/或科室文件夹</p>
+        <input type="text" name="org_name" placeholder="医院名称（文件夹名）*" required
+               class="w-full px-2.5 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-indigo-500/30">
+        <input type="text" name="org_notes" placeholder="备注（可选）"
+               class="w-full px-2.5 py-2 text-sm border border-slate-200 rounded-lg bg-white">
+        <button type="submit" class="w-full py-2 rounded-lg bg-slate-800 text-white text-sm font-medium hover:bg-slate-700">
+            <i class="ri-add-line align-middle"></i> 创建文件夹
+        </button>
+    </form>
+    {% else %}
+    <p class="text-[11px] text-slate-500 rounded-lg bg-slate-50 px-2 py-2 ring-1 ring-slate-100">科室为最底层文件夹，此处不可再建子文件夹。可在左侧进入上级后新建同级或下级。</p>
+    {% endif %}
+
+    {% if explorer_org %}
+    <form method="post" class="rounded-xl border border-slate-200 bg-white p-3 space-y-2 pt-1">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="update_commission_organization">
+        <input type="hidden" name="org_id" value="{{ explorer_org.pk }}">
+        {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
+        <p class="text-xs font-semibold text-slate-700 flex items-center gap-1">
+            <i class="ri-edit-2-line text-slate-500"></i> 重命名当前文件夹
+        </p>
+        <input type="text" name="org_name" value="{{ explorer_org.name }}" required
+               placeholder="文件夹名称 *"
+               class="w-full px-2.5 py-2 text-sm border border-slate-200 rounded-lg bg-white">
+        <textarea name="org_notes" rows="2" placeholder="备注（可选）"
+                  class="w-full px-2.5 py-2 text-sm border border-slate-200 rounded-lg bg-white">{{ explorer_org.notes }}</textarea>
+        <button type="submit" class="w-full py-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-800 text-sm font-medium hover:bg-slate-100">保存</button>
+    </form>
+    {% elif not explorer_org %}
+    <p class="text-[11px] text-slate-400 px-0.5">在左侧树或中间区域进入某文件夹后，可在此重命名。</p>
+    {% endif %}
+</div>

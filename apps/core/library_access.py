@@ -342,6 +342,17 @@ def library_user_may_access_task_template_library_nav(user) -> bool:
     )
 
 
+def library_user_may_access_hospital_info_nav(user) -> bool:
+    """医院信息管理：需文件库权限且具备委托单位维护能力。"""
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if not role_has(user, "perm_file_library"):
+        return False
+    return library_user_can_assign_tasks_to_participants(user) or role_has(
+        user, "perm_create_library_project"
+    )
+
+
 def role_has(user, perm: str) -> bool:
     """
     是否拥有某权限：
@@ -394,12 +405,45 @@ def library_user_has_task_assignment_on_project(user, project) -> bool:
     return LibraryTaskAssignment.objects.filter(assignee=user, project=project).exists()
 
 
+def library_user_is_project_primary_responsible(user, project) -> bool:
+    """是否为指定项目的业务主要负责人（拥有该项目工作台内的完整配置与分配权限）。"""
+    if user is None or project is None or not getattr(user, "is_authenticated", False):
+        return False
+    return getattr(project, "primary_responsible_id", None) == user.id
+
+
+def library_user_may_assign_on_project(user, project) -> bool:
+    """是否可在指定项目内向他人指定主要负责人、同步任务分配等。"""
+    if project is None or not getattr(user, "is_authenticated", False):
+        return False
+    if library_user_can_assign_tasks_to_participants(user):
+        return True
+    return library_user_is_project_primary_responsible(user, project)
+
+
 def library_user_may_mutate_project_workbench(user, project) -> bool:
     """
-    是否可对「项目工作台」内指定项目进行与项目相关的写操作（不含新建/删除项目、不含撤回他人分配等全局管理动作）。
-    具备分配权的账号视为全项目；否则须为已在该项目获得任务分配的检测侧参与人。
+    是否可对「项目工作台」内指定项目进行委托、流程、分配等写操作（不含「文件」标签维护）。
+    高权限分配者视为全项目；主要负责人限本项目；参与人须已有任务分配或为项目创建者。
     """
     if project is None or not getattr(user, "is_authenticated", False):
+        return False
+    if library_user_can_assign_tasks_to_participants(user):
+        return True
+    if library_user_is_project_primary_responsible(user, project):
+        return True
+    if library_user_has_task_assignment_on_project(user, project):
+        return True
+    if role_has(user, "perm_create_library_project") and getattr(project, "created_by_id", None) == user.id:
+        return True
+    return False
+
+
+def library_user_may_edit_project_files(user, project) -> bool:
+    """是否可在项目工作台「文件」标签中关联/移除项目文件。主要负责人不可编辑项目文件。"""
+    if project is None or not getattr(user, "is_authenticated", False):
+        return False
+    if library_user_is_project_primary_responsible(user, project):
         return False
     if library_user_can_assign_tasks_to_participants(user):
         return True
@@ -511,13 +555,19 @@ def library_user_scoped_project_ids(user) -> list[int]:
             if pid not in seen:
                 seen.add(pid)
                 out.append(pid)
+    for pid in LibraryProject.objects.filter(primary_responsible=user).values_list("pk", flat=True):
+        if pid not in seen:
+            seen.add(pid)
+            out.append(pid)
     return out
 
 
 def library_user_test_account_self_fill(user) -> bool:
     """
-    测试沙箱账号：仅本人数据 + 可自建项目 + 不可向他人分配任务。
-    此类账号在项目工作台加载时，自动把可见项目上的任务分配与流程岗位同步为本人。
+    测试沙箱账号：仅本人数据 + 可自建项目 + 不可向他人分配任务（与 ``party_a_demo_restrictions`` 等组合常见）。
+
+    用于放宽部分文件库/导出入口等逻辑；**不再**在页面加载或创建项目时自动写入任务分配，
+    以便在「分配」页由本人完成分配并走完整流程。
     """
     if not getattr(user, "is_authenticated", False):
         return False
@@ -528,6 +578,24 @@ def library_user_test_account_self_fill(user) -> bool:
         and role_has(user, "perm_create_library_project")
         and not library_user_can_assign_tasks_to_participants(user)
     )
+
+
+def library_user_hide_project_workbench_files_tab(user, project=None) -> bool:
+    """
+    是否在项目工作台隐藏「项目文件」标签。
+
+    演示/沙箱端不适合在项目维度自由勾选文件库记录；主要负责人亦不在此维护项目文件。
+    """
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if library_user_has_party_a_demo_restrictions(user):
+        return True
+    if library_user_test_account_self_fill(user):
+        return True
+    if project is not None and library_user_is_project_primary_responsible(user, project):
+        if not library_user_can_assign_tasks_to_participants(user):
+            return True
+    return False
 
 
 def library_signatory_assigned_project_selected(user, project_selected_id: int | None) -> bool:
@@ -650,6 +718,40 @@ def library_file_access_allowed(user, lf: LibraryFile) -> bool:
     return lf.created_by_id == user.id
 
 
+def library_user_can_delete_any_library_file(user) -> bool:
+    """
+    是否可按「已可见」范围删除任意上传者创建的文件（仍须单独通过 library_file_access_allowed）。
+
+    用于系统管理员类角色。部门 / 上下级删除他人文件等扩展策略可在此函数或
+    library_user_may_delete_library_file 中追加分支（当前未建模组织层级）。
+    """
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+    return _role_code(user) in ("super_admin", "admin")
+
+
+def library_user_may_delete_library_file(user, lf: LibraryFile) -> bool:
+    """
+    移入回收站、回收站内恢复或彻底删除等写操作；规则严于「仅可见」。
+
+    - 须先满足 library_file_access_allowed（与列表/预览一致）。
+    - 默认仅允许删除本人上传的记录（created_by 为当前用户）。
+    - Django 超级用户或角色 super_admin / admin：可删除在可见范围内的任意文件。
+    - 无上传者（created_by 为空）的记录：仅上述管理员类账号可删，避免普通用户误删系统数据。
+    """
+    if lf is None:
+        return False
+    if not library_file_access_allowed(user, lf):
+        return False
+    if library_user_can_delete_any_library_file(user):
+        return True
+    if lf.created_by_id is None:
+        return False
+    return lf.created_by_id == user.id
+
+
 def role_permission_map(user) -> Dict[str, bool]:
     """供模板使用的权限字典。"""
     return {key: role_has(user, key) for key, _, _, _ in ROLE_PERMISSION_MATRIX}
@@ -662,6 +764,7 @@ def role_ui_context(user) -> Dict[str, Any]:
     """
     empty: Dict[str, Any] = {
         "ui_sidebar_show_project_management": False,
+        "ui_sidebar_show_commission_manage": False,
         "ui_dashboard_hide_json_tile": False,
         "ui_dashboard_site_record_focus": False,
         "ui_dashboard_hide_file_stats_row": False,
@@ -690,8 +793,13 @@ def role_ui_context(user) -> Dict[str, Any]:
     # Django Admin 入口：仅保留给系统管理类角色，避免检测岗误点
     show_admin_tile = is_super or is_admin or role_has(user, "perm_manage_users")
 
+    from apps.core.commission_management_service import library_user_may_access_commission_manage
+
     return {
         "ui_sidebar_show_project_management": bool(show_pm),
+        "ui_sidebar_show_commission_manage": bool(
+            show_pm and library_user_may_access_commission_manage(user)
+        ),
         "ui_dashboard_hide_json_tile": bool(hide_json),
         "ui_dashboard_site_record_focus": bool(site_focus),
         "ui_dashboard_hide_file_stats_row": bool(hide_file_row),

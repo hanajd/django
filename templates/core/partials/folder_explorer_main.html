@@ -1,0 +1,92 @@
+{# 面包屑 + 当前层子文件夹网格 + 文件表（files_at_path）；DnD 作用域由外层 #library-explorer-dnd-scope 提供 #}
+<div>
+<nav class="flex flex-wrap items-center gap-1 text-sm text-slate-600 mb-4 px-1" aria-label="路径">
+    {% for crumb in folder_breadcrumbs %}
+    {% if not forloop.first %}<i class="ri-arrow-right-s-line text-slate-300"></i>{% endif %}
+    {% if forloop.last %}
+    <span class="font-medium text-slate-900">{{ crumb.label }}</span>
+    {% else %}
+    <a href="{{ explorer_base_url }}{% if crumb.path %}{% if '?' in explorer_base_url %}&{% else %}?{% endif %}fl_path={{ crumb.path|urlencode }}{% endif %}"
+       class="hover:text-indigo-600">{{ crumb.label }}</a>
+    {% endif %}
+    {% endfor %}
+</nav>
+
+{% if explorer_dnd_enabled %}
+<p class="mb-3 text-[11px] text-slate-500 leading-relaxed px-0.5">
+    <i class="ri-drag-move-2-line align-middle text-indigo-500"></i>
+    {% if explorer_dnd_mode == 'file_library' %}
+    可将下方文件行拖到「项目」文件夹以关联到该项目。
+    {% elif explorer_dnd_mode == 'task_library' %}
+    按住<strong>报告</strong>名称拖动到左侧或中间的<strong>任务分类</strong>文件夹（含「未分类报告」）。
+    {% elif explorer_dnd_allow_org_move %}
+    按住名称拖动：项目可放入医院、院区或科室；院区/科室可拖到上级医院或院区（医院为顶级不可拖）。
+    {% else %}
+    按住<strong>项目</strong>名称拖动，可放入医院、院区或科室以调整所属委托单位。组织架构请在「医院信息管理」中维护。
+    {% endif %}
+</p>
+{% endif %}
+
+{% if folder_entries %}
+<div class="mb-6">
+    <p class="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">文件夹</p>
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+        {% for ent in folder_entries %}
+        {% if explorer_dnd_enabled %}
+        <div class="folder-explorer-card group relative flex flex-col items-center gap-1 p-4 rounded-xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-md transition-all text-center"
+             {% if ent.drop_accepts %}data-drop-accepts="{{ ent.drop_accepts }}" data-drop-id="{{ ent.entity_pk }}" data-drop-org-level="{{ ent.org_level }}"{% endif %}
+             >
+            <a href="{{ explorer_base_url }}{% if '?' in explorer_base_url %}&{% else %}?{% endif %}fl_path={{ ent.path|urlencode }}{{ ent.link_suffix }}"
+               class="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-50 text-amber-600 group-hover:bg-amber-100"
+               title="打开文件夹">
+                <i class="{% if ent.icon == 'project' %}ri-file-text-line text-2xl{% elif ent.icon == 'hospital' %}ri-hospital-line text-2xl{% elif ent.icon == 'campus' %}ri-building-2-line text-2xl{% elif ent.icon == 'department' %}ri-stethoscope-line text-2xl{% elif ent.icon == 'site_record' %}ri-file-paper-2-line text-2xl{% elif ent.icon == 'report' %}ri-file-chart-line text-2xl{% elif ent.icon == 'task' %}ri-stack-line text-2xl{% elif ent.icon == 'site' %}ri-file-paper-2-line text-2xl{% elif ent.icon == 'submit_data' %}ri-file-code-line text-2xl{% elif ent.icon == 'submit_signature' %}ri-quill-pen-line text-2xl{% elif ent.icon == 'submit_photo' %}ri-image-2-line text-2xl{% else %}ri-folder-fill text-2xl{% endif %}"></i>
+            </a>
+            <a href="{{ explorer_base_url }}{% if '?' in explorer_base_url %}&{% else %}?{% endif %}fl_path={{ ent.path|urlencode }}{{ ent.link_suffix }}"
+               class="library-dnd-source w-full px-1 text-sm font-medium text-slate-900 line-clamp-2 leading-snug rounded-lg py-1 hover:bg-slate-50{% if ent.drag_type %} cursor-grab active:cursor-grabbing{% endif %}"
+               {% if ent.drag_type %}draggable="true" data-drag-type="{{ ent.drag_type }}" data-drag-id="{{ ent.entity_pk }}" data-org-level="{{ ent.org_level }}"{% endif %}
+               title="{% if ent.drag_type %}按住名称拖动{% else %}打开{% endif %}">{{ ent.label }}</a>
+            {% if ent.meta %}<span class="text-[11px] text-slate-500 px-1">{{ ent.meta }}</span>{% endif %}
+        </div>
+        {% else %}
+        <a href="{{ explorer_base_url }}{% if '?' in explorer_base_url %}&{% else %}?{% endif %}fl_path={{ ent.path|urlencode }}{{ ent.link_suffix }}"
+           class="group flex flex-col items-center gap-2 p-4 rounded-xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-md hover:bg-indigo-50/30 transition-all text-center">
+            <span class="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-50 text-amber-600 group-hover:bg-amber-100">
+                <i class="{% if ent.icon == 'project' %}ri-file-text-line text-2xl{% elif ent.icon == 'hospital' %}ri-hospital-line text-2xl{% elif ent.icon == 'campus' %}ri-building-2-line text-2xl{% elif ent.icon == 'department' %}ri-stethoscope-line text-2xl{% elif ent.icon == 'site_record' %}ri-file-paper-2-line text-2xl{% elif ent.icon == 'report' %}ri-file-chart-line text-2xl{% elif ent.icon == 'task' %}ri-stack-line text-2xl{% elif ent.icon == 'site' %}ri-file-paper-2-line text-2xl{% elif ent.icon == 'submit_data' %}ri-file-code-line text-2xl{% elif ent.icon == 'submit_signature' %}ri-quill-pen-line text-2xl{% elif ent.icon == 'submit_photo' %}ri-image-2-line text-2xl{% else %}ri-folder-fill text-2xl{% endif %}"></i>
+            </span>
+            <span class="text-sm font-medium text-slate-900 line-clamp-2 w-full">{{ ent.label }}</span>
+            {% if ent.meta %}<span class="text-[11px] text-slate-500">{{ ent.meta }}</span>{% endif %}
+        </a>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{% if files_at_path %}
+<div>
+    {% if folder_entries %}<p class="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">文件</p>{% endif %}
+    <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+        <table class="min-w-full text-left text-sm text-slate-700">
+            <thead>
+                <tr class="border-b border-slate-100 bg-slate-50/90">
+                    {% if file_library_row_selection %}
+                    <th class="w-12 px-3 py-2.5"></th>
+                    {% endif %}
+                    <th class="min-w-[14rem] px-3 py-2.5 text-xs font-semibold text-slate-500">文件信息</th>
+                    <th class="px-3 py-2.5 text-xs font-semibold text-slate-500">上传者</th>
+                    <th class="px-3 py-2.5 text-xs font-semibold text-slate-500">创建时间</th>
+                    <th class="w-36 px-3 py-2.5 text-right text-xs font-semibold text-slate-500">操作</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                {% for f in files_at_path %}
+                {% include "core/partials/file_library_file_row.html" %}
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% elif not folder_entries %}
+<div class="py-16 text-center text-slate-500 text-sm">此文件夹为空</div>
+{% endif %}
+</div>

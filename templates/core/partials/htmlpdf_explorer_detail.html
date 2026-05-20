@@ -1,0 +1,129 @@
+{# 模板编辑器右侧：面包屑 + 子文件夹网格 / 报告+现场记录 / 单个现场记录 #}
+<div class="min-h-[20rem]">
+    {% if folder_breadcrumbs %}
+    <nav class="flex flex-wrap items-center gap-1 text-sm text-slate-600 mb-5 px-0.5" aria-label="路径">
+        <a href="{{ htmlpdf_explorer_base }}"
+           class="inline-flex items-center gap-1 hover:text-violet-700 transition-colors">
+            <i class="ri-home-4-line"></i>
+            <span>全部模板</span>
+        </a>
+        {% for crumb in folder_breadcrumbs %}
+        {% if crumb.label != "任务模板" %}
+        <i class="ri-arrow-right-s-line text-slate-300"></i>
+        {% if forloop.last %}
+        <span class="font-medium text-slate-900">{{ crumb.label }}</span>
+        {% elif crumb.path %}
+        <a href="{{ htmlpdf_explorer_base }}?fl_path={{ crumb.path|urlencode }}"
+           class="hover:text-violet-700 transition-colors">{{ crumb.label }}</a>
+        {% else %}
+        <span class="text-slate-500">{{ crumb.label }}</span>
+        {% endif %}
+        {% endif %}
+        {% endfor %}
+    </nav>
+    {% endif %}
+
+    {% if selected_report %}
+    {# 报告：同页展示报告版式 + 下属现场记录 #}
+    <header class="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2 mb-1">
+                <span class="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-violet-100 text-violet-800">报告模板</span>
+                <span class="font-mono text-xs text-slate-500">{{ selected_report.task_code }}</span>
+            </div>
+            <h2 class="text-lg font-semibold text-slate-900 tracking-tight">{{ selected_report.task_name }}</h2>
+            <p class="text-xs text-slate-500 mt-1">
+                报告 {{ selected_report.template_pdfs|length }} 个 PDF
+                {% if report_site_records %} · {{ report_site_records|length }} 个现场记录子模板{% endif %}
+            </p>
+        </div>
+        {% if show_library_task_nav %}
+        <a href="{{ selected_report.manage_url }}"
+           class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-slate-600 ring-1 ring-slate-200 hover:text-indigo-700 hover:ring-indigo-200 shrink-0">
+            <i class="ri-external-link-line"></i> 任务模板库
+        </a>
+        {% endif %}
+    </header>
+
+    <section class="mb-8">
+        <h3 class="text-xs font-semibold uppercase tracking-wide text-violet-700 mb-3 flex items-center gap-2">
+            <i class="ri-file-chart-line"></i> 报告版式
+        </h3>
+        {% include "core/partials/htmlpdf_pdf_file_grid.html" with task_pdfs=selected_report.template_pdfs task_id=selected_report.task_id fl_path=selected_report.fl_path %}
+    </section>
+
+    {% if report_site_records %}
+    <section class="space-y-6 pt-6 border-t border-slate-100">
+        <h3 class="text-xs font-semibold uppercase tracking-wide text-cyan-700 flex items-center gap-2">
+            <i class="ri-file-paper-2-line"></i> 下属现场记录
+        </h3>
+        {% for site in report_site_records %}
+        <article class="rounded-2xl border border-cyan-100/80 bg-cyan-50/20 overflow-hidden">
+            <header class="px-4 py-3 flex flex-wrap items-center justify-between gap-2 border-b border-cyan-100/60 bg-white/80">
+                <div class="min-w-0">
+                    <span class="text-[10px] font-semibold uppercase tracking-wide text-cyan-800">现场记录</span>
+                    <h4 class="text-sm font-medium text-slate-900 truncate">{{ site.task_name }}</h4>
+                    <span class="font-mono text-[11px] text-slate-500">{{ site.task_code }}</span>
+                </div>
+                <a href="{{ htmlpdf_explorer_base }}?fl_path={{ site.fl_path|urlencode }}"
+                   class="text-xs text-cyan-700 hover:text-cyan-900 font-medium shrink-0">仅看此项</a>
+            </header>
+            <div class="p-4">
+                {% include "core/partials/htmlpdf_pdf_file_grid.html" with task_pdfs=site.template_pdfs task_id=site.task_id fl_path=site.fl_path %}
+            </div>
+        </article>
+        {% endfor %}
+    </section>
+    {% else %}
+    <p class="text-sm text-slate-500 rounded-xl bg-slate-50 px-4 py-3 border border-slate-100">
+        该报告下暂无关联的现场记录模板；可在任务模板库中于本报告下新建现场记录。
+    </p>
+    {% endif %}
+
+    {% elif selected_task %}
+    <header class="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2 mb-1">
+                <span class="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-800">现场记录</span>
+                <span class="font-mono text-xs text-slate-500">{{ selected_task.task_code }}</span>
+            </div>
+            <h2 class="text-lg font-semibold text-slate-900 tracking-tight">{{ selected_task.task_name }}</h2>
+            <p class="text-xs text-slate-500 mt-1">共 {{ selected_task.template_pdfs|length }} 个可编辑 PDF</p>
+        </div>
+        {% if show_library_task_nav %}
+        <a href="{{ selected_task.manage_url }}"
+           class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium text-slate-600 ring-1 ring-slate-200 hover:text-indigo-700 hover:ring-indigo-200 shrink-0">
+            <i class="ri-external-link-line"></i> 任务模板库
+        </a>
+        {% endif %}
+    </header>
+    {% include "core/partials/htmlpdf_pdf_file_grid.html" with task_pdfs=selected_task.template_pdfs task_id=selected_task.task_id fl_path=selected_task.fl_path %}
+
+    {% elif folder_entries %}
+    <p class="text-xs font-medium text-slate-500 uppercase tracking-wide mb-3">文件夹</p>
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+        {% for ent in folder_entries %}
+        <a href="{{ htmlpdf_explorer_base }}?fl_path={{ ent.path|urlencode }}"
+           class="group flex flex-col items-center gap-2 p-4 rounded-2xl border border-slate-200/90 bg-white hover:border-violet-300 hover:shadow-md hover:bg-violet-50/20 transition-all text-center">
+            <span class="flex h-12 w-12 items-center justify-center rounded-xl {% if ent.icon == 'site' %}bg-cyan-50 text-cyan-600 group-hover:bg-cyan-100{% elif ent.icon == 'project' %}bg-violet-50 text-violet-600 group-hover:bg-violet-100{% else %}bg-amber-50 text-amber-600 group-hover:bg-amber-100{% endif %}">
+                <i class="{% if ent.icon == 'site' %}ri-file-paper-2-line{% elif ent.icon == 'project' %}ri-file-chart-line{% else %}ri-folder-fill{% endif %} text-2xl"></i>
+            </span>
+            <span class="text-sm font-medium text-slate-900 line-clamp-2 w-full leading-snug">{{ ent.label }}</span>
+            {% if ent.meta %}<span class="text-[11px] text-slate-500">{{ ent.meta }}</span>{% endif %}
+            {% if ent.count %}<span class="text-[10px] tabular-nums text-violet-600 font-medium">{{ ent.count }} 项</span>{% endif %}
+        </a>
+        {% endfor %}
+    </div>
+
+    {% else %}
+    <div class="rounded-2xl border border-dashed border-slate-200 bg-gradient-to-br from-slate-50 to-violet-50/30 px-8 py-14 text-center">
+        <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-white shadow-sm text-violet-500 mb-4">
+            <i class="ri-folder-open-line text-3xl"></i>
+        </div>
+        <h2 class="text-lg font-semibold text-slate-900">从左侧选择位置</h2>
+        <p class="text-sm text-slate-500 mt-2 max-w-sm mx-auto leading-relaxed">
+            展开任务分类后点击<strong>报告</strong>，右侧将同时显示报告版式与下属现场记录；也可点选单个现场记录单独查看。
+        </p>
+    </div>
+    {% endif %}
+</div>
