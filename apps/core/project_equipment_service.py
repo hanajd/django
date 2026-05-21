@@ -12,10 +12,12 @@ from apps.core.commission_org_service import (
 )
 from apps.core.hospital_info_service import (
     bind_equipment_tasks_to_project,
+    collect_library_tasks_for_project_equipments,
     equipment_display_status,
     equipments_for_org_view,
     library_tasks_for_equipment_binding,
     resolve_equipment_report_task,
+    sync_project_library_tasks_from_equipments,
 )
 from apps.core.models import (
     CommissionOrgEquipment,
@@ -68,6 +70,15 @@ def resolve_workbench_equipment_scope_org(
     if org.hospital_root().pk != hospital.pk:
         return None
     return org
+
+
+def project_tasks_for_user_assignment(project: LibraryProject) -> list[LibraryTask]:
+    """向参与人同步任务时：有委托设备则仅各设备任务链，否则沿用项目已挂载任务。"""
+    if LibraryProjectEquipment.objects.filter(project=project).exists():
+        tasks = collect_library_tasks_for_project_equipments(project)
+        if tasks:
+            return tasks
+    return list(project.library_tasks.all().order_by("code"))
 
 
 def project_equipment_queryset(project: LibraryProject) -> QuerySet[LibraryProjectEquipment]:
@@ -220,7 +231,7 @@ def sync_project_task_assignments_for_user(project, assignee, assigned_by) -> tu
 
     if project is None or assignee is None:
         return 0, 0
-    project_tasks = list(project.library_tasks.all().order_by("code"))
+    project_tasks = project_tasks_for_user_assignment(project)
     if not project_tasks:
         return 0, 0
     created_count = 0
@@ -249,11 +260,14 @@ def sync_project_task_assignments_for_user(project, assignee, assigned_by) -> tu
     return created_count, len(all_file_ids)
 
 
-def unbind_equipment_from_project(project: LibraryProject, link_id: int) -> str | None:
+def unbind_equipment_from_project(
+    project: LibraryProject, link_id: int, user: User | None = None
+) -> str | None:
     link = LibraryProjectEquipment.objects.filter(project=project, pk=link_id).first()
     if link is None:
         return "委托设备记录不存在"
     link.delete()
+    sync_project_library_tasks_from_equipments(project, user)
     return None
 
 
@@ -285,6 +299,8 @@ def update_project_equipment_report_task(
     eq.report_task = task
     eq.save(update_fields=["report_task_id", "updated_at"])
     _, err = bind_equipment_tasks_to_project(eq, project, user)
+    if err is None:
+        sync_project_library_tasks_from_equipments(project, user)
     return err
 
 

@@ -268,7 +268,7 @@ def commission_project_rows(
                 "assignees": assignees,
                 "can_manage": library_user_may_assign_on_project(viewer, p)
                 or library_user_is_project_primary_responsible(viewer, p),
-                "workbench_url": f"?project_id={p.pk}&tab=assign",
+                "workbench_url": f"?project_id={p.pk}&tab=dispatch",
             }
         )
     return out

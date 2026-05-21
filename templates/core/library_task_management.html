@@ -10,7 +10,7 @@
         <a href="{{ workbench_back_url }}" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 font-medium hover:bg-indigo-100 border border-indigo-100">
             <i class="ri-arrow-left-line"></i> 返回项目工作台
         </a>
-        <span class="text-slate-500">分配与记录请在项目工作台「分配」标签中操作。</span>
+        <span class="text-slate-500">派工与记录请在项目工作台「人员派工」标签中操作。</span>
     </div>
     {% endif %}
 
@@ -301,6 +301,12 @@
 
                     <div>
                         <h3 class="text-sm font-semibold text-slate-800 mb-3">已绑定的模板文件</h3>
+                        {% if task_primary_json_file %}
+                        <p class="text-xs text-slate-500 mb-2">任务主 JSON（坐标模板，用于回填/PDF 生成）：<span class="font-medium text-slate-800">{{ task_primary_json_file.original_name }}</span></p>
+                        {% endif %}
+                        {% if task_auxiliary_json_files %}
+                        <p class="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-2">下列为<strong>辅助 JSON</strong>（前端规则 / 矩阵），仅保存在文件库，<strong>不参与</strong>任务模板绑定；App 导出前端 JSON 亦不会替换主模板。{% if task_edit_mode %}可在编辑模式下从模板移除。{% endif %}</p>
+                        {% endif %}
                         <div class="rounded-xl border border-slate-200 overflow-hidden max-h-80 overflow-y-auto">
                             <table class="min-w-full text-sm text-left">
                                 <thead class="bg-slate-50 text-slate-500 text-xs uppercase sticky top-0 border-b border-slate-100">
@@ -313,7 +319,14 @@
                                 <tbody class="divide-y divide-slate-100">
                                     {% for f in task_linked_files %}
                                     <tr class="hover:bg-slate-50/80">
-                                        <td class="px-4 py-2.5 text-slate-800">{{ f.original_name }}</td>
+                                        <td class="px-4 py-2.5 text-slate-800">
+                                            {{ f.original_name }}
+                                            {% if task_primary_json_file and f.id == task_primary_json_file.id %}
+                                            <span class="ml-1 text-[11px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800">主 JSON</span>
+                                            {% elif f.id in task_auxiliary_json_ids %}
+                                            <span class="ml-1 text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-900">辅助</span>
+                                            {% endif %}
+                                        </td>
                                         <td class="px-4 py-2.5 text-slate-500">{{ f.get_category_display }}</td>
                                         <td class="px-4 py-2.5 whitespace-nowrap">
                                             {% if role_perm.perm_file_preview and f.preview_kind != 'unsupported' %}
@@ -322,7 +335,7 @@
                                             {% if role_perm.perm_file_download %}
                                             <a href="{% url 'file_library_download' f.pk %}" class="text-emerald-600 hover:underline text-xs">下载</a>
                                             {% endif %}
-                                            {% if role_perm.perm_htmlpdf %}
+                                            {% if role_perm.perm_htmlpdf or role_perm.perm_process_pipeline %}
                                             {% with fn=f.original_name|lower %}
                                             {% if fn|slice:"-4:" == ".pdf" %}
                                             <a href="{% url 'htmlpdf_editor_open' f.pk %}?return_manage_task={{ manage_task.id }}&return_fl_path={{ fl_path|urlencode }}"
@@ -339,6 +352,51 @@
                             </table>
                         </div>
                     </div>
+
+                    {% if task_template_binding_history %}
+                    <div class="mt-6">
+                        <h3 class="text-sm font-semibold text-slate-800 mb-2">历史模板（可回溯）</h3>
+                        <p class="text-xs text-slate-500 mb-3">编辑器保存新 JSON 后，旧绑定会记录在此；文件未删除时可恢复为当前绑定。</p>
+                        <div class="rounded-xl border border-slate-200 overflow-hidden max-h-56 overflow-y-auto">
+                            <table class="min-w-full text-sm text-left">
+                                <thead class="bg-slate-50 text-slate-500 text-xs uppercase sticky top-0 border-b border-slate-100">
+                                    <tr>
+                                        <th class="px-3 py-2">类型</th>
+                                        <th class="px-3 py-2">文件名</th>
+                                        <th class="px-3 py-2">替换时间</th>
+                                        <th class="px-3 py-2 w-24">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-100">
+                                    {% for h in task_template_binding_history %}
+                                    <tr class="hover:bg-slate-50/80">
+                                        <td class="px-3 py-2 text-slate-600 uppercase text-xs">{{ h.file_role }}</td>
+                                        <td class="px-3 py-2 text-slate-800" title="文件 ID {{ h.file_id_snapshot }}">{{ h.original_name_snapshot|default:h.file_id_snapshot }}</td>
+                                        <td class="px-3 py-2 text-slate-500 text-xs whitespace-nowrap">{{ h.replaced_at|date:"Y-m-d H:i" }}</td>
+                                        <td class="px-3 py-2 whitespace-nowrap">
+                                            {% if task_edit_mode and h.file_still_available %}
+                                            <form method="post" class="inline" onsubmit="return confirm('确定将当前 {{ h.file_role|upper }} 绑定恢复为该历史文件？');">
+                                                {% csrf_token %}
+                                                <input type="hidden" name="action" value="restore_task_template_history">
+                                                <input type="hidden" name="history_id" value="{{ h.id }}">
+                                                <input type="hidden" name="manage_task_id" value="{{ manage_task.id }}">
+                                                <input type="hidden" name="edit" value="1">
+                                                {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
+                                                {% if rp %}<input type="hidden" name="return_project" value="{{ rp }}">{% endif %}
+                                                <button type="submit" class="text-violet-600 hover:underline text-xs">恢复</button>
+                                            </form>
+                                            {% elif not h.file_still_available %}
+                                            <span class="text-slate-400 text-xs">已删除</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    {% endif %}
+
                     {% if task_edit_mode %}
                     <div id="guide-task-template-bind-panel" class="space-y-8 pt-6 border-t border-slate-100">
                     <p class="text-sm text-slate-600">从文件库<strong>模板</strong>分类勾选文件（已按 PDF / JSON / 其它分组），加入或移出本任务模板。</p>

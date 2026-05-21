@@ -485,6 +485,16 @@ def library_template_granted_via_assigned_projects_tasks(user, lf: LibraryFile) 
     return lf.library_tasks.filter(pk__in=list(task_ids)).exists()
 
 
+def library_template_granted_via_editable_task(user, lf: LibraryFile) -> bool:
+    """受限用户：模板已绑定到本人可维护的 LibraryTask（含本人创建的任务模板）时允许访问。"""
+    if lf.category != LibraryFile.CATEGORY_TEMPLATE:
+        return False
+    for task in lf.library_tasks.all()[:80]:
+        if library_user_may_edit_library_task(user, task):
+            return True
+    return False
+
+
 def library_user_may_edit_library_task(user, task) -> bool:
     """
     当前用户是否可编辑该 LibraryTask（输出目标、模板绑定、删除等）。
@@ -706,11 +716,14 @@ def library_file_access_allowed(user, lf: LibraryFile) -> bool:
         return False
     if not library_scope_own_files_only(user):
         return True
-    if lf.category == LibraryFile.CATEGORY_TEMPLATE and library_user_may_browse_shared_library_templates(user):
-        if library_user_can_assign_tasks_to_participants(user):
+    if lf.category == LibraryFile.CATEGORY_TEMPLATE:
+        if library_template_granted_via_editable_task(user, lf):
             return True
-        if library_template_granted_via_assigned_projects_tasks(user, lf):
-            return True
+        if library_user_may_browse_shared_library_templates(user):
+            if library_user_can_assign_tasks_to_participants(user):
+                return True
+            if library_template_granted_via_assigned_projects_tasks(user, lf):
+                return True
     if library_project_file_granted_via_task_assignment(user, lf):
         return True
     if lf.created_by_id is None:

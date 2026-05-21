@@ -377,6 +377,7 @@ def _assign_submit_bucket(field_obj: Dict[str, Any]) -> Dict[str, str]:
     src0 = field_obj.get("source") if isinstance(field_obj.get("source"), dict) else {}
     hierarchy_key = str(src0.get("hierarchyKey") or "")
     haystack = f"{label}|{fid}|{hierarchy_key}"
+    auto_semantic = src0.get("autoSemantic") if isinstance(src0.get("autoSemantic"), dict) else {}
 
     # 与 inspection_submit_placeholder_maps / 报告回填一致：温湿度走 testResult.temperature、humidity
     if fid == "environmentTempC":
@@ -384,8 +385,11 @@ def _assign_submit_bucket(field_obj: Dict[str, Any]) -> Dict[str, str]:
     if fid == "environmentHumidity":
         return {"bucket": "testResult", "path": "testResult.humidity"}
 
-    # signatures: 指定三项 + 所有签名语义字段
-    if _contains_any(haystack, ("检测员", "受检单位陪同人", "校核员及校核日期")) or ft == "signature":
+    # signatures: 仅模板规定的三个签字栏位
+    if _contains_any(
+        haystack,
+        ("参与主要检测人员名单", "校核员及校核日期", "受检单位陪同人"),
+    ) or ft == "signature":
         return {"bucket": "signatures", "path": f"signatures.{fid}"}
 
     # instruments: 检测仪器相关
@@ -405,6 +409,26 @@ def _assign_submit_bucket(field_obj: Dict[str, Any]) -> Dict[str, str]:
         if _contains_any(haystack, ("设备所在场所",)):
             return {"bucket": "equipmentInfo", "path": "equipmentInfo.location"}
         return {"bucket": "equipmentInfo", "path": f"equipmentInfo.{fid}"}
+
+    # 自动结构校对字段：提交路径由结构生成，避免多个“检测结果/报出值”挤到同一个 testResult.measuredValue。
+    if auto_semantic:
+        item_name = str(auto_semantic.get("itemName") or "").strip()
+        role_name = str(auto_semantic.get("typeName") or "").strip()
+        field_name = str(auto_semantic.get("fieldName") or "").strip()
+        if item_name or role_name or field_name:
+            item_slug = _underscore_stable_slug(item_name or field_name or "auto")
+            leaf = fid if re.match(r"^[a-z][A-Za-z0-9]*$", fid) else _camel_case(role_name or field_name or fid, "value")
+            coords: List[str] = []
+            for key, prefix in (("tableId", "t"), ("row", "r"), ("col", "c"), ("slotNo", "s")):
+                raw = auto_semantic.get(key)
+                if raw is None or raw == "":
+                    continue
+                try:
+                    coords.append(f"{prefix}{int(raw)}")
+                except (TypeError, ValueError):
+                    coords.append(f"{prefix}{_slug_ascii(str(raw), 'x')}")
+            coord_part = "." + "_".join(coords) if coords else ""
+            return {"bucket": "testResult", "path": f"testResult.auto.{item_slug}{coord_part}.{leaf}"}
 
     # 默认归 testResult
     return {"bucket": "testResult", "path": f"testResult.{fid}"}
@@ -537,13 +561,86 @@ def _infer_standard(template_name: str) -> str:
     return ""
 
 
+_FLOOR_PLAN_LABEL_HINTS = (
+    "平面布局示意图",
+    "平面布局图",
+    "布局示意图",
+    "平面示意图",
+)
+
+
+def _label_indicates_floor_plan_image(label: str) -> bool:
+    """标签本身即平面图（不含签字栏）。"""
+    text = str(label or "").strip()
+    if not text or _signature_role_from_label(text):
+        return False
+    if any(h in text for h in _FLOOR_PLAN_LABEL_HINTS):
+        return True
+    if "平面图" in text and "签字" not in text and "签名" not in text:
+        return True
+    return bool(
+        "平面" in text
+        and ("布局" in text or "示意" in text)
+        and "签字" not in text
+        and "签名" not in text
+    )
+
+
+def _field_anchor_type(field: Dict[str, Any]) -> str:
+    src = field.get("source") if isinstance(field.get("source"), dict) else {}
+    return str(src.get("anchorType") or field.get("anchorType") or "").strip().lower()
+
+
+def _field_is_signature_image(field: Dict[str, Any]) -> bool:
+    """签字/签名类图片栏位，不可标为 floorPlan。"""
+    label = str(field.get("label") or "")
+    if _signature_role_from_label(label):
+        return True
+    ft = str(field.get("type") or "").lower()
+    if ft == "signature":
+        return True
+    if any(k in label for k in _SIGNATURE_KEYWORDS):
+        return True
+    if "签字" in label or "签名" in label:
+        return True
+    return False
+
+
+def _field_is_floor_plan_image(field: Dict[str, Any], *, in_layout_section: bool = False) -> bool:
+    """
+    仅平面图影像：须在「平面布局示意图」章节内的 image 框，且非签字栏。
+    """
+    if _field_is_signature_image(field):
+        return False
+    label = str(field.get("label") or "")
+    anchor = _field_anchor_type(field)
+    ft = str(field.get("type") or "").lower()
+    is_image_anchor = anchor == "image" or ft in ("image", "floorPlan")
+    if not is_image_anchor:
+        return False
+    if _label_indicates_floor_plan_image(label):
+        return True
+    if not in_layout_section:
+        return False
+    # 本章内无明确文案的 image 占位（自动框选常为「图片N」）视为平面图
+    if re.match(r"^图片\d*$", label) or label in ("图片", "平面图", "平面布局", "平面布局示意图"):
+        return True
+    return False
+
+
 def _infer_type(raw_type: str, label: str) -> str:
     rt = (raw_type or "").strip().lower()
     title = (label or "").strip()
     _, semantic_type = infer_field_properties(title)
     if semantic_type:
         return semantic_type
-    if rt == "image" or any(k in title for k in _SIGNATURE_KEYWORDS):
+    if rt == "image":
+        if _label_indicates_floor_plan_image(title):
+            return "floorPlan"
+        if any(k in title for k in _SIGNATURE_KEYWORDS):
+            return "signature"
+        return "image"
+    if any(k in title for k in _SIGNATURE_KEYWORDS):
         return "signature"
     if rt == "check":
         return "boolean"
@@ -557,22 +654,16 @@ def _infer_type(raw_type: str, label: str) -> str:
 
 
 def _signature_role_from_label(label: str) -> Tuple[str, str] | None:
-    """
-    前端签名固定三输入：
-    1) 检测员
-    2) 受检单位陪同人
-    3) 校核员及校核日期
-    其余签名语义统一归并到上述三类之一。
-    """
+    """仅识别现场记录模板规定的三个签字栏位，不做宽泛「检测员/校核」归并。"""
     text = str(label or "").strip()
     if not text:
         return None
-    if any(token in text for token in ("受检单位陪同人", "陪同人")):
-        return ("accompanyingPerson", "受检单位陪同人")
-    if any(token in text for token in ("检测员", "测试员", "主检")):
-        return ("inspector", "检测员")
-    if any(token in text for token in ("校核", "复核", "审核", "批准", "授权签字")):
+    if text in ("参与主要检测人员名单（签字）", "参与主要检测人员名单"):
+        return ("inspector", "参与主要检测人员名单")
+    if text in ("校核员及校核日期（签字）", "校核员及校核日期"):
         return ("checker", "校核员及校核日期")
+    if text in ("受检单位陪同人（签字）", "受检单位陪同人"):
+        return ("accompanyingPerson", "受检单位陪同人")
     return None
 
 
@@ -898,6 +989,95 @@ def _classify_group(label: str, field_type: str) -> Tuple[str, str, str, str, st
     return ("step_qc_items", "质控检测项目", "sec_qc_items", "检测项目", "form")
 
 
+def _classify_by_pdf_template_section(
+    section_key: str,
+    item: Dict[str, Any],
+    *,
+    signature_role: Tuple[str, str] | None = None,
+    field_type: str = "",
+) -> Tuple[str, str, str, str, str] | None:
+    """
+    新版现场记录 PDF：按章节标题纵坐标归属（templateSectionKey）。
+    与旧版 submit 桶兼容：reportInfo/hospitalInfo/equipmentInfo/instruments/signatures/testResult。
+    """
+    key = str(section_key or "").strip()
+    if not key:
+        return None
+    label = str(item.get("label") or "")
+    ft = str(field_type or item.get("fieldType") or "").lower()
+    is_signature = ft == "signature" or signature_role is not None or any(
+        k in label
+        for k in ("参与主要检测人员名单", "校核员及校核日期", "受检单位陪同人")
+    )
+
+    if key == "site_unit_basic":
+        if _contains_any(
+            label,
+            ("委托编号", "受检编号", "检测日期", "报告编号", "commissionNo", "inspectionNo"),
+        ):
+            return ("step_basic_info", "基本信息", "sec_report_info", "报告信息", "form")
+        if _contains_any(label, ("受检单位", "委托单位", "联系人", "电话", "检测依据", "检测类型", "地址")):
+            return ("step_basic_info", "基本信息", "sec_hospital_info", "医院信息", "form")
+        return ("step_basic_info", "基本信息", "sec_site_unit_basic", "受检单位基本信息", "form")
+
+    if key == "site_device_basic":
+        return ("step_basic_info", "基本信息", "sec_device_info", "受检设备基本信息", "form")
+
+    if key == "site_instruments_staff":
+        if is_signature:
+            return (
+                "step_instruments",
+                "检测仪器与人员",
+                "sec_instruments_staff",
+                "受检设备主要检测仪器及检测人员",
+                "form",
+            )
+        if "检测仪器" in label or re.match(r"^仪器\d+$", label):
+            return (
+                "step_instruments",
+                "检测仪器与人员",
+                "sec_instruments",
+                "检测仪器清单",
+                "table",
+            )
+        if any(k in label for k in ("日期", "有效期", "校准")):
+            return (
+                "step_instruments",
+                "检测仪器与人员",
+                "sec_instrument_validity",
+                "检测仪器有效期",
+                "form",
+            )
+        return (
+            "step_instruments",
+            "检测仪器与人员",
+            "sec_instruments_staff",
+            "受检设备主要检测仪器及检测人员",
+            "form",
+        )
+
+    if key == "site_qc_performance":
+        auto = _classify_by_auto_semantic(item)
+        if auto:
+            step_id, step_title, sec_id, sec_title = auto
+            return (step_id, step_title, sec_id, sec_title, "form")
+        return ("step_qc_items", "质控检测项目", "sec_site_qc_performance", "质量控制（性能）检测项目及结果", "form")
+
+    if key == "site_radiation_protection":
+        return (
+            "step_qc_items",
+            "质控检测项目",
+            "sec_site_radiation_protection",
+            "工作场所放射防护检测结果",
+            "form",
+        )
+
+    if key == "site_layout_diagram":
+        return ("step_basic_info", "基本信息", "sec_site_layout_diagram", "平面布局示意图", "form")
+
+    return None
+
+
 def _classify_by_underscore(raw_key: str) -> Tuple[str, str, str, str] | None:
     """
     下划线分层规则（由命名本身定义层级，不做中文语义归类）：
@@ -999,6 +1179,78 @@ def _classify_by_underscore(raw_key: str) -> Tuple[str, str, str, str] | None:
     return step_id, step_title, sec_id, sec_title
 
 
+_AUTO_SEMANTIC_FIELD_ID_MAP = {
+    "检测条件": "condition",
+    "检测结果": "measuredValue",
+    "计算结果": "computedValue",
+    "报出值": "reportValue",
+    "验收": "acceptanceVerdict",
+    "状态": "statusVerdict",
+    "单项判定": "verdict",
+    "判定": "verdict",
+    "检测值": "measuredValue",
+}
+
+
+def _auto_semantic_clean_text(value: Any) -> str:
+    text = normalize_field_text_by_underscore_rules(str(value or "").strip())
+    text = re.sub(r"\s+", "", text)
+    return text.strip("_")
+
+
+def _auto_semantic_from_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    sem = item.get("autoSemantic")
+    return sem if isinstance(sem, dict) else {}
+
+
+def _classify_by_auto_semantic(item: Dict[str, Any]) -> Tuple[str, str, str, str] | None:
+    """
+    自动划框已经能拿到表格行列语义时，优先按结构化信息分层。
+    这样前端 schema 不再依赖人工把字段名写成「大项_字段」。
+    """
+    sem = _auto_semantic_from_item(item)
+    item_name = _auto_semantic_clean_text(sem.get("itemName"))
+    field_name = _auto_semantic_clean_text(sem.get("fieldName"))
+    if not item_name and field_name and "_" in field_name:
+        item_name = field_name.split("_", 1)[0]
+    if not item_name:
+        return None
+    sec_id = f"sec_{_underscore_stable_slug(item_name)}"
+    return ("step_qc_items", "质控检测项目", sec_id, item_name)
+
+
+def _auto_semantic_field_id_label(item: Dict[str, Any], fallback_id: str, fallback_label: str) -> Tuple[str, str]:
+    sem = _auto_semantic_from_item(item)
+    if not sem:
+        return fallback_id, fallback_label
+
+    type_name = _auto_semantic_clean_text(sem.get("typeName"))
+    underline_part = _auto_semantic_clean_text(sem.get("underlinePartName"))
+    tail_name = _auto_semantic_clean_text(sem.get("tailName"))
+    field_name = _auto_semantic_clean_text(sem.get("fieldName"))
+    item_name = _auto_semantic_clean_text(sem.get("itemName"))
+
+    suffix = ""
+    if field_name and item_name and field_name.startswith(f"{item_name}_"):
+        suffix = field_name[len(item_name) + 1 :]
+    if not suffix and field_name and "_" in field_name:
+        suffix = field_name.rsplit("_", 1)[-1]
+    role = type_name or suffix or underline_part or tail_name or field_name
+    if not role:
+        return fallback_id, fallback_label
+
+    mapped = _AUTO_SEMANTIC_FIELD_ID_MAP.get(role, "")
+    if not mapped and type_name and underline_part and underline_part != type_name:
+        mapped = f"{_AUTO_SEMANTIC_FIELD_ID_MAP.get(type_name, _to_english_id(type_name, type_name, 'value'))}_{_to_english_id(underline_part, underline_part, 'slot')}"
+    if not mapped:
+        mapped = _to_english_id(role, role, fallback_id)
+    field_id = str(mapped) if re.match(r"^[a-z][A-Za-z0-9]*$", str(mapped)) else _camel_case(mapped, fallback_id)
+    label = role
+    if type_name and underline_part and underline_part not in {type_name, role}:
+        label = f"{type_name}-{underline_part}"
+    return field_id or fallback_id, label or fallback_label
+
+
 def _underscore_field_id(hierarchy_key: str, fallback_id: str) -> str:
     parts = [p for p in normalize_field_text_by_underscore_rules(str(hierarchy_key or "")).split("_") if p]
     if len(parts) < 2:
@@ -1093,52 +1345,438 @@ def _normalize_pdf_field(item: Dict[str, Any], idx: int) -> Dict[str, Any]:
     cp = item.get("checkboxPair")
     if isinstance(cp, dict) and cp:
         out["checkboxPair"] = cp
+    auto_semantic = item.get("autoSemantic")
+    if isinstance(auto_semantic, dict) and auto_semantic:
+        out["autoSemantic"] = {
+            str(k): v
+            for k, v in auto_semantic.items()
+            if isinstance(k, str) and v is not None and v != ""
+        }
+    ts_key = str(item.get("templateSectionKey") or "").strip()
+    if ts_key:
+        out["templateSectionKey"] = ts_key
+    ts_title = str(item.get("templateSectionTitle") or "").strip()
+    if ts_title:
+        out["templateSectionTitle"] = ts_title
+    jct = str(item.get("judgmentCriterionText") or "").strip()
+    if jct:
+        out["judgmentCriterionText"] = jct[:500]
     out["hierarchyKey"] = _best_semantic_underscore_key_from_pdf_item(item, idx)
+    ts_key = str(item.get("templateSectionKey") or "").strip()
+    ts_title = str(item.get("templateSectionTitle") or "").strip()
+    if ts_key:
+        out["templateSectionKey"] = ts_key
+    if ts_title:
+        out["templateSectionTitle"] = ts_title
     return out
 
 
-def _attach_rect_and_strip_legacy_coords(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """为前端 steps 内各栏位写入 ``rect``，并移除散落的 page/x/y/w/h 与内部排序键。"""
+def apply_table_row_col_to_source(
+    src: Dict[str, Any],
+    *,
+    table_id: Any | None = None,
+    row: Any | None = None,
+    col: Any | None = None,
+    auto_semantic: Dict[str, Any] | None = None,
+) -> None:
+    """表格行列语义仅写入 source.autoSemantic，避免与顶层 tableId/row/col 重复。"""
+    if not isinstance(src, dict):
+        return
+    sem: Dict[str, Any] = {}
+    existing = src.get("autoSemantic")
+    if isinstance(existing, dict):
+        sem.update(existing)
+    if isinstance(auto_semantic, dict):
+        sem.update(auto_semantic)
+    if table_id is not None and table_id != "":
+        sem["tableId"] = table_id
+    if row is not None and row != "":
+        sem["row"] = row
+    if col is not None and col != "":
+        sem["col"] = col
+    if sem:
+        src["autoSemantic"] = sem
+    for key in ("tableId", "row", "col", "cellId", "slotNo"):
+        src.pop(key, None)
 
-    def _finalize_field_obj(field: Dict[str, Any]) -> None:
-        rect = frontend_rect_from_field(field)
-        if rect is not None:
-            field["rect"] = rect
-        for key in ("pdfAnchor", "page", "x", "y", "w", "h", "pdfFieldId"):
-            field.pop(key, None)
+
+def inject_table_row_col_meta(field: Dict[str, Any]) -> None:
+    """导出收尾：表格信息只保留 source.autoSemantic，去掉顶层重复键。"""
+    if not isinstance(field, dict):
+        return
+    src = field.get("source")
+    if not isinstance(src, dict):
+        return
+    if isinstance(src.get("autoSemantic"), dict):
+        for key in ("tableId", "row", "col", "cellId", "slotNo"):
+            src.pop(key, None)
+
+
+def _iter_form_field_nodes(payload: Dict[str, Any]):
+    """遍历 steps 内所有表单栏位（含 matrix 单元格）。"""
+    for step in payload.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        for section in step.get("sections") or []:
+            if not isinstance(section, dict):
+                continue
+            for field in section.get("fields") or []:
+                if isinstance(field, dict):
+                    yield section, field
+            matrix = section.get("matrix")
+            if not isinstance(matrix, dict):
+                continue
+            for field in matrix.get("headerFields") or []:
+                if isinstance(field, dict):
+                    yield section, field
+            for row in matrix.get("rows") or []:
+                if not isinstance(row, dict):
+                    continue
+                cells = row.get("cells")
+                if isinstance(cells, dict):
+                    for cell in cells.values():
+                        if isinstance(cell, dict):
+                            yield section, cell
+
+
+def _field_pdf_ids(field: Dict[str, Any]) -> List[str]:
+    src = field.get("source") if isinstance(field.get("source"), dict) else {}
+    ids: List[str] = []
+    raw_list = src.get("pdfFieldIds")
+    if isinstance(raw_list, list):
+        for x in raw_list:
+            pid = str(x or "").strip()
+            if pid and pid not in ids:
+                ids.append(pid)
+    pid = str(src.get("pdfFieldId") or field.get("pdfFieldId") or "").strip()
+    if pid and pid not in ids:
+        ids.append(pid)
+    return ids
+
+
+def _rect_from_field_for_binding(field: Dict[str, Any]) -> List[float] | None:
+    rect = field.get("rect")
+    if isinstance(rect, (list, tuple)) and len(rect) >= 5:
+        try:
+            return [
+                int(rect[0]),
+                round(float(rect[1]), 2),
+                round(float(rect[2]), 2),
+                round(float(rect[3]), 2),
+                round(float(rect[4]), 2),
+            ]
+        except (TypeError, ValueError):
+            pass
+    src = field.get("source") if isinstance(field.get("source"), dict) else {}
+    pb = src.get("pdfBinding")
+    if isinstance(pb, dict) and isinstance(pb.get("rect"), (list, tuple)) and len(pb["rect"]) >= 5:
+        try:
+            r = pb["rect"]
+            return [int(r[0]), round(float(r[1]), 2), round(float(r[2]), 2), round(float(r[3]), 2), round(float(r[4]), 2)]
+        except (TypeError, ValueError):
+            pass
+    return frontend_rect_from_field(field)
+
+
+def _attach_rect_and_strip_legacy_coords(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """兼容旧调用名：仅剥离表单 steps 中的坐标键（回填靠 ``pdfFieldId``，不写 pdfBindings）。"""
+    return _strip_pdf_coords_from_form_schema(payload)
+
+
+def _extract_pdf_bindings_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """兼容旧调用名：与 ``_strip_pdf_coords_from_form_schema`` 相同，不再输出 pdfBindings。"""
+    return _strip_pdf_coords_from_form_schema(payload)
+
+
+def _strip_pdf_coords_from_form_schema(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """前端表单 JSON 不含 PDF 坐标；回填仅依赖各栏位 ``pdfFieldId``（或 ``pdfFieldIds``）。"""
+    if not isinstance(payload, dict):
+        return payload
+    payload.pop("pdfBindings", None)
+    payload.pop("pdf", None)
+    for _section, field in _iter_form_field_nodes(payload):
+        inject_table_row_col_meta(field)
+        field.pop("rect", None)
+        field.pop("pdfAnchor", None)
+        field.pop("page", None)
+        field.pop("x", None)
+        field.pop("y", None)
+        field.pop("w", None)
+        field.pop("h", None)
         field.pop("__order", None)
         field.pop("__bbox", None)
         src = field.get("source")
         if isinstance(src, dict):
-            for key in ("page", "x", "y", "w", "h", "pages", "hierarchyKey"):
+            for key in ("page", "x", "y", "w", "h", "pages", "pdfBinding", "anchorType"):
                 src.pop(key, None)
+    return payload
 
-    for step in payload.get("steps", []):
+
+def _minimal_cell_ref(sem: Dict[str, Any]) -> str:
+    cell = str(sem.get("cellId") or "").strip()
+    if cell:
+        return cell
+    try:
+        tid = int(sem.get("tableId") or 0)
+        row = int(sem.get("row"))
+        col = int(sem.get("col"))
+        return f"t{tid}_r{row}_c{col}"
+    except (TypeError, ValueError):
+        return ""
+
+
+def _build_export_table_semantic(sem: Dict[str, Any], section_key: str = "") -> Dict[str, Any] | None:
+    """
+    导出表格语义（写入栏位顶层 table）：
+    - 行列/cellId、itemName/typeName/fieldName：供前端组表与副标题（label 常为「检测结果」等短名）
+    - 防护表额外：radiationPoint、radiationColumn、readingIndex 等
+    PDF 坐标 rect 仍在坐标模板 JSON，不在此块。
+    """
+    if not isinstance(sem, dict) or not sem:
+        return None
+
+    block: Dict[str, Any] = {}
+    cell = _minimal_cell_ref(sem)
+    if cell:
+        block["cellId"] = cell
+    for key in ("tableId", "row", "col", "readingIndex"):
+        raw = sem.get(key)
+        if raw is None or raw == "":
+            continue
+        try:
+            block[key] = int(raw)
+        except (TypeError, ValueError):
+            block[key] = raw
+    slot = sem.get("slotNo")
+    if slot is not None and slot != "":
+        try:
+            block["slotNo"] = int(slot)
+        except (TypeError, ValueError):
+            block["slotNo"] = slot
+    for key in (
+        "radiationPoint",
+        "radiationColumn",
+        "itemName",
+        "typeName",
+        "fieldName",
+        "underlinePartName",
+        "tailName",
+    ):
+        val = str(sem.get(key) or "").strip()
+        if val:
+            block[key] = val
+    if sem.get("meanOfReadings"):
+        block["meanOfReadings"] = True
+
+    return block if block else None
+
+
+def _attach_export_table_semantic(field: Dict[str, Any], section_key: str = "") -> None:
+    src = field.get("source") if isinstance(field.get("source"), dict) else {}
+    sem = src.get("autoSemantic") if isinstance(src.get("autoSemantic"), dict) else {}
+    if not sem and isinstance(field.get("table"), dict):
+        return
+    block = _build_export_table_semantic(sem, section_key)
+    if block:
+        field["table"] = block
+        if block.get("meanOfReadings"):
+            field["mean"] = True
+
+
+def _compact_single_form_field(field: Dict[str, Any], section_key: str = "") -> Dict[str, Any]:
+    """单栏位最小结构：语义 + pdfFieldId + submitPath，无嵌套 source / pdfAnchor。"""
+    if not isinstance(field, dict):
+        return field
+    src = field.get("source") if isinstance(field.get("source"), dict) else {}
+    out: Dict[str, Any] = {}
+
+    fid = str(field.get("id") or "").strip()
+    ftype = str(field.get("type") or "text").strip() or "text"
+    label = str(field.get("label") or "").strip()
+    if fid:
+        out["id"] = fid
+    if ftype:
+        out["type"] = ftype
+    if label:
+        out["label"] = label
+
+    pdf_ids = src.get("pdfFieldIds")
+    if isinstance(pdf_ids, list):
+        cleaned = [str(x).strip() for x in pdf_ids if str(x).strip()]
+        if len(cleaned) > 1:
+            out["pdfFieldIds"] = cleaned
+        elif len(cleaned) == 1:
+            out["pdfFieldId"] = cleaned[0]
+    if "pdfFieldId" not in out and "pdfFieldIds" not in out:
+        pid = str(
+            src.get("pdfFieldId")
+            or field.get("pdfFieldId")
+            or field.get("pdfAnchor")
+            or ""
+        ).strip()
+        if pid:
+            out["pdfFieldId"] = pid
+
+    sp = str(field.get("submitPath") or src.get("submitPath") or "").strip()
+    if sp:
+        out["submitPath"] = sp
+
+    schema_key = str(field.get("schemaKey") or src.get("key") or "").strip()
+    if schema_key:
+        out["schemaKey"] = schema_key
+    hk = str(field.get("hierarchyKey") or src.get("hierarchyKey") or "").strip()
+    if hk:
+        out["hierarchyKey"] = hk
+    jct = str(field.get("judgmentCriterionText") or src.get("judgmentCriterionText") or "").strip()
+    if jct:
+        out["judgmentCriterionText"] = jct[:500]
+    vw = field.get("visibleWhen")
+    if vw not in (None, "", {}):
+        out["visibleWhen"] = vw
+
+    sem = src.get("autoSemantic") if isinstance(src.get("autoSemantic"), dict) else {}
+    table_block = _build_export_table_semantic(sem, section_key)
+    if table_block:
+        out["table"] = table_block
+        if table_block.get("meanOfReadings"):
+            out["mean"] = True
+    elif isinstance(field.get("table"), dict):
+        out["table"] = dict(field["table"])
+        if out["table"].get("meanOfReadings"):
+            out["mean"] = True
+
+    if field.get("required"):
+        out["required"] = True
+    dv = field.get("defaultValue")
+    if dv is not None and dv is not False and dv != "":
+        out["defaultValue"] = dv
+    er = str(field.get("enumRef") or "").strip()
+    if er:
+        out["enumRef"] = er
+    width = field.get("width")
+    if width not in (None, "", "half", 0.5):
+        out["width"] = width
+    ftype_l = str(out.get("type") or "text").lower()
+    for key in (
+        "unit",
+        "precision",
+        "formula",
+        "fieldExpression",
+        "dependsOn",
+        "rule",
+        "minLines",
+        "maxLines",
+        "columns",
+        "initialRows",
+        "options",
+    ):
+        val = field.get(key)
+        if val is None or val == "" or val == []:
+            continue
+        if key in ("precision", "unit") and ftype_l not in ("number", "computed"):
+            continue
+        out[key] = val
+    return out
+
+
+def _compact_matrix_object(matrix: Dict[str, Any], section_key: str = "") -> Dict[str, Any]:
+    if not isinstance(matrix, dict):
+        return matrix
+    out: Dict[str, Any] = {}
+    if matrix.get("id"):
+        out["id"] = matrix["id"]
+    if matrix.get("title"):
+        out["title"] = matrix["title"]
+    headers = matrix.get("headerFields")
+    if isinstance(headers, list) and headers:
+        out["headerFields"] = [_compact_single_form_field(f, section_key) for f in headers if isinstance(f, dict)]
+    rows_out: List[Dict[str, Any]] = []
+    for row in matrix.get("rows") or []:
+        if not isinstance(row, dict):
+            continue
+        row_id = row.get("id")
+        cells = row.get("cells")
+        if not isinstance(cells, dict):
+            continue
+        cells_compact = {
+            k: _compact_single_form_field(v, section_key)
+            for k, v in cells.items()
+            if isinstance(v, dict)
+        }
+        if cells_compact:
+            rows_out.append({"id": row_id, "cells": cells_compact} if row_id else {"cells": cells_compact})
+    if rows_out:
+        out["rows"] = rows_out
+    cols = matrix.get("columns")
+    if isinstance(cols, list) and cols:
+        out["columns"] = cols
+    return out
+
+
+def _prune_enums_to_used(payload: Dict[str, Any]) -> Dict[str, Any]:
+    used: set = set()
+    for _sec, field in _iter_form_field_nodes(payload):
+        er = str(field.get("enumRef") or "").strip()
+        if er:
+            used.add(er)
+    enums = payload.get("enums")
+    if isinstance(enums, dict) and used:
+        payload["enums"] = {k: v for k, v in enums.items() if k in used}
+    elif isinstance(enums, dict) and not used:
+        payload["enums"] = {}
+    return payload
+
+
+def _compact_form_schema_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """压平 steps 栏位结构，去掉 source/pdfAnchor/pdfBindings 等重复块。"""
+    if not isinstance(payload, dict):
+        return payload
+    payload.pop("pdfBindings", None)
+    payload.pop("pdf", None)
+    payload.pop("sections", None)
+
+    for step in payload.get("steps") or []:
         if not isinstance(step, dict):
             continue
-        for section in step.get("sections", []):
-            if not isinstance(section, dict):
+        for sec in step.get("sections") or []:
+            if not isinstance(sec, dict):
                 continue
-            for field in section.get("fields", []):
-                if not isinstance(field, dict):
-                    continue
-                _finalize_field_obj(field)
-            matrix = section.get("matrix")
-            if not isinstance(matrix, dict):
-                continue
-            for field in matrix.get("headerFields", []):
-                if isinstance(field, dict):
-                    _finalize_field_obj(field)
-            for row in matrix.get("rows", []):
-                if not isinstance(row, dict):
-                    continue
-                cells = row.get("cells")
-                if not isinstance(cells, dict):
-                    continue
-                for cell in cells.values():
-                    if isinstance(cell, dict):
-                        _finalize_field_obj(cell)
-    return payload
+            sk = str(sec.get("sectionKey") or sec.get("id") or "").strip()
+            if sk:
+                sec["id"] = sk
+                sec.pop("sectionKey", None)
+            sec.pop("templateSectionKey", None)
+            sec.pop("templateSectionTitle", None)
+            sec.pop("section", None)
+            layout = str(sec.get("layout") or "form").strip().lower()
+            if layout == "form":
+                sec.pop("layout", None)
+            elif layout:
+                sec["layout"] = layout
+
+            matrix = sec.get("matrix")
+            if isinstance(matrix, dict):
+                sec["matrix"] = _compact_matrix_object(matrix, sk)
+            fields = sec.get("fields")
+            if isinstance(fields, list):
+                compacted: List[Any] = []
+                for f in fields:
+                    if not isinstance(f, dict):
+                        continue
+                    if str(f.get("type") or "").lower() == "table" and isinstance(f.get("columns"), list):
+                        tbl = _compact_single_form_field(f, sk)
+                        if f.get("columns"):
+                            tbl["columns"] = f["columns"]
+                        if f.get("initialRows"):
+                            tbl["initialRows"] = f["initialRows"]
+                        compacted.append(tbl)
+                    else:
+                        compacted.append(_compact_single_form_field(f, sk))
+                if compacted:
+                    sec["fields"] = compacted
+                else:
+                    sec.pop("fields", None)
+    return _prune_enums_to_used(payload)
 
 
 def _coerce_radio_select_defaults_to_string(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -2056,6 +2694,8 @@ def _collapse_mutually_exclusive_checks_to_radio(payload: Dict[str, Any]) -> Dic
                     lb = str(label or "").strip()
                     if lb in {"状态检测", "验收检测"}:
                         return "testType"
+                    if lb in {"CT", "DR", "DSA", "乳腺机", "C臂机", "CR", "胃肠机", "透视"}:
+                        return "deviceType"
                     if lb in {"同受检单位", "委托单位"}:
                         return "commissionOrgMode"
                     if lb in {"自动控制", "手动控制"}:
@@ -2113,6 +2753,25 @@ def _collapse_mutually_exclusive_checks_to_radio(payload: Dict[str, Any]) -> Dic
                         default_value = "sameInspection"
                         submit_bucket = "hospitalInfo"
                         submit_path_leaf = "commissionOrgMode"
+                    elif labels_set and all(
+                        lb in {"CT", "DR", "DSA", "乳腺机", "C臂机", "CR", "胃肠机", "透视"} for lb in labels_set
+                    ):
+                        enum_ref = "deviceType"
+                        radio_id = "deviceType"
+                        radio_label = "设备类型"
+                        value_by_label = {
+                            "CT": "ct",
+                            "DR": "dr",
+                            "DSA": "dsa",
+                            "乳腺机": "mammography",
+                            "C臂机": "cArm",
+                            "CR": "dr",
+                            "胃肠机": "dr",
+                            "透视": "dr",
+                        }
+                        default_value = "ct"
+                        submit_bucket = "equipmentInfo"
+                        submit_path_leaf = "deviceType"
                     elif {"自动控制", "手动控制"} <= labels_set:
                         enum_ref = "controlMode"
                         radio_label = "控制方式"
@@ -2176,6 +2835,9 @@ def _collapse_mutually_exclusive_checks_to_radio(payload: Dict[str, Any]) -> Dic
                     elif enum_ref == "commissionOrgMode":
                         submit_path = "hospitalInfo.commissionOrgMode"
                         submit_bucket = "hospitalInfo"
+                    elif enum_ref == "deviceType":
+                        submit_path = "equipmentInfo.deviceType"
+                        submit_bucket = "equipmentInfo"
                     else:
                         submit_path = _replace_submit_path_leaf(
                             str(src0.get("submitPath") or f"{submit_bucket}.{radio_id}"), submit_path_leaf or radio_id
@@ -3058,6 +3720,255 @@ def _post_optimize_js117(payload: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
+def _site_record_template_section_catalog() -> List[Dict[str, Any]]:
+    """现场记录 PDF 章节目录（与 htmlpdf.full_text_coordinate_boxing 定义一致）。"""
+    try:
+        from htmlpdf.full_text_coordinate_boxing import SITE_RECORD_TEMPLATE_SECTIONS
+
+        specs = SITE_RECORD_TEMPLATE_SECTIONS
+    except Exception:
+        specs = []
+    out: List[Dict[str, Any]] = []
+    for spec in specs or []:
+        if not isinstance(spec, dict):
+            continue
+        key = str(spec.get("key") or "").strip()
+        if not key:
+            continue
+        out.append(
+            {
+                "key": key,
+                "title": str(spec.get("title") or key).strip(),
+                "order": int(spec.get("order") or 0),
+            }
+        )
+    out.sort(key=lambda s: (int(s.get("order") or 0), str(s.get("key") or "")))
+    return out
+
+
+def _template_section_title_for_key(section_key: str, catalog: List[Dict[str, Any]]) -> str:
+    key = str(section_key or "").strip()
+    if not key:
+        return ""
+    for row in catalog:
+        if str(row.get("key") or "").strip() == key:
+            return str(row.get("title") or key).strip()
+    return key
+
+
+def _section_ref_from_keys(section_key: str, section_title: str, catalog: List[Dict[str, Any]]) -> Dict[str, str]:
+    key = str(section_key or "").strip()
+    if not key:
+        return {}
+    title = str(section_title or "").strip() or _template_section_title_for_key(key, catalog)
+    return {"key": key, "title": title}
+
+
+def _section_dominant_chapter_key(section: Dict[str, Any]) -> str:
+    sk = str(section.get("templateSectionKey") or section.get("sectionKey") or "").strip()
+    if sk:
+        return sk
+    sec_ref = section.get("section")
+    if isinstance(sec_ref, dict):
+        sk = str(sec_ref.get("key") or "").strip()
+        if sk:
+            return sk
+    votes: Dict[str, int] = {}
+    for field in section.get("fields") or []:
+        if not isinstance(field, dict):
+            continue
+        src = field.get("source") if isinstance(field.get("source"), dict) else {}
+        fk = str(field.get("templateSectionKey") or src.get("templateSectionKey") or "").strip()
+        if fk:
+            votes[fk] = votes.get(fk, 0) + 1
+    matrix = section.get("matrix")
+    if isinstance(matrix, dict):
+        for field in (matrix.get("headerFields") or []):
+            if not isinstance(field, dict):
+                continue
+            src = field.get("source") if isinstance(field.get("source"), dict) else {}
+            fk = str(field.get("templateSectionKey") or src.get("templateSectionKey") or "").strip()
+            if fk:
+                votes[fk] = votes.get(fk, 0) + 1
+    if votes:
+        return max(votes.items(), key=lambda kv: kv[1])[0]
+    return ""
+
+
+def _merge_sections_by_site_record_chapters(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    现场记录类模板：按六大 PDF 章节合并零碎 section，避免一表拆成几十个 section。
+    保留：受检单位基本信息、受检设备基本信息、仪器及检测人员、质控项目、防护检测、平面布局图。
+    """
+    steps = payload.get("steps")
+    if not isinstance(steps, list) or not steps:
+        return payload
+    catalog = _site_record_template_section_catalog()
+    if not catalog:
+        return payload
+    chapter_order = [str(r["key"]) for r in catalog if r.get("key")]
+    chapter_titles = {str(r["key"]): str(r["title"]) for r in catalog if r.get("key")}
+
+    seen_keys: set = set()
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        for sec in step.get("sections") or []:
+            if not isinstance(sec, dict):
+                continue
+            sk = _section_dominant_chapter_key(sec)
+            if sk in chapter_order:
+                seen_keys.add(sk)
+    if len(seen_keys) < 2:
+        return payload
+
+    buckets: Dict[str, Dict[str, Any]] = {
+        k: {"fields": [], "matrix": None, "layout": "form", "table": None} for k in chapter_order
+    }
+    signature_steps: List[Dict[str, Any]] = []
+    misc_sections: List[Dict[str, Any]] = []
+
+    def _append_fields(chapter: str, fields: List[Any]) -> None:
+        for f in fields or []:
+            if isinstance(f, dict):
+                buckets[chapter]["fields"].append(copy.deepcopy(f))
+
+    def _maybe_take_matrix(chapter: str, sec: Dict[str, Any]) -> None:
+        matrix = sec.get("matrix")
+        if not isinstance(matrix, dict):
+            return
+        cur = buckets[chapter]["matrix"]
+        row_count = len(matrix.get("rows") or [])
+        if cur is None or row_count >= len(cur.get("rows") or []):
+            buckets[chapter]["matrix"] = copy.deepcopy(matrix)
+            buckets[chapter]["layout"] = "matrix"
+        for field in sec.get("fields") or []:
+            if isinstance(field, dict) and str(field.get("type") or "").lower() == "table":
+                if buckets[chapter]["table"] is None:
+                    buckets[chapter]["table"] = copy.deepcopy(field)
+
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        sid = str(step.get("id") or "")
+        if sid == "step_signature":
+            signature_steps.append(copy.deepcopy(step))
+            continue
+        for sec in step.get("sections") or []:
+            if not isinstance(sec, dict):
+                continue
+            ch = _section_dominant_chapter_key(sec)
+            if ch not in buckets:
+                misc_sections.append(copy.deepcopy(sec))
+                continue
+            _append_fields(ch, sec.get("fields") if isinstance(sec.get("fields"), list) else [])
+            _maybe_take_matrix(ch, sec)
+            if str(sec.get("layout") or "").lower() == "table":
+                buckets[ch]["layout"] = "table"
+
+    merged_sections: List[Dict[str, Any]] = []
+    for ch in chapter_order:
+        bucket = buckets[ch]
+        has_matrix = isinstance(bucket["matrix"], dict) and bool(bucket["matrix"].get("rows") or bucket["matrix"].get("headerFields"))
+        has_fields = bool(bucket["fields"])
+        has_table = isinstance(bucket["table"], dict)
+        if not has_matrix and not has_fields and not has_table:
+            continue
+        sec_out: Dict[str, Any] = {
+            "id": ch,
+            "title": chapter_titles.get(ch) or ch,
+            "sectionKey": ch,
+            "layout": bucket["layout"] if has_matrix else ("table" if has_table else "form"),
+        }
+        if has_matrix:
+            sec_out["matrix"] = bucket["matrix"]
+            flat = [f for f in bucket["fields"] if str(f.get("type") or "").lower() != "table"]
+            if flat:
+                sec_out["fields"] = flat
+        elif has_table and not has_fields:
+            sec_out["fields"] = [bucket["table"]]
+        else:
+            sec_out["fields"] = bucket["fields"]
+        merged_sections.append(sec_out)
+
+    new_steps: List[Dict[str, Any]] = [
+        {
+            "id": "step_site_record",
+            "title": "检测原始记录",
+            "sections": merged_sections,
+        }
+    ]
+    if misc_sections:
+        new_steps[0]["sections"].extend(misc_sections)
+    new_steps.extend(signature_steps)
+    payload["steps"] = new_steps
+    return payload
+
+
+def _apply_floor_plan_field_types(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """仅在「平面布局示意图」章节内，将平面图 image 标为 floorPlan；签字仍为 signature。"""
+    layout_keys = frozenset({"site_layout_diagram"})
+    for step in payload.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        for section in step.get("sections") or []:
+            if not isinstance(section, dict):
+                continue
+            ch = str(section.get("sectionKey") or section.get("templateSectionKey") or "").strip()
+            sec_title = str(section.get("title") or "")
+            in_layout = ch in layout_keys or sec_title == "平面布局示意图" or sec_title == "平面布局图"
+            if not in_layout:
+                continue
+            targets = list(section.get("fields") or [])
+            matrix = section.get("matrix")
+            if isinstance(matrix, dict):
+                targets.extend(matrix.get("headerFields") or [])
+                for row in matrix.get("rows") or []:
+                    if isinstance(row, dict) and isinstance(row.get("cells"), dict):
+                        targets.extend(row["cells"].values())
+            for field in targets:
+                if not isinstance(field, dict):
+                    continue
+                if not _field_is_floor_plan_image(field, in_layout_section=True):
+                    continue
+                field["type"] = "floorPlan"
+                field["defaultValue"] = None
+                field.pop("enumRef", None)
+    return payload
+
+
+def _slim_frontend_schema_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """兼容旧名：执行完整表单 JSON 压平。"""
+    return _compact_form_schema_payload(payload)
+
+
+def _inject_template_section_metadata(result: Dict[str, Any]) -> Dict[str, Any]:
+    """统一 section.id/title（章节目录已在 steps.sections 中体现，不再写根级 sections 副本）。"""
+    if not isinstance(result, dict):
+        return result
+    result.pop("templateSections", None)
+    result.pop("sections", None)
+    catalog = _site_record_template_section_catalog()
+    title_by_key = {str(r["key"]): str(r["title"]) for r in catalog if r.get("key")}
+
+    for step in result.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        for sec in step.get("sections") or []:
+            if not isinstance(sec, dict):
+                continue
+            sk = str(sec.get("sectionKey") or sec.get("templateSectionKey") or sec.get("id") or "").strip()
+            if not sk:
+                sk = _section_dominant_chapter_key(sec)
+            if sk:
+                sec["id"] = sk
+                sec["title"] = title_by_key.get(sk) or str(sec.get("title") or sk).strip() or sk
+            sec.pop("sectionKey", None)
+            sec.pop("templateSectionKey", None)
+            sec.pop("templateSectionTitle", None)
+    return result
+
+
 def _finalize_frontend_schema_result(result: Dict[str, Any], *, merge_split_dates: bool) -> Dict[str, Any]:
     """统一后处理链（从 PDF 规则拼装或从 formSchema.steps 直出后共用）。"""
     tid = str(result.get("templateId") or "")
@@ -3083,12 +3994,81 @@ def _finalize_frontend_schema_result(result: Dict[str, Any], *, merge_split_date
     result = _upgrade_sv_h_sections_to_matrix_table(result)
     result = _inject_underscore_section_rules(result)
     result = _consolidate_orphan_inspection_steps(result)
+    result = _merge_sections_by_site_record_chapters(result)
     result = _sort_fields_by_coordinate_order(result)
     result = _force_signature_step_last(result)
     result = _inject_visibility_conditional_rules(result)
-    result = _attach_rect_and_strip_legacy_coords(result)
+    result = _apply_floor_plan_field_types(result)
+    result = _strip_pdf_coords_from_form_schema(result)
     result = _coerce_radio_select_defaults_to_string(result)
+    result = _apply_radiation_protection_mean_formulas(result)
+    result = _inject_template_section_metadata(result)
+    result = _compact_form_schema_payload(result)
+    if isinstance(result, dict):
+        result.setdefault("schema", "frontend_form_schema/v1")
     return result
+
+
+def _apply_radiation_protection_mean_formulas(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """工作场所防护表：测量均值列默认 avg(同点位三次测量读数)。"""
+    steps = payload.get("steps")
+    if not isinstance(steps, list):
+        return payload
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        for sec in step.get("sections") or []:
+            if not isinstance(sec, dict):
+                continue
+            title = str(sec.get("title") or "")
+            if "工作场所" not in title and "放射防护" not in title:
+                continue
+            fields = sec.get("fields")
+            if not isinstance(fields, list):
+                continue
+            by_point: Dict[str, list] = {}
+            mean_fields: list = []
+            def _field_table_sem(f: Dict[str, Any]) -> Dict[str, Any]:
+                if isinstance(f.get("table"), dict):
+                    return f["table"]
+                src = f.get("source") if isinstance(f.get("source"), dict) else {}
+                sem = src.get("autoSemantic") if isinstance(src.get("autoSemantic"), dict) else {}
+                return sem if isinstance(sem, dict) else {}
+
+            for f in fields:
+                if not isinstance(f, dict):
+                    continue
+                sem = _field_table_sem(f)
+                if sem.get("meanOfReadings") or f.get("mean"):
+                    mean_fields.append(f)
+                    continue
+                if str(sem.get("radiationColumn") or "") == "测量读数M":
+                    pt = str(sem.get("radiationPoint") or f.get("label") or "")
+                    by_point.setdefault(pt, []).append(f)
+            for mf in mean_fields:
+                sem = _field_table_sem(mf)
+                pt = str(sem.get("radiationPoint") or mf.get("label") or "")
+                refs = sorted(
+                    by_point.get(pt, []),
+                    key=lambda rf: int(_field_table_sem(rf).get("readingIndex") or 99),
+                )
+                pids = [
+                    str(
+                        (rf.get("pdfFieldId") or (rf.get("source") or {}).get("pdfFieldId") or "")
+                    ).strip()
+                    for rf in refs
+                    if str(
+                        (rf.get("pdfFieldId") or (rf.get("source") or {}).get("pdfFieldId") or "")
+                    ).strip()
+                ]
+                if len(pids) >= 2:
+                    mf["type"] = "computed"
+                    mf["dependsOn"] = pids[:]
+                    mf["formula"] = f"avg({','.join(pids[:3])})"
+                    mf["fieldExpression"] = mf["formula"]
+                    mf["precision"] = 2
+                    mf["unit"] = "μSv/h"
+    return payload
 
 
 def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_dates: bool = True) -> Dict[str, Any]:
@@ -3112,6 +4092,7 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
     editor_steps = form_schema_top.get("steps") if isinstance(form_schema_top.get("steps"), list) else None
     if "js-117" in id_hay and editor_steps:
         result = {
+            "schema": "frontend_form_schema/v1",
             "templateId": template_id or "template_frontend",
             "templateName": template_name or "template_frontend.json",
             "version": version or "1.0.0",
@@ -3156,6 +4137,7 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
     instrument_check_labels: List[str] = []
 
     sorted_items = sorted(normalized_items, key=lambda it: it.get("order", (999, 999999, 999999, 999999)))
+    section_catalog = _site_record_template_section_catalog()
     for idx, item in enumerate(sorted_items, start=1):
         # 规则1：第一页勾选项归位（状态检测/验收检测）
         if item.get("page") == 1 and item.get("fieldType", "").lower() == "check":
@@ -3168,17 +4150,36 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
 
         ft = _infer_type(item["fieldType"], item["label"])
         signature_role = _signature_role_from_label(item["label"]) if ft == "signature" else None
-        # 规则2：下划线自动分层优先（同前缀归同一层级）
+        pdf_section_key = str(item.get("templateSectionKey") or "").strip()
+        # 规则1：新版 PDF 章节锚点（纵坐标区间）优先
+        pdf_hierarchy = None
+        if pdf_section_key:
+            pdf_hierarchy = _classify_by_pdf_template_section(
+                pdf_section_key,
+                item,
+                signature_role=signature_role,
+                field_type=ft,
+            )
+        # 规则2：下划线自动分层（同前缀归同一层级）
         hierarchy_key = str(item.get("hierarchyKey") or "").strip()
         if not hierarchy_key:
             label_key = normalize_field_text_by_underscore_rules(str(item.get("label") or "").strip())
             raw_key = normalize_field_text_by_underscore_rules(str(item.get("rawId") or "").strip())
             hierarchy_key = _pick_hierarchy_underscore_key(label_key, raw_key)
-        # 签名字段不参与下划线分层，避免被拆成多个独立 step/section。
-        hierarchy = None if signature_role else _classify_by_underscore(hierarchy_key)
+        # 表格行列语义；签名字段在「仪器及检测人员」章节内仍走 pdf 分层，其它章节跳过下划线/auto 以免拆散
+        skip_auto_for_sig = signature_role and pdf_section_key != "site_instruments_staff"
+        auto_hierarchy = None if skip_auto_for_sig else _classify_by_auto_semantic(item)
+        hierarchy = (
+            pdf_hierarchy
+            or auto_hierarchy
+            or (None if signature_role and not pdf_section_key else _classify_by_underscore(hierarchy_key))
+        )
         if hierarchy:
-            step_id, step_title, sec_id, sec_title = hierarchy
-            layout = "form"
+            if len(hierarchy) >= 5:
+                step_id, step_title, sec_id, sec_title, layout = hierarchy
+            else:
+                step_id, step_title, sec_id, sec_title = hierarchy
+                layout = "form"
         else:
             step_id, step_title, sec_id, sec_title, layout = _classify_group(item["label"], ft)
         if step_id not in section_bucket:
@@ -3189,12 +4190,19 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
             sec_id,
             {"id": sec_id, "title": sec_title, "layout": "table" if layout == "table" else "form", "fields": []},
         )
+        if pdf_section_key:
+            sec.setdefault("templateSectionKey", pdf_section_key)
+            ts_title_for_sec = str(item.get("templateSectionTitle") or "").strip()
+            if ts_title_for_sec:
+                sec.setdefault("templateSectionTitle", ts_title_for_sec)
         fallback_id = f"field{idx}"
         # 下划线命名时，字段 id 使用最后一段语义（同前缀字段归一分组）
         # 例如：高对比分辨力_kv / 高对比分辨力_报出值 -> kv / reportValue
         semantic_id_prefix, semantic_type = infer_field_properties(item["label"])
         if signature_role:
             field_id, field_label = signature_role
+        elif auto_hierarchy:
+            field_id, field_label = _auto_semantic_field_id_label(item, fallback_id, item["label"])
         elif hierarchy:
             field_id = _underscore_field_id(hierarchy_key, fallback_id)
             field_label = _underscore_field_label(hierarchy_key, item["label"])
@@ -3292,8 +4300,35 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
         icp = item.get("checkboxPair")
         if isinstance(icp, dict) and icp:
             field_obj["source"]["checkboxPair"] = icp
+        if pdf_section_key:
+            field_obj["source"]["templateSectionKey"] = pdf_section_key
+            ts_title = str(item.get("templateSectionTitle") or "").strip()
+            if ts_title:
+                field_obj["source"]["templateSectionTitle"] = ts_title
+            field_obj["section"] = _section_ref_from_keys(pdf_section_key, ts_title, section_catalog)
         if hierarchy and str(hierarchy_key or "").strip():
             field_obj["source"]["hierarchyKey"] = str(hierarchy_key).strip()
+        auto_semantic = item.get("autoSemantic")
+        if isinstance(auto_semantic, dict) and auto_semantic:
+            apply_table_row_col_to_source(field_obj["source"], auto_semantic=auto_semantic)
+            item_name = _auto_semantic_clean_text(auto_semantic.get("itemName"))
+            type_name = _auto_semantic_clean_text(auto_semantic.get("typeName"))
+            if item_name or type_name:
+                field_obj["source"]["hierarchyKey"] = "_".join(p for p in (item_name, type_name) if p)
+            key_parts = []
+            for key, prefix in (("tableId", "t"), ("row", "r"), ("col", "c"), ("slotNo", "s")):
+                raw = auto_semantic.get(key)
+                if raw is None or raw == "":
+                    continue
+                try:
+                    key_parts.append(f"{prefix}{int(raw)}")
+                except (TypeError, ValueError):
+                    key_parts.append(f"{prefix}{_slug_ascii(str(raw), 'x')}")
+            key_suffix = "." + "_".join(key_parts) if key_parts else ""
+            field_obj["source"]["key"] = f"{step_id}.{sec_id}{key_suffix}.{field_id}"
+        jct = str(item.get("judgmentCriterionText") or "").strip()
+        if jct:
+            field_obj["source"]["judgmentCriterionText"] = jct[:500]
         submit_binding = _assign_submit_bucket(field_obj)
         field_obj["source"]["submitBucket"] = submit_binding["bucket"]
         field_obj["source"]["submitPath"] = submit_binding["path"]
@@ -3312,6 +4347,8 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
             field_obj["type"] = "boolean"
             field_obj["defaultValue"] = bool(field_obj.get("defaultValue", False))
             field_obj.pop("enumRef", None)
+            field_obj.pop("precision", None)
+            field_obj.pop("unit", None)
         if field_obj.get("type") in {"radio", "select"}:
             field_obj["enumRef"] = "testType" if ("验收" in item["label"] or "状态" in item["label"]) else "yesNo"
             field_obj["defaultValue"] = "status" if field_obj["enumRef"] == "testType" else "no"
@@ -3402,6 +4439,7 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
         steps = [{"id": "step_basic_info", "title": "基本信息", "sections": [{"id": "sec_misc", "title": "杂项", "layout": "form", "fields": []}]}]
 
     result = {
+        "schema": "frontend_form_schema/v1",
         "templateId": template_id or "template_frontend",
         "templateName": template_name or "template_frontend.json",
         "version": version or "1.0.0",

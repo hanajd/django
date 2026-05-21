@@ -76,5 +76,8 @@ urlpatterns = [
     path('files/htmlpdf/api/save-pdf/', views.htmlpdf_api_save_pdf, name='htmlpdf_api_save_pdf'),
     path('files/htmlpdf/api/table-cell-at-point/', views.htmlpdf_api_table_cell_at_point, name='htmlpdf_api_table_cell_at_point'),
     path('files/htmlpdf/api/auto-red-text-boxes/', views.htmlpdf_api_auto_red_text_boxes, name='htmlpdf_api_auto_red_text_boxes'),
+    path('files/htmlpdf/api/assign-template-sections/', views.htmlpdf_api_assign_template_sections, name='htmlpdf_api_assign_template_sections'),
+    path('files/htmlpdf/api/report-task-context/', views.htmlpdf_api_report_task_context, name='htmlpdf_api_report_task_context'),
+    path('files/htmlpdf/api/site-template-bundle/', views.htmlpdf_api_site_template_bundle, name='htmlpdf_api_site_template_bundle'),
     path('files/temp/<str:batch_id>/', views.file_temp_batch, name='file_temp_batch'),
 ]

@@ -75,7 +75,7 @@ from apps.api.inspection_report_make import (
     merge_task_template_bound_instruments_into_payload,
 )
 from utils.extract_frontend_template import extract_frontend_template
-from utils.frontend_schema_rule_engine import _attach_rect_and_strip_legacy_coords, build_frontend_schema_by_rules
+from utils.frontend_schema_rule_engine import build_frontend_schema_by_rules
 from utils.unified_template_fields import enrich_frontend_steps_rect_from_pdf_fields
 
 DEFAULT_REPORT_TYPE = "xray_fluoroscopy"
@@ -392,9 +392,18 @@ def _resolve_task_template_json(task_obj):
         .order_by("-created_at", "-id")
         .distinct()
     )
-    json_rows = [lf for lf in template_qs if (lf.original_name or "").lower().endswith(".json")]
+    from apps.core.library_task_template_binding_service import (
+        is_auxiliary_template_json_filename,
+    )
+
+    json_rows = [
+        lf
+        for lf in template_qs
+        if (lf.original_name or "").lower().endswith(".json")
+        and not is_auxiliary_template_json_filename(lf.original_name or "")
+    ]
     if not json_rows:
-        return None, "", "任务下缺少 JSON 模板"
+        return None, "", "任务下缺少 JSON 模板（需为含 pdf.fields 的坐标模板，非 *_frontend.json）"
 
     def _score_library_template_json(lf: LibraryFile) -> tuple[int, int]:
         """分数越高越优先：统一模板 + 含 pdf.fields。"""
@@ -1622,6 +1631,18 @@ class InspectionTaskFrontendJsonExportAPIView(_InspectionTaskAccessMixin, APIVie
         pdf_block["fields"] = filled_fields
         template_obj["pdf"] = pdf_block
 
+        template_pdf_id, _template_pdf_name, template_pdf_err = _resolve_task_template_pdf(task_obj)
+        if not template_pdf_err and template_pdf_id:
+            template_pdf_lf = LibraryFile.objects.filter(pk=template_pdf_id).first()
+            if template_pdf_lf is not None:
+                try:
+                    pdf_path = pipeline_service.library_absolute_path(template_pdf_lf.relative_path)
+                    from htmlpdf.full_text_coordinate_boxing import assign_template_sections_to_fields
+
+                    assign_template_sections_to_fields(str(pdf_path), pdf_block["fields"])
+                except Exception:
+                    pass
+
         # 任务接口默认使用规则引擎导出前端模板；失败时回退旧提取逻辑保证可用性。
         try:
             frontend_obj = build_frontend_schema_by_rules(template_obj)
@@ -1636,9 +1657,8 @@ class InspectionTaskFrontendJsonExportAPIView(_InspectionTaskAccessMixin, APIVie
         )
         frontend_obj = _inject_frontend_payload_defaults(frontend_obj, payload)
         frontend_obj = _inject_instruments_root_into_frontend_export(frontend_obj, payload, task_obj=task_obj)
-        # 与 HTMLPDF 保存导出一致：从 pdf.fields 补全 steps 内 rect，并规范化坐标字段。
+        # 从 pdf.fields 补全根级 pdfBindings（表单 steps 不含坐标）
         frontend_obj = enrich_frontend_steps_rect_from_pdf_fields(frontend_obj, filled_fields)
-        frontend_obj = _attach_rect_and_strip_legacy_coords(frontend_obj)
         ts = timezone.localtime().strftime("%Y%m%d%H%M%S")
         filename = f"{task_no}_frontend_{ts}.json".replace("/", "_")
         raw = json_std.dumps(frontend_obj, ensure_ascii=False, indent=2).encode("utf-8")

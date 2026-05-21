@@ -489,6 +489,60 @@ def tasks_for_equipment_project_bind(
     return tasks
 
 
+def collect_library_tasks_for_project_equipments(project: LibraryProject) -> list[LibraryTask]:
+    """当前项目委托设备对应的报告 + 现场记录任务链（去重、按 code 排序）。"""
+    from apps.core.models import LibraryProjectEquipment
+
+    tasks: list[LibraryTask] = []
+    seen: set[int] = set()
+    for link in LibraryProjectEquipment.objects.filter(project=project).select_related(
+        "equipment", "report_task"
+    ):
+        eq = link.equipment
+        for t in tasks_for_equipment_project_bind(eq):
+            if t.pk not in seen:
+                seen.add(t.pk)
+                tasks.append(t)
+    tasks.sort(key=lambda t: (t.code or "", t.pk))
+    return tasks
+
+
+def sync_project_library_tasks_from_equipments(
+    project: LibraryProject,
+    user: User | None = None,
+) -> int:
+    """
+    项目已挂载委托设备时，将 library_tasks 设为各设备任务链的并集，去掉历史上
+    绑定其它设备或手工勾选后残留的模板。
+    """
+    from apps.core.library_file_service import attach_files_to_projects
+    from apps.core.models import LibraryProjectEquipment
+
+    if not LibraryProjectEquipment.objects.filter(project=project).exists():
+        return 0
+    task_list = collect_library_tasks_for_project_equipments(project)
+    if not task_list:
+        return 0
+    project.library_tasks.set(task_list)
+    new_ids = {t.pk for t in task_list}
+    from apps.core.models import LibraryTaskAssignment
+
+    LibraryTaskAssignment.objects.filter(project=project).exclude(
+        library_task_id__in=new_ids
+    ).delete()
+    if user is not None:
+        all_file_ids: set[int] = set()
+        for t in task_list:
+            all_file_ids.update(
+                t.library_files.filter(category=LibraryFile.CATEGORY_TEMPLATE).values_list(
+                    "pk", flat=True
+                )
+            )
+        if all_file_ids:
+            attach_files_to_projects(sorted(all_file_ids), [project.pk], user)
+    return len(task_list)
+
+
 def bind_equipment_tasks_to_project(
     eq: CommissionOrgEquipment,
     project: LibraryProject,

@@ -67,6 +67,17 @@
             min-height: 0;
             overflow: hidden;
         }
+        .editor-workspace {
+            flex: 1;
+            min-width: 0;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .structure-panel.structure-panel--hidden {
+            display: none !important;
+        }
         .sidebar {
             width: 300px;
             flex-shrink: 0;
@@ -180,6 +191,125 @@
             font-size: 11px;
             color: #c9cdd4;
             font-family: Consolas, monospace;
+        }
+        .structure-panel {
+            margin: 12px 0 14px;
+            padding: 12px;
+            border: 1px solid #e5e6eb;
+            border-radius: 8px;
+            background: #f7f8fa;
+        }
+        .structure-panel-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 700;
+            color: #1d2129;
+            margin-bottom: 8px;
+        }
+        .structure-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+        }
+        .structure-grid label {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 12px;
+            color: #4e5969;
+        }
+        .structure-grid input,
+        .structure-grid select {
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid #dcdfe6;
+            border-radius: 4px;
+            padding: 5px 7px;
+            font-size: 12px;
+            color: #1d2129;
+            background: #fff;
+            outline: none;
+        }
+        .structure-grid input:focus,
+        .structure-grid select:focus {
+            border-color: #165dff;
+            box-shadow: 0 0 0 2px rgba(22, 93, 255, 0.12);
+        }
+        .structure-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .structure-actions button {
+            border: 1px solid #dcdfe6;
+            border-radius: 4px;
+            background: #fff;
+            color: #1d2129;
+            padding: 6px 8px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .structure-actions button.primary {
+            background: #165dff;
+            border-color: #165dff;
+            color: #fff;
+        }
+        .structure-actions button:hover {
+            border-color: #165dff;
+        }
+        .structure-status {
+            margin-top: 8px;
+            font-size: 12px;
+            line-height: 1.45;
+            color: #4e5969;
+            white-space: pre-line;
+        }
+        .field-row-tag.has-structure {
+            background: #e8f7ef;
+            color: #00a870;
+        }
+        .section-nav-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 4px;
+        }
+        .section-nav-chip {
+            border: 1px solid #c9cdd4;
+            border-radius: 999px;
+            background: #fff;
+            color: #4e5969;
+            font-size: 11px;
+            line-height: 1.2;
+            padding: 4px 10px;
+            cursor: pointer;
+            max-width: 100%;
+        }
+        .section-nav-chip:hover {
+            border-color: #165dff;
+            color: #165dff;
+        }
+        .section-nav-chip.active {
+            background: #e8f3ff;
+            border-color: #165dff;
+            color: #165dff;
+            font-weight: 600;
+        }
+        .field-section-header {
+            font-size: 11px;
+            font-weight: 700;
+            color: #00a870;
+            background: #e8f7ef;
+            padding: 6px 8px;
+            margin: 10px 0 4px;
+            border-radius: 4px;
+        }
+        .field-section-header:first-child {
+            margin-top: 0;
         }
         .formula-panel {
             margin-top: 16px;
@@ -699,8 +829,10 @@
             background: #f2f6ff;
         }
         .pdf-scroll {
-            flex: 1;
+            flex: 1 1 auto;
+            min-height: 0;
             overflow: auto;
+            -webkit-overflow-scrolling: touch;
             background: #4a4a4a;
             padding: 20px;
             display: flex;
@@ -955,6 +1087,16 @@
             color: #a30000;
             background: rgba(192, 0, 0, 0.1);
         }
+        #btnClearWorkspace {
+            color: #b42318;
+            border-color: #fecdca;
+            background: #fff5f5;
+        }
+        #btnClearWorkspace:hover {
+            border-color: #f97066;
+            color: #912018;
+            background: #ffede9;
+        }
         .field-wrap.field-wrap--red-text .input-box {
             color: #c00000 !important;
         }
@@ -975,6 +1117,377 @@
         .pdf-page.draw-mode {
             cursor: crosshair !important;
         }
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+        body.map-mode-open {
+            overflow: hidden;
+        }
+        .map-mode-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 100000;
+            background: rgba(15, 23, 42, 0.52);
+            padding: 10px 12px;
+            box-sizing: border-box;
+            align-items: center;
+            justify-content: center;
+        }
+        .map-mode-overlay.is-open {
+            display: flex;
+        }
+        .map-mode-dialog {
+            width: min(98vw, 1680px);
+            height: min(94vh, 960px);
+            max-height: 94vh;
+            display: flex;
+            flex-direction: column;
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
+            overflow: hidden;
+        }
+        .map-mode-header {
+            flex-shrink: 0;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px 16px;
+            padding: 12px 18px;
+            border-bottom: 1px solid #e5e6eb;
+            background: linear-gradient(180deg, #f0f5ff, #fff);
+        }
+        .map-mode-header-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #1d2129;
+            margin-right: auto;
+        }
+        .map-mode-field-label {
+            font-size: 13px;
+            color: #4e5969;
+            max-width: min(48vw, 520px);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .map-mode-field-label strong {
+            color: #ff7d00;
+            font-weight: 600;
+        }
+        .map-mode-header select {
+            min-width: 200px;
+            padding: 6px 10px;
+            border: 1px solid #dcdfe6;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        .map-mode-header-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .map-mode-header-actions button {
+            padding: 7px 14px;
+            border-radius: 6px;
+            border: 1px solid #dcdfe6;
+            background: #fff;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .map-mode-header-actions button.primary {
+            background: #165DFF;
+            color: #fff;
+            border-color: #165DFF;
+        }
+        .map-mode-body {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+        }
+        .map-report-preview {
+            width: 300px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #e5e6eb;
+            background: #f7f8fa;
+        }
+        .map-report-preview-title {
+            padding: 10px 12px 6px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #4e5969;
+        }
+        .map-report-preview-hint {
+            padding: 0 12px 8px;
+            font-size: 11px;
+            color: #86909c;
+            line-height: 1.4;
+        }
+        .map-report-preview-scroll {
+            flex: 1;
+            min-height: 0;
+            overflow: auto;
+            padding: 8px 10px 12px;
+        }
+        #mapReportPreviewContainer {
+            position: relative;
+        }
+        #mapReportPreviewContainer .pdf-page {
+            position: relative;
+            margin: 0 auto 10px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+            background: #fff;
+        }
+        .map-preview-field {
+            position: absolute;
+            box-sizing: border-box;
+            border: 1px solid rgba(22, 93, 255, 0.45);
+            background: rgba(22, 93, 255, 0.06);
+            pointer-events: none;
+            z-index: 1;
+        }
+        .map-preview-field--active {
+            border: 2px solid #ff7d00;
+            background: rgba(255, 125, 0, 0.22);
+            z-index: 3;
+            box-shadow: 0 0 0 2px rgba(255, 125, 0, 0.35);
+        }
+        .map-preview-field--linked {
+            border-color: rgba(0, 180, 42, 0.7);
+            background: rgba(0, 180, 42, 0.1);
+        }
+        .map-site-main {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            background: #eef0f3;
+        }
+        .map-site-hint {
+            flex-shrink: 0;
+            padding: 10px 16px;
+            font-size: 12px;
+            color: #4e5969;
+            background: #fff;
+            border-bottom: 1px solid #e5e6eb;
+        }
+        .map-site-scroll {
+            flex: 1;
+            min-height: 0;
+            overflow: auto;
+            padding: 16px 20px 24px;
+        }
+        #siteMapPdfContainer {
+            position: relative;
+            margin: 0 auto;
+        }
+        #siteMapPdfContainer .pdf-page {
+            margin: 0 auto 16px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+        }
+        .field-row-tag.has-source-map {
+            background: #e8ffea;
+            color: #00b42a;
+        }
+        .field-row-tag.has-source-map-inferred {
+            background: #e8f3ff;
+            color: #165DFF;
+        }
+        .field-wrap.field-wrap--map-source-inferred {
+            outline: 2px solid #165DFF;
+            outline-offset: 1px;
+        }
+        .field-wrap .field-map-chip.is-inferred {
+            border-color: #165DFF;
+            background: #e8f3ff;
+            color: #165DFF;
+        }
+        .field-wrap.field-wrap--map-source-pending {
+            outline: 2px dashed #ff7d00;
+            outline-offset: 1px;
+        }
+        .field-wrap.field-wrap--map-source-linked {
+            outline: 2px solid #00b42a;
+            outline-offset: 1px;
+        }
+        .site-map-field-wrap {
+            position: absolute;
+            border: 2px solid transparent;
+            box-sizing: border-box;
+            cursor: pointer;
+            z-index: 5;
+        }
+        .site-map-field-wrap:hover,
+        .site-map-field-wrap.site-map-field-wrap--pick {
+            border-color: #165DFF;
+            background: rgba(22, 93, 255, 0.12);
+        }
+        .site-map-field-wrap.site-map-field-wrap--linked-current {
+            border-color: #00b42a;
+            background: rgba(0, 180, 42, 0.28);
+            box-shadow: 0 0 0 2px rgba(0, 180, 42, 0.45);
+        }
+        .site-map-field-wrap.site-map-field-wrap--linked-other {
+            border-color: #722ed1;
+            background: rgba(114, 46, 209, 0.18);
+        }
+        .site-map-field-wrap.site-map-field-wrap--draft-source {
+            border-color: #ff7d00;
+            background: rgba(255, 125, 0, 0.22);
+            box-shadow: 0 0 0 2px rgba(255, 125, 0, 0.4);
+        }
+        .map-compose-panel {
+            flex-shrink: 0;
+            border-top: 1px solid #e5e6eb;
+            background: #fafbfc;
+            padding: 12px 16px 14px;
+            max-height: 38vh;
+            overflow-y: auto;
+        }
+        .map-cache-hint {
+            margin: 0 0 8px;
+            font-size: 12px;
+            color: #86909c;
+            line-height: 1.45;
+        }
+        .map-cache-hint.is-restored {
+            color: #0e7b3a;
+        }
+        .field-row-tag.has-map-draft {
+            background: #fff7e8;
+            color: #d46b08;
+            border: 1px solid #ffcf8b;
+        }
+        .map-compose-panel h4 {
+            margin: 0 0 8px;
+            font-size: 13px;
+            color: #1d2129;
+        }
+        .map-source-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin: 8px 0;
+            min-height: 28px;
+        }
+        .map-source-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            background: #f2f3f5;
+            border: 1px solid #e5e6eb;
+            font-size: 12px;
+        }
+        .map-source-chip button {
+            border: none;
+            background: transparent;
+            color: #86909c;
+            cursor: pointer;
+            padding: 0 2px;
+            font-size: 14px;
+            line-height: 1;
+        }
+        .map-value-template-input {
+            width: 100%;
+            min-height: 120px;
+            padding: 8px 10px;
+            border: 1px solid #dcdfe6;
+            border-radius: 8px;
+            font-size: 13px;
+            font-family: ui-monospace, "Cascadia Code", "Source Han Mono SC", Consolas, monospace;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            tab-size: 4;
+            resize: vertical;
+        }
+        .map-template-preview {
+            margin-top: 8px;
+            padding: 8px 10px;
+            background: #f7f8fa;
+            border: 1px dashed #c9cdd4;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #4e5969;
+            white-space: pre-wrap;
+        }
+        .map-compose-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .map-compose-actions button {
+            padding: 7px 12px;
+            border-radius: 6px;
+            border: 1px solid #dcdfe6;
+            background: #fff;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .map-compose-actions button.primary {
+            background: #165DFF;
+            color: #fff;
+            border-color: #165DFF;
+        }
+        #reportMappingPanel {
+            margin-bottom: 12px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            background: #f7f8fa;
+            border: 1px solid #e5e6eb;
+            display: none;
+        }
+        #reportMappingPanel.visible {
+            display: block;
+        }
+        .field-wrap .field-map-chip {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            left: auto;
+            bottom: auto;
+            z-index: 50;
+            padding: 0 5px;
+            min-width: 22px;
+            height: 18px;
+            line-height: 16px;
+            font-size: 11px;
+            border-radius: 3px;
+            border: 1px solid #165DFF;
+            background: rgba(255, 255, 255, 0.96);
+            color: #165DFF;
+            cursor: pointer;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+            pointer-events: auto;
+        }
+        .field-wrap .field-map-chip:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            pointer-events: auto;
+        }
+        .field-wrap .field-map-chip.is-linked {
+            background: #e8f0ff;
+            font-weight: 600;
+        }
+        .field-row button.map-source-btn {
+            border-color: #722ed1;
+            color: #722ed1;
+        }
+        .field-row button.map-source-btn:hover:not(:disabled) {
+            background: #f5e8ff;
+        }
     </style>
 </head>
 <body>
@@ -987,11 +1500,10 @@
         </select>
         <button id="btnImportTemplate" type="button" title="把下拉框中选中的 JSON 版式套到当前 PDF 上">从文件库载入版式</button>
         <button id="btnImportContent" type="button" title="仅载入 JSON 里已保存的填写内容，不改变框线位置">载入已保存的填写内容</button>
+        <button id="btnClearWorkspace" type="button" title="清空画布上全部填写框、版式元数据与浏览器映射草稿，便于重新划框；不解除任务与 PDF 绑定">一键清除</button>
         <input type="text" id="templateName" placeholder="保存到文件库时的文件名（可选）">
         <button id="saveTemplate" type="button" title="保存当前各框坐标与属性到文件库「模板」">保存坐标模板 JSON</button>
-        <button id="saveMatrixTemplate" type="button">保存固定表格模板 JSON</button>
-        <button id="saveFrontendTemplate" type="button" title="按规则生成可前端渲染的 JSON">保存前端规则 JSON</button>
-        <button id="saveFrontendTemplateAI" type="button" title="由服务端结合大模型生成前端 JSON">保存前端 JSON（AI）</button>
+        <button id="saveFrontendTemplate" type="button" title="按规则生成业务语义化前端表单 JSON（坐标写入 pdfBindings）">保存前端规则 JSON</button>
         </div>
         <div class="toolbar-group">
         <button id="btnToggleFields" type="button">隐藏填写框</button>
@@ -1016,10 +1528,75 @@
         <aside class="sidebar">
             <h3>填写区列表</h3>
             <p class="sidebar-hint">点击列表或 PDF 上的填写框即可定位栏位；标签可直接修改。需要自动计算或合格判断时，点击行内「规则」打开编辑弹窗。</p>
+            <div id="reportMappingPanel">
+                <div style="font-size:13px;font-weight:600;color:#1d2129;">报告 ← 现场记录映射</div>
+                <p class="sidebar-hint" style="margin:6px 0 0;">与回填一致：医院/设备等相同 submitPath 会自动标为「规则映射」（蓝框/规）；检测数据等点「映」或双击报告栏位，在<strong>悬浮映射窗口</strong>的现场记录 PDF 上点选单元格；文本模板支持换行与缩进。保存坐标模板时仅写入手动映射。</p>
+                <div class="structure-status" id="reportMappingStatus" style="margin-top:6px;">未配置映射</div>
+            </div>
+            <div id="structurePanel" class="structure-panel">
+                <div class="structure-panel-title">
+                    <span>章节导航</span>
+                    <button type="button" id="btnAssignSections" title="按 PDF 标题纵坐标重新识别各框所属章节">识别章节</button>
+                </div>
+                <p class="sidebar-hint" style="margin:0 0 8px;">与自动框选一致：按 PDF 六大章节归类；点击筛选列表，选中栏位可在下方修改章节。</p>
+                <div id="sectionNav" class="section-nav-chips"></div>
+                <div id="structureFieldEditor" class="structure-grid" style="display:none;">
+                    <label>当前栏位所属章节
+                        <select id="fieldSectionSelect"></select>
+                    </label>
+                </div>
+                <div class="structure-status" id="structureStatus">—</div>
+            </div>
             <div id="fieldList"></div>
         </aside>
-        <div class="pdf-scroll">
-            <div id="pdfContainer" class="pdf-container"></div>
+        <div class="editor-workspace" id="editorWorkspace">
+            <div class="pdf-scroll">
+                <div id="pdfContainer" class="pdf-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="map-mode-overlay" id="mapModeOverlay" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="mapModeTitle">
+        <div class="map-mode-dialog">
+            <header class="map-mode-header">
+                <div class="map-mode-header-title" id="mapModeTitle">报告 ← 现场记录 栏位映射</div>
+                <div class="map-mode-field-label" id="mapModeFieldLabel">当前报告栏位：—</div>
+                <label class="sr-only" for="siteMapTaskSelect">现场记录模板</label>
+                <select id="siteMapTaskSelect" title="现场记录模板"></select>
+                <div class="map-mode-header-actions">
+                    <button type="button" id="siteMapClearOne" style="display:none;">清除本栏映射</button>
+                    <button type="button" id="siteMapCancel">关闭</button>
+                </div>
+            </header>
+            <div class="map-mode-body">
+                <aside class="map-report-preview">
+                    <div class="map-report-preview-title">报告栏位位置（预览）</div>
+                    <p class="map-report-preview-hint">橙色为当前待映射栏位；绿框为已映射。</p>
+                    <div class="map-report-preview-scroll" id="mapReportPreviewScroll">
+                        <div id="mapReportPreviewContainer"></div>
+                    </div>
+                </aside>
+                <main class="map-site-main">
+                    <p class="map-site-hint" id="siteMapHint">在下方现场记录 PDF 上<strong>直接点击</strong>输入框加入来源（可多个）；绿框=已映射到当前报告栏位，紫框=其它栏位，橙框=当前草稿。</p>
+                    <div class="map-site-scroll" id="siteMapScrollMain">
+                        <div id="siteMapPdfContainer"></div>
+                    </div>
+                    <div class="map-compose-panel" id="mapComposePanel">
+                        <h4>映射来源与文本模板</h4>
+                        <p class="sidebar-hint" style="margin:0 0 6px;">占位符 <code>{1}</code>、<code>{2}</code> 或现场 <code>pdfFieldId</code>；留空则多来源按行拼接。模板中的<strong>换行与行首空格</strong>会原样保存并在回填时使用。</p>
+                        <p class="map-cache-hint" id="mapCacheHint">映射草稿会自动保存到本浏览器；导出坐标模板 JSON 成功后会清除对应草稿。</p>
+                        <div class="map-source-list" id="mapSourceList"></div>
+                        <label class="sr-only" for="mapValueTemplateInput">回填文本模板</label>
+                        <textarea id="mapValueTemplateInput" class="map-value-template-input" spellcheck="false" placeholder="例如：&#10;  检测条件：{1}&#10;  结果：{2}"></textarea>
+                        <div class="map-template-preview" id="mapTemplatePreview">预览：（添加来源后显示）</div>
+                        <div class="map-compose-actions">
+                            <button type="button" id="mapBtnInsertSlot1">插入 {1}</button>
+                            <button type="button" id="mapBtnApplyPreview" class="primary">预览填入报告栏位</button>
+                            <button type="button" id="mapBtnSaveConfig" class="primary">保存映射</button>
+                        </div>
+                    </div>
+                </main>
+            </div>
         </div>
     </div>
 
@@ -1067,9 +1644,9 @@
         let btnFillLeft = document.getElementById('btnFillLeft');
         const btnAddText = document.getElementById('btnAddText');
         const btnAutoRedBoxes = document.getElementById('btnAutoRedBoxes');
+        const btnClearWorkspace = document.getElementById('btnClearWorkspace');
         const btnAddCheck = document.getElementById('btnAddCheck');
         const btnAddImage = document.getElementById('btnAddImage');
-        let btnSaveMatrixTemplate = document.getElementById('saveMatrixTemplate');
         const imageFilePicker = document.getElementById('imageFilePicker');
         const templateJsonSelect = document.getElementById('templateJsonSelect');
         const formulaModalBackdrop = document.getElementById('formulaModalBackdrop');
@@ -1080,10 +1657,7 @@
             const strip = (el) => {
                 if (el && el.parentNode) el.parentNode.removeChild(el);
             };
-            strip(btnSaveMatrixTemplate);
-            btnSaveMatrixTemplate = null;
             strip(document.getElementById('saveFrontendTemplate'));
-            strip(document.getElementById('saveFrontendTemplateAI'));
             strip(btnMarkPrefix);
             btnMarkPrefix = null;
             strip(btnFillRight);
@@ -1117,6 +1691,1172 @@
             libraryTaskId: '',
             libraryTemplateFileId: ''
         };
+
+        let reportTaskContext = {
+            isReport: false,
+            outputTarget: '',
+            siteTasks: [],
+            reportSiteFieldConfigs: [],
+            explicitReportSiteFieldConfigs: [],
+            inferredReportSiteFieldConfigs: [],
+            effectiveReportSiteFieldConfigs: [],
+            reportSiteFieldMap: [],
+            explicitReportSiteFieldMap: [],
+            inferredReportSiteFieldMap: [],
+            effectiveReportSiteFieldMap: [],
+            mappingReady: false,
+            mappingHint: ''
+        };
+
+        function isReportTemplateEditor() {
+            return reportTaskContext.isReport === true
+                && reportTaskContext.outputTarget === 'report';
+        }
+
+        function shouldUseSiteRecordSections() {
+            return !isReportTemplateEditor();
+        }
+
+        function htmlpdfEditorApiBody(extra) {
+            const body = Object.assign({}, extra || {});
+            const lt = (templateContext.libraryTaskId || window.HTMLPDF_INITIAL_LIBRARY_TASK_ID || '').trim();
+            if (lt) body.library_task_id = Number(lt);
+            return body;
+        }
+
+        function clearSiteRecordSectionMeta(field) {
+            if (!field) return;
+            field.templateSectionKey = '';
+            field.templateSectionTitle = '';
+            delete field.sectionKey;
+        }
+
+        function clearAllFieldsSiteRecordSectionMeta() {
+            fields.forEach(clearSiteRecordSectionMeta);
+        }
+
+        function reportMappingCanPick() {
+            return isReportTemplateEditor() && reportTaskContext.siteTasks.length > 0;
+        }
+
+        function removeReportMapUiFromFields() {
+            fields.forEach(f => {
+                if (f.wrap) {
+                    const chip = f.wrap.querySelector('.field-map-chip');
+                    if (chip) chip.remove();
+                    f.wrap.classList.remove(
+                        'field-wrap--map-source-linked',
+                        'field-wrap--map-source-inferred',
+                        'field-wrap--map-source-pending'
+                    );
+                }
+            });
+        }
+
+        function getMapCacheScopeKey() {
+            const tid = String(templateContext.libraryTaskId || '').trim();
+            const pdf = String(templateContext.libraryTemplateFileId || window.HTMLPDF_INITIAL_TEMPLATE_PDF_ID || '').trim();
+            const json = templateJsonSelect ? String(templateJsonSelect.value || '').trim() : '';
+            return 't:' + tid + '|pdf:' + pdf + '|json:' + json;
+        }
+
+        function mapCacheScopeIsValid(scope) {
+            const s = String(scope || getMapCacheScopeKey());
+            const m = s.match(/^t:([^|]*)\|pdf:([^|]*)\|json:(.*)$/);
+            if (!m) return false;
+            return !!(String(m[1] || '').trim() || String(m[2] || '').trim() || String(m[3] || '').trim());
+        }
+
+        function readMapCacheStore() {
+            try {
+                const raw = localStorage.getItem(MAP_CACHE_STORAGE_KEY);
+                if (!raw) return {};
+                const parsed = JSON.parse(raw);
+                return parsed && typeof parsed === 'object' ? parsed : {};
+            } catch (err) {
+                console.warn('read map cache failed', err);
+                return {};
+            }
+        }
+
+        function readMapCacheForScope(scope) {
+            const key = scope || getMapCacheScopeKey();
+            if (!mapCacheScopeIsValid(key)) return null;
+            const entry = readMapCacheStore()[key];
+            return entry && typeof entry === 'object' ? entry : null;
+        }
+
+        function cloneMapSources(sources) {
+            return (sources || []).map((s, i) => ({
+                siteTaskId: Number(s.siteTaskId),
+                sitePdfFieldId: String(s.sitePdfFieldId || ''),
+                siteTaskCode: s.siteTaskCode || '',
+                siteTaskName: s.siteTaskName || '',
+                slot: String(s.slot || (i + 1)),
+                label: s.label || ''
+            }));
+        }
+
+        function cloneExplicitConfigsForCache(configs) {
+            return (configs || []).map(c => {
+                const n = normalizeConfigClient(c);
+                if (!n || !n.sources.length) return null;
+                return {
+                    reportPdfFieldId: n.reportPdfFieldId,
+                    sources: cloneMapSources(n.sources),
+                    valueTemplate: n.valueTemplate || '',
+                    mapSource: 'explicit',
+                    mapRuleLabel: ''
+                };
+            }).filter(Boolean);
+        }
+
+        function applyMapCacheToExplicitConfigs(serverExplicit) {
+            const cached = readMapCacheForScope();
+            mapCacheFieldDrafts = {};
+            if (cached && cached.fieldDrafts && typeof cached.fieldDrafts === 'object') {
+                Object.keys(cached.fieldDrafts).forEach(k => {
+                    const d = cached.fieldDrafts[k];
+                    if (!d) return;
+                    mapCacheFieldDrafts[String(k).toLowerCase()] = {
+                        sources: cloneMapSources(d.sources),
+                        valueTemplate: normalizeValueTemplateText(d.valueTemplate || ''),
+                        updatedAt: Number(d.updatedAt) || 0
+                    };
+                });
+            }
+            if (!cached || !Array.isArray(cached.explicitConfigs) || !cached.explicitConfigs.length) {
+                return serverExplicit;
+            }
+            const cachedExplicit = mergeEffectiveConfigsClient(cached.explicitConfigs, []);
+            return mergeEffectiveConfigsClient(cachedExplicit, serverExplicit);
+        }
+
+        function getFieldMapDraft(reportPdfFieldId) {
+            const rid = String(reportPdfFieldId || '').trim().toLowerCase();
+            if (!rid) return null;
+            const d = mapCacheFieldDrafts[rid];
+            if (!d) return null;
+            const hasSources = Array.isArray(d.sources) && d.sources.length > 0;
+            const hasTpl = String(d.valueTemplate || '').trim().length > 0;
+            return (hasSources || hasTpl) ? d : null;
+        }
+
+        function clearFieldMapDraft(reportPdfFieldId) {
+            const rid = String(reportPdfFieldId || '').trim().toLowerCase();
+            if (rid) delete mapCacheFieldDrafts[rid];
+        }
+
+        function clearMapCacheForCurrentScope() {
+            const scope = getMapCacheScopeKey();
+            if (!mapCacheScopeIsValid(scope)) return;
+            try {
+                const all = readMapCacheStore();
+                delete all[scope];
+                localStorage.setItem(MAP_CACHE_STORAGE_KEY, JSON.stringify(all));
+            } catch (err) {
+                console.warn('clear map cache failed', err);
+            }
+            mapCacheFieldDrafts = {};
+            updateMapCacheUiHint(false);
+        }
+
+        function clearMapCacheForPdfAndTask() {
+            const tid = String(templateContext.libraryTaskId || '').trim();
+            const pdf = String(
+                templateContext.libraryTemplateFileId || window.HTMLPDF_INITIAL_TEMPLATE_PDF_ID || ''
+            ).trim();
+            if (!tid && !pdf) {
+                clearMapCacheForCurrentScope();
+                return;
+            }
+            try {
+                const all = readMapCacheStore();
+                let changed = false;
+                Object.keys(all).forEach(key => {
+                    const m = key.match(/^t:([^|]*)\|pdf:([^|]*)\|json:(.*)$/);
+                    if (!m) return;
+                    const kt = String(m[1] || '').trim();
+                    const kp = String(m[2] || '').trim();
+                    if ((tid && kt === tid) || (pdf && kp === pdf)) {
+                        delete all[key];
+                        changed = true;
+                    }
+                });
+                if (changed) {
+                    localStorage.setItem(MAP_CACHE_STORAGE_KEY, JSON.stringify(all));
+                }
+            } catch (err) {
+                console.warn('clear map cache for pdf/task failed', err);
+            }
+            mapCacheFieldDrafts = {};
+            updateMapCacheUiHint(false);
+        }
+
+        const SUPPRESS_AUTO_IMPORT_SESSION_KEY = 'htmlpdf_suppress_auto_import_v1';
+
+        function suppressAutoImportStorageKey() {
+            const pdf = String(
+                templateContext.libraryTemplateFileId || window.HTMLPDF_INITIAL_TEMPLATE_PDF_ID || ''
+            ).trim();
+            return pdf ? ('pdf:' + pdf) : '1';
+        }
+
+        function shouldSuppressAutoImport() {
+            try {
+                const flag = sessionStorage.getItem(SUPPRESS_AUTO_IMPORT_SESSION_KEY);
+                if (!flag) return false;
+                if (flag === '1') return true;
+                return flag === suppressAutoImportStorageKey();
+            } catch (err) {
+                return false;
+            }
+        }
+
+        function setSuppressAutoImport(on) {
+            try {
+                if (on) {
+                    sessionStorage.setItem(SUPPRESS_AUTO_IMPORT_SESSION_KEY, suppressAutoImportStorageKey());
+                } else {
+                    sessionStorage.removeItem(SUPPRESS_AUTO_IMPORT_SESSION_KEY);
+                }
+            } catch (err) {
+                console.warn('suppress auto import flag failed', err);
+            }
+        }
+
+        function persistMapCacheNow() {
+            const scope = getMapCacheScopeKey();
+            if (!mapCacheScopeIsValid(scope)) return;
+            try {
+                syncExplicitConfigsFromFields();
+                const all = readMapCacheStore();
+                all[scope] = {
+                    updatedAt: Date.now(),
+                    fieldDrafts: Object.assign({}, mapCacheFieldDrafts),
+                    explicitConfigs: cloneExplicitConfigsForCache(reportTaskContext.explicitReportSiteFieldConfigs)
+                };
+                localStorage.setItem(MAP_CACHE_STORAGE_KEY, JSON.stringify(all));
+            } catch (err) {
+                console.warn('persist map cache failed', err);
+            }
+        }
+
+        function schedulePersistMapCache() {
+            if (mapCachePersistTimer) clearTimeout(mapCachePersistTimer);
+            mapCachePersistTimer = setTimeout(() => {
+                mapCachePersistTimer = null;
+                flushMapSessionDraftToCache();
+                persistMapCacheNow();
+            }, 350);
+        }
+
+        function flushMapSessionDraftToCache() {
+            if (!mapSession) return;
+            const rid = String(mapSession.reportPdfFieldId || '').trim().toLowerCase();
+            if (!rid) return;
+            const draft = mapSession.draftConfig || {};
+            const tpl = normalizeValueTemplateText(
+                (mapValueTemplateInput && mapValueTemplateInput.value) || draft.valueTemplate || ''
+            );
+            const sources = cloneMapSources(draft.sources);
+            if (!sources.length && !String(tpl).trim()) {
+                clearFieldMapDraft(rid);
+                return;
+            }
+            mapCacheFieldDrafts[rid] = {
+                sources: sources,
+                valueTemplate: tpl,
+                updatedAt: Date.now()
+            };
+        }
+
+        function formatMapCacheTime(ts) {
+            if (!ts) return '';
+            try {
+                const d = new Date(ts);
+                return d.toLocaleString('zh-CN', { hour12: false });
+            } catch (e) {
+                return '';
+            }
+        }
+
+        function updateMapCacheUiHint(fromRestored) {
+            const el = document.getElementById('mapCacheHint');
+            if (!el) return;
+            if (!mapSession) {
+                el.classList.remove('is-restored');
+                el.textContent = '映射草稿会自动保存到本浏览器；关闭窗口或刷新后可恢复，导出 JSON 成功后会清除对应草稿。';
+                return;
+            }
+            const draft = getFieldMapDraft(mapSession.reportPdfFieldId);
+            if (fromRestored && draft) {
+                el.classList.add('is-restored');
+                const t = formatMapCacheTime(draft.updatedAt);
+                el.textContent = '已从本地草稿恢复' + (t ? '（' + t + '）' : '') + '；继续编辑会自动保存，点「保存映射」后写入栏位配置。';
+            } else {
+                el.classList.remove('is-restored');
+                el.textContent = '映射草稿会自动保存到本浏览器；关闭映射窗或刷新页面不会丢失未点「保存映射」的编辑。';
+            }
+        }
+
+        function mapCacheHasPendingDrafts() {
+            return Object.keys(mapCacheFieldDrafts).some(k => {
+                const d = mapCacheFieldDrafts[k];
+                return d && ((d.sources && d.sources.length) || String(d.valueTemplate || '').trim());
+            });
+        }
+
+        function normalizeConfigClient(row) {
+            if (!row || typeof row !== 'object') return null;
+            const reportPdfFieldId = String(row.reportPdfFieldId || '').trim();
+            if (!reportPdfFieldId) return null;
+            let sources = [];
+            if (Array.isArray(row.sources)) {
+                row.sources.forEach((src, i) => {
+                    if (!src || !src.sitePdfFieldId) return;
+                    sources.push({
+                        siteTaskId: Number(src.siteTaskId),
+                        sitePdfFieldId: String(src.sitePdfFieldId),
+                        siteTaskCode: src.siteTaskCode || '',
+                        siteTaskName: src.siteTaskName || '',
+                        slot: String(src.slot || (i + 1)),
+                        label: src.label || ''
+                    });
+                });
+            } else if (row.sitePdfFieldId) {
+                sources.push({
+                    siteTaskId: Number(row.siteTaskId),
+                    sitePdfFieldId: String(row.sitePdfFieldId),
+                    siteTaskCode: row.siteTaskCode || '',
+                    siteTaskName: row.siteTaskName || '',
+                    slot: '1',
+                    label: row.label || ''
+                });
+            }
+            return {
+                reportPdfFieldId,
+                sources,
+                valueTemplate: normalizeValueTemplateText(row.valueTemplate || row.value_template || ''),
+                mapSource: row.mapSource || '',
+                mapRuleLabel: row.mapRuleLabel || ''
+            };
+        }
+
+        function mergeEffectiveConfigsClient(explicit, inferred) {
+            const out = [];
+            const seen = new Set();
+            (explicit || []).forEach(raw => {
+                const c = normalizeConfigClient(raw);
+                if (!c || !c.sources.length) return;
+                c.mapSource = c.mapSource || 'explicit';
+                const k = c.reportPdfFieldId.toLowerCase();
+                if (seen.has(k)) return;
+                seen.add(k);
+                out.push(c);
+            });
+            (inferred || []).forEach(raw => {
+                const c = normalizeConfigClient(raw);
+                if (!c || !c.sources.length) return;
+                const k = c.reportPdfFieldId.toLowerCase();
+                if (seen.has(k)) return;
+                seen.add(k);
+                c.mapSource = c.mapSource || 'inferred';
+                out.push(c);
+            });
+            return out;
+        }
+
+        function mergeEffectiveMapsClient(explicit, inferred) {
+            return mergeEffectiveConfigsClient(explicit, inferred);
+        }
+        const MAP_CACHE_STORAGE_KEY = 'htmlpdf_report_map_cache_v1';
+        let mapCacheFieldDrafts = {};
+        let mapCachePersistTimer = null;
+        let mapSession = null;
+        let siteMapPdfDoc = null;
+        let siteMapPageMeta = {};
+        let siteMapFields = [];
+
+        function normalizeValueTemplateText(raw) {
+            if (raw == null) return '';
+            return String(raw).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        }
+
+        const reportMappingPanel = document.getElementById('reportMappingPanel');
+        const reportMappingStatus = document.getElementById('reportMappingStatus');
+        const editorWorkspace = document.getElementById('editorWorkspace');
+        const mapModeOverlay = document.getElementById('mapModeOverlay');
+        const mapReportPreviewContainer = document.getElementById('mapReportPreviewContainer');
+        const mapReportPreviewScroll = document.getElementById('mapReportPreviewScroll');
+        const mapModeFieldLabel = document.getElementById('mapModeFieldLabel');
+        const structurePanel = document.getElementById('structurePanel');
+        const siteMapScrollMain = document.getElementById('siteMapScrollMain');
+        const siteMapTaskSelect = document.getElementById('siteMapTaskSelect');
+        const siteMapHint = document.getElementById('siteMapHint');
+        const siteMapPdfContainer = document.getElementById('siteMapPdfContainer');
+        const siteMapCancel = document.getElementById('siteMapCancel');
+        const siteMapClearOne = document.getElementById('siteMapClearOne');
+        const mapSourceList = document.getElementById('mapSourceList');
+        const mapValueTemplateInput = document.getElementById('mapValueTemplateInput');
+        const mapTemplatePreview = document.getElementById('mapTemplatePreview');
+        const mapBtnInsertSlot1 = document.getElementById('mapBtnInsertSlot1');
+        const mapBtnApplyPreview = document.getElementById('mapBtnApplyPreview');
+        const mapBtnSaveConfig = document.getElementById('mapBtnSaveConfig');
+        const mainEl = document.querySelector('.main');
+
+        function getReportPdfFieldId(f, idx) {
+            return getFieldFormulaId(f, idx);
+        }
+
+        function findMappingConfigForReportField(reportPdfFieldId) {
+            const pid = String(reportPdfFieldId || '').trim().toLowerCase();
+            return (reportTaskContext.effectiveReportSiteFieldConfigs || []).find(
+                c => String(c.reportPdfFieldId || '').trim().toLowerCase() === pid
+            ) || null;
+        }
+
+        function findMappingForReportField(reportPdfFieldId) {
+            const cfg = findMappingConfigForReportField(reportPdfFieldId);
+            if (!cfg || !cfg.sources.length) return null;
+            const s0 = cfg.sources[0];
+            return {
+                reportPdfFieldId: cfg.reportPdfFieldId,
+                siteTaskId: s0.siteTaskId,
+                sitePdfFieldId: s0.sitePdfFieldId,
+                siteTaskCode: s0.siteTaskCode,
+                siteTaskName: s0.siteTaskName,
+                mapSource: cfg.mapSource,
+                mapRuleLabel: cfg.mapRuleLabel,
+                sources: cfg.sources,
+                valueTemplate: cfg.valueTemplate
+            };
+        }
+
+        function configToReportSourceMap(cfg) {
+            if (!cfg || !cfg.sources.length) return null;
+            return {
+                sources: cfg.sources.slice(),
+                valueTemplate: cfg.valueTemplate || '',
+                mapSource: cfg.mapSource || '',
+                mapRuleLabel: cfg.mapRuleLabel || ''
+            };
+        }
+
+        function applyReportSiteFieldMapToFields() {
+            const mapByReport = {};
+            (reportTaskContext.effectiveReportSiteFieldConfigs || []).forEach(c => {
+                const k = String(c.reportPdfFieldId || '').trim().toLowerCase();
+                if (k && c.sources && c.sources.length) mapByReport[k] = c;
+            });
+            fields.forEach((f, idx) => {
+                const pid = getReportPdfFieldId(f, idx);
+                const cfg = mapByReport[pid];
+                if (cfg) {
+                    f.reportSourceMap = configToReportSourceMap(cfg);
+                } else {
+                    delete f.reportSourceMap;
+                }
+            });
+        }
+
+        function syncExplicitConfigsFromFields() {
+            reportTaskContext.explicitReportSiteFieldConfigs = fields.map((f, idx) => {
+                const m = f.reportSourceMap;
+                if (!m || !Array.isArray(m.sources) || !m.sources.length) return null;
+                if (m.mapSource && m.mapSource !== 'explicit') return null;
+                return {
+                    reportPdfFieldId: getReportPdfFieldId(f, idx),
+                    sources: m.sources.map((s, i) => ({
+                        siteTaskId: s.siteTaskId,
+                        sitePdfFieldId: s.sitePdfFieldId,
+                        siteTaskCode: s.siteTaskCode || '',
+                        siteTaskName: s.siteTaskName || '',
+                        slot: String(s.slot || (i + 1)),
+                        label: s.label || ''
+                    })),
+                    valueTemplate: m.valueTemplate || '',
+                    mapSource: 'explicit',
+                    mapRuleLabel: ''
+                };
+            }).filter(Boolean);
+            reportTaskContext.reportSiteFieldConfigs = reportTaskContext.explicitReportSiteFieldConfigs.slice();
+        }
+
+        function buildBindingsForExport() {
+            syncExplicitConfigsFromFields();
+            const explicit = reportTaskContext.explicitReportSiteFieldConfigs || [];
+            if (!explicit.length) return {};
+            return {
+                report_site_field_configs: explicit.slice(),
+                report_site_field_map: explicit.flatMap(c => (c.sources || []).map(s => ({
+                    reportPdfFieldId: c.reportPdfFieldId,
+                    siteTaskId: s.siteTaskId,
+                    sitePdfFieldId: s.sitePdfFieldId,
+                    siteTaskCode: s.siteTaskCode,
+                    siteTaskName: s.siteTaskName,
+                    slot: s.slot,
+                    label: s.label,
+                    mapSource: c.mapSource,
+                    mapRuleLabel: c.mapRuleLabel,
+                    valueTemplate: c.valueTemplate
+                })))
+            };
+        }
+
+        function buildSiteFieldUsageIndex() {
+            const index = {};
+            (reportTaskContext.effectiveReportSiteFieldConfigs || []).forEach(cfg => {
+                const rid = String(cfg.reportPdfFieldId || '').trim().toLowerCase();
+                (cfg.sources || []).forEach(src => {
+                    const key = Number(src.siteTaskId) + ':' + String(src.sitePdfFieldId || '').trim().toLowerCase();
+                    index[key] = rid;
+                });
+            });
+            return index;
+        }
+
+        function applySiteMapHighlights() {
+            if (!siteMapPdfContainer || !mapSession) return;
+            const usage = buildSiteFieldUsageIndex();
+            const currentRid = String(mapSession.reportPdfFieldId || '').trim().toLowerCase();
+            const draftKeys = new Set((mapSession.draftConfig.sources || []).map(s =>
+                Number(s.siteTaskId) + ':' + String(s.sitePdfFieldId || '').trim().toLowerCase()));
+            siteMapPdfContainer.querySelectorAll('.site-map-field-wrap').forEach(el => {
+                el.classList.remove(
+                    'site-map-field-wrap--linked-current',
+                    'site-map-field-wrap--linked-other',
+                    'site-map-field-wrap--draft-source',
+                    'site-map-field-wrap--pick'
+                );
+                const sid = String(el.dataset.sitePdfFieldId || '').trim().toLowerCase();
+                const tid = Number(siteMapTaskSelect && siteMapTaskSelect.value);
+                const key = tid + ':' + sid;
+                if (draftKeys.has(key)) {
+                    el.classList.add('site-map-field-wrap--draft-source');
+                } else if (usage[key] === currentRid) {
+                    el.classList.add('site-map-field-wrap--linked-current');
+                } else if (usage[key]) {
+                    el.classList.add('site-map-field-wrap--linked-other');
+                }
+            });
+        }
+
+        function renderValueTemplatePreview(template, sources) {
+            const slotValues = {};
+            (sources || []).forEach((s, i) => {
+                const slot = String(s.slot || (i + 1));
+                const label = (s.label || s.sitePdfFieldId || ('来源' + slot)).trim();
+                slotValues[slot] = label;
+                slotValues[String(i + 1)] = label;
+                if (s.sitePdfFieldId) slotValues[String(s.sitePdfFieldId)] = label;
+            });
+            let text = String(template || '');
+            if (!text.trim()) {
+                return (sources || []).map(s => slotValues[String(s.slot || '')] || '').filter(Boolean).join('\n');
+            }
+            Object.keys(slotValues).sort((a, b) => b.length - a.length).forEach(k => {
+                text = text.split('{' + k + '}').join(slotValues[k]);
+                text = text.split('{{' + k + '}}').join(slotValues[k]);
+            });
+            return text;
+        }
+
+        function renderMapComposePanel() {
+            if (!mapSession || !mapSourceList) return;
+            const draft = mapSession.draftConfig;
+            mapSourceList.innerHTML = '';
+            (draft.sources || []).forEach((src, i) => {
+                const chip = document.createElement('span');
+                chip.className = 'map-source-chip';
+                const label = (src.label || src.sitePdfFieldId || '').trim();
+                chip.innerHTML = '<span>{' + (src.slot || (i + 1)) + '} ' + label + '</span>';
+                const rm = document.createElement('button');
+                rm.type = 'button';
+                rm.textContent = '×';
+                rm.title = '移除此来源';
+                rm.addEventListener('click', () => {
+                    draft.sources = draft.sources.filter((_, j) => j !== i);
+                    draft.sources.forEach((s, j) => { s.slot = String(j + 1); });
+                    renderMapComposePanel();
+                    applySiteMapHighlights();
+                    refreshMapTemplatePreview();
+                });
+                chip.appendChild(rm);
+                mapSourceList.appendChild(chip);
+            });
+            const tplNorm = normalizeValueTemplateText(draft.valueTemplate || '');
+            if (mapValueTemplateInput && mapValueTemplateInput.value !== tplNorm) {
+                mapValueTemplateInput.value = tplNorm;
+            }
+            refreshMapTemplatePreview();
+            schedulePersistMapCache();
+        }
+
+        function refreshMapTemplatePreview() {
+            if (!mapTemplatePreview || !mapSession) return;
+            const draft = mapSession.draftConfig;
+            if (!draft.sources.length) {
+                mapTemplatePreview.textContent = '预览：（请先点击现场记录输入框添加来源）';
+                return;
+            }
+            mapTemplatePreview.textContent = '预览：\n' + renderValueTemplatePreview(draft.valueTemplate, draft.sources);
+        }
+
+        function updateStructurePanelVisibility() {
+            if (!structurePanel) return;
+            const btnAssign = document.getElementById('btnAssignSections');
+            if (isReportTemplateEditor()) {
+                structurePanel.classList.add('structure-panel--hidden');
+                activeSectionFilter = '';
+                if (btnAssign) btnAssign.style.display = 'none';
+            } else {
+                structurePanel.classList.remove('structure-panel--hidden');
+                if (btnAssign) btnAssign.style.display = '';
+            }
+        }
+
+        function setMapOverlayOpen(open) {
+            if (mapModeOverlay) {
+                mapModeOverlay.classList.toggle('is-open', !!open);
+                mapModeOverlay.setAttribute('aria-hidden', open ? 'false' : 'true');
+            }
+            document.body.classList.toggle('map-mode-open', !!open);
+        }
+
+        function updateReportMappingUi() {
+            updateStructurePanelVisibility();
+            if (!reportMappingPanel) return;
+            if (!isReportTemplateEditor()) {
+                reportMappingPanel.classList.remove('visible');
+                removeReportMapUiFromFields();
+                if (mapSession) exitMapMode();
+                return;
+            }
+            reportMappingPanel.classList.add('visible');
+            const explicitN = (reportTaskContext.explicitReportSiteFieldConfigs || []).length;
+            const effectiveN = (reportTaskContext.effectiveReportSiteFieldConfigs || []).length;
+            const inferredN = Math.max(0, effectiveN - explicitN);
+            const canPick = reportMappingCanPick();
+            if (reportMappingStatus) {
+                if (!canPick) {
+                    reportMappingStatus.textContent = reportTaskContext.mappingHint
+                        || '请先在任务模板库中为该报告关联现场记录来源任务。';
+                } else if (effectiveN) {
+                    reportMappingStatus.textContent =
+                        '共 ' + effectiveN + ' 个报告栏位已关联：手动 ' + explicitN + '，规则推断 ' +
+                        inferredN + '（submitPath / 同名，含医院、设备等）';
+                } else {
+                    reportMappingStatus.textContent =
+                        '尚未配置映射；请对检测数据等栏位点「映射现场」或「映」';
+                }
+            }
+            fields.forEach((f, idx) => {
+                const pid = getReportPdfFieldId(f, idx);
+                const m = findMappingForReportField(pid);
+                const linked = !!m;
+                const inferred = linked && m.mapSource && m.mapSource !== 'explicit';
+                if (f.wrap) {
+                    f.wrap.classList.toggle('field-wrap--map-source-linked', linked && !inferred && !mapSession);
+                    f.wrap.classList.toggle('field-wrap--map-source-inferred', inferred && !mapSession);
+                    f.wrap.classList.toggle('field-wrap--map-source-pending',
+                        mapSession && mapSession.reportPdfFieldId === pid);
+                }
+            });
+        }
+
+        async function loadReportTaskContext(templateJsonFileId) {
+            const tid = (templateContext.libraryTaskId || '').trim();
+            const pdfId = (templateContext.libraryTemplateFileId || window.HTMLPDF_INITIAL_TEMPLATE_PDF_ID || '').trim();
+            if (!tid && !pdfId) {
+                reportTaskContext = {
+                    isReport: false,
+                    outputTarget: '',
+                    siteTasks: [],
+                    reportSiteFieldConfigs: [],
+                    explicitReportSiteFieldConfigs: [],
+                    inferredReportSiteFieldConfigs: [],
+                    effectiveReportSiteFieldConfigs: [],
+                    reportSiteFieldMap: [],
+                    explicitReportSiteFieldMap: [],
+                    inferredReportSiteFieldMap: [],
+                    effectiveReportSiteFieldMap: [],
+                    mappingReady: false,
+                    mappingHint: ''
+                };
+                updateReportMappingUi();
+                return;
+            }
+            try {
+                const body = {
+                    template_json_file_id: templateJsonFileId || null,
+                    template_pdf_file_id: pdfId ? Number(pdfId) : null
+                };
+                if (tid) body.library_task_id = Number(tid);
+                const res = await fetch('/files/htmlpdf/api/report-task-context/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(body)
+                });
+                const data = await parseJsonResponseOrThrow(res, '加载报告任务上下文失败');
+                if (data.resolvedLibraryTaskId) {
+                    templateContext.libraryTaskId = String(data.resolvedLibraryTaskId);
+                }
+                const taskOut = (data.task && data.task.outputTarget) ? String(data.task.outputTarget) : '';
+                const isReportCtx = !!data.isReportTemplate && taskOut === 'report';
+                const explicitRaw = data.reportSiteFieldConfigs || data.reportSiteFieldMap || [];
+                const inferredRaw = data.inferredReportSiteFieldConfigs || data.inferredReportSiteFieldMap || [];
+                let explicitNorm = mergeEffectiveConfigsClient(explicitRaw, []);
+                if (isReportCtx) {
+                    explicitNorm = applyMapCacheToExplicitConfigs(explicitNorm);
+                } else {
+                    mapCacheFieldDrafts = {};
+                }
+                const inferredNorm = mergeEffectiveConfigsClient(inferredRaw, []);
+                const effectiveNorm = mergeEffectiveConfigsClient(explicitNorm, inferredNorm);
+                reportTaskContext = {
+                    isReport: isReportCtx,
+                    outputTarget: taskOut,
+                    siteTasks: Array.isArray(data.siteTasks) ? data.siteTasks : [],
+                    reportSiteFieldConfigs: explicitNorm,
+                    explicitReportSiteFieldConfigs: explicitNorm,
+                    inferredReportSiteFieldConfigs: inferredNorm,
+                    effectiveReportSiteFieldConfigs: effectiveNorm,
+                    reportSiteFieldMap: [],
+                    explicitReportSiteFieldMap: [],
+                    inferredReportSiteFieldMap: [],
+                    effectiveReportSiteFieldMap: [],
+                    mappingReady: !!data.mappingReady,
+                    mappingHint: data.mappingHint || ''
+                };
+                if (!isReportTemplateEditor()) {
+                    reportTaskContext.explicitReportSiteFieldConfigs = [];
+                    reportTaskContext.inferredReportSiteFieldConfigs = [];
+                    reportTaskContext.effectiveReportSiteFieldConfigs = [];
+                    reportTaskContext.reportSiteFieldConfigs = [];
+                    fields.forEach(f => { delete f.reportSourceMap; });
+                } else {
+                    applyReportSiteFieldMapToFields();
+                    clearAllFieldsSiteRecordSectionMeta();
+                }
+                updateReportMappingUi();
+                refreshFieldList();
+                fields.forEach(f => mountField(f));
+            } catch (err) {
+                console.warn(err);
+            }
+        }
+
+        function attachReportMapChip(wrap, f) {
+            if (!wrap || !isReportTemplateEditor()) return;
+            const old = wrap.querySelector('.field-map-chip');
+            if (old) old.remove();
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            const isExplicit = f.reportSourceMap && f.reportSourceMap.mapSource === 'explicit';
+            const isInferred = f.reportSourceMap && f.reportSourceMap.mapSource && f.reportSourceMap.mapSource !== 'explicit';
+            chip.className = 'field-map-chip'
+                + (f.reportSourceMap ? (isInferred ? ' is-linked is-inferred' : ' is-linked') : '');
+            chip.textContent = f.reportSourceMap ? (isInferred ? '规' : '↔') : '映';
+            chip.disabled = !reportMappingCanPick();
+            const ruleHint = (f.reportSourceMap && f.reportSourceMap.mapRuleLabel)
+                ? ('规则：' + f.reportSourceMap.mapRuleLabel + ' · ') : '';
+            const srcHint = f.reportSourceMap && f.reportSourceMap.sources
+                ? f.reportSourceMap.sources.map(s => (s.label || s.sitePdfFieldId)).join('、')
+                : '';
+            chip.title = f.reportSourceMap
+                ? (ruleHint + '来源：' + srcHint + (f.reportSourceMap.valueTemplate ? ' · 模板已设' : ''))
+                : (reportTaskContext.mappingHint || '映射到现场记录输入框');
+            chip.addEventListener('mousedown', ev => {
+                ev.stopPropagation();
+                ev.preventDefault();
+            });
+            chip.addEventListener('click', ev => {
+                ev.stopPropagation();
+                ev.preventDefault();
+                if (!reportMappingCanPick()) {
+                    alert(reportTaskContext.mappingHint || '请先在任务模板库为报告关联现场记录来源。');
+                    return;
+                }
+                enterMapMode(f.id);
+            });
+            wrap.appendChild(chip);
+        }
+
+        function fillSiteMapTaskSelect(selectedId) {
+            if (!siteMapTaskSelect) return;
+            siteMapTaskSelect.innerHTML = '';
+            (reportTaskContext.siteTasks || []).forEach(st => {
+                const opt = document.createElement('option');
+                opt.value = String(st.id);
+                opt.textContent = (st.code ? st.code + ' · ' : '') + (st.name || '现场记录');
+                siteMapTaskSelect.appendChild(opt);
+            });
+            if (selectedId) siteMapTaskSelect.value = String(selectedId);
+            else if (siteMapTaskSelect.options.length) siteMapTaskSelect.selectedIndex = 0;
+        }
+
+        async function renderReportMapPreview(reportFieldId) {
+            if (!mapReportPreviewContainer || !pdfDoc) return;
+            mapReportPreviewContainer.innerHTML = '';
+            const previewMaxW = 268;
+            const activeField = getFieldById(reportFieldId);
+            for (let p = 1; p <= pdfDoc.numPages; p++) {
+                const page = await pdfDoc.getPage(p);
+                const base = page.getViewport({ scale: 1 });
+                const scale = previewMaxW / base.width;
+                const vp = page.getViewport({ scale });
+                const wrap = document.createElement('div');
+                wrap.className = 'pdf-page';
+                wrap.dataset.page = String(p);
+                wrap.style.width = vp.width + 'px';
+                wrap.style.height = vp.height + 'px';
+                const canvas = document.createElement('canvas');
+                canvas.width = vp.width;
+                canvas.height = vp.height;
+                wrap.appendChild(canvas);
+                mapReportPreviewContainer.appendChild(wrap);
+                await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+                fields.filter(ff => Number(ff.page) === p).forEach(ff => {
+                    const gidx = fields.indexOf(ff);
+                    const el = document.createElement('div');
+                    el.className = 'map-preview-field';
+                    if (ff.id === reportFieldId) el.classList.add('map-preview-field--active');
+                    else if (ff.reportSourceMap && ff.reportSourceMap.sources && ff.reportSourceMap.sources.length) {
+                        el.classList.add('map-preview-field--linked');
+                    }
+                    const ph = ff.placeholder || getReportPdfFieldId(ff, gidx);
+                    el.title = ph;
+                    el.style.left = (Number(ff.x) * scale) + 'px';
+                    el.style.top = (Number(ff.y) * scale) + 'px';
+                    el.style.width = (Number(ff.w) * scale) + 'px';
+                    el.style.height = (Number(ff.h) * scale) + 'px';
+                    wrap.appendChild(el);
+                });
+            }
+            requestAnimationFrame(() => {
+                const active = mapReportPreviewContainer.querySelector('.map-preview-field--active');
+                if (active && mapReportPreviewScroll) {
+                    const pageEl = active.closest('.pdf-page');
+                    if (pageEl) {
+                        pageEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                }
+            });
+        }
+
+        async function renderSiteMapPdf(url, siteFieldsList) {
+            siteMapPdfContainer.innerHTML = '';
+            siteMapFields = siteFieldsList || [];
+            if (!url) return;
+            siteMapPdfDoc = await pdfjsLib.getDocument(url).promise;
+            siteMapPageMeta = {};
+            const scrollEl = siteMapScrollMain || siteMapPdfContainer.parentElement;
+            let availW = 960;
+            if (scrollEl && scrollEl.clientWidth > 200) {
+                availW = Math.max(720, scrollEl.clientWidth - 48);
+            } else {
+                availW = Math.max(720, Math.min(1400, window.innerWidth - 340));
+            }
+            for (let p = 1; p <= siteMapPdfDoc.numPages; p++) {
+                const page = await siteMapPdfDoc.getPage(p);
+                const base = page.getViewport({ scale: 1 });
+                const scale = Math.min(1.65, availW / base.width);
+                const vp = page.getViewport({ scale });
+                const wrap = document.createElement('div');
+                wrap.className = 'pdf-page';
+                wrap.dataset.page = String(p);
+                wrap.style.width = vp.width + 'px';
+                wrap.style.height = vp.height + 'px';
+                const canvas = document.createElement('canvas');
+                canvas.width = vp.width;
+                canvas.height = vp.height;
+                wrap.appendChild(canvas);
+                siteMapPdfContainer.appendChild(wrap);
+                siteMapPageMeta[p] = { width: vp.width, height: vp.height, scale };
+                await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+                siteFieldsList.filter(sf => Number(sf.page) === p).forEach(sf => {
+                    const el = document.createElement('div');
+                    el.className = 'site-map-field-wrap';
+                    el.dataset.sitePdfFieldId = sf.pdfFieldId;
+                    el.title = sf.placeholder || sf.pdfFieldId;
+                    const x = Number(sf.x) * scale;
+                    const y = Number(sf.y) * scale;
+                    const w = Number(sf.w) * scale;
+                    const h = Number(sf.h) * scale;
+                    el.style.left = x + 'px';
+                    el.style.top = y + 'px';
+                    el.style.width = w + 'px';
+                    el.style.height = h + 'px';
+                    el.addEventListener('click', ev => {
+                        ev.stopPropagation();
+                        if (!mapSession) return;
+                        toggleSourceInMapMode(sf.pdfFieldId, sf.placeholder || sf.pdfFieldId);
+                    });
+                    wrap.appendChild(el);
+                });
+            }
+            applySiteMapHighlights();
+        }
+
+        async function loadSiteMapBundle(siteTaskId) {
+            const res = await fetch('/files/htmlpdf/api/site-template-bundle/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ site_task_id: Number(siteTaskId) })
+            });
+            const data = await parseJsonResponseOrThrow(res, '加载现场记录模板失败');
+            await renderSiteMapPdf(data.pdfUrl, data.fields || []);
+            if (siteMapHint) {
+                siteMapHint.innerHTML = '已加载「' + (data.task.name || '') + '」；请在下方 PDF 上点击与报告栏位对应的现场记录输入框，文本模板支持换行与缩进。';
+            }
+        }
+
+        function updateMapModeFieldLabel(f, idx) {
+            if (!mapModeFieldLabel || !f) return;
+            const pid = getReportPdfFieldId(f, idx);
+            const ph = (f.placeholder || '').trim() || pid;
+            mapModeFieldLabel.innerHTML = '当前报告栏位：<strong>' + ph + '</strong> <span style="color:#86909c;">(' + pid + ')</span>';
+        }
+
+        function enterMapMode(reportFieldId) {
+            if (mapSession && mapSession.reportFieldId !== reportFieldId) {
+                flushMapSessionDraftToCache();
+                persistMapCacheNow();
+            }
+            const f = getFieldById(reportFieldId);
+            if (!f) {
+                alert('请先在列表或 PDF 上选中一个报告栏位');
+                return;
+            }
+            if (!pdfDoc || !pdfReady) {
+                alert('报告 PDF 尚未加载完成，请稍后再试');
+                return;
+            }
+            if (!isReportTemplateEditor()) {
+                alert('映射仅从报告模板配置；现场记录模板无需、也不应添加映射按钮。');
+                return;
+            }
+            if (!reportTaskContext.siteTasks.length) {
+                alert(reportTaskContext.mappingHint || '请先在任务模板库中为该报告关联「报告来源现场记录」任务。');
+                return;
+            }
+            const idx = fields.findIndex(x => x.id === reportFieldId);
+            const reportPdfFieldId = getReportPdfFieldId(f, idx);
+            const existingCfg = findMappingConfigForReportField(reportPdfFieldId);
+            const cachedDraft = getFieldMapDraft(reportPdfFieldId);
+            let draftSources = [];
+            let valueTemplate = '';
+            let restoredFromCache = false;
+            if (cachedDraft) {
+                draftSources = cloneMapSources(cachedDraft.sources);
+                valueTemplate = cachedDraft.valueTemplate || '';
+                restoredFromCache = true;
+            } else if (existingCfg && existingCfg.sources) {
+                draftSources = existingCfg.sources.map(s => Object.assign({}, s));
+                valueTemplate = existingCfg.valueTemplate || '';
+            }
+            mapSession = {
+                reportFieldId: reportFieldId,
+                reportPdfFieldId: reportPdfFieldId,
+                draftConfig: {
+                    reportPdfFieldId: reportPdfFieldId,
+                    sources: draftSources,
+                    valueTemplate: valueTemplate,
+                    mapSource: 'explicit',
+                    mapRuleLabel: ''
+                }
+            };
+            setMapOverlayOpen(true);
+            updateMapModeFieldLabel(f, idx);
+            const firstTid = draftSources[0] ? draftSources[0].siteTaskId : (reportTaskContext.siteTasks[0] && reportTaskContext.siteTasks[0].id);
+            fillSiteMapTaskSelect(firstTid);
+            if (siteMapClearOne) siteMapClearOne.style.display = 'inline-block';
+            renderMapComposePanel();
+            updateMapCacheUiHint(restoredFromCache);
+            updateReportMappingUi();
+            fields.forEach(ff => mountField(ff));
+            renderReportMapPreview(reportFieldId).catch(err => console.warn(err));
+            loadSiteMapBundle(Number(siteMapTaskSelect.value)).catch(err => alert(err.message));
+        }
+
+        function toggleSourceInMapMode(sitePdfFieldId, labelHint) {
+            if (!mapSession) return;
+            const tid = Number(siteMapTaskSelect.value);
+            const sid = String(sitePdfFieldId || '').trim();
+            const key = tid + ':' + sid.toLowerCase();
+            const draft = mapSession.draftConfig;
+            const idx = (draft.sources || []).findIndex(s =>
+                Number(s.siteTaskId) === tid && String(s.sitePdfFieldId).toLowerCase() === sid.toLowerCase());
+            const st = (reportTaskContext.siteTasks || []).find(x => Number(x.id) === tid);
+            if (idx >= 0) {
+                draft.sources.splice(idx, 1);
+            } else {
+                draft.sources.push({
+                    siteTaskId: tid,
+                    sitePdfFieldId: sid,
+                    siteTaskCode: st ? st.code : '',
+                    siteTaskName: st ? st.name : '',
+                    slot: String(draft.sources.length + 1),
+                    label: String(labelHint || sid).trim()
+                });
+            }
+            draft.sources.forEach((s, j) => { s.slot = String(j + 1); });
+            renderMapComposePanel();
+            applySiteMapHighlights();
+            schedulePersistMapCache();
+        }
+
+        function saveMapConfigFromSession(closeAfter) {
+            if (!mapSession) return;
+            const f = getFieldById(mapSession.reportFieldId);
+            if (!f) return;
+            const idx = fields.findIndex(x => x.id === mapSession.reportFieldId);
+            const reportPdfFieldId = getReportPdfFieldId(f, idx);
+            const draft = mapSession.draftConfig;
+            if (!draft.sources.length) {
+                alert('请至少选择一个现场记录来源');
+                return;
+            }
+            const cfg = {
+                reportPdfFieldId: reportPdfFieldId,
+                sources: draft.sources.slice(),
+                valueTemplate: normalizeValueTemplateText(
+                    (mapValueTemplateInput && mapValueTemplateInput.value) || draft.valueTemplate || ''
+                ),
+                mapSource: 'explicit',
+                mapRuleLabel: ''
+            };
+            f.reportSourceMap = configToReportSourceMap(cfg);
+            const rid = reportPdfFieldId.toLowerCase();
+            reportTaskContext.explicitReportSiteFieldConfigs = (reportTaskContext.explicitReportSiteFieldConfigs || [])
+                .filter(c => String(c.reportPdfFieldId || '').toLowerCase() !== rid);
+            reportTaskContext.explicitReportSiteFieldConfigs.push(cfg);
+            reportTaskContext.reportSiteFieldConfigs = reportTaskContext.explicitReportSiteFieldConfigs.slice();
+            reportTaskContext.effectiveReportSiteFieldConfigs = mergeEffectiveConfigsClient(
+                reportTaskContext.explicitReportSiteFieldConfigs,
+                reportTaskContext.inferredReportSiteFieldConfigs
+            );
+            applyReportSiteFieldMapToFields();
+            clearFieldMapDraft(reportPdfFieldId);
+            persistMapCacheNow();
+            refreshFieldList();
+            fields.forEach(ff => mountField(ff));
+            if (closeAfter) exitMapMode();
+            else {
+                applySiteMapHighlights();
+                renderReportMapPreview(mapSession.reportFieldId).catch(() => {});
+                updateMapCacheUiHint(false);
+            }
+        }
+
+        function dismissMapModeUi() {
+            mapSession = null;
+            setMapOverlayOpen(false);
+            if (mapReportPreviewContainer) mapReportPreviewContainer.innerHTML = '';
+            if (siteMapPdfContainer) siteMapPdfContainer.innerHTML = '';
+            siteMapPdfDoc = null;
+            if (siteMapClearOne) siteMapClearOne.style.display = 'none';
+            updateMapCacheUiHint(false);
+            updateReportMappingUi();
+            refreshFieldList();
+        }
+
+        function exitMapMode() {
+            flushMapSessionDraftToCache();
+            persistMapCacheNow();
+            mapSession = null;
+            setMapOverlayOpen(false);
+            if (mapReportPreviewContainer) mapReportPreviewContainer.innerHTML = '';
+            if (siteMapPdfContainer) siteMapPdfContainer.innerHTML = '';
+            siteMapPdfDoc = null;
+            if (siteMapClearOne) siteMapClearOne.style.display = 'none';
+            updateMapCacheUiHint(false);
+            updateReportMappingUi();
+            refreshFieldList();
+        }
+
+        function clearMappingForCurrentField() {
+            if (!mapSession) return;
+            mapSession.draftConfig.sources = [];
+            mapSession.draftConfig.valueTemplate = '';
+            if (mapValueTemplateInput) mapValueTemplateInput.value = '';
+            clearFieldMapDraft(mapSession.reportPdfFieldId);
+            renderMapComposePanel();
+            applySiteMapHighlights();
+            schedulePersistMapCache();
+        }
+
+        if (siteMapCancel) siteMapCancel.addEventListener('click', exitMapMode);
+        if (siteMapClearOne) siteMapClearOne.addEventListener('click', clearMappingForCurrentField);
+        if (mapBtnSaveConfig) mapBtnSaveConfig.addEventListener('click', () => saveMapConfigFromSession(true));
+        if (mapBtnApplyPreview) {
+            mapBtnApplyPreview.addEventListener('click', () => {
+                if (!mapSession) return;
+                const f = getFieldById(mapSession.reportFieldId);
+                if (!f || !f.el) return;
+                const draft = mapSession.draftConfig;
+                const preview = renderValueTemplatePreview(
+                    (mapValueTemplateInput && mapValueTemplateInput.value) || draft.valueTemplate,
+                    draft.sources
+                );
+                if (f.fieldType === 'check') {
+                    f.checked = /^(1|true|yes|是|y)$/i.test(String(preview).trim());
+                    if (f.el) f.el.textContent = f.checked ? '✓' : '';
+                } else if (f.fieldType !== 'image') {
+                    f.value = preview;
+                    if (f.el) {
+                        f.el.value = preview;
+                        fitInputStyle(f.el, f);
+                    }
+                }
+            });
+        }
+        if (mapBtnInsertSlot1) {
+            mapBtnInsertSlot1.addEventListener('click', () => {
+                if (!mapValueTemplateInput) return;
+                mapValueTemplateInput.value = (mapValueTemplateInput.value || '') + '{1}';
+                if (mapSession) mapSession.draftConfig.valueTemplate = mapValueTemplateInput.value;
+                refreshMapTemplatePreview();
+                schedulePersistMapCache();
+            });
+        }
+        if (mapValueTemplateInput) {
+            mapValueTemplateInput.addEventListener('input', () => {
+                if (mapSession) mapSession.draftConfig.valueTemplate = mapValueTemplateInput.value;
+                refreshMapTemplatePreview();
+                schedulePersistMapCache();
+            });
+        }
+        window.addEventListener('beforeunload', () => {
+            if (!isReportTemplateEditor()) return;
+            flushMapSessionDraftToCache();
+            if (mapSession || mapCacheHasPendingDrafts()) {
+                persistMapCacheNow();
+            }
+        });
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden' && mapSession) {
+                flushMapSessionDraftToCache();
+                persistMapCacheNow();
+            }
+        });
+        if (mapModeOverlay) {
+            mapModeOverlay.addEventListener('click', e => {
+                if (e.target === mapModeOverlay) exitMapMode();
+            });
+        }
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape' && mapSession) exitMapMode();
+        });
+        if (siteMapTaskSelect) {
+            siteMapTaskSelect.addEventListener('change', () => {
+                if (!mapSession) return;
+                loadSiteMapBundle(Number(siteMapTaskSelect.value)).catch(err => alert(err.message));
+            });
+        }
 
         function nextId() {
             return 'f' + fieldIdSeq++;
@@ -1188,10 +2928,12 @@
         }
 
         function updateSelectedFieldRows() {
+            syncStructureFieldEditor();
             document.querySelectorAll('.field-row--selected').forEach(r => r.classList.remove('field-row--selected'));
-            if (!selectedFieldId) return;
-            const row = document.querySelector('.field-row[data-field-id="' + selectedFieldId + '"]');
-            if (row) row.classList.add('field-row--selected');
+            if (selectedFieldId) {
+                const row = document.querySelector('.field-row[data-field-id="' + selectedFieldId + '"]');
+                if (row) row.classList.add('field-row--selected');
+            }
         }
 
         function attachFieldHoverSync(wrap, id) {
@@ -1912,16 +3654,139 @@
             host.appendChild(clearRow);
         }
 
-        function refreshFieldList() {
-            const el = document.getElementById('fieldList');
-            el.innerHTML = '';
-            if (!fields.length) {
-                el.textContent = '暂无输入框';
-                selectedFieldId = null;
-                closeFormulaModal();
+        function getAutoSemantic(f) {
+            return f && f.autoSemantic && typeof f.autoSemantic === 'object' ? f.autoSemantic : {};
+        }
+
+        const SITE_RECORD_SECTIONS = [
+            { key: 'site_unit_basic', title: '受检单位基本信息' },
+            { key: 'site_device_basic', title: '受检设备基本信息' },
+            { key: 'site_instruments_staff', title: '受检设备主要检测仪器及检测人员' },
+            { key: 'site_qc_performance', title: '质量控制（性能）检测项目及结果' },
+            { key: 'site_radiation_protection', title: '工作场所放射防护检测结果' },
+            { key: 'site_layout_diagram', title: '平面布局示意图' }
+        ];
+        const SITE_RECORD_SECTION_TITLE_BY_KEY = Object.fromEntries(
+            SITE_RECORD_SECTIONS.map(s => [s.key, s.title])
+        );
+        let activeSectionFilter = '';
+
+        function applyTemplateSectionToField(f, sectionKey) {
+            if (!f) return;
+            const key = String(sectionKey || '').trim();
+            if (!key) {
+                f.templateSectionKey = '';
+                f.templateSectionTitle = '';
                 return;
             }
-            fields.forEach((f, idx) => {
+            f.templateSectionKey = key;
+            f.templateSectionTitle = SITE_RECORD_SECTION_TITLE_BY_KEY[key] || key;
+        }
+
+        function refreshSectionNav() {
+            if (!shouldUseSiteRecordSections()) {
+                updateStructurePanelVisibility();
+                return;
+            }
+            const nav = document.getElementById('sectionNav');
+            const statusEl = document.getElementById('structureStatus');
+            if (!nav) return;
+            const counts = { '': fields.length };
+            fields.forEach(f => {
+                const k = String(f.templateSectionKey || '').trim() || '_unset';
+                counts[k] = (counts[k] || 0) + 1;
+            });
+            const unset = counts['_unset'] || 0;
+            nav.innerHTML = '';
+            const mkChip = (key, label, count) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'section-nav-chip' + ((activeSectionFilter === key) ? ' active' : '');
+                btn.textContent = label + (count != null ? (' (' + count + ')') : '');
+                btn.addEventListener('click', () => {
+                    activeSectionFilter = key;
+                    refreshFieldList();
+                });
+                nav.appendChild(btn);
+            };
+            mkChip('', '全部', fields.length);
+            SITE_RECORD_SECTIONS.forEach(sec => {
+                mkChip(sec.key, sec.title, counts[sec.key] || 0);
+            });
+            if (unset > 0) {
+                mkChip('_unset', '未归类', unset);
+            }
+            if (statusEl) {
+                const labeled = fields.length - unset;
+                statusEl.textContent = fields.length
+                    ? ('已归类 ' + labeled + ' / ' + fields.length + ' 个栏位')
+                    : '暂无栏位';
+            }
+        }
+
+        function syncStructureFieldEditor() {
+            const editor = document.getElementById('structureFieldEditor');
+            const sel = document.getElementById('fieldSectionSelect');
+            if (!editor || !sel) return;
+            const f = selectedFieldId ? getFieldById(selectedFieldId) : null;
+            if (!f) {
+                editor.style.display = 'none';
+                return;
+            }
+            editor.style.display = 'block';
+            const cur = String(f.templateSectionKey || '').trim();
+            sel.innerHTML = '<option value="">— 未指定章节 —</option>';
+            SITE_RECORD_SECTIONS.forEach(sec => {
+                const opt = document.createElement('option');
+                opt.value = sec.key;
+                opt.textContent = sec.title;
+                if (sec.key === cur) opt.selected = true;
+                sel.appendChild(opt);
+            });
+            if (cur && !SITE_RECORD_SECTION_TITLE_BY_KEY[cur]) {
+                const opt = document.createElement('option');
+                opt.value = cur;
+                opt.textContent = f.templateSectionTitle || cur;
+                opt.selected = true;
+                sel.appendChild(opt);
+            }
+        }
+
+        async function assignTemplateSectionsFromPdf(silent) {
+            if (!shouldUseSiteRecordSections()) {
+                if (!silent) alert('报告模板不使用现场记录六大章节，无需识别章节。');
+                return;
+            }
+            if (!fields.length) {
+                if (!silent) alert('当前没有栏位，请先载入版式或自动框选。');
+                return;
+            }
+            const res = await fetch('/files/htmlpdf/api/assign-template-sections/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ fields: buildFieldsPayload() })
+            });
+            const data = await parseJsonResponseOrThrow(res, '识别章节失败');
+            const byPdfId = {};
+            (data.fields || []).forEach(row => {
+                const pid = String(row.pdfFieldId || row.id || '').trim();
+                if (pid) byPdfId[pid] = row;
+            });
+            fields.forEach(f => {
+                const pid = String(f.pdfFieldId || f.id || '').trim();
+                const row = byPdfId[pid];
+                if (!row) return;
+                f.templateSectionKey = row.templateSectionKey || row.sectionKey || '';
+                f.templateSectionTitle = row.templateSectionTitle || SITE_RECORD_SECTION_TITLE_BY_KEY[f.templateSectionKey] || '';
+            });
+            refreshFieldList();
+            if (!silent) {
+                alert('已按 PDF 章节更新 ' + (data.count || fields.length) + ' 个栏位的 section 归属。');
+            }
+        }
+
+        function appendFieldRow(el, f, idx) {
                 const ft = f.fieldType || 'text';
                 const tk = fieldTypeKey(ft);
                 const row = document.createElement('div');
@@ -1969,6 +3834,33 @@
                     tag.textContent = '已设判定';
                     meta.appendChild(tag);
                 }
+                if (shouldUseSiteRecordSections() && f.templateSectionTitle) {
+                    const tag = document.createElement('span');
+                    tag.className = 'field-row-tag has-structure';
+                    tag.title = f.templateSectionKey || '';
+                    tag.textContent = f.templateSectionTitle.length > 10
+                        ? f.templateSectionTitle.slice(0, 10) + '…'
+                        : f.templateSectionTitle;
+                    meta.appendChild(tag);
+                }
+                if (f.reportSourceMap && f.reportSourceMap.sources && f.reportSourceMap.sources.length) {
+                    const tag = document.createElement('span');
+                    const inferred = f.reportSourceMap.mapSource && f.reportSourceMap.mapSource !== 'explicit';
+                    tag.className = 'field-row-tag ' + (inferred ? 'has-source-map-inferred' : 'has-source-map');
+                    const srcs = f.reportSourceMap.sources.map(s => (s.label || s.sitePdfFieldId)).join('、');
+                    const rule = f.reportSourceMap.mapRuleLabel ? ('规则 ' + f.reportSourceMap.mapRuleLabel + ' · ') : '';
+                    tag.title = rule + srcs + (f.reportSourceMap.valueTemplate ? ' · 有文本模板' : '');
+                    tag.textContent = inferred ? ('规则×' + f.reportSourceMap.sources.length) : ('映射×' + f.reportSourceMap.sources.length);
+                    meta.appendChild(tag);
+                } else if (isReportTemplateEditor() && getFieldMapDraft(getReportPdfFieldId(f, idx))) {
+                    const tag = document.createElement('span');
+                    tag.className = 'field-row-tag has-map-draft';
+                    const d = getFieldMapDraft(getReportPdfFieldId(f, idx));
+                    const t = formatMapCacheTime(d && d.updatedAt);
+                    tag.title = '本地草稿未点「保存映射」' + (t ? ' · ' + t : '');
+                    tag.textContent = '映射草稿';
+                    meta.appendChild(tag);
+                }
                 textCol.appendChild(title);
                 textCol.appendChild(labelInput);
                 textCol.appendChild(idSpan);
@@ -1985,6 +3877,22 @@
                     ev.stopPropagation();
                     openFormulaModal(f.id);
                 });
+                if (isReportTemplateEditor()) {
+                    const mapBtn = document.createElement('button');
+                    mapBtn.type = 'button';
+                    mapBtn.className = 'rule-btn map-source-btn';
+                    const nsrc = f.reportSourceMap && f.reportSourceMap.sources ? f.reportSourceMap.sources.length : 0;
+                    mapBtn.textContent = nsrc ? ('改映射(' + nsrc + ')') : '映射现场';
+                    mapBtn.disabled = !reportMappingCanPick();
+                    mapBtn.title = reportMappingCanPick()
+                        ? '打开悬浮映射窗口，在现场记录 PDF 上点选单元格；下方可设带换行/缩进的文本模板'
+                        : (reportTaskContext.mappingHint || '');
+                    mapBtn.addEventListener('click', ev => {
+                        ev.stopPropagation();
+                        enterMapMode(f.id);
+                    });
+                    actions.appendChild(mapBtn);
+                }
                 const del = document.createElement('button');
                 del.type = 'button';
                 del.textContent = '删除';
@@ -2007,9 +3915,121 @@
                 row.addEventListener('mouseenter', () => setCanvasHoverForField(f.id, true));
                 row.addEventListener('mouseleave', () => setCanvasHoverForField(f.id, false));
                 el.appendChild(row);
-            });
+        }
+
+        function refreshFieldList() {
+            const el = document.getElementById('fieldList');
+            el.innerHTML = '';
+            refreshSectionNav();
+            syncStructureFieldEditor();
+            if (!fields.length) {
+                el.textContent = '暂无输入框';
+                selectedFieldId = null;
+                closeFormulaModal();
+                return;
+            }
+            let list = fields.map((f, idx) => ({ f, idx }));
+            if (shouldUseSiteRecordSections()) {
+                if (activeSectionFilter === '_unset') {
+                    list = list.filter(x => !String(x.f.templateSectionKey || '').trim());
+                } else if (activeSectionFilter) {
+                    list = list.filter(x => String(x.f.templateSectionKey || '') === activeSectionFilter);
+                }
+                if (!list.length) {
+                    el.textContent = '当前章节筛选下暂无栏位';
+                    return;
+                }
+                let lastSec = null;
+                list.forEach(({ f, idx }) => {
+                    if (!activeSectionFilter) {
+                        const sk = String(f.templateSectionKey || '').trim() || '_unset';
+                        if (sk !== lastSec) {
+                            lastSec = sk;
+                            const hdr = document.createElement('div');
+                            hdr.className = 'field-section-header';
+                            hdr.textContent = sk === '_unset'
+                                ? '未归类章节'
+                                : (f.templateSectionTitle || SITE_RECORD_SECTION_TITLE_BY_KEY[sk] || sk);
+                            el.appendChild(hdr);
+                        }
+                    }
+                    appendFieldRow(el, f, idx);
+                });
+            } else {
+                list.forEach(({ f, idx }) => appendFieldRow(el, f, idx));
+            }
             updateFieldBadges();
+            updateReportMappingUi();
             if (formulaModalOpen) renderFormulaPanel();
+        }
+
+        function clearEditorWorkspace() {
+            if (!pdfDoc || !pdfReady) {
+                alert('模板 PDF 尚未加载完成，请稍后重试。');
+                return;
+            }
+            const n = fields.length;
+            const msg = n > 0
+                ? ('将清除画布上 ' + n + ' 个填写框，并清空已载入的版式元数据、映射草稿缓存。\n\nPDF 与任务绑定不会解除；刷新页面前不会再自动载入已绑定 JSON。\n\n确定继续？')
+                : ('将清空已载入的版式元数据与映射草稿缓存。\n\nPDF 与任务绑定不会解除；刷新页面前不会再自动载入已绑定 JSON。\n\n确定继续？');
+            if (!window.confirm(msg)) return;
+
+            if (mapCachePersistTimer) {
+                clearTimeout(mapCachePersistTimer);
+                mapCachePersistTimer = null;
+            }
+            dismissMapModeUi();
+            closeFormulaModal();
+            setDrawMode(false);
+            pendingImageField = null;
+
+            fields.forEach(f => {
+                if (f.wrap) f.wrap.remove();
+                else f.el?.remove();
+            });
+            fields = [];
+            fieldIdSeq = 1;
+            selectedFieldId = null;
+
+            marks.forEach(m => { if (m.el) m.el.remove(); });
+            marks = [];
+            markerSeq = 1;
+            renderMarks();
+
+            const keepLt = templateContext.libraryTaskId || '';
+            const keepLf = templateContext.libraryTemplateFileId || '';
+            const keepPdfUrl = templateContext.pdfUrl || '';
+            templateContext = {
+                templateId: '',
+                templateName: '',
+                version: '1.0.0',
+                reportType: '',
+                standard: '',
+                pdfUrl: keepPdfUrl,
+                locale: 'zh-CN',
+                constants: {},
+                enums: {},
+                steps: [],
+                libraryTaskId: keepLt,
+                libraryTemplateFileId: keepLf
+            };
+            if (templateJsonSelect) templateJsonSelect.value = '';
+
+            clearMapCacheForPdfAndTask();
+            reportTaskContext.explicitReportSiteFieldConfigs = [];
+            reportTaskContext.inferredReportSiteFieldConfigs = [];
+            reportTaskContext.effectiveReportSiteFieldConfigs = [];
+            reportTaskContext.reportSiteFieldConfigs = [];
+            reportTaskContext.explicitReportSiteFieldMap = [];
+            reportTaskContext.inferredReportSiteFieldMap = [];
+            reportTaskContext.effectiveReportSiteFieldMap = [];
+            reportTaskContext.reportSiteFieldMap = [];
+
+            setSuppressAutoImport(true);
+            refreshFieldList();
+            applyAllNamingMarks();
+            updateReportMappingUi();
+            alert('已清空。可重新「按红字自动框选」或手动划框；需要旧版式时请再点「从文件库载入版式」。');
         }
 
         function removeField(id) {
@@ -2108,6 +4128,7 @@
                 wrap.appendChild(badge);
                 wrap.appendChild(box);
                 wrap.addEventListener('mousedown', (ev) => {
+                    if (ev.target.closest('.field-map-chip')) return;
                     if (ev.target === box) return;
                     selectedFieldId = f.id;
                     clearAllRowHighlights();
@@ -2115,6 +4136,7 @@
                     updateSelectedFieldRows();
                     if (formulaModalOpen) renderFormulaPanel();
                 });
+                attachReportMapChip(wrap, f);
                 meta.pageDiv.appendChild(wrap);
                 f.wrap = wrap;
                 f.el = box;
@@ -2140,6 +4162,7 @@
                 wrap.appendChild(badge);
                 wrap.appendChild(box);
                 wrap.addEventListener('mousedown', (ev) => {
+                    if (ev.target.closest('.field-map-chip')) return;
                     if (ev.target === box || ev.target.tagName === 'IMG') return;
                     selectedFieldId = f.id;
                     clearAllRowHighlights();
@@ -2147,6 +4170,7 @@
                     updateSelectedFieldRows();
                     if (formulaModalOpen) renderFormulaPanel();
                 });
+                attachReportMapChip(wrap, f);
                 meta.pageDiv.appendChild(wrap);
                 f.wrap = wrap;
                 f.el = box;
@@ -2172,6 +4196,7 @@
                 if (formulaModalOpen) renderFormulaPanel();
             });
             wrap.addEventListener('mousedown', (ev) => {
+                if (ev.target.closest('.field-map-chip')) return;
                 if (ev.target === i) return;
                 selectedFieldId = f.id;
                 clearAllRowHighlights();
@@ -2181,6 +4206,7 @@
             });
             wrap.appendChild(badge);
             wrap.appendChild(i);
+            attachReportMapChip(wrap, f);
             meta.pageDiv.appendChild(wrap);
             f.wrap = wrap;
             f.el = i;
@@ -2189,7 +4215,7 @@
             requestAnimationFrame(() => fitInputStyle(i, f));
         }
 
-        function renderPdfAndFields(pdfUrl, loadedFields = []) {
+        function renderPdfAndFields(pdfUrl, loadedFields = [], afterReadyFn = null) {
             pdfReady = false;
             closeFormulaModal();
             fields = (loadedFields || []).map(f => {
@@ -2286,7 +4312,34 @@
                 applyFieldsVisibility();
                 setDrawMode(false);
                 pdfReady = true;
+                if (typeof afterReadyFn === 'function') {
+                    try { afterReadyFn(); } catch (e) { console.warn(e); }
+                }
             });
+        }
+
+        async function autoImportLibraryJson(jsonTemplateId) {
+            const jid = Number(jsonTemplateId);
+            if (!jid) return;
+            try {
+                const impBody = { template_id: jid };
+                const lt = (templateContext.libraryTaskId || window.HTMLPDF_INITIAL_LIBRARY_TASK_ID || '').trim();
+                if (lt) impBody.library_task_id = Number(lt);
+                const res = await fetch('/files/htmlpdf/api/import-json-from-library/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(impBody)
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || '读取模板 JSON 失败');
+                importTemplatePayload(data, jid);
+                if (templateJsonSelect) {
+                    templateJsonSelect.value = String(jid);
+                }
+                await loadReportTaskContext(jid);
+            } catch (err) {
+                console.warn('自动载入任务模板 JSON 失败:', err);
+            }
         }
 
         function setDrawMode(on, fieldType = 'text') {
@@ -2757,6 +4810,7 @@
         btnAddText.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'text'), 'text');
         btnAddCheck.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'check'), 'check');
         btnAddImage.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'image'), 'image');
+        if (btnClearWorkspace) btnClearWorkspace.onclick = () => clearEditorWorkspace();
 
         btnAutoRedBoxes.onclick = async () => {
             if (!pdfDoc || !pdfReady) {
@@ -2769,7 +4823,7 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'same-origin',
-                    body: JSON.stringify({})
+                    body: JSON.stringify(htmlpdfEditorApiBody())
                 });
                 const data = await parseJsonResponseOrThrow(res, '按红字自动框选失败');
                 const list = data.fields || [];
@@ -2796,6 +4850,10 @@
                         checked: false,
                         imageData: '',
                         checkboxPair: raw.checkboxPair && typeof raw.checkboxPair === 'object' ? raw.checkboxPair : null,
+                        autoSemantic: raw.autoSemantic && typeof raw.autoSemantic === 'object' ? raw.autoSemantic : null,
+                        templateSectionKey: shouldUseSiteRecordSections() ? (raw.templateSectionKey || '') : '',
+                        templateSectionTitle: shouldUseSiteRecordSections() ? (raw.templateSectionTitle || '') : '',
+                        judgmentCriterionText: raw.judgmentCriterionText || '',
                         fieldExpression: '',
                         judgmentCriteriaByTestType: { acceptance: '', status: '' },
                         judgmentCriteriaManual: false,
@@ -2829,8 +4887,17 @@
             const loadedFields = (d.fields || []).map((f, idx) => {
                 const pdfFieldIdRaw = String(f.pdfFieldId || '').trim();
                 const sid = /^f\d+$/i.test(pdfFieldIdRaw) ? pdfFieldIdRaw.toLowerCase() : (f.id || 'f' + (idx + 1));
+                const sectionKey = shouldUseSiteRecordSections()
+                    ? String(f.templateSectionKey || f.sectionKey || '').trim()
+                    : '';
+                let ft = f.fieldType || 'text';
+                const ph = String(f.placeholder || f.id || '');
+                if (ft === 'text' && /^(参与主要检测人员名单|校核员及校核日期|受检单位陪同人)（签字）$/.test(ph)) {
+                    ft = 'image';
+                }
                 return {
                 id: sid,
+                pdfFieldId: pdfFieldIdRaw || sid,
                 page: f.page,
                 x: f.x,
                 y: f.y,
@@ -2838,12 +4905,16 @@
                 h: f.h,
                 placeholder: f.placeholder || ('栏位' + idx),
                 originalPlaceholder: (f.originalPlaceholder != null ? f.originalPlaceholder : (f.placeholder || ('栏位' + idx))),
-                fieldType: f.fieldType || 'text',
+                fieldType: ft,
                 redText: (f.fieldType || 'text') === 'text' ? (f.redText !== false) : !!f.redText,
                 value: '',
                 checked: false,
                 imageData: '',
                 checkboxPair: f.checkboxPair && typeof f.checkboxPair === 'object' ? f.checkboxPair : null,
+                autoSemantic: f.autoSemantic && typeof f.autoSemantic === 'object' ? f.autoSemantic : null,
+                templateSectionKey: sectionKey,
+                templateSectionTitle: f.templateSectionTitle || SITE_RECORD_SECTION_TITLE_BY_KEY[sectionKey] || '',
+                judgmentCriterionText: f.judgmentCriterionText != null ? String(f.judgmentCriterionText) : '',
                 labelUserEdited: !!f.labelUserEdited,
                 labelPersistedFromFile: f.labelPersistedFromFile != null ? !!f.labelPersistedFromFile : true,
                 labelRuleNamed: !!f.labelRuleNamed,
@@ -2885,6 +4956,15 @@
                 libraryTaskId: keepLt,
                 libraryTemplateFileId: keepLf
             };
+            const b = (d && d.bindings && typeof d.bindings === 'object') ? d.bindings : {};
+            setSuppressAutoImport(false);
+            loadReportTaskContext(keepLf || templateJsonSelect.value || null);
+            refreshSectionNav();
+            if (isReportTemplateEditor()) {
+                clearAllFieldsSiteRecordSectionMeta();
+            } else if (!loadedFields.some(f => f.templateSectionKey)) {
+                assignTemplateSectionsFromPdf(true).catch(() => {});
+            }
         }
 
         function importContentPayload(d) {
@@ -2944,10 +5024,13 @@
         async function requestLibraryJsonPayload() {
             const selected = templateJsonSelect.value;
             if (!selected) throw new Error('请先选择模板 JSON');
+            const body = { template_id: Number(selected) };
+            const lt = (templateContext.libraryTaskId || '').trim();
+            if (lt) body.library_task_id = Number(lt);
             const res = await fetch('/files/htmlpdf/api/import-json-from-library/', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ template_id: Number(selected) })
+                body: JSON.stringify(body)
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || '读取模板 JSON 失败');
@@ -2971,10 +5054,27 @@
         }
         document.getElementById('btnImportTemplate').onclick = () => {
             const sel = templateJsonSelect.value || '';
+            setSuppressAutoImport(false);
             requestLibraryJsonPayload()
                 .then(d => importTemplatePayload(d, sel))
                 .catch(err => alert(err.message));
         };
+        const btnAssignSections = document.getElementById('btnAssignSections');
+        const fieldSectionSelect = document.getElementById('fieldSectionSelect');
+        if (btnAssignSections) {
+            btnAssignSections.onclick = () => {
+                assignTemplateSectionsFromPdf().catch(err => alert(err.message));
+            };
+        }
+        if (fieldSectionSelect) {
+            fieldSectionSelect.addEventListener('change', () => {
+                const f = selectedFieldId ? getFieldById(selectedFieldId) : null;
+                if (!f) return;
+                applyTemplateSectionToField(f, fieldSectionSelect.value);
+                refreshFieldList();
+                updateFieldRowIndicators(f.id);
+            });
+        }
         document.getElementById('btnImportContent').onclick = () => {
             requestLibraryJsonPayload()
                 .then(importContentPayload)
@@ -3012,6 +5112,7 @@
             return fields.map(i => {
                 const row = {
                     id: i.id,
+                    pdfFieldId: i.pdfFieldId || i.id,
                     page: i.page,
                     x: i.x,
                     y: i.y,
@@ -3025,6 +5126,15 @@
                 };
                 if (i.redText) row.redText = true;
                 if (i.checkboxPair && typeof i.checkboxPair === 'object') row.checkboxPair = i.checkboxPair;
+                if (i.autoSemantic && typeof i.autoSemantic === 'object') row.autoSemantic = i.autoSemantic;
+                if (shouldUseSiteRecordSections()) {
+                    if (i.templateSectionKey) row.templateSectionKey = i.templateSectionKey;
+                    if (i.templateSectionTitle) row.templateSectionTitle = i.templateSectionTitle;
+                    if (i.sectionKey && !row.templateSectionKey) row.sectionKey = i.sectionKey;
+                }
+                if (i.reportSourceMap && typeof i.reportSourceMap === 'object') row.reportSourceMap = i.reportSourceMap;
+                if (i.judgmentCriterionText) row.judgmentCriterionText = i.judgmentCriterionText;
+                if (i.title) row.title = i.title;
                 if (i.labelUserEdited) row.labelUserEdited = true;
                 if (i.labelPersistedFromFile) row.labelPersistedFromFile = true;
                 if (i.labelRuleNamed) row.labelRuleNamed = true;
@@ -3063,7 +5173,7 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'same-origin',
-                    body: JSON.stringify({})
+                    body: JSON.stringify(htmlpdfEditorApiBody())
                 });
                 const data = await parseJsonResponseOrThrow(res, '保存前同步红字命名失败');
                 const detected = Array.isArray(data.fields) ? data.fields : [];
@@ -3084,6 +5194,8 @@
                     if (!nextName) return;
                     f.placeholder = nextName;
                     f.originalPlaceholder = nextName;
+                    if (best.autoSemantic && typeof best.autoSemantic === 'object') f.autoSemantic = best.autoSemantic;
+                    if (best.judgmentCriterionText) f.judgmentCriterionText = best.judgmentCriterionText;
                     syncFieldLabelToCanvas(f);
                 });
                 refreshFieldList();
@@ -3111,6 +5223,9 @@
 
         function exportJsonMerged() {
             const name = document.getElementById('templateName').value.trim() || 'template';
+            const libTask = (templateContext.libraryTaskId || '').trim();
+            const libPdf = (templateContext.libraryTemplateFileId || '').trim()
+                || String(window.HTMLPDF_INITIAL_TEMPLATE_PDF_ID || '');
             fetch('/files/htmlpdf/api/export-json/', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -3118,6 +5233,9 @@
                 body: JSON.stringify({
                     type: 'merged',
                     name,
+                    libraryTaskId: libTask,
+                    library_task_id: libTask,
+                    library_template_file_id: libPdf,
                     fields: buildFieldsPayload(),
                     meta: {
                         templateId: templateContext.templateId || '',
@@ -3126,7 +5244,10 @@
                         reportType: templateContext.reportType || '',
                         standard: templateContext.standard || '',
                         pdfUrl: templateContext.pdfUrl || '',
-                        locale: templateContext.locale || 'zh-CN'
+                        locale: templateContext.locale || 'zh-CN',
+                        libraryTaskId: libTask,
+                        library_task_id: libTask,
+                        library_template_file_id: libPdf
                     },
                     report_type: templateContext.reportType || '',
                     standard: templateContext.standard || '',
@@ -3134,46 +5255,25 @@
                         constants: templateContext.constants || {},
                         enums: templateContext.enums || {},
                         steps: templateContext.steps || []
-                    }
+                    },
+                    bindings: buildBindingsForExport(),
+                    report_site_field_map: reportTaskContext.reportSiteFieldMap || []
                 })
             }).then(async r => {
                 const d = await parseJsonResponseOrThrow(r, '保存坐标模板失败');
-                alert('坐标模板 JSON 已保存到文件库「模板」分类');
+                let msg = '坐标模板 JSON 已保存到文件库「模板」分类';
+                if (d.binding_rotation && d.binding_rotation.ok) {
+                    msg += '；已更新任务模板 JSON 绑定';
+                    if (d.file && d.file.id) {
+                        templateContext.libraryTemplateFileId = String(d.file.id);
+                    }
+                }
+                alert(msg);
+                clearMapCacheForCurrentScope();
                 if (d.file && d.file.library_url) {
                     window.open(d.file.library_url, '_blank');
                 }
-            }).catch(err => alert(err.message));
-        }
-
-        function exportMatrixTemplateJson() {
-            const baseName = document.getElementById('templateName').value.trim() || 'template';
-            const name = baseName.endsWith('.json') ? baseName.replace(/\.json$/i, '_matrix.json') : (baseName + '_matrix.json');
-            fetch('/files/htmlpdf/api/export-matrix-json/', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'same-origin',
-                body: JSON.stringify({
-                    type: 'matrix',
-                    name,
-                    fields: buildFieldsPayload(),
-                    meta: {
-                        templateId: templateContext.templateId || '',
-                        templateName: templateContext.templateName || '',
-                        version: templateContext.version || '1.0.0',
-                        reportType: templateContext.reportType || '',
-                        standard: templateContext.standard || '',
-                        pdfUrl: templateContext.pdfUrl || '',
-                        locale: templateContext.locale || 'zh-CN'
-                    },
-                    report_type: templateContext.reportType || '',
-                    standard: templateContext.standard || ''
-                })
-            }).then(async r => {
-                const d = await parseJsonResponseOrThrow(r, '保存固定表格模板JSON失败');
-                alert('固定表格后端 JSON 已保存到文件库「模板」分类');
-                if (d.file && d.file.library_url) {
-                    window.open(d.file.library_url, '_blank');
-                }
+                refreshTemplateJsonOptions().catch(() => {});
             }).catch(err => alert(err.message));
         }
 
@@ -3181,13 +5281,7 @@
             await syncAutoRedNamesBeforeSave();
             exportJsonMerged();
         };
-        if (btnSaveMatrixTemplate) {
-            btnSaveMatrixTemplate.onclick = async () => {
-                await syncAutoRedNamesBeforeSave();
-                exportMatrixTemplateJson();
-            };
-        }
-        function saveFrontendTemplate(exportMode = 'rule') {
+        function saveFrontendTemplate() {
             const baseName = document.getElementById('templateName').value.trim() || 'template';
             const name = baseName.endsWith('.json') ? baseName.replace(/\.json$/i, '_frontend.json') : (baseName + '_frontend.json');
             const libTpl = (templateContext.libraryTemplateFileId || '').trim()
@@ -3199,7 +5293,7 @@
                 credentials: 'same-origin',
                 body: JSON.stringify({
                     name,
-                    export_mode: exportMode,
+                    export_mode: 'rule',
                     fields: buildFieldsPayload(),
                     templateId: templateContext.templateId || '',
                     templateName: templateContext.templateName || '',
@@ -3221,28 +5315,28 @@
                     meta: {
                         libraryTaskId: libTask,
                         libraryTemplateFileId: libTpl
-                    }
+                    },
+                    bindings: buildBindingsForExport(),
+                    report_site_field_map: reportTaskContext.reportSiteFieldMap || []
                 })
             }).then(async r => {
                 const d = await parseJsonResponseOrThrow(r, '保存前端规则 JSON 失败');
-                alert('前端规则 JSON 已保存到文件库「模板」分类');
+                let msg = '前端规则 JSON 已保存到文件库「模板」分类（不绑定任务主模板；请用「保存坐标模板 JSON」维护任务绑定）';
+                if (d.detached_auxiliary_from_task && d.detached_auxiliary_from_task.length) {
+                    msg += '；已从任务模板移除误关联的辅助 JSON';
+                }
+                alert(msg);
                 if (d.file && d.file.library_url) {
                     window.open(d.file.library_url, '_blank');
                 }
+                refreshTemplateJsonOptions().catch(() => {});
             }).catch(err => alert(err.message));
         }
         const elSaveFrontendTemplate = document.getElementById('saveFrontendTemplate');
         if (elSaveFrontendTemplate) {
             elSaveFrontendTemplate.onclick = async () => {
                 await syncAutoRedNamesBeforeSave();
-                saveFrontendTemplate('rule');
-            };
-        }
-        const btnSaveFrontendTemplateAI = document.getElementById('saveFrontendTemplateAI');
-        if (btnSaveFrontendTemplateAI) {
-            btnSaveFrontendTemplateAI.onclick = async () => {
-                await syncAutoRedNamesBeforeSave();
-                saveFrontendTemplate('llm');
+                saveFrontendTemplate();
             };
         }
 
@@ -3298,6 +5392,7 @@
                 clearAllRowHighlights();
                 return;
             }
+            if (e.target.closest('.field-map-chip')) return;
             if (e.target.closest('.input-box')) return;
             selectedFieldId = wrap.dataset.fieldId;
             clearAllRowHighlights();
@@ -3306,29 +5401,63 @@
             if (formulaModalOpen) renderFormulaPanel();
             const row = document.querySelector('.field-row[data-field-id="' + wrap.dataset.fieldId + '"]');
             if (row) row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            if (isReportTemplateEditor() && reportMappingCanPick() && mapSession) {
+                enterMapMode(wrap.dataset.fieldId);
+            }
+        });
+
+        pdfContainer.addEventListener('dblclick', e => {
+            const wrap = e.target.closest('.field-wrap');
+            if (!wrap || !wrap.dataset.fieldId) return;
+            if (e.target.closest('.field-map-chip')) return;
+            if (e.target.closest('.input-box')) return;
+            if (!isReportTemplateEditor() || !reportMappingCanPick()) return;
+            e.preventDefault();
+            enterMapMode(wrap.dataset.fieldId);
         });
 
         setDrawMode(false);
+        setMapOverlayOpen(false);
         const pathMatch = window.location.pathname.match(/\/files\/htmlpdf\/editor\/(\d+)\/?$/);
         const initialTemplatePdfId = Number(
             window.HTMLPDF_INITIAL_TEMPLATE_PDF_ID || (pathMatch ? pathMatch[1] : 0)
         );
         if (initialTemplatePdfId) {
+            const initTaskId = window.HTMLPDF_INITIAL_LIBRARY_TASK_ID;
+            const usePdfBody = { template_id: initialTemplatePdfId };
+            if (initTaskId) {
+                usePdfBody.library_task_id = Number(initTaskId);
+            }
             fetch('/files/htmlpdf/api/use-template-pdf/', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ template_id: initialTemplatePdfId })
+                body: JSON.stringify(usePdfBody)
             })
                 .then(async r => {
                     const d = await r.json();
                     if (!r.ok) throw new Error(d.error || '加载模板 PDF 失败');
                     if (!d.pdf_url) throw new Error('模板 PDF 地址缺失');
                     const lids = Array.isArray(d.linked_library_task_ids) ? d.linked_library_task_ids : [];
-                    if (lids.length) {
+                    const urlTask = window.HTMLPDF_INITIAL_LIBRARY_TASK_ID;
+                    if (urlTask) {
+                        templateContext.libraryTaskId = String(urlTask);
+                    } else if (d.library_task_id) {
+                        templateContext.libraryTaskId = String(d.library_task_id);
+                    } else if (lids.length) {
                         templateContext.libraryTaskId = String(lids[0]);
-                        templateContext.libraryTemplateFileId = '';
                     }
-                    renderPdfAndFields(d.pdf_url, []);
+                    if (d.library_task_output_target) {
+                        reportTaskContext.outputTarget = String(d.library_task_output_target);
+                        reportTaskContext.isReport = reportTaskContext.outputTarget === 'report';
+                    }
+                    templateContext.libraryTemplateFileId = String(initialTemplatePdfId);
+                    renderPdfAndFields(d.pdf_url, [], async () => {
+                        if (d.auto_import_json && d.default_json_template_id && !shouldSuppressAutoImport()) {
+                            await autoImportLibraryJson(d.default_json_template_id);
+                        } else {
+                            await loadReportTaskContext(null);
+                        }
+                    });
                 })
                 .catch(err => alert(err.message));
         }

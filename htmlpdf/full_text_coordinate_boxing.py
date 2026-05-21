@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from itertools import groupby
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import fitz
 from PIL import Image
@@ -1050,9 +1050,120 @@ def _clean_combined_field_name(s: str, max_len: int = 118) -> str:
     """拼接单元格命名与下划线局部名时的清洗。"""
     t = re.sub(r"\s+", "_", str(s or "").strip())
     t = re.sub(r"_+", "_", t).strip("_")
+    t = _dedupe_field_name_segments(t)
     if len(t) > max_len:
         return t[:max_len]
     return t
+
+
+def _dedupe_field_name_segments(name: str) -> str:
+    """去掉连续重复的下划线分段，如 额定参数_kV_kV、检测日期_202年月日_202年月日。"""
+    parts = [p for p in str(name or "").split("_") if p]
+    if not parts:
+        return ""
+    out: List[str] = []
+    for p in parts:
+        if out and out[-1] == p:
+            continue
+        if out and len(p) <= len(out[-1]) and (out[-1].endswith(p) or p == out[-1]):
+            continue
+        if out and len(out[-1]) <= len(p) and (p.endswith(out[-1]) or out[-1] == p):
+            out[-1] = p
+            continue
+        out.append(p)
+    return "_".join(out)
+
+
+def _field_name_already_has_token(name: str, token: str) -> bool:
+    nm = str(name or "").strip()
+    tok = str(token or "").strip()
+    if not nm or not tok:
+        return False
+    if nm.endswith(f"_{tok}") or nm.endswith(f"({tok})") or nm.endswith(tok):
+        return True
+    parts = nm.split("_")
+    return tok in parts
+
+
+def _append_unit_suffix_to_field_name(name: str, unit: str) -> str:
+    unit = str(unit or "").strip()
+    if not unit or _field_name_already_has_token(name, unit):
+        return str(name or "").strip()
+    return f"{name}({unit})"
+
+
+# 现场记录模板仅允许这三处签字（与库内 pdfFieldId f18/f19/f20 一致）；其它含「签字/检测员」文本不自动出签名框。
+OFFICIAL_SITE_RECORD_SIGNATURE_SLOTS: List[Dict[str, Any]] = [
+    {
+        "id": "参与主要检测人员名单（签字）",
+        "pdfFieldId": "f18",
+        "exportName": "参与主要检测人员名单",
+        "labelKeys": ("参与主要检测人员名单",),
+        "default_w": 201.95,
+    },
+    {
+        "id": "校核员及校核日期（签字）",
+        "pdfFieldId": "f19",
+        "exportName": "校核员及校核日期",
+        "labelKeys": ("校核员及校核日期",),
+        "default_w": 135.0,
+    },
+    {
+        "id": "受检单位陪同人（签字）",
+        "pdfFieldId": "f20",
+        "exportName": "受检单位陪同人",
+        "labelKeys": ("受检单位陪同人",),
+        "default_w": 157.12,
+    },
+]
+
+
+def _compact_matches_official_signature_slot(compact: str, slot: Dict[str, Any]) -> bool:
+    """仅匹配三个官方签字栏位；兼容 PDF 单元格内换行拆开的标签文案。"""
+    c = _compact_pdf_heading_text(compact)
+    if not c:
+        return False
+    fid = str(slot.get("pdfFieldId") or "").strip().lower()
+    if fid == "f18":
+        if "参与主要检测人员名单" in c:
+            return True
+        return "参与主要检测" in c and "名单" in c
+    if fid == "f19":
+        if "校核员及校核日期" in c:
+            return True
+        return "校核员" in c and "校核" in c and "日期" in c
+    if fid == "f20":
+        return "受检单位陪同人" in c
+    for raw_key in slot.get("labelKeys") or ():
+        key = _compact_pdf_heading_text(str(raw_key))
+        if not key or len(key) < 5:
+            continue
+        if c == key or (c.startswith(key) and len(c) <= len(key) + 8):
+            return True
+        if key in c and len(c) <= len(key) + 12:
+            return True
+    return False
+
+
+def _span_text_is_signature_label(text: str) -> bool:
+    compact = _compact_pdf_heading_text(text)
+    if not compact:
+        return False
+    return any(_compact_matches_official_signature_slot(compact, slot) for slot in OFFICIAL_SITE_RECORD_SIGNATURE_SLOTS)
+
+
+def _rect_overlap_ratio(a: Dict[str, Any], b: Dict[str, Any]) -> float:
+    ax0, ay0 = float(a.get("x") or 0), float(a.get("y") or 0)
+    ax1, ay1 = ax0 + float(a.get("w") or 0), ay0 + float(a.get("h") or 0)
+    bx0, by0 = float(b.get("x") or 0), float(b.get("y") or 0)
+    bx1, by1 = bx0 + float(b.get("w") or 0), by0 + float(b.get("h") or 0)
+    iw = max(0.0, min(ax1, bx1) - max(ax0, bx0))
+    ih = max(0.0, min(ay1, by1) - max(ay0, by0))
+    inter = iw * ih
+    if inter <= 0:
+        return 0.0
+    area_a = max(1e-6, (ax1 - ax0) * (ay1 - ay0))
+    return inter / area_a
 
 
 def _cell_full_text_to_underline_part_name(cell_txt: str, max_len: int = 96) -> str:
@@ -1288,8 +1399,29 @@ def _rect_area(rect: fitz.Rect) -> float:
 
 
 def _pick_best_cell_for_span(span_bbox: Dict[str, float], cells: Sequence[Dict]) -> Optional[Dict]:
-    cx = float(span_bbox["x"]) + float(span_bbox["w"]) / 2.0
-    cy = float(span_bbox["y"]) + float(span_bbox["h"]) / 2.0
+    sx0 = float(span_bbox["x"])
+    sy0 = float(span_bbox["y"])
+    sx1 = sx0 + float(span_bbox["w"])
+    sy1 = sy0 + float(span_bbox["h"])
+    span_area = max(1e-6, (sx1 - sx0) * (sy1 - sy0))
+    best: Optional[Dict] = None
+    best_inter = 0.0
+    for cell in cells:
+        rect = cell.get("rect")
+        if rect is None:
+            continue
+        ix0 = max(sx0, float(rect.x0))
+        iy0 = max(sy0, float(rect.y0))
+        ix1 = min(sx1, float(rect.x1))
+        iy1 = min(sy1, float(rect.y1))
+        inter = max(0.0, ix1 - ix0) * max(0.0, iy1 - iy0)
+        if inter > best_inter:
+            best_inter = inter
+            best = cell
+    if best is not None and best_inter >= min(span_area * 0.12, 8.0):
+        return best
+    cx = sx0 + float(span_bbox["w"]) / 2.0
+    cy = sy0 + float(span_bbox["h"]) / 2.0
     pt = fitz.Point(cx, cy)
     hits = [c for c in cells if c["rect"].contains(pt)]
     if not hits:
@@ -1370,7 +1502,21 @@ def _build_structured_cell_maps(page: fitz.Page, cells: Sequence[Dict], spans: S
 
 
 def _infer_table_header_map(table_id: int, cells_by_rc: Dict[tuple, Dict], cell_texts: Dict[tuple, str]) -> Dict[str, int]:
-    header_keywords = ["序号", "检测项目", "检测条件", "检测结果", "计算结果", "报出值", "判定标准", "验收", "状态", "单项判定"]
+    header_keywords = [
+        "序号",
+        "检测项目",
+        "检测点位置",
+        "检测条件",
+        "检测结果",
+        "测量读数",
+        "测量均值",
+        "计算结果",
+        "报出值",
+        "判定标准",
+        "验收",
+        "状态",
+        "单项判定",
+    ]
     by_row: Dict[int, List[tuple]] = {}
     for (row, col), _ in cells_by_rc.items():
         by_row.setdefault(int(row), []).append((int(row), int(col)))
@@ -1401,7 +1547,622 @@ def _infer_table_header_map(table_id: int, cells_by_rc: Dict[tuple, Dict], cell_
         for k in header_keywords:
             if k in txt and k not in mapping:
                 mapping[k] = int(col)
+        if "检测点" in txt and "位置" in txt and "检测点位置" not in mapping:
+            mapping["检测点位置"] = int(col)
+        if "测量读" in txt and "测量读数" not in mapping:
+            mapping["测量读数"] = int(col)
+        if ("测量均" in txt or "Mbar" in txt or "均值" in txt) and "测量均值" not in mapping:
+            mapping["测量均值"] = int(col)
     return mapping
+
+
+def _is_radiation_protection_header_map(header_map: Dict[str, int]) -> bool:
+    return "检测点位置" in header_map and (
+        "测量读数" in header_map or "测量均值" in header_map or "报出值" in header_map
+    )
+
+
+def _radiation_measurement_read_cols(header_map: Dict[str, int]) -> List[int]:
+    """测量读数 M 可能占多列：从「测量读数」列到「测量均值」列之前均视为读数列。"""
+    start = header_map.get("测量读数")
+    if start is None:
+        return []
+    start = int(start)
+    end_candidates = [
+        int(header_map[k])
+        for k in ("测量均值", "报出值", "判定标准", "验收", "状态")
+        if header_map.get(k) is not None and int(header_map[k]) > start
+    ]
+    end = min(end_candidates) if end_candidates else start + 4
+    return list(range(start, end))
+
+
+_RADIATION_CIRCLED_NUMS = "①②③④⑤⑥⑦⑧⑨⑩"
+
+
+def _radiation_column_role_label(col: int, header_map: Dict[str, int], cell_texts: Dict[tuple, str], table_id: int) -> str:
+    """工作场所防护表：列角色名（含 M / Mbar / D 标记）。"""
+    c = int(col)
+    if header_map.get("序号") is not None and int(header_map["序号"]) == c:
+        return "序号"
+    if header_map.get("检测点位置") is not None and int(header_map["检测点位置"]) == c:
+        return "检测点位置"
+    for r in range(0, 6):
+        txt = _normalize_cell_text(cell_texts.get((table_id, r, col), ""))
+        if not txt:
+            continue
+        if "本底" in txt:
+            return "本底水平"
+        if "报出" in txt:
+            return "报出值D"
+        if "测量均" in txt or "Mbar" in txt or ("均值" in txt and "读" not in txt):
+            return "测量均值Mbar"
+        if "测量读" in txt:
+            return "测量读数M"
+    c = int(col)
+    if header_map.get("报出值") == c:
+        return "报出值D"
+    if header_map.get("测量均值") == c:
+        return "测量均值Mbar"
+    if header_map.get("测量读数") == c:
+        return "测量读数M"
+    read_cols = _radiation_measurement_read_cols(header_map)
+    if read_cols and c in read_cols:
+        return "测量读数M"
+    pt_col = header_map.get("检测点位置")
+    if pt_col is not None and read_cols:
+        pc = int(pt_col)
+        if pc < c < min(read_cols):
+            return "位置细分"
+    return _column_header_keyword(c, header_map) or "测量值"
+
+
+def _radiation_row_seq_label(
+    table_id: int,
+    row: int,
+    seq_col: Optional[int],
+    cell_texts: Dict[tuple, str],
+) -> str:
+    if seq_col is None:
+        return ""
+    raw = _get_item_name_for_row(table_id, row, int(seq_col), cell_texts)
+    txt = _sanitize_name_piece(raw)
+    if not txt or txt in ("序号", "检测点位置", "检测点"):
+        return ""
+    if not re.search(r"\d", txt) and len(txt) <= 6:
+        return ""
+    return txt
+
+
+def _radiation_point_column_key(
+    table_id: int,
+    row: int,
+    point_col: int,
+    seq_col: Optional[int],
+    cell_texts: Dict[tuple, str],
+    cell_black_prefix_texts: Dict[tuple, str],
+) -> Tuple[str, bool]:
+    """生成检测点唯一前缀：优先序号列，否则行号；本底水平单独标记。"""
+    point_raw = _get_item_name_for_row(table_id, row, point_col, cell_texts)
+    if not point_raw:
+        point_raw = _left_cell_plain_text(
+            table_id, row, point_col, cell_texts, cell_black_prefix_texts
+        )
+    if "本底" in (point_raw or ""):
+        bg_match = re.search(r"([①②③④⑤⑥⑦⑧⑨⑩])", point_raw or "")
+        if bg_match:
+            return f"本底水平_{bg_match.group(1)}", True
+        return "本底水平", True
+    point_name = _sanitize_radiation_point_label(point_raw) or f"检测点_r{row}"
+    seq_txt = _radiation_row_seq_label(table_id, row, seq_col, cell_texts)
+    if seq_txt:
+        return _dedupe_field_name_segments(f"序号{seq_txt}_{point_name}"), False
+    return _dedupe_field_name_segments(f"{point_name}_r{row}"), False
+
+
+def _sanitize_radiation_point_label(text: str) -> str:
+    t = str(text or "").strip()
+    t = re.sub(r"^[A-Za-z](?=[\u4e00-\u9fff])", "", t)
+    t = re.sub(r"[□☐▢]+", "", t)
+    t = re.sub(r"[（(]\s*[）)]", "", t)
+    t = re.sub(r"[\s　]+", "_", t)
+    t = re.sub(r"_+", "_", t).strip("_")
+    return _sanitize_name_piece(t) or _clean_combined_field_name(t)
+
+
+def _radiation_sub_position_suffix(
+    table_id: int,
+    row: int,
+    col: int,
+    point_col: int,
+    header_map: Dict[str, int],
+    cell_texts: Dict[tuple, str],
+    cell_black_prefix_texts: Dict[tuple, str],
+    cells_by_rc: Dict[tuple, Dict],
+    red_cell_pos_set: set,
+) -> str:
+    """观察窗/防护门等行：检测点与结果列之间的细分列（中部、上端、左侧等）。"""
+    std_col = header_map.get("判定标准")
+    exclusive = int(col)
+    if header_map.get("测量读数") is not None:
+        exclusive = min(exclusive, int(header_map["测量读数"]))
+    supplement = _get_row_prefix_text(
+        table_id=table_id,
+        row=row,
+        item_col=int(point_col),
+        target_col=col,
+        header_map=header_map,
+        cell_texts=cell_texts,
+        cell_black_prefix_texts=cell_black_prefix_texts,
+        cells_by_rc=cells_by_rc,
+        red_cell_pos_set=red_cell_pos_set,
+        prefix_scan_exclusive_end=exclusive,
+    )
+    if not supplement:
+        return ""
+    parts = [p for p in supplement.split("_") if p and p not in ("检测点位置", "序号")]
+    return "_".join(parts[:4])
+
+
+def _bbox_of_empty_parens_in_cell(
+    cell: Dict[str, Any],
+    spans: Sequence[Dict[str, Any]],
+) -> Optional[Dict[str, float]]:
+    """检测点列「观察窗C（）30cm」类：为空白括号区域生成备注框坐标。"""
+    cell_spans = _spans_inside_table_cell(cell, spans)
+    if not cell_spans:
+        return None
+    for sp in cell_spans:
+        txt = str(sp.get("text") or "")
+        if "（）" in txt or re.search(r"[（(]\s*[）)]", txt):
+            bb = sp.get("bbox") or {}
+            if not bb:
+                continue
+            pad = 2.0
+            return {
+                "x": max(0.0, float(bb["x"]) - pad),
+                "y": max(0.0, float(bb["y"]) - pad),
+                "w": max(12.0, float(bb["w"]) + 2.0 * pad),
+                "h": max(10.0, float(bb["h"]) + 2.0 * pad),
+            }
+    compact = _compact_text_from_spans(cell_spans)
+    if "（）" not in compact and "(" not in compact:
+        return None
+    merged = _merged_bbox_hit_from_spans(cell_spans)
+    if merged and merged.get("bbox"):
+        bb = merged["bbox"]
+        w = max(18.0, float(bb["w"]) * 0.22)
+        x = float(bb["x"]) + float(bb["w"]) * 0.35
+        return {
+            "x": x,
+            "y": float(bb["y"]),
+            "w": w,
+            "h": max(10.0, float(bb["h"])),
+        }
+    return None
+
+
+def _rect_from_table_cell(cell: Dict[str, Any], *, pad: float = 3.0) -> Dict[str, float]:
+    cr = cell["rect"]
+    return {
+        "x": float(cr.x0) + pad,
+        "y": float(cr.y0) + pad,
+        "w": max(12.0, float(cr.width) - 2.0 * pad),
+        "h": max(10.0, float(cr.height) - 2.0 * pad),
+    }
+
+
+def _cell_horizontal_overlap_ratio(sym_rect: Any, cell_rect: Any) -> float:
+    x0 = max(float(sym_rect.x0), float(cell_rect.x0))
+    x1 = min(float(sym_rect.x1), float(cell_rect.x1))
+    if x1 <= x0:
+        return 0.0
+    sym_w = max(1.0, float(sym_rect.x1) - float(sym_rect.x0))
+    return (x1 - x0) / sym_w
+
+
+def _resolve_radiation_background_fill_cell(
+    table_id: int,
+    symbol_row: int,
+    symbol_col: int,
+    cells_by_rc: Dict[tuple, Dict],
+    cell_texts: Dict[tuple, str],
+    used_cells: set,
+) -> Optional[tuple]:
+    """为圈号定位单个填写格：优先正上方空白格，按水平重叠匹配读数列（处理合并列）。"""
+    sym_cell = cells_by_rc.get((int(symbol_row), int(symbol_col)))
+    if sym_cell is None or sym_cell.get("rect") is None:
+        return None
+    sym_rect = sym_cell["rect"]
+    sym_cx = (float(sym_rect.x0) + float(sym_rect.x1)) / 2.0
+    candidates: List[tuple] = []
+    for (r, c), cell in cells_by_rc.items():
+        ri, ci = int(r), int(c)
+        if ri >= int(symbol_row):
+            continue
+        if (ri, ci) in used_cells:
+            continue
+        txt = _normalize_cell_text(cell_texts.get((table_id, ri, ci), ""))
+        if txt:
+            if len(txt) == 1 and txt in _RADIATION_CIRCLED_NUMS:
+                continue
+            continue
+        cr = cell.get("rect")
+        if cr is None:
+            continue
+        ratio = _cell_horizontal_overlap_ratio(sym_rect, cr)
+        if ratio < 0.2 and not (float(cr.x0) <= sym_cx <= float(cr.x1)):
+            continue
+        candidates.append((ri, ci, cell, ratio))
+    candidates.sort(key=lambda t: (-t[0], -t[3]))
+    if candidates:
+        ri, ci, cell, _ = candidates[0]
+        used_cells.add((ri, ci))
+        return ri, ci, cell
+    used_cells.add((int(symbol_row), int(symbol_col)))
+    return int(symbol_row), int(symbol_col), sym_cell
+
+
+def _radiation_target_key_at_cell(
+    red_cell_targets: Dict[tuple, Dict[str, Any]],
+    table_id: int,
+    row: int,
+    col: int,
+) -> Optional[tuple]:
+    for key, tgt in red_cell_targets.items():
+        if int(key[0]) != int(table_id) or int(key[1]) != int(row) or int(key[2]) != int(col):
+            continue
+        if tgt.get("underline_slot") or tgt.get("cell_name_probe"):
+            continue
+        return key
+    return None
+
+
+def _ensure_radiation_empty_cell_boxes(
+    table_id: int,
+    cells_by_rc: Dict[tuple, Dict],
+    cell_texts: Dict[tuple, str],
+    cell_black_prefix_texts: Dict[tuple, str],
+    underline_cell_keys: set,
+    page_no: int,
+    red_cell_targets: Dict[tuple, Dict[str, Any]],
+) -> None:
+    """防护结果表：为仍无输入框的空白格补整格框（含仅有下划线装饰但未检出下划线框的格）。"""
+    ul_keys = {
+        (int(k[0]), int(k[1]), int(k[2]))
+        for k in red_cell_targets.keys()
+        if len(k) >= 4 and "__ul" in str(k[3])
+    }
+    for (row, col), cell in cells_by_rc.items():
+        ri, ci = int(row), int(col)
+        cell_txt = _normalize_cell_text(cell_texts.get((table_id, ri, ci), ""))
+        cell_blk = _normalize_cell_text(cell_black_prefix_texts.get((table_id, ri, ci), ""))
+        if _span_text_is_signature_label(cell_txt) or _span_text_is_signature_label(cell_blk):
+            continue
+        if cell_txt:
+            continue
+        if (int(table_id), ri, ci) in underline_cell_keys and (int(table_id), ri, ci) in ul_keys:
+            continue
+        if _radiation_target_key_at_cell(red_cell_targets, table_id, ri, ci) is not None:
+            continue
+        key = (int(table_id), ri, ci, str(cell.get("cell_id") or ""))
+        if key in red_cell_targets:
+            continue
+        red_cell_targets[key] = {
+            "page": page_no,
+            "x": float(cell["rect"].x0),
+            "y": float(cell["rect"].y0),
+            "w": float(cell["rect"].width),
+            "h": float(cell["rect"].height),
+            "text": "",
+            "table_id": int(table_id),
+            "row": ri,
+            "col": ci,
+            "cell_id": str(cell.get("cell_id") or ""),
+            "fieldType": "text",
+        }
+
+
+def _collect_radiation_background_circled_slots(
+    table_id: int,
+    cells_by_rc: Dict[tuple, Dict],
+    cell_texts: Dict[tuple, str],
+) -> List[Dict[str, Any]]:
+    """本底水平行：①–⑩ 圈号单元格及其上方空白填写区。"""
+    slots: List[Dict[str, Any]] = []
+    for (row, col), _cell in cells_by_rc.items():
+        txt = _normalize_cell_text(cell_texts.get((table_id, int(row), int(col)), ""))
+        if len(txt) == 1 and txt in _RADIATION_CIRCLED_NUMS:
+            slots.append({"symbol": txt, "row": int(row), "col": int(col)})
+    slots.sort(key=lambda s: (s["row"], s["col"]))
+    return slots
+
+
+def _ensure_radiation_paren_and_background_boxes(
+    table_id: int,
+    header_map: Dict[str, int],
+    cells_by_rc: Dict[tuple, Dict],
+    cell_texts: Dict[tuple, str],
+    cell_black_prefix_texts: Dict[tuple, str],
+    spans: Sequence[Dict[str, Any]],
+    page_no: int,
+    page_w: float,
+    page_h: float,
+    red_cell_targets: Dict[tuple, Dict[str, Any]],
+) -> None:
+    """括号备注框 + 本底水平①–⑩ 共十个填写框。"""
+    point_col = int(header_map.get("检测点位置") or 1)
+    seq_col_i = int(header_map["序号"]) if header_map.get("序号") is not None else None
+
+    for (row, col), cell in cells_by_rc.items():
+        if int(col) != point_col:
+            continue
+        raw = str(cell_texts.get((table_id, int(row), int(col)), "") or "")
+        if "（）" not in raw and "()" not in raw:
+            continue
+        paren_bb = _bbox_of_empty_parens_in_cell(cell, spans)
+        if not paren_bb:
+            continue
+        point_key, _ = _radiation_point_column_key(
+            table_id, int(row), point_col, seq_col_i, cell_texts, cell_black_prefix_texts
+        )
+        key = (table_id, int(row), int(col), f"paren_remark_{row}")
+        if key not in red_cell_targets:
+            red_cell_targets[key] = {
+                "page": page_no,
+                "x": float(paren_bb["x"]),
+                "y": float(paren_bb["y"]),
+                "w": float(paren_bb["w"]),
+                "h": float(paren_bb["h"]),
+                "text": "",
+                "table_id": table_id,
+                "row": int(row),
+                "col": int(col),
+                "cell_id": str(cell.get("cell_id") or ""),
+                "fieldType": "text",
+                "radiationParenRemark": True,
+            }
+        nm = _dedupe_field_name_segments(f"{point_key}_备注")
+        red_cell_targets[key]["name"] = nm[:120]
+        red_cell_targets[key]["item_name"] = point_key
+        red_cell_targets[key]["type_name"] = "备注"
+        red_cell_targets[key]["autoSemantic"] = {
+            "tableId": table_id,
+            "row": int(row),
+            "col": int(col),
+            "itemName": point_key,
+            "typeName": "备注",
+            "fieldName": nm,
+            "radiationPoint": point_key,
+            "radiationColumn": "备注",
+        }
+
+    circled = _collect_radiation_background_circled_slots(table_id, cells_by_rc, cell_texts)
+    if not circled:
+        return
+    used_fill_cells: set = set()
+    for slot in circled:
+        sym = slot["symbol"]
+        num_row = int(slot["row"])
+        num_col = int(slot["col"])
+        resolved = _resolve_radiation_background_fill_cell(
+            table_id, num_row, num_col, cells_by_rc, cell_texts, used_fill_cells
+        )
+        if not resolved:
+            continue
+        fill_row, fill_col, fill_cell = resolved
+        rect = _rect_from_table_cell(fill_cell)
+        key = _radiation_target_key_at_cell(red_cell_targets, table_id, fill_row, fill_col)
+        if key is None:
+            key = (table_id, fill_row, fill_col, f"bg_{sym}")
+        nm = _dedupe_field_name_segments(f"本底水平_{sym}_测量读数")
+        payload = {
+            "page": page_no,
+            "x": float(rect["x"]),
+            "y": float(rect["y"]),
+            "w": float(rect["w"]),
+            "h": float(rect["h"]),
+            "text": "",
+            "table_id": table_id,
+            "row": fill_row,
+            "col": fill_col,
+            "cell_id": str(fill_cell.get("cell_id") or ""),
+            "fieldType": "text",
+            "name": nm[:120],
+            "item_name": "本底水平",
+            "type_name": "测量读数M",
+            "autoSemantic": {
+                "tableId": table_id,
+                "row": fill_row,
+                "col": fill_col,
+                "itemName": "本底水平",
+                "typeName": "测量读数M",
+                "fieldName": nm,
+                "radiationPoint": "本底水平",
+                "radiationColumn": "测量读数M",
+                "backgroundSymbol": sym,
+            },
+        }
+        if key in red_cell_targets:
+            red_cell_targets[key].update(payload)
+        else:
+            red_cell_targets[key] = payload
+
+
+def _apply_radiation_protection_table_naming(
+    table_id: int,
+    header_map: Dict[str, int],
+    red_cell_targets: Dict[tuple, Dict[str, Any]],
+    cell_texts: Dict[tuple, str],
+    cell_black_prefix_texts: Dict[tuple, str],
+    cells_by_rc: Dict[tuple, Dict],
+) -> None:
+    """工作场所放射防护检测结果：按检测点位置 + 列角色 + 读数序号命名。"""
+    point_col = header_map.get("检测点位置")
+    if point_col is None:
+        return
+    point_col = int(point_col)
+    read_cols = sorted(
+        {
+            int(c)
+            for k in ("测量读数", "测量均值", "报出值")
+            for c in [header_map.get(k)]
+            if c is not None
+        }
+    )
+    red_cell_pos_set = {
+        (int(t), int(r), int(c))
+        for (t, r, c, _) in red_cell_targets.keys()
+        if int(r) >= 0 and int(c) >= 0
+    }
+    row_targets: Dict[int, List[Dict[str, Any]]] = {}
+    for target in red_cell_targets.values():
+        if target.get("cell_name_probe"):
+            continue
+        tid_raw = target.get("table_id")
+        if tid_raw is None or int(tid_raw) != int(table_id):
+            continue
+        row = target.get("row")
+        col = target.get("col")
+        if row is None or col is None:
+            continue
+        if target.get("radiationParenRemark"):
+            continue
+        row_targets.setdefault(int(row), []).append(target)
+
+    seq_col_i = int(header_map["序号"]) if header_map.get("序号") is not None else None
+    seq_col = header_map.get("序号")
+    point_col_i = int(point_col)
+
+    for row, targets in row_targets.items():
+        point_key, is_background = _radiation_point_column_key(
+            table_id, row, point_col_i, seq_col_i, cell_texts, cell_black_prefix_texts
+        )
+        point_name = point_key
+
+        read_meas_cols = _radiation_measurement_read_cols(header_map)
+        read_by_col: Dict[int, List[Dict[str, Any]]] = {}
+        for t in targets:
+            if t.get("cell_name_probe"):
+                continue
+            read_by_col.setdefault(int(t["col"]), []).append(t)
+        for col, col_targets in read_by_col.items():
+            col_targets.sort(key=lambda x: float(x.get("x") or 0))
+            role = _radiation_column_role_label(col, header_map, cell_texts, table_id)
+            sub = _radiation_sub_position_suffix(
+                table_id,
+                row,
+                col,
+                point_col,
+                header_map,
+                cell_texts,
+                cell_black_prefix_texts,
+                cells_by_rc,
+                red_cell_pos_set,
+            )
+            base = point_key if not sub else f"{point_key}_{sub}"
+            for idx, t in enumerate(col_targets, start=1):
+                if t.get("underline_slot"):
+                    cell_txt = _normalize_cell_text(
+                        cell_texts.get((table_id, row, int(t["col"])), "")
+                    )
+                    if "（）" in cell_txt or "()" in cell_txt:
+                        nm = _dedupe_field_name_segments(f"{point_key}_备注")
+                        t["name"] = nm[:120]
+                        t["item_name"] = point_key
+                        t["type_name"] = "备注"
+                        t["autoSemantic"] = {
+                            "tableId": table_id,
+                            "row": row,
+                            "col": int(t["col"]),
+                            "itemName": point_key,
+                            "typeName": "备注",
+                            "fieldName": nm,
+                            "radiationPoint": point_key,
+                            "radiationColumn": "备注",
+                        }
+                        continue
+                if role == "序号":
+                    seq_txt = _radiation_row_seq_label(table_id, row, seq_col_i, cell_texts)
+                    nm = _dedupe_field_name_segments(
+                        f"序号{seq_txt}" if seq_txt else f"序号_r{row}"
+                    )
+                elif role == "检测点位置":
+                    nm = _dedupe_field_name_segments(f"{point_key}_检测点位置")
+                elif role == "位置细分":
+                    nm = _dedupe_field_name_segments(base)
+                else:
+                    suffix = role
+                    if role == "测量读数M":
+                        if read_meas_cols and int(col) in read_meas_cols and len(read_meas_cols) > 1:
+                            suffix = f"{role}{read_meas_cols.index(int(col)) + 1}"
+                        elif len(col_targets) > 1:
+                            suffix = f"{role}{idx}"
+                    nm = _dedupe_field_name_segments(f"{base}_{suffix}")
+                unit = _extract_unit_suffix(str(t.get("unit") or ""))
+                if unit:
+                    nm = _append_unit_suffix_to_field_name(nm, unit)
+                t["name"] = nm[:120]
+                t["item_name"] = point_name
+                t["type_name"] = role
+                auto = {
+                    "tableId": table_id,
+                    "row": row,
+                    "col": col,
+                    "itemName": point_name,
+                    "typeName": role,
+                    "fieldName": nm,
+                    "radiationPoint": point_name,
+                    "radiationColumn": role,
+                }
+                if role == "测量读数M":
+                    auto["readingIndex"] = idx
+                if role == "测量均值Mbar":
+                    auto["readingIndex"] = 0
+                    auto["meanOfReadings"] = True
+                t["autoSemantic"] = auto
+        for t in targets:
+            if not t.get("cell_name_probe"):
+                continue
+            col = int(t["col"])
+            role = _radiation_column_role_label(col, header_map, cell_texts, table_id)
+            sub = _radiation_sub_position_suffix(
+                table_id,
+                row,
+                col,
+                point_col,
+                header_map,
+                cell_texts,
+                cell_black_prefix_texts,
+                cells_by_rc,
+                red_cell_pos_set,
+            )
+            base = point_key if not sub else f"{point_key}_{sub}"
+            if role == "序号":
+                seq_txt = _radiation_row_seq_label(table_id, row, seq_col_i, cell_texts)
+                nm = _dedupe_field_name_segments(
+                    f"序号{seq_txt}" if seq_txt else f"序号_r{row}"
+                )
+            elif role == "检测点位置":
+                nm = _dedupe_field_name_segments(f"{point_key}_检测点位置")
+            elif role == "位置细分":
+                nm = _dedupe_field_name_segments(base)
+            else:
+                nm = _dedupe_field_name_segments(f"{base}_{role}")
+            t["name"] = nm[:120]
+            t["item_name"] = point_key
+            t["type_name"] = role
+            t["autoSemantic"] = {
+                "tableId": table_id,
+                "row": row,
+                "col": col,
+                "itemName": point_name,
+                "typeName": role,
+                "fieldName": nm,
+                "radiationPoint": point_name,
+                "radiationColumn": role,
+                "cellNameProbe": True,
+            }
 
 
 def _get_verdict_std_cell_text_for_row(
@@ -2779,34 +3540,495 @@ def _signature_image_box_size(
     return w, h
 
 
+# 新版现场记录 PDF：按章节标题（纵坐标）划分输入框归属；与旧版 submit 桶兼容。
+SITE_RECORD_TEMPLATE_SECTIONS: List[Dict[str, Any]] = [
+    {
+        "key": "site_unit_basic",
+        "title": "受检单位基本信息",
+        "aliases": ["受检单位基本信息"],
+        "order": 10,
+    },
+    {
+        "key": "site_device_basic",
+        "title": "受检设备基本信息",
+        "aliases": ["受检设备基本信息"],
+        "order": 20,
+    },
+    {
+        "key": "site_instruments_staff",
+        "title": "受检设备主要检测仪器及检测人员",
+        "aliases": [
+            "受检设备主要检测仪器及检测人员",
+            "主要检测仪器及检测人员",
+        ],
+        "order": 30,
+    },
+    {
+        "key": "site_qc_performance",
+        "title": "质量控制（性能）检测项目及结果",
+        "aliases": [
+            "质量控制（性能）检测项目及结果",
+            "质量控制(性能)检测项目及结果",
+            "质量控制检测项目及结果",
+        ],
+        "order": 40,
+    },
+    {
+        "key": "site_radiation_protection",
+        "title": "工作场所放射防护检测结果",
+        "aliases": [
+            "工作场所放射防护检测结果",
+            "工作场所防护检测结果",
+            "工作场所放射防护检测",
+            "工作场所防护检测",
+        ],
+        "order": 50,
+    },
+    {
+        "key": "site_layout_diagram",
+        "title": "平面布局示意图",
+        "aliases": ["平面布局示意图", "平面布局图"],
+        "order": 60,
+    },
+]
+
+
+def _compact_pdf_heading_text(text: str) -> str:
+    return _normalize_cell_text(text)
+
+
+def _span_top_y(span: Dict[str, Any]) -> float:
+    bb = span.get("bbox") if isinstance(span.get("bbox"), dict) else {}
+    return float(bb.get("y") or 0.0)
+
+
+def _line_text_compact(spans: Sequence[Dict[str, Any]]) -> str:
+    parts = [_compact_pdf_heading_text(sp.get("text") or "") for sp in spans]
+    return "".join(p for p in parts if p)
+
+
+def _group_spans_into_lines(spans: Sequence[Dict[str, Any]], y_tol: float = 5.0) -> List[List[Dict[str, Any]]]:
+    ordered = sorted(spans, key=lambda sp: (_span_top_y(sp), float((sp.get("bbox") or {}).get("x") or 0.0)))
+    lines: List[List[Dict[str, Any]]] = []
+    line_tops: List[float] = []
+    for sp in ordered:
+        y = _span_top_y(sp)
+        idx = None
+        for i, top in enumerate(line_tops):
+            if abs(y - top) <= y_tol:
+                idx = i
+                break
+        if idx is None:
+            lines.append([sp])
+            line_tops.append(y)
+        else:
+            lines[idx].append(sp)
+            n = len(lines[idx])
+            line_tops[idx] = (line_tops[idx] * (n - 1) + y) / n
+    for line in lines:
+        line.sort(key=lambda sp: float((sp.get("bbox") or {}).get("x") or 0.0))
+    return lines
+
+
+def _match_site_record_section_key(compact_text: str) -> Optional[str]:
+    text = _compact_pdf_heading_text(compact_text)
+    if not text:
+        return None
+    best_key = None
+    best_order = -1
+    for spec in SITE_RECORD_TEMPLATE_SECTIONS:
+        for alias in spec.get("aliases") or []:
+            ac = _compact_pdf_heading_text(alias)
+            if not ac:
+                continue
+            if ac in text or text in ac:
+                order = int(spec.get("order") or 0)
+                if order >= best_order:
+                    best_order = order
+                    best_key = str(spec.get("key") or "")
+    return best_key or None
+
+
+def extract_site_record_section_anchors(pdf_path: str) -> List[Dict[str, Any]]:
+    """从 PDF 全文识别现场记录章节标题，返回按 (page, y) 排序的锚点列表。"""
+    doc = fitz.open(pdf_path)
+    anchors: List[Dict[str, Any]] = []
+    seen: set = set()
+    try:
+        for i in range(len(doc)):
+            page = doc[i]
+            page_no = i + 1
+            spans = extract_text_spans(page)
+            candidates: List[Dict[str, Any]] = []
+            for line in _group_spans_into_lines(spans):
+                line_text = _line_text_compact(line)
+                key = _match_site_record_section_key(line_text)
+                if not key:
+                    for sp in line:
+                        key = _match_site_record_section_key(_compact_pdf_heading_text(sp.get("text") or ""))
+                        if key:
+                            break
+                if not key:
+                    continue
+                y = min(_span_top_y(sp) for sp in line)
+                spec = next((s for s in SITE_RECORD_TEMPLATE_SECTIONS if s.get("key") == key), None)
+                title = str(spec.get("title") or key) if spec else key
+                dedupe = (page_no, key, round(y, 1))
+                if dedupe in seen:
+                    continue
+                seen.add(dedupe)
+                candidates.append(
+                    {
+                        "page": page_no,
+                        "y": y,
+                        "key": key,
+                        "title": title,
+                        "order": int(spec.get("order") or 0) if spec else 0,
+                    }
+                )
+            candidates.sort(key=lambda a: (a["y"], a.get("order", 0)))
+            anchors.extend(candidates)
+    finally:
+        doc.close()
+    anchors.sort(key=lambda a: (int(a.get("page") or 1), float(a.get("y") or 0.0), int(a.get("order") or 0)))
+    return anchors
+
+
+def _field_sort_pos(field: Dict[str, Any]) -> tuple:
+    return (
+        int(field.get("page") or 1),
+        float(field.get("y") or 0.0),
+        float(field.get("x") or 0.0),
+    )
+
+
+def _resolve_template_section_for_field(
+    field: Dict[str, Any],
+    anchors: Sequence[Dict[str, Any]],
+) -> Optional[Dict[str, str]]:
+    if not anchors:
+        return None
+    fp = int(field.get("page") or 1)
+    fy = float(field.get("y") or 0.0)
+    picked = None
+    for anchor in anchors:
+        ap = int(anchor.get("page") or 1)
+        ay = float(anchor.get("y") or 0.0)
+        if (ap, ay) <= (fp, fy):
+            picked = anchor
+        else:
+            break
+    if picked is None:
+        picked = anchors[0]
+    return {
+        "templateSectionKey": str(picked.get("key") or ""),
+        "templateSectionTitle": str(picked.get("title") or ""),
+    }
+
+
+def assign_template_sections_to_fields(
+    pdf_path: str,
+    fields: List[Dict[str, Any]],
+    *,
+    anchors: Optional[Sequence[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """按章节锚点纵坐标，为每个输入框写入 templateSectionKey / templateSectionTitle。"""
+    if not fields:
+        return fields
+    anchor_list = list(anchors) if anchors is not None else extract_site_record_section_anchors(pdf_path)
+    if not anchor_list:
+        return fields
+    for field in fields:
+        if not isinstance(field, dict):
+            continue
+        sec = _resolve_template_section_for_field(field, anchor_list)
+        if not sec:
+            continue
+        field["templateSectionKey"] = sec["templateSectionKey"]
+        field["templateSectionTitle"] = sec["templateSectionTitle"]
+    return fields
+
+
+def _spans_inside_table_cell(cell: Dict[str, Any], spans: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    rect = cell.get("rect")
+    if rect is None:
+        return []
+    out: List[Dict[str, Any]] = []
+    for sp in spans:
+        bb = sp.get("bbox") or {}
+        if not bb:
+            continue
+        cx = float(bb["x"]) + float(bb["w"]) / 2.0
+        cy = float(bb["y"]) + float(bb["h"]) / 2.0
+        if rect.contains(fitz.Point(cx, cy)):
+            out.append(sp)
+    out.sort(
+        key=lambda sp: (
+            float((sp.get("bbox") or {}).get("y") or 0.0),
+            float((sp.get("bbox") or {}).get("x") or 0.0),
+        )
+    )
+    return out
+
+
+def _compact_text_from_spans(spans: Sequence[Dict[str, Any]]) -> str:
+    return _line_text_compact(spans)
+
+
+def _signature_label_spans_for_slot(cell_spans: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """单元格内用于定位标签的黑色标题 span（签字栏位标签通常在红字填写区之上）。"""
+    label: List[Dict[str, Any]] = []
+    for sp in cell_spans:
+        txt = str(sp.get("text") or "").strip()
+        if not txt:
+            continue
+        if is_span_red_rgb(sp.get("color_rgb") or []):
+            break
+        label.append(sp)
+    return label or list(cell_spans)
+
+
+def _merged_bbox_hit_from_spans(spans: Sequence[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not spans:
+        return None
+    x0 = y0 = 1e9
+    x1 = y1 = -1e9
+    texts: List[str] = []
+    ref = spans[0]
+    for sp in spans:
+        bb = sp.get("bbox") or {}
+        if not bb:
+            continue
+        x0 = min(x0, float(bb["x"]))
+        y0 = min(y0, float(bb["y"]))
+        x1 = max(x1, float(bb["x"]) + float(bb["w"]))
+        y1 = max(y1, float(bb["y"]) + float(bb["h"]))
+        texts.append(str(sp.get("text") or ""))
+    if x1 < x0 or y1 < y0:
+        return ref
+    return {
+        "text": "".join(texts),
+        "bbox": {"x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0},
+        "size": ref.get("size"),
+        "font": ref.get("font"),
+    }
+
+
+def _single_row_footer_table_cells(raw_cells: Sequence[Dict], page_h: float) -> List[Dict]:
+    """
+    保留页脚「单行多列」签字表（常被 _filter_noise_tables 当作页眉碎格误删）。
+    """
+    if not raw_cells:
+        return []
+    grouped: Dict[int, List[Dict]] = {}
+    for cell in raw_cells:
+        grouped.setdefault(int(cell["table_id"]), []).append(cell)
+    out: List[Dict] = []
+    footer_y = page_h * 0.42
+    for tcells in grouped.values():
+        rows = {c.get("row") for c in tcells if c.get("row") is not None}
+        if len(rows) != 1 or len(tcells) < 2:
+            continue
+        y0 = min(float(c["rect"].y0) for c in tcells)
+        if y0 < footer_y:
+            continue
+        out.extend(tcells)
+    return out
+
+
+def _merge_signature_table_cells(page: fitz.Page, page_no: int) -> List[Dict]:
+    raw_cells = extract_table_cells(page)
+    cells = _filter_noise_tables(raw_cells, Config()) + extract_vector_rect_cells(page, page_no)
+    extra = _single_row_footer_table_cells(raw_cells, float(page.rect.height))
+    seen: set = set()
+    merged: List[Dict] = []
+    for cell in list(cells) + list(extra):
+        cid = str(cell.get("cell_id") or "")
+        if cid and cid in seen:
+            continue
+        if cid:
+            seen.add(cid)
+        merged.append(cell)
+    return merged
+
+
+def _matching_official_signature_slots(cell_text: str) -> List[Dict[str, Any]]:
+    return [
+        s
+        for s in OFFICIAL_SITE_RECORD_SIGNATURE_SLOTS
+        if _compact_matches_official_signature_slot(cell_text, s)
+    ]
+
+
+def _find_blank_signature_cell_right(
+    label_cell: Dict[str, Any],
+    table_cells: Sequence[Dict[str, Any]],
+    cell_texts: Dict[tuple, str],
+) -> Optional[Dict[str, Any]]:
+    """签字表格常见布局：标签在左列，右侧紧邻列为空白签字区。"""
+    row = label_cell.get("row")
+    col = label_cell.get("col")
+    tid = label_cell.get("table_id")
+    if row is None or col is None or tid is None:
+        return None
+    row_i, col_i, tid_i = int(row), int(col), int(tid)
+    for cell in table_cells:
+        if cell.get("row") is None or cell.get("col") is None:
+            continue
+        ctid = cell.get("table_id")
+        if ctid is None or int(ctid) != tid_i or int(cell["row"]) != row_i:
+            continue
+        if int(cell["col"]) != col_i + 1:
+            continue
+        cc = int(cell["col"])
+        txt = _normalize_cell_text(cell_texts.get((tid_i, row_i, cc), ""))
+        if txt and _matching_official_signature_slots(txt):
+            continue
+        return cell
+    return None
+
+
+def _signature_box_rect_for_blank_cell(
+    blank_cell: Dict[str, Any],
+    page_w: float,
+    page_h: float,
+    *,
+    pad: float = 3.0,
+    default_w: float = 120.0,
+) -> Optional[Dict[str, float]]:
+    """将图片框铺满空白签字单元格（留小边距）。"""
+    cr = blank_cell.get("rect")
+    if cr is None:
+        return None
+    cx0, cy0 = float(cr.x0), float(cr.y0)
+    cx1, cy1 = float(cr.x1), float(cr.y1)
+    inner_w = cx1 - cx0 - 2.0 * pad
+    inner_h = cy1 - cy0 - 2.0 * pad
+    if inner_w < 24.0 or inner_h < 18.0:
+        return None
+    w = max(48.0, inner_w)
+    h = inner_h
+    x = cx0 + pad
+    y = cy0 + pad
+    if x + w > page_w - 2:
+        x = max(0.0, page_w - w - 2)
+    if y + h > page_h - 2:
+        y = max(0.0, page_h - h - 2)
+    return {"x": x, "y": y, "w": w, "h": h}
+
+
+def _find_best_signature_label_on_page(
+    spans: Sequence[Dict[str, Any]],
+    table_cells: Sequence[Dict[str, Any]],
+    slot: Dict[str, Any],
+    cell_texts: Optional[Dict[tuple, str]] = None,
+) -> Optional[tuple]:
+    """在本页找指定签字栏位：优先按表格单元格合并全文，再回退按行匹配。"""
+    best: Optional[tuple] = None
+    best_score = -1
+
+    for cell in table_cells:
+        cell_spans = _spans_inside_table_cell(cell, spans)
+        if not cell_spans:
+            continue
+        cell_text = _compact_text_from_spans(cell_spans)
+        matched_slots = _matching_official_signature_slots(cell_text)
+        if slot not in matched_slots:
+            continue
+        # 跳过把三列签字揉进同一大框的矢量伪单元格
+        if len(matched_slots) > 1:
+            continue
+        label_spans = _signature_label_spans_for_slot(cell_spans)
+        hit = _merged_bbox_hit_from_spans(label_spans)
+        if hit is None:
+            continue
+        blank_cell = None
+        if cell_texts is not None:
+            blank_cell = _find_blank_signature_cell_right(cell, table_cells, cell_texts)
+        score = 300 - min(len(cell_text), 200)
+        if cell.get("row") is not None and cell.get("col") is not None:
+            score += 60
+        if blank_cell is not None:
+            score += 180
+        if score > best_score:
+            best_score = score
+            best = (hit, cell, blank_cell, cell_text)
+
+    for line in _group_spans_into_lines(spans):
+        line_text = _line_text_compact(line)
+        if not _compact_matches_official_signature_slot(line_text, slot):
+            continue
+        for sp in line:
+            bb = sp.get("bbox") or {}
+            if not bb:
+                continue
+            cell = _pick_best_cell_for_span(bb, table_cells)
+            blank_cell = None
+            if cell is not None and cell_texts is not None:
+                blank_cell = _find_blank_signature_cell_right(cell, table_cells, cell_texts)
+            score = len(line_text) + (80 if cell is not None else 0) + (120 if blank_cell else 0)
+            if score > best_score:
+                best_score = score
+                best = (sp, cell, blank_cell, line_text)
+    return best
+
+
+def _signature_box_rect_for_label(
+    hit: Dict[str, Any],
+    hit_cell: Optional[Dict[str, Any]],
+    spans: Sequence[Dict[str, Any]],
+    page_w: float,
+    page_h: float,
+    slot: Dict[str, Any],
+    *,
+    blank_cell: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, float]]:
+    default_w = float(slot.get("default_w") or 120.0)
+    if blank_cell is not None and blank_cell.get("rect") is not None:
+        rect = _signature_box_rect_for_blank_cell(
+            blank_cell, page_w, page_h, default_w=default_w
+        )
+        if rect:
+            return rect
+    bb = hit.get("bbox") or {}
+    if not bb:
+        return None
+    label_right = float(bb["x"]) + float(bb["w"])
+    label_bottom = float(bb["y"]) + float(bb["h"])
+    w, h = _signature_image_box_size(bb, hit, spans, page_w, default_w)
+    x = label_right + 3.0
+    y = max(0.0, float(bb["y"]))
+    if hit_cell is not None and hit_cell.get("rect") is not None:
+        cr = hit_cell["rect"]
+        cx0, cy0 = float(cr.x0), float(cr.y0)
+        cx1, cy1 = float(cr.x1), float(cr.y1)
+        gap = 4.0
+        below_h = max(28.0, cy1 - label_bottom - gap)
+        if below_h >= 24.0:
+            x = cx0 + 4.0
+            y = label_bottom + gap
+            w = max(48.0, (cx1 - cx0) - 8.0)
+            h = min(below_h, max(28.0, (cy1 - cy0) * 0.72))
+        else:
+            x = min(label_right + gap, cx1 - w - 4.0)
+            if x < cx0 + 4.0:
+                x = cx0 + 4.0
+            y = max(cy0, min(float(bb["y"]), cy1 - h - 2.0))
+            w = min(w, max(48.0, cx1 - x - 4.0))
+    if x + w > page_w - 2:
+        x = max(0.0, page_w - w - 2)
+    if y + h > page_h - 2:
+        y = max(0.0, page_h - h - 2)
+    return {"x": x, "y": y, "w": w, "h": h}
+
+
 def extract_signature_image_boxes(pdf_path: str) -> List[Dict[str, Any]]:
     """
-    自动识别签名标签文本，并在其右侧生成图片框。
-    规则：
-    - 图片框不与标签重叠（x 从标签右侧开始）
-    - 上端与标签文本框上端对齐
-    - 高度：按标签 span 的 bbox 高度与字号自适应（约 1.85×～2.35× 字号相关），并限制在合理区间
-    - 宽度：标签右侧到「同一行下一文字块」左缘或页右缘的空白；过窄时回退到各角色默认宽度
+    仅为模板规定的三个签字栏位生成图片框（f18/f19/f20），每栏位全局最多一个。
+    不在其它「检测员/签字/校核」文字处生成签名框。
     """
-    targets = [
-        {
-            "name": "检测员",
-            "aliases": ["检测员", "检测员：", "检测员:"],
-            "default_w": 225.0,
-        },
-        {
-            "name": "受检单位陪同人",
-            "aliases": ["受检单位陪同人", "受检单位陪同人：", "受检单位陪同人:"],
-            "default_w": 83.0,
-        },
-        {
-            "name": "校核员及校核日期",
-            "aliases": ["校核员及校核日期", "校核员及校核日期：", "校核员及校核日期:"],
-            "default_w": 125.0,
-        },
-    ]
     doc = fitz.open(pdf_path)
-    out: List[Dict[str, Any]] = []
+    chosen: Dict[str, tuple] = {}
     try:
         for i in range(len(doc)):
             page = doc[i]
@@ -2814,40 +4036,58 @@ def extract_signature_image_boxes(pdf_path: str) -> List[Dict[str, Any]]:
             page_w = float(page.rect.width)
             page_h = float(page.rect.height)
             spans = extract_text_spans(page)
-            for item in targets:
-                hit = None
-                for sp in spans:
-                    txt = _normalize_cell_text(sp.get("text") or "")
-                    if not txt:
-                        continue
-                    if any(alias in txt for alias in item["aliases"]):
-                        hit = sp
-                        break
-                if hit is None:
+            table_cells = _merge_signature_table_cells(page, page_no)
+            maps = _build_structured_cell_maps(page, table_cells, spans)
+            cell_texts: Dict[tuple, str] = maps.get("cell_texts") or {}
+            for slot in OFFICIAL_SITE_RECORD_SIGNATURE_SLOTS:
+                slot_id = str(slot.get("id") or "")
+                if slot_id in chosen:
                     continue
-                bb = hit.get("bbox") or {}
-                if not bb:
-                    continue
-                label_right = float(bb["x"]) + float(bb["w"])
-                w, h = _signature_image_box_size(bb, hit, spans, page_w, float(item["default_w"]))
-                x = label_right
-                if x + w > page_w - 2:
-                    x = max(0.0, page_w - w - 2)
-                y = max(0.0, min(float(bb["y"]), page_h - h))
-                out.append(
-                    {
-                        "page": page_no,
-                        "x": x,
-                        "y": y,
-                        "w": w,
-                        "h": h,
-                        "text": item["name"],
-                        "name": item["name"],
-                        "fieldType": "image",
-                    }
+                found = _find_best_signature_label_on_page(
+                    spans, table_cells, slot, cell_texts=cell_texts
                 )
+                if not found:
+                    continue
+                hit, hit_cell, blank_cell, _line_text = found
+                rect = _signature_box_rect_for_label(
+                    hit,
+                    hit_cell,
+                    spans,
+                    page_w,
+                    page_h,
+                    slot,
+                    blank_cell=blank_cell,
+                )
+                if not rect:
+                    continue
+                chosen[slot_id] = (page_no, hit, rect, slot)
     finally:
         doc.close()
+
+    out: List[Dict[str, Any]] = []
+    for slot in OFFICIAL_SITE_RECORD_SIGNATURE_SLOTS:
+        slot_id = str(slot.get("id") or "")
+        pack = chosen.get(slot_id)
+        if not pack:
+            continue
+        page_no, _hit, rect, slot = pack
+        export_name = str(slot.get("exportName") or slot_id)
+        out.append(
+            {
+                "page": int(page_no),
+                "x": float(rect["x"]),
+                "y": float(rect["y"]),
+                "w": float(rect["w"]),
+                "h": float(rect["h"]),
+                "text": export_name,
+                "name": export_name,
+                "placeholder": slot_id,
+                "fieldType": "image",
+                "pdfFieldId": str(slot.get("pdfFieldId") or ""),
+                "templateSectionKey": "site_instruments_staff",
+                "templateSectionTitle": "受检设备主要检测仪器及检测人员",
+            }
+        )
     return out
 
 
@@ -2884,7 +4124,9 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
         for i in range(len(doc)):
             page = doc[i]
             page_no = i + 1
-            page_area = max(1.0, float(page.rect.width) * float(page.rect.height))
+            page_w = float(page.rect.width)
+            page_h = float(page.rect.height)
+            page_area = max(1.0, page_w * page_h)
             spans = extract_text_spans(page)
             table_cells = _filter_noise_tables(extract_table_cells(page), cfg) + extract_vector_rect_cells(page, page_no)
             maps = _build_structured_cell_maps(page, table_cells, spans)
@@ -2966,6 +4208,9 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
             for table_id, cells_by_rc in table_cells_by_rc.items():
                 for (row, col), cell in cells_by_rc.items():
                     cell_txt = _normalize_cell_text(cell_texts.get((table_id, row, col), ""))
+                    cell_blk = _normalize_cell_text(cell_black_prefix_texts.get((table_id, row, col), ""))
+                    if _span_text_is_signature_label(cell_txt) or _span_text_is_signature_label(cell_blk):
+                        continue
                     if cell_txt:
                         continue
                     if (int(table_id), int(row), int(col)) in underline_cell_keys:
@@ -3070,6 +4315,41 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                     "name": "",
                 }
             red_cell_pos_set = {(int(t), int(r), int(c)) for (t, r, c, _) in red_cell_targets.keys() if int(r) >= 0 and int(c) >= 0}
+            radiation_table_ids = {
+                int(tid)
+                for tid, hm in header_map_by_table.items()
+                if _is_radiation_protection_header_map(hm)
+            }
+            for tid in radiation_table_ids:
+                _ensure_radiation_empty_cell_boxes(
+                    int(tid),
+                    table_cells_by_rc.get(int(tid)) or {},
+                    cell_texts,
+                    cell_black_prefix_texts,
+                    underline_cell_keys,
+                    page_no,
+                    red_cell_targets,
+                )
+                _apply_radiation_protection_table_naming(
+                    int(tid),
+                    header_map_by_table[int(tid)],
+                    red_cell_targets,
+                    cell_texts,
+                    cell_black_prefix_texts,
+                    table_cells_by_rc.get(int(tid)) or {},
+                )
+                _ensure_radiation_paren_and_background_boxes(
+                    int(tid),
+                    header_map_by_table[int(tid)],
+                    table_cells_by_rc.get(int(tid)) or {},
+                    cell_texts,
+                    cell_black_prefix_texts,
+                    spans,
+                    page_no,
+                    page_w,
+                    page_h,
+                    red_cell_targets,
+                )
             semantic_targets: List[Dict[str, Any]] = []
             for _, target in red_cell_targets.items():
                 if target.get("underline_slot"):
@@ -3078,6 +4358,8 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                 row = target.get("row")
                 col = target.get("col")
                 if row is None or col is None or table_id not in header_map_by_table:
+                    continue
+                if int(table_id) in radiation_table_ids:
                     continue
                 header_map = header_map_by_table.get(table_id) or {}
                 type_name = _resolve_semantic_type_by_col(int(col), header_map)
@@ -3193,10 +4475,13 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                     if not prefix:
                         col = int(t["col"])
                         prefix = row_prefix_cache.get((table_id, row, item_name, col), item_name)
-                    t["name"] = f"{prefix}_{type_name}" if prefix else f"{item_name}_{type_name}"
+                    t["name"] = _dedupe_field_name_segments(
+                        f"{prefix}_{type_name}" if prefix else f"{item_name}_{type_name}"
+                    )
                     tail_name = _sanitize_name_piece(str(t.get("tail_name") or ""))
-                    if tail_name:
-                        t["name"] = f"{t['name']}_{tail_name}"
+                    if tail_name and not _field_name_already_has_token(t["name"], tail_name):
+                        if tail_name != type_name:
+                            t["name"] = _dedupe_field_name_segments(f"{t['name']}_{tail_name}")
 
             # 兜底：未命中表头语义规则的单元格，使用左侧单元格文本命名（下划线槽位已单独命名）
             for target in red_cell_targets.values():
@@ -3230,7 +4515,7 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                     target["name"] = f"{target['name']}{slot_no}"
                 unit = _extract_unit_suffix(str(target.get("unit") or ""))
                 if unit and str(target.get("name") or "").strip():
-                    target["name"] = f"{target['name']}({unit})"
+                    target["name"] = _append_unit_suffix_to_field_name(str(target["name"]), unit)
 
             # 单位后缀统一补充（语义命名分支；下划线已含「字母（单位）」或单位本体）
             for target in red_cell_targets.values():
@@ -3243,9 +4528,8 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                 if slot_no > 1 and not nm.endswith(str(slot_no)):
                     nm = f"{nm}{slot_no}"
                 unit = _extract_unit_suffix(str(target.get("unit") or ""))
-                if unit and not nm.endswith(f"({unit})"):
-                    nm = f"{nm}({unit})"
-                target["name"] = nm
+                nm = _append_unit_suffix_to_field_name(nm, unit)
+                target["name"] = _dedupe_field_name_segments(nm)
 
             # 有下划线的单元格：取「整格」命名（探针走完全部规则后）再删除探针与其它整格目标，仅保留下划线框
             cell_prefix_for_underline: Dict[tuple, str] = {}
@@ -3275,6 +4559,13 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                 if not v.get("underline_slot"):
                     continue
                 tid, row, col = v.get("table_id"), v.get("row"), v.get("col")
+                auto = v.get("autoSemantic") if isinstance(v.get("autoSemantic"), dict) else {}
+                if auto.get("radiationPoint") or (
+                    tid is not None and int(tid) in radiation_table_ids and str(v.get("name") or "").strip()
+                ):
+                    nm = _dedupe_field_name_segments(str(v.get("name") or ""))
+                    v["name"] = _unique_underline_field_name(nm, used_page_names)[:120]
+                    continue
                 part = str(v.get("underline_part_name") or "").strip() or "下划线"
                 pref = ""
                 if tid is not None and row is not None and col is not None:
@@ -3282,7 +4573,7 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                         pref = cell_prefix_for_underline.get((int(tid), int(row), int(col)), "")
                     except (TypeError, ValueError):
                         pref = ""
-                raw = _clean_combined_field_name(f"{pref}_{part}" if pref else part)
+                raw = _dedupe_field_name_segments(_clean_combined_field_name(f"{pref}_{part}" if pref else part))
                 v["name"] = _unique_underline_field_name(raw, used_page_names)[:120]
 
             # 「单项判定」填格：抓取同行「判定标准」列静态文本，供回填时自动推断合格/不合格
@@ -3329,18 +4620,48 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                     continue
                 if w < 8 or h < 6:
                     continue
-                out.append(
-                    {
-                        "page": page_no,
-                        "x": float(t["x"]),
-                        "y": float(t["y"]),
-                        "w": w,
-                        "h": h,
-                        "text": (t.get("text") or "")[:120],
-                        "name": (t.get("name") or "")[:120],
-                        "judgmentCriterionText": str(t.get("judgment_criterion_text") or "")[:500],
-                    }
-                )
+                auto_semantic: Dict[str, Any] = {}
+                preset = t.get("autoSemantic")
+                if isinstance(preset, dict):
+                    for pk, pv in preset.items():
+                        if isinstance(pk, str) and pv is not None and pv != "":
+                            auto_semantic[pk] = pv
+                for src_key, out_key in (
+                    ("table_id", "tableId"),
+                    ("row", "row"),
+                    ("col", "col"),
+                    ("cell_id", "cellId"),
+                    ("item_name", "itemName"),
+                    ("type_name", "typeName"),
+                    ("tail_name", "tailName"),
+                    ("underline_part_name", "underlinePartName"),
+                    ("slot_no", "slotNo"),
+                ):
+                    val = t.get(src_key)
+                    if val is None or val == "":
+                        continue
+                    auto_semantic[out_key] = val
+                if t.get("name"):
+                    auto_semantic["fieldName"] = str(t.get("name") or "")[:120]
+                if t.get("cell_name_probe"):
+                    auto_semantic["cellNameProbe"] = True
+                if t.get("underline_slot"):
+                    auto_semantic["underlineSlot"] = True
+
+                row_out = {
+                    "page": page_no,
+                    "x": float(t["x"]),
+                    "y": float(t["y"]),
+                    "w": w,
+                    "h": h,
+                    "text": (t.get("text") or "")[:120],
+                    "name": (t.get("name") or "")[:120],
+                    "fieldType": str(t.get("fieldType") or "text"),
+                    "judgmentCriterionText": str(t.get("judgment_criterion_text") or "")[:500],
+                }
+                if auto_semantic:
+                    row_out["autoSemantic"] = auto_semantic
+                out.append(row_out)
             blocks = merge_tokens_to_blocks(red_tokens, cfg)
             for b in blocks:
                 bb = b["bbox"]

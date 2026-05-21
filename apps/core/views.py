@@ -152,6 +152,13 @@ from apps.core.project_equipment_service import (
     unbind_equipment_from_project,
     update_project_equipment_report_task,
 )
+from apps.core.project_workflow_ui import (
+    PROCESS_STEPS_REFERENCE,
+    ROLE_LADDER,
+    build_workbench_pipeline_status,
+    group_workflow_members_by_role,
+    normalize_workbench_tab,
+)
 from apps.core.hospital_info_service import (
     backfill_equipment_histories_from_reports,
     bind_equipment_tasks_to_project,
@@ -187,6 +194,7 @@ from apps.core.models import (
     LibraryFile,
     LibraryFileProject,
     LibraryProject,
+    LibraryProjectEquipment,
     LibraryProjectUserRevocation,
     LibraryProjectWorkflowMember,
     LibraryTask,
@@ -198,7 +206,7 @@ from apps.core.models import (
 )
 from utils.ollama_extract import generate_frontend_template_with_ollama
 from utils.frontend_schema_rule_engine import (
-    _attach_rect_and_strip_legacy_coords,
+    apply_table_row_col_to_source,
     build_frontend_schema_by_rules,
     normalize_field_text_by_underscore_rules,
 )
@@ -1054,10 +1062,12 @@ def _sync_project_commission_org_name(project: LibraryProject) -> None:
 
 def _sync_library_project_tasks_to_user(project, assignee, assigned_by):
     """
-    将项目下全部任务模板同步给指定用户（幂等），并登记流程参与、模板文件关联。
+    将项目下任务模板同步给指定用户（幂等），并登记流程参与、模板文件关联。
     返回 (created_count, template_file_count)。
     """
-    project_tasks = list(project.library_tasks.all().order_by("code"))
+    from apps.core.project_equipment_service import project_tasks_for_user_assignment
+
+    project_tasks = project_tasks_for_user_assignment(project)
     if not project_tasks:
         return 0, 0
     created_count = 0
@@ -1360,12 +1370,25 @@ def library_projects(request):
                         messages.warning(request, e)
                     if not added and not errs:
                         messages.info(request, "所选设备均已在本项目中")
+                    if added or LibraryProjectEquipment.objects.filter(project=proj).exists():
+                        from apps.core.hospital_info_service import (
+                            sync_project_library_tasks_from_equipments,
+                        )
+
+                        n_sync = sync_project_library_tasks_from_equipments(
+                            proj, request.user
+                        )
+                        if n_sync and added:
+                            messages.info(
+                                request,
+                                f"项目任务模板已按当前委托设备整理为 {n_sync} 个（已移除无关残留）",
+                            )
             elif action == "unbind_project_equipment":
                 try:
                     link_id = int(request.POST.get("link_id", "") or 0)
                 except ValueError:
                     link_id = 0
-                err = unbind_equipment_from_project(proj, link_id)
+                err = unbind_equipment_from_project(proj, link_id, request.user)
                 if err:
                     messages.error(request, err)
                 else:
@@ -1412,7 +1435,7 @@ def library_projects(request):
                     return redirect(reverse("library_projects"))
                 if not library_user_may_assign_on_project(request.user, project):
                     messages.error(request, "无权指定该项目主要负责人")
-                    return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=assign")
+                    return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=dispatch")
                 assignee = User.objects.filter(
                     pk=assignee_id,
                     profile__role__code__in=APP_SIDE_ROLE_CODES,
@@ -1432,7 +1455,7 @@ def library_projects(request):
                     )
             return redirect(
                 reverse("library_projects")
-                + f"?project_id={project.pk if project else project_id}&tab=assign"
+                + f"?project_id={project.pk if project else project_id}&tab=dispatch"
             )
 
         if action == "assign":
@@ -1461,7 +1484,7 @@ def library_projects(request):
                 if not library_user_may_assign_on_project(request.user, project):
                     if assignee_id != request.user.id:
                         messages.error(request, "无分配权限：仅可向本人同步本项目任务")
-                        return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=assign")
+                        return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=dispatch")
                 assignee = User.objects.filter(
                     pk=assignee_id,
                     profile__role__code__in=APP_SIDE_ROLE_CODES,
@@ -1489,7 +1512,7 @@ def library_projects(request):
                                 f"{assignee.username} 已拥有该项目全部任务模板；已同步 {file_n} 个模板文件到项目。",
                             )
             redir_pid = int(project_raw) if (project_raw or "").strip().isdigit() else (selected_project_id or 0)
-            tab_q = f"?project_id={redir_pid}&tab=assign" if redir_pid else "?tab=assign"
+            tab_q = f"?project_id={redir_pid}&tab=dispatch" if redir_pid else "?tab=dispatch"
             return redirect(reverse("library_projects") + tab_q)
 
         if action == "unassign_project":
@@ -1514,14 +1537,14 @@ def library_projects(request):
                 return redirect(reverse("library_projects"))
             if not LibraryTaskAssignment.objects.filter(project=project, assignee=assignee).exists():
                 messages.error(request, "撤回失败：该用户在本项目上无任务分配记录")
-                return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=assign")
+                return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=dispatch")
             if not library_user_may_mutate_project_workbench(request.user, project):
                 messages.error(request, "无权撤回此项目下的分配")
-                return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=assign")
+                return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=dispatch")
             if not library_user_may_assign_on_project(request.user, project):
                 if assignee_id != request.user.id:
                     messages.error(request, "仅能撤回本人在本项目上的任务分配")
-                    return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=assign")
+                    return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=dispatch")
             deleted_count, _ = LibraryTaskAssignment.objects.filter(
                 project=project,
                 assignee=assignee,
@@ -1530,7 +1553,7 @@ def library_projects(request):
                 messages.success(request, f"已撤回 {assignee.username} 在项目「{project.name}」上的分配")
             else:
                 messages.info(request, f"{assignee.username} 在项目「{project.name}」上无可撤回分配")
-            return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=assign")
+            return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=dispatch")
 
         if action in ("bind_project_files", "unbind_project_files"):
             post_raw = request.POST.get("project_id", "").strip()
@@ -1551,7 +1574,7 @@ def library_projects(request):
                 )
                 return redirect(reverse("library_projects") + f"?project_id={proj.pk}&tab=commission")
             if not library_user_may_edit_project_files(request.user, proj):
-                messages.error(request, "无权维护项目文件（主要负责人请在「分配」页面向参与人同步任务）")
+                messages.error(request, "无权维护项目文件（统筹人请在「人员派工」页面向参与人同步 App 任务）")
                 return redirect(reverse("library_projects") + f"?project_id={proj.pk}&tab=commission")
             if not library_user_may_mutate_project_workbench(request.user, proj):
                 messages.error(request, "当前角色无权维护项目文件")
@@ -1619,7 +1642,7 @@ def library_projects(request):
             else:
                 LibraryProjectUserRevocation.objects.filter(project=proj, user=target).delete()
                 messages.success(request, f"已恢复 {target.username} 在本项目上的编辑权限。")
-            return redirect(reverse("library_projects") + f"?project_id={proj.pk}&tab=assign")
+            return redirect(reverse("library_projects") + f"?project_id={proj.pk}&tab=dispatch")
 
         if action == "rollback_submission_to_pending":
             post_raw = request.POST.get("project_id", "").strip()
@@ -1711,7 +1734,7 @@ def library_projects(request):
                     messages.error(request, "演示账号仅可移除本人担任的流程岗位")
                 else:
                     row.delete()
-            return redirect(reverse("library_projects") + f"?project_id={proj.pk}&tab=workflow")
+            return redirect(reverse("library_projects") + f"?project_id={proj.pk}&tab=dispatch")
 
         if action == "delete_project":
             post_raw = request.POST.get("project_id", "").strip()
@@ -1868,7 +1891,7 @@ def library_projects(request):
                     }
                 )
 
-    workbench_tab = (request.GET.get("tab") or "overview").strip()
+    workbench_tab = normalize_workbench_tab(request.GET.get("tab") or "overview")
     if workbench_tab == "tasks":
         workbench_tab = "commission"
     if hide_project_workbench_files_tab and workbench_tab == "files":
@@ -1876,9 +1899,8 @@ def library_projects(request):
     if workbench_tab not in (
         "overview",
         "commission",
-        "workflow",
+        "dispatch",
         "files",
-        "assign",
         "submissions",
     ):
         workbench_tab = "overview"
@@ -1928,13 +1950,24 @@ def library_projects(request):
             for pid in f.projects.filter(pk=proj.pk).values_list("id", flat=True):
                 project_files_map.setdefault(pid, []).append(f)
         for item in grouped.values():
+            assignee = item["assignee"]
+            assigned_tasks = []
+            if assignee is not None:
+                assigned_tasks = list(
+                    LibraryTask.objects.filter(
+                        assignments__project=proj,
+                        assignments__assignee=assignee,
+                    )
+                    .distinct()
+                    .order_by("code")
+                )
             project_scoped_assignment_records.append(
                 {
-                    "assignee": item["assignee"],
+                    "assignee": assignee,
                     "assigned_by": item["assigned_by"],
                     "project": proj,
                     "created_at": item["created_at"],
-                    "tasks": sorted(list(proj.library_tasks.all()), key=lambda x: x.code),
+                    "tasks": assigned_tasks,
                     "files": project_files_map.get(proj.pk, []),
                 }
             )
@@ -2052,16 +2085,21 @@ def library_projects(request):
 
     workbench_tabs = [
         ("overview", "概览"),
-        ("commission", "委托情况"),
-        ("workflow", "流程"),
+        ("commission", "委托立项"),
+        ("dispatch", "人员派工"),
     ]
     if not hide_project_workbench_files_tab:
         workbench_tabs.append(("files", "文件"))
-    workbench_tabs.extend(
-        [
-            ("assign", "分配"),
-            ("submissions", "提交"),
-        ]
+    workbench_tabs.append(("submissions", "进度跟踪"))
+
+    workflow_members_by_role = group_workflow_members_by_role(workflow_members)
+    project_equipment_count = len(project_commission_equipment_cards)
+    workbench_pipeline_status = build_workbench_pipeline_status(
+        selected_project,
+        equipment_count=project_equipment_count,
+        assignee_count=len(project_assignees),
+        workflow_member_count=len(workflow_members),
+        submission_count=len(project_submissions),
     )
 
     return render(
@@ -2134,6 +2172,11 @@ def library_projects(request):
             "project_report_task_options": project_report_task_options,
             "project_has_hospital": project_has_hospital,
             "project_equipment_scope_label": project_equipment_scope_label,
+            "workbench_pipeline_status": workbench_pipeline_status,
+            "workflow_members_by_role": workflow_members_by_role,
+            "role_ladder": ROLE_LADDER,
+            "process_steps_reference": PROCESS_STEPS_REFERENCE,
+            "project_equipment_count": project_equipment_count,
         },
     )
 
@@ -4871,8 +4914,13 @@ def htmlpdf_editor_open(request, pk: int):
         f"window.HTMLPDF_INITIAL_TEMPLATE_PDF_ID={lf.pk};"
         f"window.HTMLPDF_PARTY_A_DEMO_UI={'true' if party_demo else 'false'};"
         f"window.HTMLPDF_MATRIX_BETA_UI={'true' if matrix_beta else 'false'};"
-        "</script>"
     )
+    if return_manage_raw:
+        try:
+            inject += f"window.HTMLPDF_INITIAL_LIBRARY_TASK_ID={int(return_manage_raw)};"
+        except ValueError:
+            pass
+    inject += "</script>"
     # 必须出现在主内联脚本之前，否则读取 MATRIX_BETA / PARTY_A_DEMO 时 window 尚未赋值，strip 逻辑与权限不一致。
     if return_task_url:
         bar = (
@@ -4941,10 +4989,16 @@ def htmlpdf_api_template_jsons(request):
         .order_by("-created_at")
         .only("id", "original_name")
     )
+    from apps.core.library_task_template_binding_service import (
+        is_auxiliary_template_json_filename,
+    )
+
     for lf in qs[:500]:
         if not library_file_access_allowed(request.user, lf):
             continue
         if not lf.original_name.lower().endswith(".json"):
+            continue
+        if is_auxiliary_template_json_filename(lf.original_name or ""):
             continue
         rows.append({"id": lf.pk, "name": lf.original_name})
     return JsonResponse({"templates": rows})
@@ -4974,6 +5028,22 @@ def htmlpdf_api_import_json_from_library(request):
         parsed = htmlpdf_service.parse_template_json(path.read_text(encoding="utf-8", errors="replace"))
     except Exception:
         return JsonResponse({"error": "JSON文件格式无效"}, status=400)
+    fields = parsed.get("fields") if isinstance(parsed.get("fields"), list) else []
+    skip_sections = htmlpdf_service.library_template_file_linked_to_report_task(lf)
+    lt_raw = data.get("library_task_id") or data.get("libraryTaskId")
+    if lt_raw is not None and str(lt_raw).strip() != "":
+        try:
+            t = LibraryTask.objects.filter(pk=int(lt_raw)).first()
+            if t is not None and t.output_target == LibraryTask.OUTPUT_REPORT:
+                skip_sections = True
+        except (TypeError, ValueError):
+            pass
+    if fields:
+        parsed["fields"] = htmlpdf_service.assign_template_sections_for_editor(
+            request.user.id,
+            fields,
+            skip_for_report=skip_sections,
+        )
     return JsonResponse(parsed)
 
 
@@ -5011,11 +5081,48 @@ def htmlpdf_api_use_template_pdf(request):
     linked_ids = list(
         LibraryTask.objects.filter(library_files=lf).order_by("code").values_list("pk", flat=True)[:80]
     )
+    from apps.core.htmlpdf_report_mapping_service import (
+        resolve_library_task_for_template_pdf,
+    )
+
+    preferred_task = None
+    lt_raw = data.get("library_task_id") or data.get("libraryTaskId")
+    if lt_raw is not None and str(lt_raw).strip() != "":
+        try:
+            preferred_task = LibraryTask.objects.filter(pk=int(lt_raw)).first()
+        except (TypeError, ValueError):
+            preferred_task = None
+    task_for_defaults = resolve_library_task_for_template_pdf(
+        lf.pk, preferred_task=preferred_task
+    )
+
+    default_json_template_id = None
+    auto_import_json = False
+    if task_for_defaults is not None:
+        from apps.core.library_task_template_binding_service import (
+            resolve_default_json_template_id,
+            task_has_pdf_and_json_bound,
+        )
+
+        if task_has_pdf_and_json_bound(task_for_defaults):
+            jid = resolve_default_json_template_id(
+                task_for_defaults, pdf_template_id=lf.pk
+            )
+            if jid:
+                default_json_template_id = int(jid)
+                auto_import_json = True
+
     return JsonResponse(
         {
             "ok": True,
             "pdf_url": reverse("htmlpdf_template_file", kwargs={"pk": lf.pk}),
             "linked_library_task_ids": [int(x) for x in linked_ids],
+            "library_task_id": task_for_defaults.pk if task_for_defaults else None,
+            "library_task_output_target": (
+                task_for_defaults.output_target if task_for_defaults else None
+            ),
+            "default_json_template_id": default_json_template_id,
+            "auto_import_json": auto_import_json,
         }
     )
 
@@ -5059,6 +5166,13 @@ def htmlpdf_api_import_json(request):
         parsed = htmlpdf_service.parse_template_json(file.read().decode("utf-8"))
     except Exception:
         return JsonResponse({"error": "JSON文件格式无效"}, status=400)
+    fields = parsed.get("fields") if isinstance(parsed.get("fields"), list) else []
+    if fields:
+        parsed["fields"] = htmlpdf_service.assign_template_sections_for_editor(
+            request.user.id,
+            fields,
+            skip_for_report=_htmlpdf_is_report_template_context(request, {}),
+        )
     return JsonResponse(parsed)
 
 
@@ -5078,6 +5192,11 @@ def htmlpdf_api_export_json(request):
     fields = _sanitize_pdf_field_texts(data.get("fields", []))
     form_schema = data.get("form_schema") if isinstance(data.get("form_schema"), dict) else {}
     bindings = data.get("bindings") if isinstance(data.get("bindings"), dict) else {}
+    raw_map = data.get("report_site_field_map") or data.get("reportSiteFieldMap")
+    if isinstance(raw_map, list):
+        from apps.core.htmlpdf_report_mapping_service import merge_report_site_map_into_bindings
+
+        bindings = merge_report_site_map_into_bindings(bindings, raw_map)
     template_meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
     report_type = str(data.get("report_type") or "").strip()
     standard = str(data.get("standard") or "").strip()
@@ -5091,7 +5210,12 @@ def htmlpdf_api_export_json(request):
             source_meta = json_std.loads(meta_path.read_text(encoding="utf-8"))
         except Exception:
             source_meta = {}
+    binding_meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+    is_report_tpl = _htmlpdf_is_report_template_context(request, data, binding_meta)
     normalized_fields = _normalize_pdf_fields_for_unified_template(fields, form_schema, bindings)
+    _assign_htmlpdf_template_sections_to_fields(
+        request.user.id, normalized_fields, skip_for_report=is_report_tpl
+    )
     constants = form_schema.get("constants") if isinstance(form_schema.get("constants"), dict) else {}
     enums = form_schema.get("enums") if isinstance(form_schema.get("enums"), dict) else {}
     steps = form_schema.get("steps") if isinstance(form_schema.get("steps"), list) else []
@@ -5157,19 +5281,24 @@ def htmlpdf_api_export_json(request):
         return JsonResponse({"error": "模板保存失败"}, status=500)
     row = created[0]
     register_tour_library_file(request, int(row["id"]))
-    return JsonResponse(
-        {
-            "ok": True,
-            "saved_to": "template",
-            "file": {
-                "id": row["id"],
-                "name": row["original_name"],
-                "category": row["category"],
-                "library_url": reverse("file_library") + "?tab=template",
-                "download_url": reverse("file_library_download", kwargs={"pk": row["id"]}),
-            },
-        }
+    binding_meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+    binding_rotation = _maybe_rotate_task_json_binding_after_export(
+        request, data, binding_meta, row, source="editor_export_json"
     )
+    resp = {
+        "ok": True,
+        "saved_to": "template",
+        "file": {
+            "id": row["id"],
+            "name": row["original_name"],
+            "category": row["category"],
+            "library_url": reverse("file_library") + "?tab=template",
+            "download_url": reverse("file_library_download", kwargs={"pk": row["id"]}),
+        },
+    }
+    if binding_rotation:
+        resp["binding_rotation"] = binding_rotation
+    return JsonResponse(resp)
 
 
 def _frontend_type_from_pdf_field_type(field_type: str) -> str:
@@ -5272,6 +5401,43 @@ def _normalize_pdf_fields_for_unified_template(fields, form_schema: dict, bindin
         used_pdf.add(pid)
         row["pdfFieldId"] = pid
     return out
+
+
+def _htmlpdf_is_report_template_context(
+    request, data: dict | None = None, meta: dict | None = None
+) -> bool:
+    """当前 HTMLPDF 编辑上下文是否为报告类任务模板（非现场记录）。"""
+    task = _resolve_library_task_for_htmlpdf_frontend_export(
+        request, data if isinstance(data, dict) else {}, meta
+    )
+    if task is None:
+        return False
+    return getattr(task, "output_target", None) == LibraryTask.OUTPUT_REPORT
+
+
+def _assign_htmlpdf_template_sections_to_fields(
+    user_id: int, fields: list, *, skip_for_report: bool = False
+) -> None:
+    """按 PDF 章节锚点写入 templateSectionKey（仅现场记录；报告模板不写入六大章节）。"""
+    if not fields:
+        return
+    if skip_for_report:
+        htmlpdf_service.strip_site_record_section_fields(
+            fields, remove_all_section_keys=True
+        )
+        return
+    try:
+        pdf_path = htmlpdf_service.user_original_pdf_path(int(user_id))
+    except Exception:
+        return
+    if not pdf_path.is_file():
+        return
+    try:
+        from htmlpdf.full_text_coordinate_boxing import assign_template_sections_to_fields
+
+        assign_template_sections_to_fields(str(pdf_path), fields)
+    except Exception:
+        pass
 
 
 def _sanitize_pdf_field_texts(fields):
@@ -5508,6 +5674,23 @@ def _build_matrix_steps_from_auto_fields(fields, source_pdf_path, table_struct_b
                             fid = f"mx_p{page}_t{int(tbl.get('table_id') or 0)}_{semantic}"
                             pdf_field_id = _prefer_pdf_field_id_token(it, f"f{len(header_fields)+1}")
                             src_path = f"testResult.matrixAuto.page{page}.table{int(tbl.get('table_id') or 0)}.header.{semantic}"
+                            cell_src: dict = {
+                                "pdfFieldId": pdf_field_id,
+                                "page": page,
+                                "anchorType": str(it.get("fieldType") or "text"),
+                                "submitBucket": "testResult",
+                                "submitPath": src_path,
+                                "legacySubmitPath": src_path,
+                                "key": f"step_qc_items.sec_t{page}_{int(tbl.get('table_id') or 0)}_matrix.header.{semantic}",
+                            }
+                            auto_sem = it.get("autoSemantic") if isinstance(it.get("autoSemantic"), dict) else None
+                            apply_table_row_col_to_source(
+                                cell_src,
+                                table_id=int(tbl.get("table_id") or 0),
+                                row=r,
+                                col=c,
+                                auto_semantic=auto_sem,
+                            )
                             header_fields.append(
                                 {
                                     "id": fid,
@@ -5517,15 +5700,7 @@ def _build_matrix_steps_from_auto_fields(fields, source_pdf_path, table_struct_b
                                     "defaultValue": None,
                                     "precision": 1,
                                     "unit": "",
-                                    "source": {
-                                        "pdfFieldId": pdf_field_id,
-                                        "page": page,
-                                        "anchorType": str(it.get("fieldType") or "text"),
-                                        "submitBucket": "testResult",
-                                        "submitPath": src_path,
-                                        "legacySubmitPath": src_path,
-                                        "key": f"step_qc_items.sec_t{page}_{int(tbl.get('table_id') or 0)}_matrix.header.{semantic}",
-                                    },
+                                    "source": cell_src,
                                 }
                             )
 
@@ -5592,6 +5767,21 @@ def _build_matrix_steps_from_auto_fields(fields, source_pdf_path, table_struct_b
                         # 兼容前端 matrix 渲染：即使无输入框，也输出完整 cell schema（只读占位）
                         submit_path = f"testResult.matrixAuto.page{page}.table{int(tbl.get('table_id') or 0)}.rows[{row_seq}].{key}"
                         legacy = f"testResult.legacy.page{page}.table{int(tbl.get('table_id') or 0)}.r{row_seq}.{key}"
+                        static_src: dict = {
+                            "pdfFieldId": "",
+                            "page": page,
+                            "anchorType": "text",
+                            "submitBucket": "testResult",
+                            "submitPath": submit_path,
+                            "legacySubmitPath": legacy,
+                            "key": f"step_qc_items.sec_t{page}_{int(tbl.get('table_id') or 0)}_matrix.rows[{row_seq}].{key}",
+                        }
+                        apply_table_row_col_to_source(
+                            static_src,
+                            table_id=int(tbl.get("table_id") or 0),
+                            row=r,
+                            col=c,
+                        )
                         row_cells[key] = {
                             "id": f"t{int(tbl.get('table_id') or 0)}_row_{row_seq}_{key}",
                             "type": "text",
@@ -5601,15 +5791,7 @@ def _build_matrix_steps_from_auto_fields(fields, source_pdf_path, table_struct_b
                             "precision": 1,
                             "unit": value_columns[i].get("unit") or "",
                             "editable": False,
-                            "source": {
-                                "pdfFieldId": "",
-                                "page": page,
-                                "anchorType": "text",
-                                "submitBucket": "testResult",
-                                "submitPath": submit_path,
-                                "legacySubmitPath": legacy,
-                                "key": f"step_qc_items.sec_t{page}_{int(tbl.get('table_id') or 0)}_matrix.rows[{row_seq}].{key}",
-                            },
+                            "source": static_src,
                         }
                         if raw_txt:
                             static_cells[key] = {"text": raw_txt, "editable": False}
@@ -5618,6 +5800,23 @@ def _build_matrix_steps_from_auto_fields(fields, source_pdf_path, table_struct_b
                     pdf_field_id = _prefer_pdf_field_id_token(it, "")
                     legacy = f"testResult.legacy.page{page}.table{int(tbl.get('table_id') or 0)}.r{row_seq}.{key}"
                     submit_path = f"testResult.matrixAuto.page{page}.table{int(tbl.get('table_id') or 0)}.rows[{row_seq}].{key}"
+                    cell_src = {
+                        "pdfFieldId": pdf_field_id,
+                        "page": page,
+                        "anchorType": str(it.get("fieldType") or "text"),
+                        "submitBucket": "testResult",
+                        "submitPath": submit_path,
+                        "legacySubmitPath": legacy,
+                        "key": f"step_qc_items.sec_t{page}_{int(tbl.get('table_id') or 0)}_matrix.rows[{row_seq}].{key}",
+                    }
+                    auto_sem = it.get("autoSemantic") if isinstance(it.get("autoSemantic"), dict) else None
+                    apply_table_row_col_to_source(
+                        cell_src,
+                        table_id=int(tbl.get("table_id") or 0),
+                        row=r,
+                        col=c,
+                        auto_semantic=auto_sem,
+                    )
                     row_cells[key] = {
                         "id": f"t{int(tbl.get('table_id') or 0)}_row_{row_seq}_{key}",
                         "type": "number" if str(it.get("fieldType") or "text").lower() == "text" else _matrix_field_type_from_pdf(str(it.get("fieldType") or "text")),
@@ -5626,21 +5825,16 @@ def _build_matrix_steps_from_auto_fields(fields, source_pdf_path, table_struct_b
                         "defaultValue": None,
                         "precision": 1,
                         "unit": value_columns[i].get("unit") or "",
-                        "source": {
-                            "pdfFieldId": pdf_field_id,
-                            "page": page,
-                            "anchorType": str(it.get("fieldType") or "text"),
-                            "submitBucket": "testResult",
-                            "submitPath": submit_path,
-                            "legacySubmitPath": legacy,
-                            "key": f"step_qc_items.sec_t{page}_{int(tbl.get('table_id') or 0)}_matrix.rows[{row_seq}].{key}",
-                        },
+                        "source": cell_src,
                     }
                 # 允许“纯静态行”存在，以便前端最大化还原 PDF 表格排版
                 if not row_cells and not static_cells and not any(str(v or "").strip() for v in headers.values()):
                     continue
                 row_obj = {
                     "id": f"t{int(tbl.get('table_id') or 0)}_row_{row_seq}",
+                    "rowIndex": row_seq,
+                    "pdfRow": r,
+                    "tableId": int(tbl.get("table_id") or 0),
                     "headers": headers,
                     "cells": row_cells,
                 }
@@ -5783,6 +5977,43 @@ def _extract_table_struct_from_full_text_boxing(source_pdf_path: Path):
     return out
 
 
+def _maybe_rotate_task_json_binding_after_export(
+    request, data: dict, meta: dict | None, new_file_row: dict, *, source: str
+) -> dict | None:
+    """编辑器保存统一坐标模板 JSON 后，将任务主 JSON 绑定轮换为新文件（前端 JSON 不参与）。"""
+    if str(source or "").strip() == "editor_export_frontend_json":
+        return None
+    task = _resolve_library_task_for_htmlpdf_frontend_export(request, data, meta)
+    if task is None:
+        return None
+    try:
+        new_id = int(new_file_row.get("id"))
+    except (TypeError, ValueError):
+        return None
+    lf = LibraryFile.objects.filter(
+        pk=new_id, category=LibraryFile.CATEGORY_TEMPLATE
+    ).first()
+    if lf is None:
+        return None
+    name = (lf.original_name or "").lower()
+    if not name.endswith(".json"):
+        return None
+    from apps.core.library_task_template_binding_service import (
+        is_auxiliary_template_json_file,
+        replace_task_template_file_binding,
+    )
+
+    if is_auxiliary_template_json_file(lf):
+        return None
+
+    return replace_task_template_file_binding(
+        task=task,
+        new_file=lf,
+        user=request.user,
+        source=source,
+    )
+
+
 def _resolve_library_task_for_htmlpdf_frontend_export(request, data: dict, meta=None):
     """
     从导出请求中解析 LibraryTask，用于写入 bound_instrument_ids 对应的 instruments。
@@ -5861,8 +6092,23 @@ def _try_read_library_template_blob_for_formulas(request, data: dict, meta: dict
     lf = LibraryFile.objects.filter(pk=fid, category=LibraryFile.CATEGORY_TEMPLATE).first()
     if lf is None or not library_file_access_allowed(request.user, lf):
         return None
+    from apps.core.library_task_template_binding_service import (
+        is_auxiliary_template_json_file,
+        pick_task_primary_json_template,
+    )
+
+    read_lf = lf
+    if is_auxiliary_template_json_file(lf):
+        tasks = list(LibraryTask.objects.filter(library_files=lf).distinct().order_by("code"))
+        for t in tasks:
+            primary = pick_task_primary_json_template(t)
+            if primary is not None:
+                read_lf = primary
+                break
+        else:
+            return None
     try:
-        p = pipeline_service.library_absolute_path(lf.relative_path)
+        p = pipeline_service.library_absolute_path(read_lf.relative_path)
         blob = json_std.loads(p.read_text(encoding="utf-8", errors="replace"))
     except Exception:
         return None
@@ -5914,6 +6160,12 @@ def htmlpdf_api_export_frontend_json(request):
     input_fields = _sanitize_pdf_field_texts(data.get("fields") if isinstance(data.get("fields"), list) else [])
     # 强制规范 pdfFieldId：必须为 f+序号，防止前端传入语义名称污染绑定键。
     input_fields = _normalize_pdf_fields_for_unified_template(input_fields, {}, {})
+    is_report_fe = _htmlpdf_is_report_template_context(
+        request, data, meta if isinstance(meta, dict) else {}
+    )
+    _assign_htmlpdf_template_sections_to_fields(
+        request.user.id, input_fields, skip_for_report=is_report_fe
+    )
     payload = {
         "templateId": template_id or name.rsplit(".", 1)[0],
         "templateName": template_name or name,
@@ -6088,7 +6340,15 @@ def htmlpdf_api_export_frontend_json(request):
     payload = merge_field_formulas_into_frontend(payload, _ff_src)
     payload.update(build_instruments_root_for_frontend_export(task_obj=lib_task_for_inst, payload={}))
     payload.pop("instrumentCatalogOptions", None)
-    payload = _attach_rect_and_strip_legacy_coords(payload)
+    raw_map_fe = data.get("report_site_field_map") or data.get("reportSiteFieldMap")
+    if isinstance(raw_map_fe, list):
+        from apps.core.htmlpdf_report_mapping_service import merge_report_site_map_into_bindings
+
+        existing_b = payload.get("bindings") if isinstance(payload.get("bindings"), dict) else {}
+        payload["bindings"] = merge_report_site_map_into_bindings(existing_b, raw_map_fe)
+    from utils.frontend_schema_rule_engine import _compact_form_schema_payload
+
+    payload = _compact_form_schema_payload(payload)
 
     try:
         raw = json_std.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
@@ -6105,19 +6365,31 @@ def htmlpdf_api_export_frontend_json(request):
         return JsonResponse({"error": "前端JSON保存失败"}, status=500)
     row = created[0]
     register_tour_library_file(request, int(row["id"]))
-    return JsonResponse(
-        {
-            "ok": True,
-            "saved_to": "template",
-            "file": {
-                "id": row["id"],
-                "name": row["original_name"],
-                "category": row["category"],
-                "library_url": reverse("file_library") + "?tab=template",
-                "download_url": reverse("file_library_download", kwargs={"pk": row["id"]}),
-            },
-        }
-    )
+    detached_aux_ids: list[int] = []
+    if lib_task_for_inst is not None:
+        from apps.core.library_task_template_binding_service import (
+            detach_auxiliary_template_json_from_task,
+        )
+
+        detached_aux_ids = detach_auxiliary_template_json_from_task(
+            lib_task_for_inst, user=request.user
+        )
+    resp = {
+        "ok": True,
+        "saved_to": "template",
+        "auxiliary_json": True,
+        "task_template_binding": False,
+        "file": {
+            "id": row["id"],
+            "name": row["original_name"],
+            "category": row["category"],
+            "library_url": reverse("file_library") + "?tab=template",
+            "download_url": reverse("file_library_download", kwargs={"pk": row["id"]}),
+        },
+    }
+    if detached_aux_ids:
+        resp["detached_auxiliary_from_task"] = detached_aux_ids
+    return JsonResponse(resp)
 
 
 @csrf_exempt
@@ -6182,6 +6454,9 @@ def htmlpdf_api_export_matrix_json(request):
         steps=steps,
         bindings=None,
     )
+    from utils.frontend_schema_rule_engine import _compact_form_schema_payload
+
+    payload = _compact_form_schema_payload(payload)
     payload = _sanitize_json_payload_text(payload)
     try:
         raw = json_std.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
@@ -6311,6 +6586,56 @@ def htmlpdf_api_table_cell_at_point(request):
 
 
 @csrf_exempt
+@login_required
+@require_POST
+def htmlpdf_api_report_task_context(request):
+    gx = _require_htmlpdf(request)
+    if gx:
+        return JsonResponse({"error": "forbidden"}, status=403)
+    try:
+        data = json_std.loads(request.body.decode("utf-8"))
+        task_raw = data.get("library_task_id") or data.get("libraryTaskId")
+        task_id = int(task_raw) if task_raw not in (None, "") else None
+        json_fid = data.get("template_json_file_id") or data.get("templateJsonFileId")
+        json_fid = int(json_fid) if json_fid not in (None, "") else None
+        pdf_fid = data.get("template_pdf_file_id") or data.get("templatePdfFileId")
+        pdf_fid = int(pdf_fid) if pdf_fid not in (None, "") else None
+    except (TypeError, ValueError, json_std.JSONDecodeError):
+        return JsonResponse({"error": "参数无效"}, status=400)
+    from apps.core.htmlpdf_report_mapping_service import build_report_task_template_context
+
+    payload = build_report_task_template_context(
+        request.user,
+        library_task_id=task_id,
+        template_json_file_id=json_fid,
+        template_pdf_file_id=pdf_fid,
+    )
+    if not payload.get("ok"):
+        return JsonResponse({"error": payload.get("error") or "加载失败"}, status=400)
+    return JsonResponse(payload)
+
+
+@csrf_exempt
+@login_required
+@require_POST
+def htmlpdf_api_site_template_bundle(request):
+    gx = _require_htmlpdf(request)
+    if gx:
+        return JsonResponse({"error": "forbidden"}, status=403)
+    try:
+        data = json_std.loads(request.body.decode("utf-8"))
+        site_task_id = int(data.get("site_task_id") or data.get("siteTaskId") or 0)
+    except (TypeError, ValueError, json_std.JSONDecodeError):
+        return JsonResponse({"error": "site_task_id 无效"}, status=400)
+    from apps.core.htmlpdf_report_mapping_service import build_site_template_bundle
+
+    payload = build_site_template_bundle(request.user, site_task_id=site_task_id)
+    if not payload.get("ok"):
+        return JsonResponse({"error": payload.get("error") or "加载失败"}, status=400)
+    return JsonResponse(payload)
+
+
+@csrf_exempt
 @require_POST
 def htmlpdf_api_auto_red_text_boxes(request):
     auth_resp = _require_api_login(request)
@@ -6319,7 +6644,50 @@ def htmlpdf_api_auto_red_text_boxes(request):
     gx = _require_htmlpdf(request)
     if gx:
         return JsonResponse({"error": "forbidden"}, status=403)
+    try:
+        data = json_std.loads(request.body.decode("utf-8")) if request.body else {}
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
     rows = htmlpdf_service.htmlpdf_auto_red_text_fields_for_editor(request.user.id)
+    if _htmlpdf_is_report_template_context(request, data):
+        htmlpdf_service.strip_site_record_section_fields(
+            rows, remove_all_section_keys=True
+        )
+    return JsonResponse({"fields": rows, "count": len(rows)})
+
+
+@csrf_exempt
+@require_POST
+def htmlpdf_api_assign_template_sections(request):
+    """按当前 PDF 章节锚点为编辑器栏位写入 templateSectionKey / templateSectionTitle。"""
+    auth_resp = _require_api_login(request)
+    if auth_resp:
+        return auth_resp
+    gx = _require_htmlpdf(request)
+    if gx:
+        return JsonResponse({"error": "forbidden"}, status=403)
+    try:
+        data = json_std.loads(request.body.decode("utf-8"))
+    except Exception:
+        return JsonResponse({"error": "请求体不是合法JSON"}, status=400)
+    fields = _sanitize_pdf_field_texts(data.get("fields") if isinstance(data.get("fields"), list) else [])
+    if not fields:
+        return JsonResponse({"error": "fields 为空"}, status=400)
+    if _htmlpdf_is_report_template_context(request, data):
+        htmlpdf_service.strip_site_record_section_fields(
+            fields, remove_all_section_keys=True
+        )
+        return JsonResponse(
+            {
+                "fields": fields,
+                "count": len(fields),
+                "skipped": True,
+                "message": "报告模板不使用现场记录六大章节",
+            }
+        )
+    rows = htmlpdf_service.assign_template_sections_for_editor(request.user.id, fields)
     return JsonResponse({"fields": rows, "count": len(rows)})
 
 
@@ -6903,12 +7271,34 @@ def library_task_management(request):
                 if len(valid_ids) != len(ids):
                     messages.error(request, "所选文件无效或分类与当前标签不一致")
                 elif action == "bind_task_files":
-                    attach_files_to_tasks(valid_ids, [task_obj.pk], request.user)
-                    # 模板挂到任务模板后，同步到已引用该模板的项目，便于项目内选用。
-                    project_ids = list(task_obj.projects.values_list("id", flat=True))
-                    if project_ids:
-                        attach_files_to_projects(valid_ids, project_ids, request.user)
-                    messages.success(request, f"已向任务模板关联 {len(valid_ids)} 个模板文件")
+                    from apps.core.library_task_template_binding_service import (
+                        is_auxiliary_template_json_file,
+                    )
+
+                    bind_rows = list(
+                        LibraryFile.objects.filter(pk__in=valid_ids, category=task_cat)
+                    )
+                    primary_ids: list[int] = []
+                    skipped_aux: list[str] = []
+                    for lf in bind_rows:
+                        if is_auxiliary_template_json_file(lf):
+                            skipped_aux.append(lf.original_name or str(lf.pk))
+                            continue
+                        primary_ids.append(int(lf.pk))
+                    if skipped_aux and not primary_ids:
+                        messages.error(
+                            request,
+                            "前端规则 JSON（*_frontend.json）与矩阵 JSON 不参与任务模板绑定，请绑定「保存坐标模板 JSON」生成的统一模板文件。",
+                        )
+                    elif primary_ids:
+                        attach_files_to_tasks(primary_ids, [task_obj.pk], request.user)
+                        project_ids = list(task_obj.projects.values_list("id", flat=True))
+                        if project_ids:
+                            attach_files_to_projects(primary_ids, project_ids, request.user)
+                        msg = f"已向任务模板关联 {len(primary_ids)} 个模板文件"
+                        if skipped_aux:
+                            msg += f"（已忽略 {len(skipped_aux)} 个辅助 JSON：{skipped_aux[0]} 等）"
+                        messages.success(request, msg)
                 else:
                     detach_files_from_tasks(valid_ids, [task_obj.pk])
                     project_ids = list(task_obj.projects.values_list("id", flat=True))
@@ -6929,6 +7319,38 @@ def library_task_management(request):
                 label = f"{t_obj.code} · {t_obj.name}"
                 t_obj.delete()
                 messages.success(request, f"已删除任务模板：{label}")
+            return redirect(_library_task_management_redirect_url(request))
+        elif action == "restore_task_template_history":
+            try:
+                hid = int(request.POST.get("history_id", "") or 0)
+            except ValueError:
+                hid = 0
+            from apps.core.library_task_template_binding_service import (
+                restore_task_template_from_history,
+            )
+            from apps.core.models import LibraryTaskTemplateBindingHistory
+
+            hist = (
+                LibraryTaskTemplateBindingHistory.objects.select_related("library_task")
+                .filter(pk=hid)
+                .first()
+            )
+            if hist is None:
+                messages.error(request, "历史记录不存在")
+            elif not library_user_may_edit_library_task(request.user, hist.library_task):
+                messages.error(request, "无权维护该任务模板")
+            else:
+                result = restore_task_template_from_history(
+                    history_id=hid, user=request.user
+                )
+                if result.get("ok"):
+                    role_label = "PDF" if result.get("file_role") == "pdf" else "JSON"
+                    messages.success(
+                        request,
+                        f"已恢复任务模板「{hist.library_task.code}」的 {role_label} 绑定。",
+                    )
+                else:
+                    messages.error(request, result.get("error") or "恢复失败")
             return redirect(_library_task_management_redirect_url(request))
         elif action == "update_task_bound_instruments":
             try:
@@ -7062,11 +7484,15 @@ def library_task_management(request):
                             )
                         )
                     else:
-                        task_linked_files = list(
-                            manage_task.library_files.filter(category=LibraryFile.CATEGORY_TEMPLATE)
+                        task_linked_files = [
+                            f
+                            for f in manage_task.library_files.filter(
+                                category=LibraryFile.CATEGORY_TEMPLATE
+                            )
                             .select_related("created_by")
                             .order_by("original_name")
-                        )
+                            if library_file_access_allowed(request.user, f)
+                        ]
             except ValueError:
                 pass
         task_edit_mode = bool(task_library_edit and manage_task)
@@ -7116,6 +7542,36 @@ def library_task_management(request):
             manage_task.report_source_tasks.filter(
                 output_target=LibraryTask.OUTPUT_SITE_RECORD
             ).order_by("code", "id")
+        )
+
+    task_primary_json_file = None
+    task_auxiliary_json_files: list = []
+    task_auxiliary_json_ids: set[int] = set()
+    if manage_task:
+        from apps.core.library_task_template_binding_service import (
+            get_task_template_pair,
+            is_auxiliary_template_json_file,
+        )
+
+        _pdf_lf, _json_lf = get_task_template_pair(manage_task)
+        task_primary_json_file = _json_lf
+        for lf in manage_task.library_files.filter(
+            category=LibraryFile.CATEGORY_TEMPLATE
+        ).order_by("-created_at", "-id"):
+            if not (lf.original_name or "").lower().endswith(".json"):
+                continue
+            if is_auxiliary_template_json_file(lf):
+                task_auxiliary_json_files.append(lf)
+                task_auxiliary_json_ids.add(int(lf.pk))
+
+    task_template_binding_history: list = []
+    if manage_task:
+        from apps.core.models import LibraryTaskTemplateBindingHistory
+
+        task_template_binding_history = list(
+            LibraryTaskTemplateBindingHistory.objects.filter(library_task=manage_task)
+            .select_related("library_file", "replaced_by_file", "replaced_by")
+            .order_by("-replaced_at", "-id")[:80]
         )
 
     parent_report_task_for_site: LibraryTask | None = None
@@ -7200,6 +7656,10 @@ def library_task_management(request):
                 export_project_id=export_project_id_val,
             ),
             "task_linked_files": task_linked_files,
+            "task_primary_json_file": task_primary_json_file,
+            "task_auxiliary_json_files": task_auxiliary_json_files,
+            "task_auxiliary_json_ids": task_auxiliary_json_ids,
+            "task_template_binding_history": task_template_binding_history,
             "task_template_file_count": task_template_file_count,
             "export_project_id_val": export_project_id_val,
             "task_edit_mode": task_edit_mode,

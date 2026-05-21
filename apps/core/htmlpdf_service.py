@@ -288,7 +288,25 @@ def htmlpdf_auto_red_text_fields_for_editor(user_id: int) -> List[Dict[str, Any]
         raw_images = extract_image_fn(str(pdf))
         if isinstance(raw_images, list):
             image_boxes = raw_images
-    merged = list(boxes) + list(check_boxes) + list(image_boxes)
+    is_sig_label = getattr(mod, "_span_text_is_signature_label", None)
+    overlap_fn = getattr(mod, "_rect_overlap_ratio", None)
+    filtered_boxes: List[Dict[str, Any]] = []
+    for b in boxes:
+        if not isinstance(b, dict):
+            continue
+        nm = str(b.get("name") or b.get("text") or "")
+        if callable(is_sig_label) and is_sig_label(nm):
+            continue
+        skip = False
+        if callable(overlap_fn):
+            for img in image_boxes:
+                if isinstance(img, dict) and overlap_fn(b, img) > 0.22:
+                    skip = True
+                    break
+        if skip:
+            continue
+        filtered_boxes.append(b)
+    merged = list(filtered_boxes) + list(check_boxes) + list(image_boxes)
     fields: List[Dict[str, Any]] = []
     for i, b in enumerate(merged):
         if not isinstance(b, dict):
@@ -297,8 +315,9 @@ def htmlpdf_auto_red_text_fields_for_editor(user_id: int) -> List[Dict[str, Any]
         is_check = field_type == "check"
         is_image = field_type == "image"
         auto_name = str(b.get("name") or "").strip()
+        slot_ph = str(b.get("placeholder") or "").strip()
         snippet = str(b.get("text") or "").strip().replace("\n", " ")[:24]
-        ph = auto_name or (
+        ph = (slot_ph if is_image and slot_ph else None) or auto_name or (
             (f"勾选{i + 1}")
             if is_check
             else ((f"图片{i + 1}") if is_image else (f"红字{i + 1}" + (f" · {snippet}" if snippet else "")))
@@ -317,13 +336,29 @@ def htmlpdf_auto_red_text_fields_for_editor(user_id: int) -> List[Dict[str, Any]
             "checked": False,
             "imageData": "",
         }
+        pdf_fid = str(b.get("pdfFieldId") or "").strip()
+        if pdf_fid:
+            row["pdfFieldId"] = pdf_fid
         cp = b.get("checkboxPair")
         if isinstance(cp, dict) and cp and is_check:
             row["checkboxPair"] = cp
         jct = str(b.get("judgmentCriterionText") or "").strip()
         if jct:
             row["judgmentCriterionText"] = jct[:500]
+        auto_semantic = b.get("autoSemantic")
+        if isinstance(auto_semantic, dict) and auto_semantic:
+            row["autoSemantic"] = {
+                str(k): v
+                for k, v in auto_semantic.items()
+                if isinstance(k, str) and v is not None and v != ""
+            }
         fields.append(row)
+    assign_sections_fn = getattr(mod, "assign_template_sections_to_fields", None)
+    if callable(assign_sections_fn) and fields:
+        try:
+            fields = assign_sections_fn(str(pdf), fields)
+        except Exception:
+            pass
     return fields
 
 
@@ -400,6 +435,112 @@ def safe_inset_rect(rect: fitz.Rect, pad: float) -> fitz.Rect:
     return fitz.Rect(rect.x0 + pad, rect.y0 + pad, rect.x1 - pad, rect.y1 - pad)
 
 
+def site_record_section_title_by_key(section_key: str) -> str:
+    key = str(section_key or "").strip()
+    if not key:
+        return ""
+    try:
+        mod = _load_full_text_coordinate_boxing()
+        specs = getattr(mod, "SITE_RECORD_TEMPLATE_SECTIONS", None) if mod else None
+    except Exception:
+        specs = None
+    for spec in specs or []:
+        if str(spec.get("key") or "").strip() == key:
+            return str(spec.get("title") or key).strip()
+    return key
+
+
+def normalize_field_template_sections(fields: List[Dict[str, Any]]) -> None:
+    """将 sectionKey / templateSectionKey 统一为编辑器使用的 templateSection* 字段。"""
+    for row in fields or []:
+        if not isinstance(row, dict):
+            continue
+        sk = str(row.get("templateSectionKey") or row.get("sectionKey") or "").strip()
+        if not sk:
+            continue
+        row["templateSectionKey"] = sk
+        row["templateSectionTitle"] = str(
+            row.get("templateSectionTitle") or site_record_section_title_by_key(sk) or sk
+        ).strip()
+        row.pop("sectionKey", None)
+
+
+def site_record_template_section_keys() -> frozenset[str]:
+    mod = _load_full_text_coordinate_boxing()
+    specs = getattr(mod, "SITE_RECORD_TEMPLATE_SECTIONS", None) if mod else None
+    if isinstance(specs, list) and specs:
+        return frozenset(
+            str(s.get("key") or "").strip()
+            for s in specs
+            if isinstance(s, dict) and str(s.get("key") or "").strip()
+        )
+    return frozenset(
+        {
+            "site_unit_basic",
+            "site_device_basic",
+            "site_instruments_staff",
+            "site_qc_performance",
+            "site_radiation_protection",
+            "site_layout_diagram",
+        }
+    )
+
+
+def strip_site_record_section_fields(
+    fields: List[Dict[str, Any]], *, remove_all_section_keys: bool = False
+) -> None:
+    """
+    报告模板不写入/展示现场记录六大章节。
+    remove_all_section_keys=True 时去掉任意 templateSectionKey（报告保存用）。
+    """
+    site_keys = site_record_template_section_keys()
+    for row in fields or []:
+        if not isinstance(row, dict):
+            continue
+        sk = str(row.get("templateSectionKey") or row.get("sectionKey") or "").strip()
+        if remove_all_section_keys or sk in site_keys:
+            row.pop("templateSectionKey", None)
+            row.pop("templateSectionTitle", None)
+            row.pop("sectionKey", None)
+
+
+def library_template_file_linked_to_report_task(lf) -> bool:
+    """模板文件是否关联到「报告」类任务模板。"""
+    if lf is None:
+        return False
+    from apps.core.models import LibraryTask
+
+    return LibraryTask.objects.filter(
+        library_files=lf,
+        output_target=LibraryTask.OUTPUT_REPORT,
+    ).exists()
+
+
+def assign_template_sections_for_editor(
+    user_id: int, fields: List[Dict[str, Any]], *, skip_for_report: bool = False
+) -> List[Dict[str, Any]]:
+    """按当前编辑器 PDF 纵坐标为栏位写入章节（仅现场记录类模板；报告模板跳过）。"""
+    rows = [dict(f) for f in fields if isinstance(f, dict)]
+    if not rows:
+        return rows
+    if skip_for_report:
+        strip_site_record_section_fields(rows, remove_all_section_keys=True)
+        return rows
+    normalize_field_template_sections(rows)
+    pdf = htmlpdf_source_pdf_path(user_id)
+    if not pdf.is_file():
+        return rows
+    mod = _load_full_text_coordinate_boxing()
+    assign_fn = getattr(mod, "assign_template_sections_to_fields", None) if mod else None
+    if callable(assign_fn):
+        try:
+            rows = assign_fn(str(pdf), rows)
+            normalize_field_template_sections(rows)
+        except Exception:
+            pass
+    return rows
+
+
 def parse_template_json(raw_text: str) -> Dict[str, Any]:
     data = json.loads(raw_text)
     if isinstance(data, list):
@@ -433,6 +574,7 @@ def parse_template_json(raw_text: str) -> Dict[str, Any]:
                     if _top_steps:
                         form_schema = {**form_schema, "steps": _top_steps}
             fields_out = materialize_unified_pdf_fields(pdf_block.get("fields") or [])
+            normalize_field_template_sections(fields_out)
             return {
                 "fields": fields_out,
                 "content": data.get("content", {}) if isinstance(data.get("content"), dict) else {},
@@ -462,6 +604,7 @@ def parse_template_json(raw_text: str) -> Dict[str, Any]:
                 "schema": data.get("schema") or "",
             }
         fields = materialize_unified_pdf_fields(data.get("fields", []) if isinstance(data.get("fields"), list) else [])
+        normalize_field_template_sections(fields)
         content_map = data.get("content", {})
         if not content_map and isinstance(fields, list):
             for item in fields:

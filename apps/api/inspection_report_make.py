@@ -5838,6 +5838,21 @@ def _prepare_backfill_value_mapping(
             overwrite=True,
             skip_report_legacy_qc_submit_path=_skip_rl_sp,
         )
+    if (
+        task_obj is not None
+        and getattr(task_obj, "output_target", None) == LibraryTask.OUTPUT_REPORT
+        and isinstance(bindings, dict)
+    ):
+        from apps.core.htmlpdf_report_mapping_service import apply_report_site_field_map_to_value_mapping
+
+        apply_report_site_field_map_to_value_mapping(
+            value_mapping,
+            source_data,
+            bindings,
+            report_parsed_template={
+                "fields": report_template_fields if isinstance(report_template_fields, list) else []
+            },
+        )
     _inject_hospital_equipment_cn_aliases(value_mapping, source_data)
     _inject_radio_enum_slug_checkbox_aliases(value_mapping, source_data)
     _inject_dose_rate_unit_mutex_pdf_aliases(

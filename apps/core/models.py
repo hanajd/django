@@ -1082,6 +1082,95 @@ class LibraryFileTask(models.Model):
         ]
 
 
+class LibraryTaskTemplateBindingHistory(models.Model):
+    """任务模板文件绑定轮换历史（编辑器保存新 JSON 等场景），供回溯到旧版模板。"""
+
+    ROLE_PDF = "pdf"
+    ROLE_JSON = "json"
+    ROLE_CHOICES = [
+        (ROLE_PDF, _("PDF 模板")),
+        (ROLE_JSON, _("JSON 模板")),
+    ]
+
+    library_task = models.ForeignKey(
+        LibraryTask,
+        on_delete=models.CASCADE,
+        related_name="template_binding_history",
+        verbose_name=_("任务模板"),
+    )
+    library_file = models.ForeignKey(
+        LibraryFile,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="template_binding_history_rows",
+        verbose_name=_("被替换的模板文件"),
+    )
+    file_id_snapshot = models.PositiveIntegerField(verbose_name=_("文件 ID 快照"))
+    original_name_snapshot = models.CharField(
+        max_length=512,
+        blank=True,
+        default="",
+        verbose_name=_("文件名快照"),
+    )
+    file_role = models.CharField(
+        max_length=8,
+        choices=ROLE_CHOICES,
+        db_index=True,
+        verbose_name=_("模板角色"),
+    )
+    replaced_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name=_("替换时间"))
+    replaced_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="template_binding_history_actions",
+        verbose_name=_("操作人"),
+    )
+    replaced_by_file = models.ForeignKey(
+        LibraryFile,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name=_("替换为的新文件"),
+    )
+    source = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        verbose_name=_("来源"),
+        help_text=_("如 editor_export_json、restore_history"),
+    )
+
+    class Meta:
+        verbose_name = _("任务模板绑定历史")
+        verbose_name_plural = verbose_name
+        ordering = ["-replaced_at", "-id"]
+        indexes = [
+            models.Index(fields=["library_task", "file_role", "-replaced_at"]),
+        ]
+
+    def __str__(self):
+        return f"task={self.library_task_id} {self.file_role} #{self.file_id_snapshot}"
+
+    @property
+    def file_still_available(self) -> bool:
+        lf = self.library_file
+        if lf is None:
+            return False
+        if lf.deleted_at:
+            return False
+        try:
+            from apps.core import pipeline_service
+
+            p = pipeline_service.library_absolute_path(lf.relative_path)
+            return p.is_file()
+        except Exception:
+            return False
+
+
 class InspectedOrganization(models.Model):
     """受检单位主数据。"""
 

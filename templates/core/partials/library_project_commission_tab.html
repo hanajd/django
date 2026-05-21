@@ -1,9 +1,11 @@
 {# 项目工作台 · 委托情况（设备为中心） #}
 <div class="rounded-xl border border-rose-100 bg-rose-50/30 p-5 space-y-6">
     <div>
-        <h3 class="text-base font-semibold text-slate-900 mb-1">委托情况 · 受检设备</h3>
+        <h3 class="text-base font-semibold text-slate-900 mb-1">委托立项 · 受检设备</h3>
         <p class="text-xs text-slate-600 max-w-3xl">
-            一次检测委托可包含一台或多台设备（支持多台同型号）。每台设备绑定<strong>检测任务模板</strong>后，系统会自动将关联的<strong>报告模板</strong>与<strong>现场记录</strong>任务同步到本项目；版式维护请在
+            委托由医院派发，<strong>设备即本次检测内容</strong>。一次项目可包含一台或多台设备（支持多台同型号）。每台设备绑定<strong>报告类任务模板</strong>后，系统自动将报告与现场记录任务挂载到本项目；设备主数据在
+            <a href="{% url 'hospital_info_manage' %}" class="text-rose-700 font-medium underline">医院信息管理</a> 维护。下一步请在
+            <a href="?project_id={{ selected_project_id }}{{ workbench_fl_query }}&tab=dispatch" class="text-rose-700 font-medium underline">人员派工</a> 配置参与人。版式请在
             <a href="{% url 'library_task_management' %}?return_project={{ selected_project_id }}" class="text-rose-700 font-medium underline">任务模板库</a> 完成。
         </p>
     </div>

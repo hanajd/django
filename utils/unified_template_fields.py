@@ -162,50 +162,13 @@ def frontend_rect_from_materialized(mf: Dict[str, Any]) -> List[float] | None:
 def enrich_frontend_steps_rect_from_pdf_fields(
     frontend_obj: Dict[str, Any], pdf_fields: List[Any]
 ) -> Dict[str, Any]:
-    """为 steps 内缺 ``rect`` 的栏位按 ``source.pdfFieldId`` 从 ``pdf.fields`` 补坐标。"""
+    """任务导出收尾：确保无 steps 内坐标、无 pdfBindings（回填仅用 pdfFieldId）。"""
     if not isinstance(frontend_obj, dict):
         return frontend_obj
-    by_pid: Dict[str, List[float]] = {}
-    for raw in materialize_unified_pdf_fields([f for f in (pdf_fields or []) if isinstance(f, dict)]):
-        pid = str(raw.get("pdfFieldId") or "").strip()
-        if not pid or pid in by_pid:
-            continue
-        rect = frontend_rect_from_materialized(raw)
-        if rect is not None:
-            by_pid[pid] = rect
+    from utils.frontend_schema_rule_engine import _compact_form_schema_payload, _strip_pdf_coords_from_form_schema
 
-    def _apply_to_field(field: Dict[str, Any]) -> None:
-        if not isinstance(field, dict) or field.get("rect"):
-            return
-        src = field.get("source") if isinstance(field.get("source"), dict) else {}
-        pid = str(src.get("pdfFieldId") or "").strip()
-        if pid and pid in by_pid:
-            field["rect"] = list(by_pid[pid])
-
-    for step in frontend_obj.get("steps") or []:
-        if not isinstance(step, dict):
-            continue
-        for section in step.get("sections") or []:
-            if not isinstance(section, dict):
-                continue
-            for field in section.get("fields") or []:
-                if isinstance(field, dict):
-                    _apply_to_field(field)
-            matrix = section.get("matrix")
-            if not isinstance(matrix, dict):
-                continue
-            for field in matrix.get("headerFields") or []:
-                if isinstance(field, dict):
-                    _apply_to_field(field)
-            for row in matrix.get("rows") or []:
-                if not isinstance(row, dict):
-                    continue
-                cells = row.get("cells")
-                if isinstance(cells, dict):
-                    for cell in cells.values():
-                        if isinstance(cell, dict):
-                            _apply_to_field(cell)
-    return frontend_obj
+    frontend_obj = _strip_pdf_coords_from_form_schema(frontend_obj)
+    return _compact_form_schema_payload(frontend_obj)
 
 
 def _field_dict_to_compact_row(mf: Dict[str, Any]) -> Dict[str, Any]:
@@ -215,18 +178,17 @@ def _field_dict_to_compact_row(mf: Dict[str, Any]) -> Dict[str, Any]:
     w = round(float(mf.get("w") or 0), 2)
     h = round(float(mf.get("h") or 0), 2)
     rect = [page, x, y, w, h]
-    fid = mf.get("id")
-    pdf_id = mf.get("pdfFieldId")
+    fid = str(mf.get("id") or "").strip()
+    pdf_id = str(mf.get("pdfFieldId") or "").strip()
     ft = str(mf.get("fieldType") or "text").lower() or "text"
-    out: Dict[str, Any] = {"id": fid, "rect": rect, "pdfFieldId": pdf_id}
+    out: Dict[str, Any] = {"id": fid or pdf_id, "rect": rect, "pdfFieldId": pdf_id or fid}
     if ft != "text":
         out["fieldType"] = ft
     ph = str(mf.get("placeholder") or "").strip()
-    if ph and ph != str(fid):
+    if ph and ph not in {fid, pdf_id, str(out.get("id") or "")}:
         out["placeholder"] = ph
     ti = str(mf.get("title") or "").strip()
-    exp_ph = str(out.get("placeholder") or fid)
-    if ti and ti != str(fid) and ti != exp_ph:
+    if ti and ti not in {fid, pdf_id, ph, str(out.get("id") or "")}:
         out["title"] = ti
     if ft == "text":
         if mf.get("redText") is False:
@@ -248,4 +210,7 @@ def _field_dict_to_compact_row(mf: Dict[str, Any]) -> Dict[str, Any]:
     fv = mf.get("fieldVerdict")
     if isinstance(fv, dict) and fv:
         out["fieldVerdict"] = fv
+    sk = str(mf.get("templateSectionKey") or mf.get("sectionKey") or "").strip()
+    if sk:
+        out["templateSectionKey"] = sk
     return out
