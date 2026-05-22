@@ -1511,18 +1511,30 @@ def instrument_catalog_to_payload_dict(inst: InstrumentCatalog) -> dict:
     }
 
 
-def merge_task_template_bound_instruments_into_payload(payload: dict | None, task_obj) -> dict:
+def merge_task_template_bound_instruments_into_payload(
+    payload: dict | None, task_obj, project_obj=None
+) -> dict:
     """
     检测仪器优先级：
-    1）任务模板 bound_instrument_ids：在未提交或 instruments 为空时，从主数据生成默认列表；
-    2）前端已在 payload 中提交非空 instruments：完全以前端为准，不再从模板追加条目（用户删减/改序均保留）。
+    1）项目 ``assigned_instrument_ids``（派工按种类分配的具体编号）或任务模板旧版固定 id；
+    2）前端已提交非空 instruments：完全以前端为准。
+    任务模板 ``bindingMode=kinds`` 时无项目分配则不预填编号。
     """
     out = dict(payload or {})
     if task_obj is None:
         return out
-    from utils.task_bound_instruments import bound_instrument_ids_for_legacy_list, normalize_task_bound_instruments
+    from utils.task_bound_instruments import bound_instrument_ids_for_legacy_list
 
-    binding = normalize_task_bound_instruments(getattr(task_obj, "bound_instrument_ids", None) or [])
+    if project_obj is not None:
+        from apps.core.instrument_inventory_service import resolved_instrument_ids_for_project
+
+        binding = resolved_instrument_ids_for_project(project_obj)
+    else:
+        from utils.task_bound_instruments import normalize_task_bound_instruments
+
+        binding = normalize_task_bound_instruments(
+            getattr(task_obj, "bound_instrument_ids", None) or []
+        )
     raw_ids = bound_instrument_ids_for_legacy_list(binding)
     cur = out.get("instruments")
     if not isinstance(cur, list):
@@ -1966,17 +1978,24 @@ def _collect_instrument_slot_lines_from_submit(
     return out
 
 
-def _build_instrument_bindings_for_task(task_obj, instruments: list) -> list[dict]:
+def _build_instrument_bindings_for_task(
+    task_obj, instruments: list, project_obj=None
+) -> list[dict]:
     """
     质控/防护仪器绑定元数据：与 instruments.qualityControl / instruments.radiationProtection 对齐。
     栏位渲染在「受检设备主要检测仪器及检测人员」章（sectionType=instrumentPersonnel）。
     """
-    from utils.task_bound_instruments import normalize_task_bound_instruments
-
     bindings: list[dict] = []
-    binding = normalize_task_bound_instruments(
-        getattr(task_obj, "bound_instrument_ids", None) or [] if task_obj is not None else []
-    )
+    if project_obj is not None:
+        from apps.core.instrument_inventory_service import resolved_instrument_ids_for_project
+
+        binding = resolved_instrument_ids_for_project(project_obj)
+    else:
+        from utils.task_bound_instruments import normalize_task_bound_instruments
+
+        binding = normalize_task_bound_instruments(
+            getattr(task_obj, "bound_instrument_ids", None) or [] if task_obj is not None else []
+        )
     default_id = ""
     if isinstance(instruments, list) and instruments:
         default_id = str(
@@ -1985,10 +2004,10 @@ def _build_instrument_bindings_for_task(task_obj, instruments: list) -> list[dic
             or instruments[0].get("identifier")
             or ""
         ).strip()
-    qc_pk = binding.get("qualityControl")
-    rp_pk = binding.get("radiationProtection")
-    qc_id = str(qc_pk) if qc_pk is not None else default_id
-    rp_id = str(rp_pk) if rp_pk is not None else ""
+    qc_ids = list(binding.get("qualityControl") or [])
+    rp_ids = list(binding.get("radiationProtection") or [])
+    qc_id = str(qc_ids[0]) if qc_ids else default_id
+    rp_id = str(rp_ids[0]) if rp_ids else ""
     bindings.append(
         {
             "scope": "qualityControl",
@@ -1998,6 +2017,7 @@ def _build_instrument_bindings_for_task(task_obj, instruments: list) -> list[dic
             "submitBucket": "instruments",
             "registrySlot": 1,
             "defaultInstrumentId": qc_id or None,
+            "defaultInstrumentIds": [str(x) for x in qc_ids] if qc_ids else None,
         }
     )
     bindings.append(
@@ -2009,24 +2029,31 @@ def _build_instrument_bindings_for_task(task_obj, instruments: list) -> list[dic
             "submitBucket": "instruments",
             "registrySlot": 2,
             "defaultInstrumentId": rp_id or None,
+            "defaultInstrumentIds": [str(x) for x in rp_ids] if rp_ids else None,
         }
     )
     return bindings
 
 
-def build_instruments_root_for_frontend_export(*, task_obj=None, payload: dict | None = None) -> dict:
+def build_instruments_root_for_frontend_export(
+    *, task_obj=None, project_obj=None, payload: dict | None = None
+) -> dict:
     """
     生成写入「前端导出 JSON」根级的仪器块（不再内嵌全库仪器表）：
     - instruments：见 merge_task_template_bound_instruments_into_payload（无提交用模板绑定，有提交以前端为准）；
     - instrumentBindings：质控/防护两章仪器格与台账 id 的对应关系；
     - 全量下拉数据请前端调用登记/台账接口（如 GET …/registry/instruments/）。
     """
-    merged = merge_task_template_bound_instruments_into_payload(dict(payload or {}), task_obj)
+    merged = merge_task_template_bound_instruments_into_payload(
+        dict(payload or {}), task_obj, project_obj=project_obj
+    )
     raw = merged.get("instruments")
     instruments = list(raw) if isinstance(raw, list) else []
     out: dict = {"instruments": instruments}
     if task_obj is not None:
-        out["instrumentBindings"] = _build_instrument_bindings_for_task(task_obj, instruments)
+        out["instrumentBindings"] = _build_instrument_bindings_for_task(
+            task_obj, instruments, project_obj=project_obj
+        )
     return out
 
 

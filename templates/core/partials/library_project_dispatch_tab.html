@@ -167,6 +167,91 @@
         {% endif %}
     </section>
 
+    {# —— 仪器：模板定种类，派工定编号 —— #}
+    {% if project_instrument_dispatch_panel.uses_kind_binding or project_instrument_dispatch_panel.required_rows %}
+    <section class="rounded-xl border border-violet-200 bg-violet-50/30 p-5">
+        <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+            <div>
+                <span class="text-xs font-bold text-violet-800 uppercase tracking-wide">仪器</span>
+                <h4 class="text-base font-semibold text-slate-900 mt-0.5">检测仪器分配与出库</h4>
+                <p class="text-xs text-slate-600 mt-1 max-w-2xl">{{ project_instrument_dispatch_panel.hint }}</p>
+            </div>
+            {% if project_instrument_dispatch_panel.can_dispatch %}
+            <span class="text-xs px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-medium">可同步任务</span>
+            {% else %}
+            <span class="text-xs px-2.5 py-1 rounded-full bg-red-100 text-red-800 font-medium">不可下发</span>
+            {% endif %}
+        </div>
+        {% if project_instrument_dispatch_panel.blocked_messages %}
+        <ul class="text-xs text-red-800 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-3 space-y-1 list-disc list-inside">
+            {% for msg in project_instrument_dispatch_panel.blocked_messages %}
+            <li>{{ msg }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+        {% if project_instrument_dispatch_panel.kind_rows %}
+        <p class="text-xs font-medium text-slate-700 mb-2">任务模板要求的种类（尚未分配编号时，点「确认同步」将自动从在库台账选取）：</p>
+        <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white mb-4">
+            <table class="min-w-full text-sm text-left">
+                <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+                    <tr>
+                        <th class="px-3 py-2">范围</th>
+                        <th class="px-3 py-2">种类</th>
+                        <th class="px-3 py-2">同种在库</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for row in project_instrument_dispatch_panel.kind_rows %}
+                    <tr>
+                        <td class="px-3 py-2 text-xs">{{ row.scope_label }}</td>
+                        <td class="px-3 py-2">{{ row.name }}{% if row.model %} <span class="text-slate-400">({{ row.model }})</span>{% endif %}</td>
+                        <td class="px-3 py-2 text-xs tabular-nums">{{ row.kind_in_stock }}/{{ row.kind_total }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        {% if project_instrument_dispatch_panel.required_rows %}
+        <p class="text-xs font-medium text-slate-700 mb-2">本项目已分配的具体编号：</p>
+        <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white mb-3">
+            <table class="min-w-full text-sm text-left">
+                <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+                    <tr>
+                        <th class="px-3 py-2">编号</th>
+                        <th class="px-3 py-2">名称</th>
+                        <th class="px-3 py-2">状态</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for row in project_instrument_dispatch_panel.required_rows %}
+                    <tr>
+                        <td class="px-3 py-2 font-mono text-xs">{{ row.code }}</td>
+                        <td class="px-3 py-2">{{ row.name }}{% if row.model %} <span class="text-slate-400">({{ row.model }})</span>{% endif %}</td>
+                        <td class="px-3 py-2">
+                            {% if row.status == 'in_stock' %}<span class="text-emerald-700">在库</span>
+                            {% elif row.status == 'on_project' %}<span class="text-indigo-700">已出库至本项目</span>
+                            {% elif row.status == 'busy' %}<span class="text-red-700">已出库至 {{ row.project_label }}</span>
+                            {% else %}<span class="text-slate-400">{{ row.status_label }}</span>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        <p class="text-[11px] text-slate-500 mb-2">同种仪器 = 名称 + 型号；每台对应台账中<strong>唯一编号</strong>。编号在「确认同步」时确定，并自动出库至本项目。</p>
+        {% if can_edit_project_workbench %}
+        <form method="post" class="inline" onsubmit="return confirm('确认将本项目已出库仪器全部入库？');">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="instrument_checkin_project">
+            <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+            <button type="submit" class="px-4 py-2 rounded-xl bg-white border border-violet-200 text-violet-800 text-sm font-medium hover:bg-violet-50">本项目仪器全部入库</button>
+        </form>
+        {% endif %}
+    </section>
+    {% endif %}
+
     {# —— ③ App 任务同步（检测员等在移动端可见项目） —— #}
     <section class="rounded-xl border border-blue-200 bg-blue-50/40 p-5">
         <div class="flex flex-wrap items-start justify-between gap-2 mb-3">
@@ -180,13 +265,16 @@
             </div>
         </div>
 
+        {% if project_instrument_dispatch_panel.uses_kind_binding and not project_instrument_dispatch_panel.can_dispatch %}
+        <p class="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-4">所需仪器未齐或已被其他项目占用，请先处理上表状态后再同步 App 任务。</p>
+        {% endif %}
         <form method="post" class="grid sm:grid-cols-2 gap-4 max-w-2xl mb-6">
             {% csrf_token %}
             <input type="hidden" name="action" value="assign">
             <input type="hidden" name="project_id" value="{{ selected_project_id }}">
             <div>
                 <label class="block text-xs font-medium text-slate-600 mb-1">接收用户（通常为检测员）</label>
-                <select name="assignee" required class="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white">
+                <select name="assignee" required class="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white"{% if project_instrument_dispatch_panel.uses_kind_binding and not project_instrument_dispatch_panel.can_dispatch %} disabled{% endif %}>
                     {% if not participant_assign_self_only %}
                     <option value="">请选择</option>
                     {% endif %}
@@ -196,7 +284,7 @@
                 </select>
             </div>
             <div class="flex items-end">
-                <button type="submit" class="px-6 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700">确认同步</button>
+                <button type="submit" class="px-6 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"{% if project_instrument_dispatch_panel.uses_kind_binding and not project_instrument_dispatch_panel.can_dispatch %} disabled{% endif %}>确认同步</button>
             </div>
         </form>
 

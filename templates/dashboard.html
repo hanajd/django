@@ -203,7 +203,7 @@
                 </span>
             </a>
             {% endif %}
-            {% if role_perm.perm_manage_users %}
+            {% if can_access_instrument_database %}
             <a href="{% url 'database_device_list' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-slate-300 hover:bg-white">
                 <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-700 text-white shadow-sm">
                     <i class="ri-database-2-line text-lg"></i>

@@ -8,11 +8,12 @@
 
 | 概念 | 说明 |
 |------|------|
-| 仪器主数据 | `InstrumentCatalog`：仪器编号 `code`、仪器设备名称 `name`、型号 `model`、证书编号 `certificate_no`、证书有效期 `certificate_valid_until`（Date，可空）等。 |
-| 任务模板绑定 | `LibraryTask.bound_instrument_ids`：`JSONField`，对象 **`{"qualityControl": id, "radiationProtection": id}`**（质控/防护各一台，独立管理）。兼容旧版有序列表 `[qc_id, rp_id]`。 |
+| 仪器主数据 | `InstrumentCatalog`：仪器编号 `code`（**唯一**，一台物理仪器一条）、名称 `name`、型号 `model` 等；**出库/入库**见 `docs/仪器台账出库入库.md`。 |
+| 任务模板绑定 | `bindingMode=kinds`：仅存种类 `{"qualityControl":[{"name","model"},…], …}`。`bindingMode=ids` 或旧列表 `[qc_id, rp_id]`：仍兼容。具体编号统一在 **`LibraryProject.assigned_instrument_ids`**（人员派工 / 同步 App 任务时写入）。 |
+| 出库顺序 | 派工分配时默认同种在库按台账 **`code` 升序** 依次占用；旧版模板若指定编号已被占用，自动选用同种下一编号。详见 `docs/仪器台账出库入库.md`。 |
 | 检测提交 | 提交体 `raw_payload.instruments`：数组，元素为字典，与前端模板根级 **`instruments`** 同形；分 scope 提交见 `instruments.qualityControl` / `instruments.radiationProtection`。 |
 
-后台入口：**任务模板库** → 选中任务模板 → **模板与仪器** → **模板默认检测仪器**（质控、防护各选一个下拉，分别保存）。
+后台入口：**任务模板库** → **模板默认检测仪器（种类）**；**项目工作台 → 人员派工** → 同步任务时按顺序分配具体编号并出库。
 
 ---
 
@@ -26,7 +27,7 @@
 
 规则要点：
 
-1. **优先任务模板**：`payload.instruments` 缺失、非列表或**空数组**时，按绑定对象中的质控、防护 id 从主数据生成根级 `instruments`（质控在前、防护在后、去重；`is_active=False` 仍会生成，避免历史绑定因停用而整行消失）。
+1. **优先任务模板**：`payload.instruments` 缺失、非列表或**空数组**时，按绑定对象中质控一套、防护一套的 id 列表从主数据生成根级 `instruments`（质控全套在前、防护全套在后、去重；`is_active=False` 仍会生成，避免历史绑定因停用而整行消失）。
 2. **以前端提交为准**：若 `payload.instruments` 为**非空列表**，则**不再**从模板追加或删减条目，完全保留前端已保存的顺序与条目（具体项目上手改仪器即以此为准）。
 3. 合并仅在内存中进行，**不改写**数据库里历史 submit 的 `raw_payload`。
 
@@ -194,7 +195,7 @@ HTMLPDF 字段的 `id` / `placeholder` / `title` 与上述键一致时即可命�
 
 | 能力 | 说明 |
 |------|------|
-| 后台绑定 | 任务模板库 → 模板与仪器 → 质控/防护各选一台保存 → `bound_instrument_ids`（对象）。 |
+| 后台绑定 | 任务模板库 → 模板与仪器 → 质控/防护各选一套（可多选）保存 → `bound_instrument_ids`（对象，值为 id 数组）。 |
 | 任务导出 JSON | 根级 **`instruments`**（合并 submit + 绑定）；无全库 options。 |
 | HTMLPDF 导出 JSON | 根级 **`instruments`**；需 **`libraryTaskId` / `libraryTemplateFileId`** 或 PDF 打开返回的 **`linked_library_task_ids`** 以预填绑定。 |
 | 全量下拉 | **`GET …/registry/instruments/`**，不在导出 JSON 内嵌全表。 |

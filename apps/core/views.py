@@ -71,6 +71,8 @@ from apps.core.library_access import (
     library_user_may_filled_pdf_toolchain,
     library_user_may_use_htmlpdf_matrix_beta_controls,
     library_user_has_party_a_demo_restrictions,
+    library_user_may_access_instrument_database,
+    library_test_peer_user_ids,
     library_user_hide_project_workbench_files_tab,
     library_user_may_edit_project_files,
     library_user_may_access_task_template_library_nav,
@@ -127,7 +129,6 @@ from apps.core.library_task_folder_service import (
 from apps.core.task_template_folder_upload import ingest_template_folder_upload
 from apps.core.task_template_ui_service import (
     build_htmlpdf_explorer_context,
-    group_template_files_for_bind,
     htmlpdf_editor_open_url,
     htmlpdf_editor_page_url,
     append_edit_mode_to_explorer_links,
@@ -438,9 +439,8 @@ def usage_workflow_tour_finish(request):
 @login_required
 def database_device_list(request):
     """数据库管理：检测仪器台账。"""
-    r = _require_perm(request, "perm_manage_users")
-    if r:
-        return r
+    if not library_user_may_access_instrument_database(request.user):
+        return _require_perm(request, "perm_manage_users")
 
     action = (request.POST.get("action") or "").strip()
     if request.method == "POST" and action:
@@ -507,6 +507,50 @@ def database_device_list(request):
             messages.success(request, "检测仪器删除成功")
             return redirect("database_device_list")
 
+        if action == "instrument_checkout":
+            device_id = (request.POST.get("device_id") or "").strip()
+            project_id = (request.POST.get("project_id") or "").strip()
+            try:
+                inst = InstrumentCatalog.objects.get(pk=int(device_id), is_active=True)
+                proj = LibraryProject.objects.get(pk=int(project_id), is_active=True)
+            except (ValueError, InstrumentCatalog.DoesNotExist, LibraryProject.DoesNotExist):
+                messages.error(request, "仪器或项目无效")
+                return redirect("database_device_list")
+            from apps.core.instrument_inventory_service import checkout_instruments_to_project
+
+            n, errs = checkout_instruments_to_project(
+                proj, [inst.pk], user=request.user, note="台账手动出库"
+            )
+            if errs:
+                messages.error(request, errs[0])
+            elif n:
+                messages.success(request, f"已出库 {inst.code} 至项目 {proj.code}")
+            return redirect("database_device_list")
+
+        if action == "instrument_checkin":
+            device_id = (request.POST.get("device_id") or "").strip()
+            try:
+                inst = InstrumentCatalog.objects.select_related("checkout_project").get(
+                    pk=int(device_id)
+                )
+            except (ValueError, InstrumentCatalog.DoesNotExist):
+                messages.error(request, "仪器不存在")
+                return redirect("database_device_list")
+            if not inst.checkout_project_id:
+                messages.info(request, f"{inst.code} 已在库，无需入库")
+                return redirect("database_device_list")
+            from apps.core.instrument_inventory_service import checkin_instruments_from_project
+
+            n = checkin_instruments_from_project(
+                inst.checkout_project,
+                [inst.pk],
+                user=request.user,
+                note="台账手动入库",
+            )
+            if n:
+                messages.success(request, f"已入库 {inst.code}")
+            return redirect("database_device_list")
+
     editing_device = None
     edit_id = (request.GET.get("edit") or "").strip()
     if edit_id:
@@ -515,10 +559,15 @@ def database_device_list(request):
         except (ValueError, InstrumentCatalog.DoesNotExist):
             editing_device = None
 
-    devices = InstrumentCatalog.objects.all()
+    devices = (
+        InstrumentCatalog.objects.select_related("checkout_project", "checked_out_by")
+        .order_by("code", "id")
+    )
+    active_projects = LibraryProject.objects.filter(is_active=True).order_by("-updated_at")[:200]
     context = {
         "devices": devices,
         "editing_device": editing_device,
+        "active_projects": active_projects,
     }
     return render(request, "core/database_device_list.html", context)
 
@@ -1500,20 +1549,32 @@ def library_projects(request):
                     if not project_tasks:
                         messages.error(request, "该项目尚未关联任务模板，请先在「任务与模板」中为项目勾选任务模板")
                     else:
-                        created_count, file_n = _sync_library_project_tasks_to_user(
-                            project, assignee, request.user
+                        from apps.core.instrument_inventory_service import (
+                            ensure_instruments_for_project_dispatch,
                         )
-                        if created_count:
-                            messages.success(
-                                request,
-                                f"已向 {assignee.username} 分配项目「{project.name}」下 {created_count} 个任务模板，"
-                                f"并同步 {file_n} 个模板文件到项目。",
-                            )
+
+                        inv = ensure_instruments_for_project_dispatch(
+                            project, user=request.user
+                        )
+                        if not inv.ok:
+                            messages.error(request, inv.message)
                         else:
-                            messages.info(
-                                request,
-                                f"{assignee.username} 已拥有该项目全部任务模板；已同步 {file_n} 个模板文件到项目。",
+                            if inv.checked_out_count:
+                                messages.info(request, inv.message)
+                            created_count, file_n = _sync_library_project_tasks_to_user(
+                                project, assignee, request.user
                             )
+                            if created_count:
+                                messages.success(
+                                    request,
+                                    f"已向 {assignee.username} 分配项目「{project.name}」下 {created_count} 个任务模板，"
+                                    f"并同步 {file_n} 个模板文件到项目。",
+                                )
+                            else:
+                                messages.info(
+                                    request,
+                                    f"{assignee.username} 已拥有该项目全部任务模板；已同步 {file_n} 个模板文件到项目。",
+                                )
             redir_pid = int(project_raw) if (project_raw or "").strip().isdigit() else (selected_project_id or 0)
             tab_q = f"?project_id={redir_pid}&tab=dispatch" if redir_pid else "?tab=dispatch"
             return redirect(reverse("library_projects") + tab_q)
@@ -1737,6 +1798,32 @@ def library_projects(request):
                     messages.error(request, "演示账号仅可移除本人担任的流程岗位")
                 else:
                     row.delete()
+            return redirect(reverse("library_projects") + f"?project_id={proj.pk}&tab=dispatch")
+
+        if action == "instrument_checkin_project":
+            post_raw = request.POST.get("project_id", "").strip()
+            try:
+                post_pid = int(post_raw) if post_raw else None
+            except ValueError:
+                post_pid = None
+            proj = LibraryProject.objects.filter(pk=post_pid).first() if post_pid else None
+            if proj is None:
+                proj = selected_project
+            if proj is None:
+                messages.error(request, "请选择项目")
+                return redirect(reverse("library_projects"))
+            if not library_user_may_mutate_project_workbench(request.user, proj):
+                messages.error(request, "无权操作本项目仪器入库")
+            else:
+                from apps.core.instrument_inventory_service import checkin_instruments_from_project
+
+                n = checkin_instruments_from_project(
+                    proj, None, user=request.user, note="项目工作台手动入库"
+                )
+                messages.success(
+                    request,
+                    f"已入库 {n} 台仪器（解除与项目「{proj.name}」的出库绑定）",
+                )
             return redirect(reverse("library_projects") + f"?project_id={proj.pk}&tab=dispatch")
 
         if action == "delete_project":
@@ -2097,6 +2184,13 @@ def library_projects(request):
 
     workflow_members_by_role = group_workflow_members_by_role(workflow_members)
     project_equipment_count = len(project_commission_equipment_cards)
+    project_instrument_dispatch_panel: dict = {}
+    if selected_project:
+        from apps.core.instrument_inventory_service import build_project_instrument_dispatch_panel
+
+        project_instrument_dispatch_panel = build_project_instrument_dispatch_panel(
+            selected_project
+        )
     workbench_pipeline_status = build_workbench_pipeline_status(
         selected_project,
         equipment_count=project_equipment_count,
@@ -2180,6 +2274,7 @@ def library_projects(request):
             "role_ladder": ROLE_LADDER,
             "process_steps_reference": PROCESS_STEPS_REFERENCE,
             "project_equipment_count": project_equipment_count,
+            "project_instrument_dispatch_panel": project_instrument_dispatch_panel,
         },
     )
 
@@ -2270,16 +2365,42 @@ def commission_manage(request):
             elif not project.library_tasks.exists():
                 messages.error(request, "该项目尚未关联任务模板，请先在项目工作台绑定设备或任务")
             else:
-                created_count, file_n = _sync_library_project_tasks_to_user(
-                    project, assignee, request.user
+                from apps.core.instrument_inventory_service import (
+                    ensure_instruments_for_project_dispatch,
                 )
-                if created_count:
-                    messages.success(
-                        request,
-                        f"已向 {assignee.username} 分配 {created_count} 个任务模板",
-                    )
+
+                inv = ensure_instruments_for_project_dispatch(project, user=request.user)
+                if not inv.ok:
+                    messages.error(request, inv.message)
                 else:
-                    messages.info(request, f"{assignee.username} 已拥有该项目全部任务模板")
+                    if inv.checked_out_count:
+                        messages.info(request, inv.message)
+                    created_count, file_n = _sync_library_project_tasks_to_user(
+                        project, assignee, request.user
+                    )
+                    if created_count:
+                        messages.success(
+                            request,
+                            f"已向 {assignee.username} 分配 {created_count} 个任务模板",
+                        )
+                    else:
+                        messages.info(request, f"{assignee.username} 已拥有该项目全部任务模板")
+        elif action == "instrument_checkin_project":
+            from apps.core.instrument_inventory_service import checkin_instruments_from_project
+
+            if not library_user_may_mutate_project_workbench(request.user, project):
+                messages.error(request, "无权操作本项目仪器入库")
+            else:
+                n = checkin_instruments_from_project(
+                    project, None, user=request.user, note="委托管理/项目仪器入库"
+                )
+                messages.success(
+                    request,
+                    f"已入库 {n} 台仪器（解除与项目「{project.name}」的出库绑定）",
+                )
+            return redirect(
+                reverse("library_projects") + f"?project_id={project.pk}&tab=dispatch"
+            )
         elif action == "unassign":
             if not library_user_may_assign_on_project(request.user, project):
                 try:
@@ -7350,73 +7471,42 @@ def library_task_management(request):
                     f"已更新任务模板「{t_obj.code}」的 PDF 输出目标为：{t_obj.get_output_target_display()}。",
                 )
             return redirect(_library_task_management_redirect_url(request))
-        elif action in ("bind_task_files", "unbind_task_files"):
+        elif action == "unbind_task_template_file":
             try:
                 tid = int(request.POST.get("manage_task_id", "") or 0)
             except ValueError:
                 tid = 0
-            task_tab = _normalize_library_tab(request.POST.get("task_tab", "template"))
-            task_cat = _library_category_for_tab(task_tab)
+            try:
+                file_id = int(request.POST.get("file_id", "") or 0)
+            except ValueError:
+                file_id = 0
+            include_paired = (request.POST.get("include_paired") or "1").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            )
             task_obj = LibraryTask.objects.filter(pk=tid).first() if tid else None
-            ids = []
-            for x in request.POST.getlist("file_ids"):
-                try:
-                    ids.append(int(x))
-                except (TypeError, ValueError):
-                    continue
-            ids = list(dict.fromkeys([i for i in ids if i > 0]))
             if task_obj is None:
                 messages.error(request, "请选择有效任务模板")
-            elif not library_user_may_edit_library_task(request.user, task_obj):
-                messages.error(request, "无权编辑由他人创建的任务模板")
-            elif not ids:
-                messages.error(request, "请至少勾选一个文件")
-            elif task_cat != LibraryFile.CATEGORY_TEMPLATE:
-                messages.error(request, "任务模板仅允许关联「模板」分类文件，其它文件请在「项目工作台」中按项目维护")
+            elif file_id <= 0:
+                messages.error(request, "无效的文件")
             else:
-                qs = LibraryFile.objects.filter(pk__in=ids, category=task_cat)
-                if library_scope_own_files_only(request.user) and not library_signatory_unrestricted_template_picker(
-                    request.user
-                ):
-                    qs = qs.filter(created_by=request.user)
-                valid_ids = list(qs.values_list("id", flat=True))
-                if len(valid_ids) != len(ids):
-                    messages.error(request, "所选文件无效或分类与当前标签不一致")
-                elif action == "bind_task_files":
-                    from apps.core.library_task_template_binding_service import (
-                        is_auxiliary_template_json_file,
-                    )
+                from apps.core.library_task_template_binding_service import (
+                    unbind_template_files_from_task,
+                )
 
-                    bind_rows = list(
-                        LibraryFile.objects.filter(pk__in=valid_ids, category=task_cat)
-                    )
-                    primary_ids: list[int] = []
-                    skipped_aux: list[str] = []
-                    for lf in bind_rows:
-                        if is_auxiliary_template_json_file(lf):
-                            skipped_aux.append(lf.original_name or str(lf.pk))
-                            continue
-                        primary_ids.append(int(lf.pk))
-                    if skipped_aux and not primary_ids:
-                        messages.error(
-                            request,
-                            "前端规则 JSON（*_frontend.json）与矩阵 JSON 不参与任务模板绑定，请绑定「保存坐标模板 JSON」生成的统一模板文件。",
-                        )
-                    elif primary_ids:
-                        attach_files_to_tasks(primary_ids, [task_obj.pk], request.user)
-                        project_ids = list(task_obj.projects.values_list("id", flat=True))
-                        if project_ids:
-                            attach_files_to_projects(primary_ids, project_ids, request.user)
-                        msg = f"已向任务模板关联 {len(primary_ids)} 个模板文件"
-                        if skipped_aux:
-                            msg += f"（已忽略 {len(skipped_aux)} 个辅助 JSON：{skipped_aux[0]} 等）"
-                        messages.success(request, msg)
+                result = unbind_template_files_from_task(
+                    task_obj,
+                    file_id,
+                    user=request.user,
+                    include_paired=include_paired,
+                )
+                if result.get("ok"):
+                    messages.success(request, result.get("message") or "已解除绑定")
                 else:
-                    detach_files_from_tasks(valid_ids, [task_obj.pk])
-                    project_ids = list(task_obj.projects.values_list("id", flat=True))
-                    if project_ids:
-                        detach_files_from_projects(valid_ids, project_ids)
-                    messages.success(request, f"已从任务模板移除 {len(valid_ids)} 个模板文件")
+                    messages.error(request, result.get("error") or "解除绑定失败")
+            return redirect(_library_task_management_redirect_url(request))
         elif action == "delete_task":
             try:
                 tid = int(request.POST.get("task_id", "") or 0)
@@ -7465,7 +7555,11 @@ def library_task_management(request):
                     messages.error(request, result.get("error") or "恢复失败")
             return redirect(_library_task_management_redirect_url(request))
         elif action == "update_task_bound_instruments":
-            from utils.task_bound_instruments import serialize_task_bound_instruments
+            from utils.task_bound_instruments import (
+                count_bound_kind_slots,
+                kind_spec_from_form_value,
+                serialize_task_bound_kinds,
+            )
 
             try:
                 tid = int(request.POST.get("manage_task_id", "") or 0)
@@ -7473,31 +7567,40 @@ def library_task_management(request):
                 tid = 0
             task_obj = LibraryTask.objects.filter(pk=tid).first() if tid else None
 
-            def _post_instrument_id(name: str) -> int | None:
-                raw = str(request.POST.get(name, "") or "").strip()
-                if not raw:
-                    return None
-                try:
-                    pk = int(raw)
-                    return pk if pk > 0 else None
-                except (TypeError, ValueError):
-                    return None
+            def _post_kind_specs(name: str) -> list:
+                specs = []
+                seen: set[tuple[str, str]] = set()
+                for raw in request.POST.getlist(name):
+                    spec = kind_spec_from_form_value(raw)
+                    if spec is None:
+                        continue
+                    k = spec.key()
+                    if k in seen:
+                        continue
+                    seen.add(k)
+                    specs.append(spec)
+                return specs
 
-            cleaned = serialize_task_bound_instruments(
-                quality_control_id=_post_instrument_id("bound_instrument_quality_control"),
-                radiation_protection_id=_post_instrument_id("bound_instrument_radiation_protection"),
+            cleaned = serialize_task_bound_kinds(
+                quality_control_kinds=_post_kind_specs("bound_kind_quality_control"),
+                radiation_protection_kinds=_post_kind_specs("bound_kind_radiation_protection"),
             )
             if task_obj is None:
                 messages.error(request, "任务模板不存在")
             elif not library_user_may_edit_library_task(request.user, task_obj):
                 messages.error(request, "无权编辑由他人创建的任务模板")
+            elif task_obj.output_target == LibraryTask.OUTPUT_REPORT:
+                messages.error(request, "报告模板不单独绑定仪器，请在各现场记录模板中维护仪器种类")
             else:
                 task_obj.bound_instrument_ids = cleaned
                 task_obj.save(update_fields=["bound_instrument_ids", "updated_at"])
-                n = len(cleaned)
+                from utils.task_bound_instruments import normalize_task_bound_kinds
+
+                kinds_norm = normalize_task_bound_kinds(cleaned)
+                qc_n, rp_n = count_bound_kind_slots(kinds_norm)
                 messages.success(
                     request,
-                    f"已保存任务模板「{task_obj.code}」的质控/防护默认仪器（共 {n} 项）。",
+                    f"已保存任务模板「{task_obj.code}」的仪器种类：质控 {qc_n} 种、防护 {rp_n} 种（具体编号在人员派工时分配）。",
                 )
             return redirect(_library_task_management_redirect_url(request))
         else:
@@ -7542,15 +7645,14 @@ def library_task_management(request):
     if task_mgmt_tab not in template_visible_tabs:
         task_mgmt_tab = "template"
     task_mgmt_cat = _library_category_for_tab(task_mgmt_tab)
-    task_mgmt_files = []
-    task_mgmt_files_grouped: dict[str, list] = {"pdf": [], "json": [], "other": []}
-    task_mgmt_file_pairs: list = []
-    task_mgmt_linked_ids = set()
     task_linked_files = []
+    task_linked_file_pairs: list = []
     export_project_id_val = ""
     task_library_edit = False
     task_edit_mode = False
     show_new_task_form = False
+    task_library_hide_pdf_export_tools = library_user_has_party_a_demo_restrictions(request.user)
+    task_show_instrument_binding = False
     if can_manage_in_task_library:
         task_library_edit = task_library_edit_mode(request)
         nt_raw = (request.GET.get("new_task") or "").strip().lower()
@@ -7585,36 +7687,19 @@ def library_task_management(request):
                             export_project_id_val = str(int(export_project_raw))
                         except ValueError:
                             export_project_id_val = ""
-                    if can_manage_in_task_library and task_library_edit:
-                        tq = (
-                            LibraryFile.objects.filter(category=task_mgmt_cat)
-                            .select_related("created_by")
-                            .order_by("-created_at")[:600]
+                    task_linked_files = [
+                        f
+                        for f in manage_task.library_files.filter(
+                            category=LibraryFile.CATEGORY_TEMPLATE
                         )
-                        if library_scope_own_files_only(request.user) and not library_signatory_unrestricted_template_picker(
-                            request.user
-                        ):
-                            tq = tq.filter(created_by=request.user)
-                        task_mgmt_files = list(tq)
-                        task_mgmt_files_grouped = group_template_files_for_bind(task_mgmt_files)
-                        task_mgmt_linked_ids = set(
-                            manage_task.library_files.filter(category=task_mgmt_cat).values_list(
-                                "id", flat=True
-                            )
-                        )
-                        task_mgmt_file_pairs = group_template_files_by_stem(
-                            task_mgmt_files, task_mgmt_linked_ids
-                        )
-                    else:
-                        task_linked_files = [
-                            f
-                            for f in manage_task.library_files.filter(
-                                category=LibraryFile.CATEGORY_TEMPLATE
-                            )
-                            .select_related("created_by")
-                            .order_by("original_name")
-                            if library_file_access_allowed(request.user, f)
-                        ]
+                        .select_related("created_by")
+                        .order_by("original_name")
+                        if library_file_access_allowed(request.user, f)
+                    ]
+                    linked_ids = {int(f.pk) for f in task_linked_files}
+                    task_linked_file_pairs = group_template_files_by_stem(
+                        task_linked_files, linked_ids
+                    )
             except ValueError:
                 pass
         task_edit_mode = bool(task_library_edit and manage_task)
@@ -7638,18 +7723,31 @@ def library_task_management(request):
     if return_project_id:
         workbench_back_url += f"?project_id={return_project_id}&tab=commission"
 
+    if manage_task:
+        task_show_instrument_binding = manage_task.output_target == LibraryTask.OUTPUT_SITE_RECORD
+
     instrument_catalog_for_task: list = []
-    task_bound_instrument_qc_id = None
-    task_bound_instrument_rp_id = None
-    if manage_task and can_manage_in_task_library:
-        from utils.task_bound_instruments import normalize_task_bound_instruments
+    task_bound_qc_kind_values: set = set()
+    task_bound_rp_kind_values: set = set()
+    instrument_kind_groups: list = []
+    if manage_task and task_show_instrument_binding:
+        from utils.task_bound_instruments import (
+            KIND_SEP,
+            build_instrument_kind_groups,
+            normalize_task_bound_kinds,
+        )
 
         instrument_catalog_for_task = list(
             InstrumentCatalog.objects.filter(is_active=True).order_by("code", "id")
         )
-        bound = normalize_task_bound_instruments(getattr(manage_task, "bound_instrument_ids", None) or [])
-        task_bound_instrument_qc_id = bound.get("qualityControl")
-        task_bound_instrument_rp_id = bound.get("radiationProtection")
+        instrument_kind_groups = build_instrument_kind_groups(instrument_catalog_for_task)
+        bound_kinds = normalize_task_bound_kinds(
+            getattr(manage_task, "bound_instrument_ids", None) or []
+        )
+        for spec in bound_kinds.get("qualityControl") or []:
+            task_bound_qc_kind_values.add(f"{spec.name}{KIND_SEP}{spec.model}")
+        for spec in bound_kinds.get("radiationProtection") or []:
+            task_bound_rp_kind_values.add(f"{spec.name}{KIND_SEP}{spec.model}")
 
     has_report_source_task_relation = _librarytask_has_report_source_relation()
 
@@ -7763,10 +7861,7 @@ def library_task_management(request):
             "manage_task": manage_task,
             "manage_task_id_val": manage_task_id_val,
             "task_mgmt_tab": task_mgmt_tab or "ocr",
-            "task_mgmt_files": task_mgmt_files,
-            "task_mgmt_files_grouped": task_mgmt_files_grouped,
-            "task_mgmt_file_pairs": task_mgmt_file_pairs,
-            "task_mgmt_linked_ids": task_mgmt_linked_ids,
+            "task_linked_file_pairs": task_linked_file_pairs,
             "explorer_nav_suffix": explorer_nav_suffix,
             "task_library_edit": task_library_edit,
             "htmlpdf_editor_url": htmlpdf_editor_page_url(
@@ -7797,8 +7892,9 @@ def library_task_management(request):
             "task_edit_mode": task_edit_mode,
             "show_new_task_form": show_new_task_form,
             "instrument_catalog_for_task": instrument_catalog_for_task,
-            "task_bound_instrument_qc_id": task_bound_instrument_qc_id,
-            "task_bound_instrument_rp_id": task_bound_instrument_rp_id,
+            "task_bound_qc_kind_values": task_bound_qc_kind_values,
+            "task_bound_rp_kind_values": task_bound_rp_kind_values,
+            "instrument_kind_groups": instrument_kind_groups,
             "workbench_back_url": workbench_back_url,
             "return_project_id": return_project_id,
             "file_library_tabs": [
@@ -7822,6 +7918,8 @@ def library_task_management(request):
             "uncategorized_folder_key": UNCATEGORIZED_KEY,
             "task_explorer_dnd_enabled": can_manage_in_task_library and task_library_edit,
             "task_explorer_dnd_post_url": reverse("library_task_management"),
+            "task_library_hide_pdf_export_tools": task_library_hide_pdf_export_tools,
+            "task_show_instrument_binding": task_show_instrument_binding,
         },
     )
 

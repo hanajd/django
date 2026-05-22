@@ -156,6 +156,7 @@
                                class="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:ring-2 focus:ring-indigo-500"
                                placeholder="留空自动生成">
                     </div>
+                    {% if not task_library_hide_pdf_export_tools %}
                     <div class="min-w-[10rem]">
                         <label for="task_output_target" class="block text-xs font-medium text-slate-600 mb-1">PDF 输出目标</label>
                         <select name="output_target" id="task_output_target"
@@ -164,6 +165,9 @@
                             <option value="report">报告</option>
                         </select>
                     </div>
+                    {% else %}
+                    <input type="hidden" name="output_target" value="site_record">
+                    {% endif %}
                     <button type="submit" class="px-5 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 shadow-sm">创建</button>
                 </form>
             </div>
@@ -175,7 +179,9 @@
                     <div class="min-w-0">
                         <div class="flex flex-wrap items-center gap-2 mb-1">
                             <span class="font-mono text-xs px-2 py-0.5 rounded-md bg-slate-100 text-slate-700">{{ manage_task.code }}</span>
+                            {% if not task_library_hide_pdf_export_tools %}
                             <span class="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">{{ manage_task.get_output_target_display }}</span>
+                            {% endif %}
                         </div>
                         <h2 class="text-xl font-semibold text-slate-900 tracking-tight">{{ manage_task.name }}</h2>
                         {% if can_manage_templates and task_library_edit %}
@@ -226,26 +232,6 @@
                 </div>
 
                 <div class="p-5 sm:p-6 space-y-6">
-                    {% if can_manage_templates and task_edit_mode %}
-                    <form method="post" class="flex flex-wrap items-end gap-4 p-4 rounded-xl border border-slate-200 bg-slate-50/50">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="update_task_output_target">
-                        <input type="hidden" name="manage_task_id" value="{{ manage_task.id }}">
-                        <input type="hidden" name="edit" value="1">
-                        {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
-                        {% if rp %}<input type="hidden" name="return_project" value="{{ rp }}">{% endif %}
-                        <div class="min-w-[12rem] flex-1">
-                            <label for="toolbar_output_target" class="block text-xs font-medium text-slate-600 mb-1">PDF 输出目标</label>
-                            <p class="text-xs text-slate-500 mb-2">提交后生成的 PDF 默认归入文件库「现场记录」或「报告」。</p>
-                            <select name="output_target" id="toolbar_output_target"
-                                    class="w-full max-w-xs px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:ring-2 focus:ring-indigo-500">
-                                <option value="site_record" {% if manage_task.output_target == 'site_record' %}selected{% endif %}>现场记录</option>
-                                <option value="report" {% if manage_task.output_target == 'report' %}selected{% endif %}>报告</option>
-                            </select>
-                        </div>
-                        <button type="submit" class="px-4 py-2.5 rounded-xl bg-slate-800 text-white text-sm font-medium hover:bg-slate-900">保存</button>
-                    </form>
-                    {% endif %}
 
                     {% if manage_task.output_target == 'report' and report_linked_site_tasks %}
                     <div class="p-4 rounded-xl border border-cyan-200/80 bg-cyan-50/40 space-y-3">
@@ -272,31 +258,19 @@
                     </div>
                     {% endif %}
 
-                    {% if manage_task.output_target == 'site_record' or manage_task.output_target == 'report' %}
-                    <form method="post" class="flex flex-wrap items-end gap-4 p-4 rounded-xl border border-emerald-200 bg-emerald-50/40">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="export_task_template_pdf">
-                        <input type="hidden" name="manage_task_id" value="{{ manage_task.id }}">
-                        <input type="hidden" name="task_tab" value="{{ task_mgmt_tab }}">
-                        {% if rp %}<input type="hidden" name="return_project" value="{{ rp }}">{% endif %}
-                        <div class="min-w-[14rem] flex-1">
-                            <label for="export_project_id" class="block text-xs font-medium text-slate-700 mb-1">导出 PDF 所用项目</label>
-                            {% if manage_task.output_target == 'report' %}
-                            <p class="text-xs text-slate-600 mb-2">按该项目最新检测提交定位案件，并汇总已绑定的现场记录，导出报告 PDF（需具备模板编辑器或文档识别权限）。</p>
-                            {% else %}
-                            <p class="text-xs text-slate-600 mb-2">按该项目最新检测提交回填并导出现场记录 PDF。</p>
-                            {% endif %}
-                            <select name="export_project_id" id="export_project_id" required class="w-full max-w-md px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:ring-2 focus:ring-emerald-500">
-                                <option value="">请选择项目</option>
-                                {% for p in projects %}
-                                <option value="{{ p.id }}" {% if export_project_id_val == p.id|stringformat:"s" %}selected{% endif %}>{{ p.code }} · {{ p.name }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <button type="submit" class="px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 shadow-sm">
-                            {% if manage_task.output_target == 'report' %}导出报告 PDF{% else %}导出现场记录 PDF{% endif %}
+                    {% if task_edit_mode %}
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" data-task-sheet="task-sheet-files"
+                                class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 shadow-sm">
+                            <i class="ri-upload-cloud-2-line"></i> 上传模板
                         </button>
-                    </form>
+                        {% if task_show_instrument_binding %}
+                        <button type="button" data-task-sheet="task-sheet-instruments"
+                                class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white text-slate-800 text-sm font-medium ring-1 ring-slate-200 hover:bg-slate-50">
+                            <i class="ri-flask-line"></i> 维护仪器种类
+                        </button>
+                        {% endif %}
+                    </div>
                     {% endif %}
 
                     <div>
@@ -305,53 +279,147 @@
                         <p class="text-xs text-slate-500 mb-2">任务主 JSON（坐标模板，用于回填/PDF 生成）：<span class="font-medium text-slate-800">{{ task_primary_json_file.original_name }}</span></p>
                         {% endif %}
                         {% if task_auxiliary_json_files %}
-                        <p class="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-2">下列为<strong>辅助 JSON</strong>（前端规则 / 矩阵），仅保存在文件库，<strong>不参与</strong>任务模板绑定；App 导出前端 JSON 亦不会替换主模板。{% if task_edit_mode %}可在编辑模式下从模板移除。{% endif %}</p>
+                        <p class="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-2">辅助 JSON（前端规则 / 矩阵）不参与主模板回填；可在下方单独解除绑定。</p>
                         {% endif %}
                         <div class="rounded-xl border border-slate-200 overflow-hidden max-h-80 overflow-y-auto">
                             <table class="min-w-full text-sm text-left">
                                 <thead class="bg-slate-50 text-slate-500 text-xs uppercase sticky top-0 border-b border-slate-100">
                                     <tr>
-                                        <th class="px-4 py-2.5">文件名</th>
-                                        <th class="px-4 py-2.5">分类</th>
-                                        <th class="px-4 py-2.5 w-32">操作</th>
+                                        <th class="px-4 py-2.5">模板组</th>
+                                        <th class="px-4 py-2.5">文件</th>
+                                        <th class="px-4 py-2.5 w-40">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-slate-100">
-                                    {% for f in task_linked_files %}
-                                    <tr class="hover:bg-slate-50/80">
-                                        <td class="px-4 py-2.5 text-slate-800">
-                                            {{ f.original_name }}
-                                            {% if task_primary_json_file and f.id == task_primary_json_file.id %}
-                                            <span class="ml-1 text-[11px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800">主 JSON</span>
-                                            {% elif f.id in task_auxiliary_json_ids %}
-                                            <span class="ml-1 text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-900">辅助</span>
+                                    {% for pair in task_linked_file_pairs %}
+                                    <tr class="hover:bg-slate-50/80 align-top">
+                                        <td class="px-4 py-3 font-mono text-slate-700 text-xs whitespace-nowrap">{{ pair.stem }}</td>
+                                        <td class="px-4 py-3 space-y-2">
+                                            {% if pair.pdf %}
+                                            <div class="flex flex-wrap items-center gap-2">
+                                                <i class="ri-file-pdf-2-line text-red-500"></i>
+                                                <span class="text-slate-800">{{ pair.pdf.name }}</span>
+                                            </div>
                                             {% endif %}
+                                            {% if pair.json %}
+                                            <div class="flex flex-wrap items-center gap-2">
+                                                <i class="ri-braces-line text-violet-500"></i>
+                                                <span class="text-slate-800">{{ pair.json.name }}</span>
+                                                {% if task_primary_json_file and pair.json.id == task_primary_json_file.id %}
+                                                <span class="text-[11px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800">主 JSON</span>
+                                                {% elif pair.json.id in task_auxiliary_json_ids %}
+                                                <span class="text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-900">辅助</span>
+                                                {% endif %}
+                                            </div>
+                                            {% endif %}
+                                            {% for o in pair.other %}
+                                            <div class="flex flex-wrap items-center gap-2 text-slate-700">
+                                                <i class="ri-file-line text-slate-400"></i>
+                                                <span>{{ o.name }}</span>
+                                            </div>
+                                            {% endfor %}
                                         </td>
-                                        <td class="px-4 py-2.5 text-slate-500">{{ f.get_category_display }}</td>
-                                        <td class="px-4 py-2.5 whitespace-nowrap">
-                                            {% if role_perm.perm_file_preview and f.preview_kind != 'unsupported' %}
-                                            <a href="{% url 'file_preview' f.pk %}" target="_blank" rel="noopener" class="text-indigo-600 hover:underline text-xs mr-2">预览</a>
+                                        <td class="px-4 py-3 whitespace-nowrap space-y-1">
+                                            {% if pair.pdf and role_perm.perm_file_preview %}
+                                            <a href="{% url 'file_preview' pair.pdf.id %}" target="_blank" rel="noopener" class="block text-indigo-600 hover:underline text-xs">预览 PDF</a>
                                             {% endif %}
-                                            {% if role_perm.perm_file_download %}
-                                            <a href="{% url 'file_library_download' f.pk %}" class="text-emerald-600 hover:underline text-xs">下载</a>
+                                            {% if pair.pdf and role_perm.perm_htmlpdf or pair.pdf and role_perm.perm_process_pipeline %}
+                                            <a href="{% url 'htmlpdf_editor_open' pair.pdf.id %}?return_manage_task={{ manage_task.id }}&return_fl_path={{ fl_path|urlencode }}"
+                                               class="block text-violet-600 hover:underline text-xs">编辑版式</a>
                                             {% endif %}
-                                            {% if role_perm.perm_htmlpdf or role_perm.perm_process_pipeline %}
-                                            {% with fn=f.original_name|lower %}
-                                            {% if fn|slice:"-4:" == ".pdf" %}
-                                            <a href="{% url 'htmlpdf_editor_open' f.pk %}?return_manage_task={{ manage_task.id }}&return_fl_path={{ fl_path|urlencode }}"
-                                               class="text-violet-600 hover:underline text-xs ml-2">编辑版式</a>
+                                            {% if task_edit_mode %}
+                                            {% if pair.pdf %}
+                                            <form method="post" class="mt-2"
+                                                  onsubmit="return confirm('{% if pair.json and pair.json.id not in task_auxiliary_json_ids %}将解除「{{ pair.stem }}」的 PDF 与主 JSON 绑定（文件仍保留在文件库）。{% else %}确定解除 PDF「{{ pair.pdf.name }}」与本模板的绑定？{% endif %}');">
+                                                {% csrf_token %}
+                                                <input type="hidden" name="action" value="unbind_task_template_file">
+                                                <input type="hidden" name="manage_task_id" value="{{ manage_task.id }}">
+                                                <input type="hidden" name="file_id" value="{{ pair.pdf.id }}">
+                                                <input type="hidden" name="include_paired" value="{% if pair.json and pair.json.id not in task_auxiliary_json_ids %}1{% else %}0{% endif %}">
+                                                <input type="hidden" name="edit" value="1">
+                                                {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
+                                                {% if rp %}<input type="hidden" name="return_project" value="{{ rp }}">{% endif %}
+                                                <button type="submit" class="text-red-600 hover:text-red-800 text-xs font-medium">
+                                                    {% if pair.json and pair.json.id not in task_auxiliary_json_ids %}解除整组绑定{% else %}解除 PDF 绑定{% endif %}
+                                                </button>
+                                            </form>
+                                            {% elif pair.json %}
+                                            <form method="post" class="mt-2" onsubmit="return confirm('确定解除「{{ pair.json.name }}」与本模板的绑定？');">
+                                                {% csrf_token %}
+                                                <input type="hidden" name="action" value="unbind_task_template_file">
+                                                <input type="hidden" name="manage_task_id" value="{{ manage_task.id }}">
+                                                <input type="hidden" name="file_id" value="{{ pair.json.id }}">
+                                                <input type="hidden" name="include_paired" value="0">
+                                                <input type="hidden" name="edit" value="1">
+                                                {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
+                                                {% if rp %}<input type="hidden" name="return_project" value="{{ rp }}">{% endif %}
+                                                <button type="submit" class="text-red-600 hover:text-red-800 text-xs font-medium">解除绑定</button>
+                                            </form>
                                             {% endif %}
-                                            {% endwith %}
+                                            {% if pair.json and pair.json.id in task_auxiliary_json_ids and pair.pdf %}
+                                            <form method="post" onsubmit="return confirm('确定解除辅助 JSON 的绑定？');">
+                                                {% csrf_token %}
+                                                <input type="hidden" name="action" value="unbind_task_template_file">
+                                                <input type="hidden" name="manage_task_id" value="{{ manage_task.id }}">
+                                                <input type="hidden" name="file_id" value="{{ pair.json.id }}">
+                                                <input type="hidden" name="include_paired" value="0">
+                                                <input type="hidden" name="edit" value="1">
+                                                {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
+                                                {% if rp %}<input type="hidden" name="return_project" value="{{ rp }}">{% endif %}
+                                                <button type="submit" class="text-red-600 hover:text-red-800 text-xs font-medium">解除辅助 JSON</button>
+                                            </form>
+                                            {% endif %}
                                             {% endif %}
                                         </td>
                                     </tr>
                                     {% empty %}
-                                    <tr><td colspan="3" class="px-4 py-12 text-center text-slate-400">{% if can_manage_templates and task_library_edit %}尚未绑定模板文件，请在下方按类型勾选添加。{% elif can_manage_templates %}尚未绑定模板文件，请点击页顶「编辑」后维护。{% else %}尚未绑定模板文件，请联系管理员维护。{% endif %}</td></tr>
+                                    <tr><td colspan="3" class="px-4 py-12 text-center text-slate-400">{% if task_edit_mode %}尚未绑定模板，请点击「上传模板」添加。{% elif can_manage_templates %}尚未绑定模板文件，请点击页顶「编辑」后上传。{% else %}尚未绑定模板文件，请联系管理员维护。{% endif %}</td></tr>
                                     {% endfor %}
                                 </tbody>
                             </table>
                         </div>
                     </div>
+
+                    {% if task_show_instrument_binding %}
+                    <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4 space-y-3">
+                        <h3 class="text-sm font-semibold text-slate-800">已绑定的仪器种类</h3>
+                        <p class="text-xs text-slate-500">具体编号在人员派工时按台账顺序分配；报告所用仪器由各现场记录模板汇总，不在报告模板单独绑定。</p>
+                        <div class="grid gap-3 sm:grid-cols-2 text-sm">
+                            <div>
+                                <span class="text-xs font-medium text-slate-500">质控（性能）</span>
+                                <ul class="mt-1 space-y-1">
+                                    {% for kg in instrument_kind_groups %}
+                                    {% if kg.form_value in task_bound_qc_kind_values %}
+                                    <li class="text-slate-800">{{ kg.name }}{% if kg.model %} <span class="text-slate-400">({{ kg.model }})</span>{% endif %}
+                                        <span class="block text-[11px] font-mono text-slate-500">{{ kg.codes|join:"、" }}</span>
+                                    </li>
+                                    {% endif %}
+                                    {% empty %}
+                                    {% endfor %}
+                                    {% if not task_bound_qc_kind_values %}<li class="text-slate-400 text-xs">未绑定</li>{% endif %}
+                                </ul>
+                            </div>
+                            <div>
+                                <span class="text-xs font-medium text-slate-500">放射防护</span>
+                                <ul class="mt-1 space-y-1">
+                                    {% for kg in instrument_kind_groups %}
+                                    {% if kg.form_value in task_bound_rp_kind_values %}
+                                    <li class="text-slate-800">{{ kg.name }}{% if kg.model %} <span class="text-slate-400">({{ kg.model }})</span>{% endif %}
+                                        <span class="block text-[11px] font-mono text-slate-500">{{ kg.codes|join:"、" }}</span>
+                                    </li>
+                                    {% endif %}
+                                    {% endfor %}
+                                    {% if not task_bound_rp_kind_values %}<li class="text-slate-400 text-xs">未绑定</li>{% endif %}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    {% elif manage_task.output_target == 'report' %}
+                    <p class="text-xs text-slate-500 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5">
+                        <i class="ri-information-line text-slate-400"></i>
+                        报告模板<strong>不单独绑定仪器</strong>；导出/展示时汇总其下各<strong>现场记录模板</strong>已绑定的仪器种类。
+                    </p>
+                    {% endif %}
 
                     {% if task_template_binding_history %}
                     <div class="mt-6">
@@ -398,57 +466,7 @@
                     {% endif %}
 
                     {% if task_edit_mode %}
-                    <div id="guide-task-template-bind-panel" class="space-y-8 pt-6 border-t border-slate-100">
-                    {% include "core/partials/library_task_template_upload_panel.html" %}
-
-                    <form method="post" class="space-y-4 p-5 rounded-xl border border-slate-200 bg-slate-50/50">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="update_task_bound_instruments">
-                        <input type="hidden" name="manage_task_id" value="{{ manage_task.id }}">
-                        <input type="hidden" name="edit" value="1">
-                        {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
-                        {% if rp %}<input type="hidden" name="return_project" value="{{ rp }}">{% endif %}
-                        <h3 class="text-sm font-semibold text-slate-900">模板默认检测仪器</h3>
-                        <p class="text-xs text-slate-500 leading-relaxed">质控与防护<strong>分开</strong>各选一台（可选）；分别对应前端 JSON 中「受检设备主要检测仪器及检测人员」章内的 <span class="font-mono">instruments.qualityControl</span> / <span class="font-mono">instruments.radiationProtection</span>，与第四、五章检测内容无关。</p>
-                        <div class="grid gap-4 sm:grid-cols-2">
-                            <div class="space-y-1.5">
-                                <label class="block text-xs font-medium text-slate-600">质控（性能）检测仪器</label>
-                                <select name="bound_instrument_quality_control" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800">
-                                    <option value="">— 不绑定 —</option>
-                                    {% for dev in instrument_catalog_for_task %}
-                                    <option value="{{ dev.id }}" {% if task_bound_instrument_qc_id == dev.id %}selected{% endif %}>{{ dev.code }} · {{ dev.name }}{% if dev.model %} ({{ dev.model }}){% endif %}</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            <div class="space-y-1.5">
-                                <label class="block text-xs font-medium text-slate-600">工作场所放射防护检测仪器</label>
-                                <select name="bound_instrument_radiation_protection" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800">
-                                    <option value="">— 不绑定 —</option>
-                                    {% for dev in instrument_catalog_for_task %}
-                                    <option value="{{ dev.id }}" {% if task_bound_instrument_rp_id == dev.id %}selected{% endif %}>{{ dev.code }} · {{ dev.name }}{% if dev.model %} ({{ dev.model }}){% endif %}</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                        </div>
-                        {% if not instrument_catalog_for_task %}
-                        <p class="text-slate-400 text-sm py-2">暂无启用的仪器主数据。</p>
-                        {% endif %}
-                        <button type="submit" class="px-4 py-2 rounded-xl bg-slate-800 text-white text-sm font-medium hover:bg-slate-900">保存仪器绑定</button>
-                    </form>
-
-                    <form method="post" class="space-y-4">
-                        {% csrf_token %}
-                        <input type="hidden" name="manage_task_id" value="{{ manage_task.id }}">
-                        <input type="hidden" name="edit" value="1">
-                        {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
-                        {% if rp %}<input type="hidden" name="return_project" value="{{ rp }}">{% endif %}
-                        <div class="flex flex-wrap gap-2">
-                            <button type="submit" name="action" value="bind_task_files" class="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 shadow-sm">将勾选加入模板</button>
-                            <button type="submit" name="action" value="unbind_task_files" class="px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-800 text-sm font-medium hover:bg-slate-50">从模板移除勾选</button>
-                        </div>
-                        {% include "core/partials/library_task_template_bind_pairs.html" %}
-                    </form>
-                    </div>
+                    {% include "core/partials/library_task_bind_floating_sheets.html" %}
                     {% endif %}
                 </div>
             </div>
@@ -477,12 +495,6 @@
                 var t = (a.getAttribute('data-filter') || '').toLowerCase();
                 a.style.display = !q || t.indexOf(q) >= 0 ? '' : 'none';
             });
-        });
-    }
-    var ca = document.getElementById('check-all-task-files');
-    if (ca) {
-        ca.addEventListener('change', function () {
-            document.querySelectorAll('.row-task-file').forEach(function (cb) { cb.checked = ca.checked; });
         });
     }
 })();

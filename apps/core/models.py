@@ -466,8 +466,8 @@ class LibraryTask(models.Model):
         blank=True,
         verbose_name=_("模板默认检测仪器"),
         help_text=_(
-            "JSON 对象：qualityControl / radiationProtection 各对应一台 InstrumentCatalog 主键；"
-            "质控与防护独立绑定。兼容旧版有序列表。"
+            "JSON：bindingMode=kinds 时仅存仪器种类（name/model），具体编号在项目派工时写入 "
+            "LibraryProject.assigned_instrument_ids。兼容旧版直接绑主键 id。"
         ),
     )
 
@@ -960,6 +960,16 @@ class LibraryProject(models.Model):
         related_name="projects",
         verbose_name=_("关联任务"),
         help_text=_("项目启用哪些任务；分配任务时仅能选择已关联的任务"),
+    )
+    assigned_instrument_ids = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name=_("已分配检测仪器"),
+        help_text=_(
+            "人员派工时为项目确定的具体仪器编号："
+            '{"qualityControl":[id,...],"radiationProtection":[id,...]}。'
+            "任务模板仅绑种类时不含编号。"
+        ),
     )
 
     class Meta:
@@ -1677,6 +1687,24 @@ class InstrumentCatalog(models.Model):
     certificate_valid_until = models.DateField(null=True, blank=True, verbose_name=_("证书有效期"))
     remarks = models.TextField(blank=True, default="", verbose_name=_("备注说明"))
     is_active = models.BooleanField(default=True, db_index=True, verbose_name=_("启用"))
+    checkout_project = models.ForeignKey(
+        "LibraryProject",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="checked_out_instruments",
+        verbose_name=_("当前出库项目"),
+        help_text=_("非空表示该编号的仪器已出库至该项目；同一时间仅能归属一个项目。"),
+    )
+    checked_out_at = models.DateTimeField(null=True, blank=True, verbose_name=_("出库时间"))
+    checked_out_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="instrument_checkouts_performed",
+        verbose_name=_("出库操作人"),
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("创建时间"))
     updated_at = models.DateTimeField(auto_now=True, verbose_name=_("更新时间"))
 
@@ -1687,3 +1715,52 @@ class InstrumentCatalog(models.Model):
 
     def __str__(self):
         return f"{self.code} - {self.name}"
+
+    @property
+    def is_in_stock(self) -> bool:
+        return self.checkout_project_id is None
+
+
+class InstrumentCheckoutLog(models.Model):
+    """仪器出库/入库流水（按唯一编号追溯）。"""
+
+    EVENT_CHECKOUT = "checkout"
+    EVENT_CHECKIN = "checkin"
+    EVENT_CHOICES = [
+        (EVENT_CHECKOUT, _("出库")),
+        (EVENT_CHECKIN, _("入库")),
+    ]
+
+    instrument = models.ForeignKey(
+        InstrumentCatalog,
+        on_delete=models.CASCADE,
+        related_name="checkout_logs",
+        verbose_name=_("仪器"),
+    )
+    project = models.ForeignKey(
+        "LibraryProject",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="instrument_checkout_logs",
+        verbose_name=_("关联项目"),
+    )
+    event_type = models.CharField(max_length=16, choices=EVENT_CHOICES, db_index=True)
+    performed_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="instrument_checkout_logs",
+        verbose_name=_("操作人"),
+    )
+    performed_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name=_("操作时间"))
+    note = models.CharField(max_length=255, blank=True, default="", verbose_name=_("备注"))
+
+    class Meta:
+        verbose_name = _("仪器出入库记录")
+        verbose_name_plural = verbose_name
+        ordering = ["-performed_at", "-id"]
+
+    def __str__(self):
+        return f"{self.instrument.code} {self.event_type} @ {self.performed_at:%Y-%m-%d %H:%M}"

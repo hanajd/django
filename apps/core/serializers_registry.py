@@ -92,6 +92,12 @@ class BizDeviceSerializer(serializers.ModelSerializer):
 
 
 class InstrumentCatalogSerializer(serializers.ModelSerializer):
+    inventoryStatus = serializers.SerializerMethodField()
+    checkoutProjectId = serializers.IntegerField(
+        source="checkout_project_id", read_only=True, allow_null=True
+    )
+    checkoutProjectCode = serializers.SerializerMethodField()
+
     class Meta:
         model = InstrumentCatalog
         fields = (
@@ -104,10 +110,21 @@ class InstrumentCatalogSerializer(serializers.ModelSerializer):
             "certificate_valid_until",
             "remarks",
             "is_active",
+            "inventoryStatus",
+            "checkoutProjectId",
+            "checkoutProjectCode",
             "created_at",
             "updated_at",
         )
         read_only_fields = ("created_at", "updated_at")
+
+    def get_inventoryStatus(self, obj) -> str:
+        return "in_stock" if obj.checkout_project_id is None else "checked_out"
+
+    def get_checkoutProjectCode(self, obj) -> str | None:
+        if obj.checkout_project_id and obj.checkout_project:
+            return obj.checkout_project.code
+        return None
 
 
 class InspectionCaseSerializer(serializers.ModelSerializer):

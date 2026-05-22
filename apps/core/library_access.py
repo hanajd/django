@@ -268,6 +268,43 @@ def _user_perm_overrides(user) -> Dict[str, bool]:
 # 未配置 party_a_demo_restrictions 时，仍按登录名识别演示类账号（默认 seed 为 test；保留 party_a_demo 兼容旧库）
 _PARTY_A_DEMO_LEGACY_USERNAMES = frozenset({"test", "party_a_demo"})
 
+def library_user_is_test_peer_username(username: str) -> bool:
+    """演示沙箱同组账号：test、party_a_demo、test-1 … test-99。"""
+    un = (username or "").strip().lower()
+    if un in _PARTY_A_DEMO_LEGACY_USERNAMES:
+        return True
+    if not un.startswith("test-"):
+        return False
+    suffix = un[5:]
+    return suffix.isdigit() and 1 <= int(suffix) <= 99
+
+
+def library_user_is_test_peer(user) -> bool:
+    if not getattr(user, "is_authenticated", False):
+        return False
+    return library_user_is_test_peer_username(getattr(user, "username", "") or "")
+
+
+def library_test_peer_user_ids() -> frozenset[int]:
+    """同组 test 账号主键（用于互相维护任务模板与模板文件）。"""
+    from django.contrib.auth import get_user_model
+
+    User = get_user_model()
+    ids: list[int] = []
+    for row in User.objects.filter(is_active=True).only("id", "username"):
+        if library_user_is_test_peer_username(row.username):
+            ids.append(int(row.pk))
+    return frozenset(ids)
+
+
+def library_user_may_access_instrument_database(user) -> bool:
+    """检测仪器台账：管理员或具备业务登记的 test 沙箱账号。"""
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if role_has(user, "perm_manage_users"):
+        return True
+    return library_user_is_test_peer(user) and role_has(user, "perm_biz_registry")
+
 
 def library_user_has_party_a_demo_restrictions(user) -> bool:
     """
@@ -285,7 +322,7 @@ def library_user_has_party_a_demo_restrictions(user) -> bool:
     if isinstance(raw, dict) and raw.get("party_a_demo_restrictions") is True:
         return True
     un = (getattr(user, "username", "") or "").strip().lower()
-    return un in _PARTY_A_DEMO_LEGACY_USERNAMES
+    return library_user_is_test_peer_username(un)
 
 
 def _role_code(user) -> str:
@@ -508,11 +545,14 @@ def library_user_may_edit_library_task(user, task) -> bool:
     tmpl_write = role_has(user, "perm_library_task_templates_write")
     if not assign and not tmpl_write:
         return False
+    creator_id = getattr(task, "created_by_id", None)
+    if library_user_is_test_peer(user) and creator_id in library_test_peer_user_ids():
+        return True
     if assign:
         if not library_user_is_template_editor(user):
             return True
-        return getattr(task, "created_by_id", None) == user.id
-    return getattr(task, "created_by_id", None) == user.id
+        return creator_id == user.id
+    return creator_id == user.id
 
 
 def library_scope_own_files_only(user) -> bool:
@@ -725,6 +765,8 @@ def library_file_access_allowed(user, lf: LibraryFile) -> bool:
             if library_template_granted_via_assigned_projects_tasks(user, lf):
                 return True
     if library_project_file_granted_via_task_assignment(user, lf):
+        return True
+    if library_user_is_test_peer(user) and lf.created_by_id in library_test_peer_user_ids():
         return True
     if lf.created_by_id is None:
         return False

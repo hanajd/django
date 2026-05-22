@@ -80,7 +80,7 @@ steps[]                    # 办理步骤（通常 1 步「检测原始记录」
 | `submitPath` | `instruments.qualityControl` / `instruments.radiationProtection` |
 | `submitBucket` | `instruments` |
 
-该章 `capabilities` 含 `instrumentSelect`。根级 `instrumentBindings` 与任务模板独立绑定对齐（后台分别选质控仪器、防护仪器，非按勾选顺序）：
+该章 `capabilities` 含 `instrumentSelect`。根级 `instrumentBindings` 与任务模板独立绑定对齐（后台分别选质控一套、防护一套仪器，各可多选，非按勾选顺序）：
 
 ```json
 "instrumentBindings": [
@@ -90,7 +90,8 @@ steps[]                    # 办理步骤（通常 1 步「检测原始记录」
     "label": "主要检测仪器_质量控制（性能）检测",
     "submitPath": "instruments.qualityControl",
     "registrySlot": 1,
-    "defaultInstrumentId": "12"
+    "defaultInstrumentId": "12",
+    "defaultInstrumentIds": ["12", "34"]
   },
   {
     "scope": "radiationProtection",
@@ -98,7 +99,8 @@ steps[]                    # 办理步骤（通常 1 步「检测原始记录」
     "label": "主要检测仪器_工作场所放射防护检测",
     "submitPath": "instruments.radiationProtection",
     "registrySlot": 2,
-    "defaultInstrumentId": "15"
+    "defaultInstrumentId": "15",
+    "defaultInstrumentIds": ["15", "16"]
   }
 ]
 ```

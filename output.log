@@ -45501,3 +45501,720 @@ Not Found: /favicon.ico
 [22/May/2026 13:37:38] "GET /files/?tab=template&fl_path=ot-none/t-none HTTP/1.1" 200 12775
 [22/May/2026 13:37:45] "GET /files/1554/preview/ HTTP/1.1" 200 19649
 [22/May/2026 13:37:50] "GET /files/1554/download/ HTTP/1.1" 200 15337
+[22/May/2026 14:14:43] "GET /files/task-management/?fl_path=f-7 HTTP/1.1" 200 11970
+[22/May/2026 14:14:44] "GET /files/task-management/?fl_path=f-5 HTTP/1.1" 200 12375
+[22/May/2026 14:14:45] "GET /files/task-management/?fl_path=f-5/f-8 HTTP/1.1" 304 0
+[22/May/2026 14:14:46] "GET /files/task-management/?fl_path=f-5/f-8/r-14&manage_task=14 HTTP/1.1" 200 13033
+[22/May/2026 14:14:53] "GET /files/task-management/?manage_task=14&fl_path=f-5/f-8/r-14&edit=1 HTTP/1.1" 200 18432
+/home/raydose/Projects/django/utils/task_bound_instruments.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 13:30:39
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 14:17:28
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 14:17:33
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 14:17:35
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/models.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 14:17:37
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 14:17:41
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/api/inspection_report_make.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 14:17:44
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/models.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 14:17:55
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 14:22:34
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 1 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:22:57
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 1 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:23:04
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 1 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:23:33
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 1 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:23:35
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 1 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:23:39
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 1 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:23:53
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 1 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:24:02
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/serializers_registry.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 1 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:24:20
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/models.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 1 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:24:31
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/models.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 1 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:30:52
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/api/inspection_report_make.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 1 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:30:54
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/api/inspection_report_make.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 2 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:31:21
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/api/inspection_report_make.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 2 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:31:23
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/api/inspection_views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 2 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:31:28
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/api/inspection_views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 2 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:31:45
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/api/inspection_views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 2 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:31:48
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 2 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:32:03
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 2 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:32:17
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 2 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:32:24
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 2 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:32:27
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 2 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:32:36
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 2 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:35:26
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+[22/May/2026 14:44:17] "GET /files/task-management/?manage_task=14&fl_path=f-5/f-8/r-14&edit=1 HTTP/1.1" 200 20828
+[22/May/2026 14:47:09] "GET /logout/ HTTP/1.1" 302 0
+[22/May/2026 14:47:10] "GET /login/ HTTP/1.1" 200 1994
+[22/May/2026 14:47:11] "POST /login/ HTTP/1.1" 302 0
+[22/May/2026 14:47:11] "GET / HTTP/1.1" 200 4467
+[22/May/2026 14:47:13] "GET /database/devices/ HTTP/1.1" 200 9148
+[22/May/2026 14:55:08] "GET /logout/ HTTP/1.1" 302 0
+[22/May/2026 14:55:08] "GET /login/ HTTP/1.1" 200 1912
+[22/May/2026 14:55:09] "POST /login/ HTTP/1.1" 302 0
+[22/May/2026 14:55:09] "GET / HTTP/1.1" 200 11070
+[22/May/2026 14:55:11] "GET /files/task-management/ HTTP/1.1" 200 12109
+[22/May/2026 14:57:05] "GET /files/task-management/?edit=1 HTTP/1.1" 200 13780
+[22/May/2026 14:57:09] "GET /files/task-management/?edit=1&fl_path=f-5/f-9&edit=1 HTTP/1.1" 200 13767
+[22/May/2026 15:00:44] "GET /files/task-management/?edit=1&fl_path=f-5/f-9&edit=1 HTTP/1.1" 200 13705
+[22/May/2026 15:00:45] "GET /files/task-management/?edit=1&fl_path=f-5&edit=1 HTTP/1.1" 200 14187
+[22/May/2026 15:00:49] "GET /files/task-management/?edit=1&fl_path=f-5/f-8&edit=1 HTTP/1.1" 200 13946
+[22/May/2026 15:01:05] "GET /files/task-management/?edit=1&fl_path=f-5/f-9&edit=1 HTTP/1.1" 200 13770
+[22/May/2026 15:01:07] "GET /files/task-management/?edit=1&fl_path=f-5/f-8&edit=1 HTTP/1.1" 200 13879
+[22/May/2026 15:01:07] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14&manage_task=14&edit=1 HTTP/1.1" 200 20804
+[22/May/2026 15:01:08] "GET /files/task-management/?edit=1&fl_path=f-5/f-8&edit=1 HTTP/1.1" 200 13857
+[22/May/2026 15:01:09] "GET /files/task-management/?fl_path=f-5/f-8&new_report=1&edit=1 HTTP/1.1" 200 13720
+[22/May/2026 15:01:25] "GET /files/task-management/?edit=1&fl_path=f-5/f-8&edit=1 HTTP/1.1" 200 13911
+[22/May/2026 15:01:27] "GET /files/task-management/?edit=1&fl_path=f-5/f-8&edit=1 HTTP/1.1" 200 13883
+[22/May/2026 15:02:30] "GET /files/task-management/?fl_path=f-5/f-8&new_report=1&edit=1 HTTP/1.1" 200 13790
+[22/May/2026 15:05:18] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14&manage_task=14&edit=1 HTTP/1.1" 200 20831
+[22/May/2026 15:09:33] "GET /files/task-management/?edit=1&fl_path=f-5/f-8&edit=1 HTTP/1.1" 200 13899
+[22/May/2026 15:09:34] "GET /files/task-management/?fl_path=f-5/f-8&new_report=1&edit=1 HTTP/1.1" 200 13729
+[22/May/2026 15:12:57] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14&manage_task=14&edit=1 HTTP/1.1" 200 20769
+[22/May/2026 15:17:15] "POST /files/task-management/?edit=1&fl_path=f-5/f-8/r-14&manage_task=14&edit=1 HTTP/1.1" 302 0
+[22/May/2026 15:17:15] "GET /files/task-management/?manage_task=14&edit=1&fl_path=f-5/f-8/r-14 HTTP/1.1" 200 20902
+[22/May/2026 15:17:20] "POST /files/task-management/?manage_task=14&edit=1&fl_path=f-5/f-8/r-14 HTTP/1.1" 302 0
+[22/May/2026 15:17:20] "GET /files/task-management/?manage_task=14&edit=1&fl_path=f-5/f-8/r-14 HTTP/1.1" 200 21052
+[22/May/2026 15:17:25] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14&manage_task=14&edit=1 HTTP/1.1" 200 20934
+[22/May/2026 15:17:33] "POST /files/task-management/?edit=1&fl_path=f-5/f-8/r-14&manage_task=14&edit=1 HTTP/1.1" 302 0
+[22/May/2026 15:17:33] "GET /files/task-management/?manage_task=14&edit=1&fl_path=f-5/f-8/r-14 HTTP/1.1" 200 21008
+[22/May/2026 15:17:45] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14&manage_task=14&edit=1 HTTP/1.1" 200 20877
+[22/May/2026 15:17:54] "GET /files/task-management/?edit=1&fl_path=f-5/f-8&edit=1 HTTP/1.1" 200 13903
+[22/May/2026 15:17:55] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14&manage_task=14&edit=1 HTTP/1.1" 200 20902
+[22/May/2026 15:17:59] "GET /files/task-management/?fl_path=f-5/f-8/r-14&manage_task=14&new_site=1&edit=1 HTTP/1.1" 200 13765
+[22/May/2026 15:18:57] "POST /files/task-management/?fl_path=f-5/f-8/r-14&manage_task=14&new_site=1&edit=1 HTTP/1.1" 302 0
+[22/May/2026 15:18:57] "GET /files/task-management/?fl_path=f-0/r-14/s-15&manage_task=15&edit=1 HTTP/1.1" 200 21091
+[22/May/2026 15:19:00] "GET /files/task-management/?edit=1&fl_path=f-5&edit=1 HTTP/1.1" 200 14313
+[22/May/2026 15:19:01] "GET /files/task-management/?edit=1&fl_path=f-5/f-8&edit=1 HTTP/1.1" 200 14057
+[22/May/2026 15:19:02] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14&manage_task=14&edit=1 HTTP/1.1" 200 21329
+[22/May/2026 15:19:03] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14/s-15&manage_task=15&edit=1 HTTP/1.1" 200 21046
+[22/May/2026 15:19:10] "POST /files/task-management/?edit=1&fl_path=f-5/f-8/r-14/s-15&manage_task=15&edit=1 HTTP/1.1" 302 0
+[22/May/2026 15:19:10] "GET /files/task-management/?manage_task=15&edit=1&fl_path=f-5/f-8/r-14/s-15 HTTP/1.1" 200 21209
+[22/May/2026 15:19:25] "POST /files/task-management/?manage_task=15&edit=1&fl_path=f-5/f-8/r-14/s-15 HTTP/1.1" 302 0
+[22/May/2026 15:19:25] "GET /files/task-management/?manage_task=15&edit=1&fl_path=f-5/f-8/r-14/s-15 HTTP/1.1" 200 21207
+[22/May/2026 15:19:27] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14&manage_task=14&edit=1 HTTP/1.1" 200 21286
+[22/May/2026 15:19:28] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14/s-15&manage_task=15&edit=1 HTTP/1.1" 200 21111
+[22/May/2026 15:19:29] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14&manage_task=14&edit=1 HTTP/1.1" 200 21300
+[22/May/2026 15:19:30] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14/s-15&manage_task=15&edit=1 HTTP/1.1" 200 21102
+[22/May/2026 15:19:34] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14&manage_task=14&edit=1 HTTP/1.1" 200 21349
+[22/May/2026 15:23:33] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14/s-15&manage_task=15&edit=1 HTTP/1.1" 200 21176
+[22/May/2026 15:26:40] "GET /files/htmlpdf/ HTTP/1.1" 200 12370
+[22/May/2026 15:26:41] "GET /files/htmlpdf/?fl_path=f-5 HTTP/1.1" 200 12581
+[22/May/2026 15:26:42] "GET /files/htmlpdf/?fl_path=f-5/f-8 HTTP/1.1" 200 12391
+[22/May/2026 15:26:43] "GET /files/htmlpdf/?fl_path=f-5/f-8/r-14 HTTP/1.1" 200 13021
+/home/raydose/Projects/django/apps/core/library_access.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+
+You have 2 unapplied migration(s). Your project may not work properly until you apply the migrations for app(s): core.
+Run 'python manage.py migrate' to apply them.
+May 22, 2026 - 14:35:28
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/library_access.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 15:27:59
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/library_access.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 15:28:01
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/library_access.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 15:28:02
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 15:28:08
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 15:28:12
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 15:28:14
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 15:28:27
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 15:28:33
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 15:28:35
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 15:28:37
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 15:28:40
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 15:29:33
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+[22/May/2026 15:29:36] "GET /files/task-management/?manage_task=14&fl_path=f-5/f-8/r-14 HTTP/1.1" 200 17302
+[22/May/2026 15:29:38] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14/s-15&manage_task=15&edit=1 HTTP/1.1" 200 20997
+/home/raydose/Projects/django/apps/core/context_processors.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 15:29:35
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+[22/May/2026 15:29:55] "POST /files/task-management/?edit=1&fl_path=f-5/f-8/r-14/s-15&manage_task=15&edit=1 HTTP/1.1" 302 0
+[22/May/2026 15:29:55] "GET /files/task-management/?manage_task=15&edit=1&fl_path=f-5/f-8/r-14/s-15 HTTP/1.1" 200 20915
+[22/May/2026 15:29:59] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14&manage_task=14&edit=1 HTTP/1.1" 200 17332
+[22/May/2026 15:30:00] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14/s-15&manage_task=15&edit=1 HTTP/1.1" 200 20825
+[22/May/2026 15:30:03] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14&manage_task=14&edit=1 HTTP/1.1" 200 17354
+[22/May/2026 15:30:04] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14/s-15&manage_task=15&edit=1 HTTP/1.1" 200 20855
+/home/raydose/Projects/django/apps/core/library_access.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 15:29:52
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 15:30:05
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 15:30:11
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 15:33:44
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 15:33:46
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 15:33:48
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+[22/May/2026 15:34:42] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14/s-15&manage_task=15&edit=1 HTTP/1.1" 200 19777
+[22/May/2026 15:35:02] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14&manage_task=14&edit=1 HTTP/1.1" 200 16220
+[22/May/2026 15:35:04] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14/s-15&manage_task=15&edit=1 HTTP/1.1" 200 19800
+[22/May/2026 15:35:05] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14&manage_task=14&edit=1 HTTP/1.1" 200 16203
+/home/raydose/Projects/django/apps/core/views.py changed, reloading.
+Performing system checks...
+
+System check identified no issues (0 silenced).
+May 22, 2026 - 15:33:53
+Django version 4.2.16, using settings 'tablet_backend.settings'
+Starting development server at http://0.0.0.0:11223/
+Quit the server with CONTROL-C.
+
+Watching for file changes with StatReloader
+[22/May/2026 15:35:06] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14/s-15&manage_task=15&edit=1 HTTP/1.1" 200 19690
+[22/May/2026 15:35:07] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14&manage_task=14&edit=1 HTTP/1.1" 200 16207
+[22/May/2026 15:35:08] "GET /files/task-management/?edit=1&fl_path=f-5/f-8/r-14/s-15&manage_task=15&edit=1 HTTP/1.1" 200 19737
+[22/May/2026 15:35:11] "GET /files/htmlpdf/ HTTP/1.1" 200 12371
+[22/May/2026 15:35:19] "GET /files/htmlpdf/?fl_path=f-5 HTTP/1.1" 200 12578
+[22/May/2026 15:35:20] "GET /files/htmlpdf/?fl_path=f-5/f-8 HTTP/1.1" 200 12338
+[22/May/2026 15:35:21] "GET /files/htmlpdf/?fl_path=f-5/f-8/r-14 HTTP/1.1" 200 12988
+[22/May/2026 15:36:54] "GET /files/htmlpdf/editor/1556/?return_manage_task=15&return_fl_path=f-5/f-8/r-14/s-15 HTTP/1.1" 200 47237
+[22/May/2026 15:36:55] "POST /files/htmlpdf/api/use-template-pdf/ HTTP/1.1" 200 414
+[22/May/2026 15:36:55] "GET /files/htmlpdf/api/template-jsons/ HTTP/1.1" 200 341
+[22/May/2026 15:36:55] "GET /files/htmlpdf/template/1556/ HTTP/1.1" 200 1192874
+[22/May/2026 15:36:55] "POST /files/htmlpdf/api/report-task-context/ HTTP/1.1" 200 447
+Unauthorized: /api/v2/auth/login/
+[22/May/2026 15:38:21] "POST /api/v2/auth/login/ HTTP/1.1" 401 179
+[22/May/2026 15:38:21] "POST /api/v2/auth/token/refresh/ HTTP/1.1" 200 241
+[22/May/2026 15:38:21] "POST /api/v2/auth/login/ HTTP/1.1" 200 524
+[22/May/2026 15:38:22] "GET /api/v2/inspections/projects HTTP/1.1" 200 313
+[22/May/2026 15:38:23] "GET /api/v2/inspections/projects/260005/tasks HTTP/1.1" 200 808
+[22/May/2026 15:38:27] "GET /api/v2/inspections/projects/260005/tasks/01/export-frontend-json HTTP/1.1" 200 8040
+[22/May/2026 15:38:33] "GET /api/v2/inspections/projects/260005/tasks/01/export-frontend-json HTTP/1.1" 200 8046
+[22/May/2026 15:40:56] "GET /api/v2/inspections/projects HTTP/1.1" 200 322
+[22/May/2026 15:40:56] "GET /api/v2/inspections/projects/260005/tasks HTTP/1.1" 200 831
+[22/May/2026 15:40:59] "GET /api/v2/inspections/projects/260005/tasks/01/export-frontend-json HTTP/1.1" 200 8058
+[22/May/2026 15:42:00] "POST /files/htmlpdf/api/auto-red-text-boxes/ HTTP/1.1" 200 26324
+[22/May/2026 15:42:01] "POST /files/htmlpdf/api/assign-template-sections/ HTTP/1.1" 200 28164
+[22/May/2026 15:47:24] "POST /api/v2/auth/login/ HTTP/1.1" 200 497
+[22/May/2026 15:47:25] "GET /api/v2/inspections/projects HTTP/1.1" 200 300
+[22/May/2026 15:47:26] "GET /api/v2/inspections/projects/260005/tasks HTTP/1.1" 200 856
+[22/May/2026 15:47:30] "GET /api/v2/inspections/projects/260005/tasks/01/export-frontend-json HTTP/1.1" 200 8047
+[22/May/2026 15:47:36] "GET /files/task-management/?manage_task=12&fl_path=f-1/f-4/r-11/s-12 HTTP/1.1" 200 20349
+[22/May/2026 15:48:44] "GET /logout/ HTTP/1.1" 302 0
+[22/May/2026 15:48:44] "GET /login/ HTTP/1.1" 200 1927
+[22/May/2026 15:48:46] "POST /login/ HTTP/1.1" 302 0
+[22/May/2026 15:48:46] "GET / HTTP/1.1" 200 4472
+[22/May/2026 15:48:47] "GET /users/ HTTP/1.1" 200 3987
+[22/May/2026 15:50:30] "POST /api/v2/auth/login/ HTTP/1.1" 200 515
+[22/May/2026 15:50:31] "GET /api/v2/inspections/projects HTTP/1.1" 200 322
+[22/May/2026 15:50:33] "GET /api/v2/inspections/projects/260005/tasks HTTP/1.1" 200 853
+[22/May/2026 15:50:37] "GET /api/v2/inspections/projects/260005/tasks/01/export-frontend-json HTTP/1.1" 200 8008
+[22/May/2026 15:50:44] "GET /api/v2/inspections/projects/260005/tasks/01/export-frontend-json HTTP/1.1" 200 8035
+[22/May/2026 15:53:54] "GET /users/ HTTP/1.1" 200 4209
+[22/May/2026 15:54:06] "GET /users/13/edit/ HTTP/1.1" 200 5403
+[22/May/2026 15:54:48] "GET /logout/ HTTP/1.1" 302 0
+[22/May/2026 15:54:48] "GET /login/ HTTP/1.1" 200 1913
+[22/May/2026 15:54:54] "POST /login/ HTTP/1.1" 302 0
+[22/May/2026 15:54:54] "GET / HTTP/1.1" 200 11147
+[22/May/2026 15:54:56] "GET /files/hospital-info/ HTTP/1.1" 200 11802
+[22/May/2026 15:54:56] "GET /files/task-management/ HTTP/1.1" 200 11807
+[22/May/2026 15:54:57] "GET /files/htmlpdf/ HTTP/1.1" 200 12356
+[22/May/2026 15:54:58] "GET /files/projects/ HTTP/1.1" 200 15244
+[22/May/2026 15:54:59] "GET /files/?tab=ocr HTTP/1.1" 200 18222
+[22/May/2026 15:55:02] "GET /files/htmlpdf/ HTTP/1.1" 304 0

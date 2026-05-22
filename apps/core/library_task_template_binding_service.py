@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from apps.core.library_access import library_user_may_edit_library_task
@@ -246,6 +247,80 @@ def replace_task_template_file_binding(
         "replaced_file_ids": replaced_ids,
         "bound_file_id": new_file.pk,
     }
+
+
+def collect_task_template_unbind_ids(
+    task: LibraryTask,
+    file_id: int,
+    *,
+    include_paired: bool = True,
+) -> tuple[list[int], str]:
+    """
+    解析要从任务解除绑定的文件 id。
+    include_paired：解除 PDF 时同时解除同名 stem 的主 JSON（及反向含 PDF）。
+    """
+    lf = (
+        LibraryFile.objects.filter(
+            pk=file_id,
+            category=LibraryFile.CATEGORY_TEMPLATE,
+            library_tasks=task,
+        )
+        .first()
+    )
+    if lf is None:
+        return [], ""
+
+    ids = [int(lf.pk)]
+    stem = Path(lf.original_name or "").stem or (lf.original_name or str(lf.pk))
+
+    if not include_paired or is_auxiliary_template_json_file(lf):
+        return ids, stem
+
+    name_low = (lf.original_name or "").lower()
+    for other in task.library_files.filter(category=LibraryFile.CATEGORY_TEMPLATE):
+        if other.pk == lf.pk:
+            continue
+        if Path(other.original_name or "").stem != Path(lf.original_name or "").stem:
+            continue
+        other_low = (other.original_name or "").lower()
+        if name_low.endswith(".pdf") and other_low.endswith(".json"):
+            if not is_auxiliary_template_json_file(other):
+                ids.append(int(other.pk))
+        elif name_low.endswith(".json") and other_low.endswith(".pdf"):
+            ids.append(int(other.pk))
+
+    return list(dict.fromkeys(ids)), stem
+
+
+def unbind_template_files_from_task(
+    task: LibraryTask,
+    file_id: int,
+    *,
+    user,
+    include_paired: bool = True,
+) -> dict[str, Any]:
+    """从任务模板解除文件绑定（不删除文件库中的文件）。"""
+    if not library_user_may_edit_library_task(user, task):
+        return {"ok": False, "error": "无权维护该任务模板"}
+    ids, stem = collect_task_template_unbind_ids(
+        task, file_id, include_paired=include_paired
+    )
+    if not ids:
+        return {"ok": False, "error": "该文件未绑定到此任务模板"}
+
+    names = list(
+        LibraryFile.objects.filter(pk__in=ids).values_list("original_name", flat=True)
+    )
+    detach_files_from_tasks(ids, [task.pk])
+    project_ids = list(task.projects.values_list("id", flat=True))
+    if project_ids:
+        detach_files_from_projects(ids, project_ids)
+
+    if len(ids) > 1:
+        msg = f"已解除绑定「{stem}」下的 {len(ids)} 个文件（{'、'.join(names)}）"
+    else:
+        msg = f"已解除绑定：{names[0] if names else stem}"
+    return {"ok": True, "detached_ids": ids, "message": msg}
 
 
 def restore_task_template_from_history(*, history_id: int, user) -> dict[str, Any]:

@@ -14,8 +14,14 @@
 
 示例::
 
-    # 仅用户（含旧名 party_a_demo → test）
-    python manage.py ensure_party_a_demo --username test --password '强密码'
+    # 仅主账号 test
+    python manage.py ensure_party_a_demo --username test --password '主账号密码'
+
+    # 主账号 test + 五个同伴（test-1 … test-5，密码分别为 password111 … password555）
+    python manage.py ensure_party_a_demo --username test --password '主账号密码' --provision-test-peers
+
+    # 只创建/更新 test-1 … test-5（不改 test 主账号密码）
+    python manage.py ensure_party_a_demo --provision-test-peers --skip-main-user
 
     # 用户 + 关联演示项目（不自动分配任务；登录后在项目「分配」页自行分配）
     python manage.py ensure_party_a_demo \\
@@ -105,6 +111,24 @@ class Command(BaseCommand):
                 "写入该用户在本项目上的任务分配并同步流程岗位（旧版一键行为）。默认关闭，便于在网页「分配」中自行体验。"
             ),
         )
+        parser.add_argument(
+            "--provision-test-peers",
+            action="store_true",
+            help=(
+                "额外创建 test-1 … test-5，权限与主账号相同，可互相编辑任务模板；"
+                "默认密码为 password111、password222 … password555（可用 --peer-password-prefix 改前缀）。"
+            ),
+        )
+        parser.add_argument(
+            "--peer-password-prefix",
+            default="password",
+            help="与 --provision-test-peers 联用：同伴密码为 {前缀}111、{前缀}222 …（默认前缀 password）",
+        )
+        parser.add_argument(
+            "--skip-main-user",
+            action="store_true",
+            help="与 --provision-test-peers 联用：不创建/更新 --username 主账号，仅处理 test-1 … test-5",
+        )
 
     def handle(self, *args, **options):
         username = (options["username"] or "").strip()
@@ -114,10 +138,38 @@ class Command(BaseCommand):
         create_if_missing = bool(options.get("create_project_if_missing"))
         project_name = (options.get("project_name") or "").strip()
         assign_project_tasks = bool(options.get("assign_project_tasks"))
+        provision_test_peers = bool(options.get("provision_test_peers"))
+        peer_password_prefix = (options.get("peer_password_prefix") or "password").strip()
+        skip_main_user = bool(options.get("skip_main_user"))
 
-        if not username:
-            self.stderr.write(self.style.ERROR("username 不能为空"))
+        if not username and not (provision_test_peers and skip_main_user):
+            self.stderr.write(self.style.ERROR("username 不能为空（或加 --provision-test-peers --skip-main-user 仅创建同伴）"))
             return
+        if skip_main_user and not provision_test_peers:
+            self.stderr.write(self.style.ERROR("--skip-main-user 须与 --provision-test-peers 一起使用"))
+            return
+
+        def _default_peer_password(index: int) -> str:
+            """test-1 → password111，test-2 → password222，…"""
+            suffix = str(index * 111)
+            return f"{peer_password_prefix}{suffix}"
+
+        def _upsert_peer(uname: str, peer_password: str) -> None:
+            peer, _ = User.objects.get_or_create(
+                username=uname,
+                defaults={"email": email, "is_staff": False, "is_superuser": False},
+            )
+            peer.is_staff = False
+            peer.is_superuser = False
+            peer.set_password(peer_password)
+            peer.save()
+            pprof, _ = UserProfile.objects.get_or_create(user=peer)
+            pmerged = dict(pprof.perm_overrides) if isinstance(pprof.perm_overrides, dict) else {}
+            pmerged.update(_PARTY_A_OVERRIDES)
+            pprof.role = role
+            pprof.perm_overrides = pmerged
+            pprof.save(update_fields=["role", "perm_overrides", "updated_at"])
+
         if create_if_missing and not project_code:
             self.stdout.write(
                 self.style.WARNING("已忽略 --create-project-if-missing（未提供 --project-code）。")
@@ -158,42 +210,72 @@ class Command(BaseCommand):
             )
             return
 
-        user, _ = User.objects.get_or_create(
-            username=username,
-            defaults={
-                "email": email,
-                "is_staff": False,
-                "is_superuser": False,
-            },
-        )
-        if email and user.email != email:
-            user.email = email
-        user.is_staff = False
-        user.is_superuser = False
-        user.set_password(password)
-        user.save()
+        user = None
+        if not skip_main_user:
+            user, _ = User.objects.get_or_create(
+                username=username,
+                defaults={
+                    "email": email,
+                    "is_staff": False,
+                    "is_superuser": False,
+                },
+            )
+            if email and user.email != email:
+                user.email = email
+            user.is_staff = False
+            user.is_superuser = False
+            user.set_password(password)
+            user.save()
 
-        prof, _ = UserProfile.objects.get_or_create(user=user)
-        merged = dict(prof.perm_overrides) if isinstance(prof.perm_overrides, dict) else {}
-        merged.update(_PARTY_A_OVERRIDES)
-        prof.role = role
-        prof.perm_overrides = merged
-        prof.save(update_fields=["role", "perm_overrides", "updated_at"])
+            prof, _ = UserProfile.objects.get_or_create(user=user)
+            merged = dict(prof.perm_overrides) if isinstance(prof.perm_overrides, dict) else {}
+            merged.update(_PARTY_A_OVERRIDES)
+            prof.role = role
+            prof.perm_overrides = merged
+            prof.save(update_fields=["role", "perm_overrides", "updated_at"])
 
-        if not project_code:
+        if provision_test_peers:
+            peer_lines: list[str] = []
+            for i in range(1, 6):
+                uname = f"test-{i}"
+                pw = _default_peer_password(i)
+                _upsert_peer(uname, pw)
+                peer_lines.append(f"  {uname} / {pw}")
             self.stdout.write(
                 self.style.SUCCESS(
-                    f"用户「{username}」已更新（角色 {_BASE_ROLE_CODE}、演示权限覆盖已写入）。"
-                    "未提供 --project-code：已跳过项目查找、任务分配与流程岗位同步。"
-                    "需要绑定演示项目时请再次执行并加上 --project-code。"
+                    "已创建/更新 test-1 … test-5（与 test 相同权限，可互相维护任务模板）：\n"
+                    + "\n".join(peer_lines)
                 )
             )
-            if password == "test_change_me":
-                self.stdout.write(
-                    self.style.WARNING(
-                        "当前为默认密码，请务必使用 --password 指定强密码并在交付后督促甲方修改。"
+
+        if skip_main_user:
+            if not project_code:
+                return
+            if user is None:
+                user = User.objects.filter(username=username).first()
+            if user is None:
+                self.stderr.write(
+                    self.style.ERROR(
+                        f"未找到主账号「{username}」，绑定项目请先创建主账号或去掉 --skip-main-user"
                     )
                 )
+                return
+
+        if not project_code:
+            if not skip_main_user:
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f"用户「{username}」已更新（角色 {_BASE_ROLE_CODE}、演示权限覆盖已写入）。"
+                        "未提供 --project-code：已跳过项目查找、任务分配与流程岗位同步。"
+                        "需要绑定演示项目时请再次执行并加上 --project-code。"
+                    )
+                )
+                if password == "test_change_me":
+                    self.stdout.write(
+                        self.style.WARNING(
+                            "当前为默认密码，请务必使用 --password 指定强密码并在交付后督促甲方修改。"
+                        )
+                    )
             return
 
         project = LibraryProject.objects.filter(code=project_code).first()

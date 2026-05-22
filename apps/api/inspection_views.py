@@ -364,7 +364,7 @@ def _inject_frontend_payload_defaults(frontend_obj: dict, payload: dict) -> dict
 
 
 def _inject_instruments_root_into_frontend_export(
-    frontend_obj: dict, payload: dict, *, task_obj=None
+    frontend_obj: dict, payload: dict, *, task_obj=None, project_obj=None
 ) -> dict:
     """
     导出给 App 的前端 JSON 根级带上检测仪器初值：
@@ -374,7 +374,9 @@ def _inject_instruments_root_into_frontend_export(
     if not isinstance(frontend_obj, dict):
         return frontend_obj
     frontend_obj.pop("instrumentCatalogOptions", None)
-    bundle = build_instruments_root_for_frontend_export(task_obj=task_obj, payload=payload)
+    bundle = build_instruments_root_for_frontend_export(
+        task_obj=task_obj, project_obj=project_obj, payload=payload
+    )
     frontend_obj.update(bundle)
     return frontend_obj
 
@@ -1595,7 +1597,9 @@ class InspectionTaskFrontendJsonExportAPIView(_InspectionTaskAccessMixin, APIVie
                 submission.updated_at_remote.isoformat() if submission.updated_at_remote else now_iso
             )
 
-        payload = merge_task_template_bound_instruments_into_payload(payload, task_obj)
+        payload = merge_task_template_bound_instruments_into_payload(
+            payload, task_obj, project_obj=project
+        )
 
         ph_map_id = (
             (request.GET.get("placeholderMapId") or request.GET.get("placeholder_map_id") or "").strip() or None
@@ -1656,7 +1660,9 @@ class InspectionTaskFrontendJsonExportAPIView(_InspectionTaskAccessMixin, APIVie
             inspected_display_no=display_inspected_no_for_fill(case, project, task_no),
         )
         frontend_obj = _inject_frontend_payload_defaults(frontend_obj, payload)
-        frontend_obj = _inject_instruments_root_into_frontend_export(frontend_obj, payload, task_obj=task_obj)
+        frontend_obj = _inject_instruments_root_into_frontend_export(
+            frontend_obj, payload, task_obj=task_obj, project_obj=project
+        )
         # 剥坐标与编辑器元数据；移动端默认再压成运行态 compact JSON
         frontend_obj = enrich_frontend_steps_rect_from_pdf_fields(frontend_obj, filled_fields)
 
