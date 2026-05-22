@@ -1541,7 +1541,7 @@ class InspectionProjectTaskListAPIView(APIView):
 
 
 class InspectionTaskFrontendJsonExportAPIView(_InspectionTaskAccessMixin, APIView):
-    """按任务导出回填后的前端 JSON，并直接下载。"""
+    """按任务导出回填后的前端 JSON。默认运行态 compact JSON（?mode=editor 为调试附件）。"""
 
     permission_classes = [IsAuthenticated]
 
@@ -1657,19 +1657,30 @@ class InspectionTaskFrontendJsonExportAPIView(_InspectionTaskAccessMixin, APIVie
         )
         frontend_obj = _inject_frontend_payload_defaults(frontend_obj, payload)
         frontend_obj = _inject_instruments_root_into_frontend_export(frontend_obj, payload, task_obj=task_obj)
-        # 从 pdf.fields 补全根级 pdfBindings（表单 steps 不含坐标）
+        # 剥坐标与编辑器元数据；移动端默认再压成运行态 compact JSON
         frontend_obj = enrich_frontend_steps_rect_from_pdf_fields(frontend_obj, filled_fields)
-        ts = timezone.localtime().strftime("%Y%m%d%H%M%S")
-        filename = f"{task_no}_frontend_{ts}.json".replace("/", "_")
-        raw = json_std.dumps(frontend_obj, ensure_ascii=False, indent=2).encode("utf-8")
-        resp = FileResponse(
-            io.BytesIO(raw),
-            as_attachment=True,
-            filename=filename,
-            content_type="application/json",
+
+        export_mode = str(request.GET.get("mode") or request.GET.get("export_mode") or "runtime").strip().lower()
+        if export_mode == "editor":
+            ts = timezone.localtime().strftime("%Y%m%d%H%M%S")
+            filename = f"{task_no}_frontend_{ts}.json".replace("/", "_")
+            raw = json_std.dumps(frontend_obj, ensure_ascii=False, indent=2).encode("utf-8")
+            resp = FileResponse(
+                io.BytesIO(raw),
+                as_attachment=True,
+                filename=filename,
+                content_type="application/json",
+            )
+            resp["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
+            return resp
+
+        from utils.frontend_runtime_export import (
+            build_runtime_json_http_response,
+            finalize_runtime_frontend_export,
         )
-        resp["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
-        return resp
+
+        runtime_obj = finalize_runtime_frontend_export(frontend_obj)
+        return build_runtime_json_http_response(runtime_obj, request=request, task_no=task_no)
 
 
 class InspectionTaskManualExportReportAPIView(_InspectionTaskAccessMixin, APIView):

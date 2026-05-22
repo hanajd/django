@@ -1520,9 +1520,10 @@ def merge_task_template_bound_instruments_into_payload(payload: dict | None, tas
     out = dict(payload or {})
     if task_obj is None:
         return out
-    raw_ids = getattr(task_obj, "bound_instrument_ids", None) or []
-    if not isinstance(raw_ids, list):
-        raw_ids = []
+    from utils.task_bound_instruments import bound_instrument_ids_for_legacy_list, normalize_task_bound_instruments
+
+    binding = normalize_task_bound_instruments(getattr(task_obj, "bound_instrument_ids", None) or [])
+    raw_ids = bound_instrument_ids_for_legacy_list(binding)
     cur = out.get("instruments")
     if not isinstance(cur, list):
         cur = []
@@ -1589,8 +1590,25 @@ _INSTRUMENT_DD_MAX_SLOTS = 32
 _DOSE_RATE_UNIT_ENUM_SLUGS = frozenset({"mgypermin", "ugypermin", "ugypersec", "ngypersec"})
 
 
-def _instrument_slot_index_for_instrument_select_field(field_id: str) -> int | None:
-    """从 schema 字段 id 推断检测仪器槽位（1-based）；无法解析则返回 None。"""
+def _instrument_slot_index_for_instrument_select_field(field_id: str, field: dict | None = None) -> int | None:
+    """从 schema 字段 id / instrumentScope / submitPath 推断检测仪器槽位（1-based）。"""
+    if isinstance(field, dict):
+        scope = str(field.get("instrumentScope") or "").strip()
+        if scope == "qualityControl":
+            return 1
+        if scope == "radiationProtection":
+            return 2
+        try:
+            rs = int(field.get("registrySlot") or 0)
+            if rs > 0:
+                return rs
+        except (TypeError, ValueError):
+            pass
+        sp = str(field.get("submitPath") or "").strip()
+        if sp.endswith("instruments.qualityControl") or ".qualityControl" in sp:
+            return 1
+        if sp.endswith("instruments.radiationProtection") or ".radiationProtection" in sp:
+            return 2
     s = str(field_id or "").strip()
     if not s:
         return None
@@ -1638,7 +1656,7 @@ def _collect_instrument_slot_lines_from_steps_instrument_select(
         if str(fld.get("type") or "").lower() != "instrument_select":
             continue
         fid = str(fld.get("id") or "").strip()
-        slot = _instrument_slot_index_for_instrument_select_field(fid)
+        slot = _instrument_slot_index_for_instrument_select_field(fid, fld)
         if slot is None or slot < 1 or slot > _INSTRUMENT_DD_MAX_SLOTS:
             continue
         en = dd.get(f"instrument{slot}Enabled")
@@ -1703,11 +1721,11 @@ def _collect_instrument_slot_lines_from_steps_instruments_text_bind(
         if ftyp and ftyp not in ("text", "textarea"):
             continue
         src = fld.get("source") if isinstance(fld.get("source"), dict) else {}
-        sp = str(src.get("submitPath") or "").strip()
-        if sp != "instruments":
+        sp = str(src.get("submitPath") or fld.get("submitPath") or "").strip()
+        if sp not in ("instruments", "instruments.qualityControl", "instruments.radiationProtection"):
             continue
         fid = str(fld.get("id") or "").strip()
-        slot = _instrument_slot_index_for_instrument_select_field(fid)
+        slot = _instrument_slot_index_for_instrument_select_field(fid, fld)
         if slot is None or slot < 1 or slot > _INSTRUMENT_DD_MAX_SLOTS:
             slot = 1
         pid = str(src.get("pdfFieldId") or fld.get("pdfFieldId") or "").strip()
@@ -1948,18 +1966,68 @@ def _collect_instrument_slot_lines_from_submit(
     return out
 
 
+def _build_instrument_bindings_for_task(task_obj, instruments: list) -> list[dict]:
+    """
+    质控/防护仪器绑定元数据：与 instruments.qualityControl / instruments.radiationProtection 对齐。
+    栏位渲染在「受检设备主要检测仪器及检测人员」章（sectionType=instrumentPersonnel）。
+    """
+    from utils.task_bound_instruments import normalize_task_bound_instruments
+
+    bindings: list[dict] = []
+    binding = normalize_task_bound_instruments(
+        getattr(task_obj, "bound_instrument_ids", None) or [] if task_obj is not None else []
+    )
+    default_id = ""
+    if isinstance(instruments, list) and instruments:
+        default_id = str(
+            instruments[0].get("id")
+            or instruments[0].get("instrumentId")
+            or instruments[0].get("identifier")
+            or ""
+        ).strip()
+    qc_pk = binding.get("qualityControl")
+    rp_pk = binding.get("radiationProtection")
+    qc_id = str(qc_pk) if qc_pk is not None else default_id
+    rp_id = str(rp_pk) if rp_pk is not None else ""
+    bindings.append(
+        {
+            "scope": "qualityControl",
+            "sectionType": "instrumentPersonnel",
+            "label": "主要检测仪器_质量控制（性能）检测",
+            "submitPath": "instruments.qualityControl",
+            "submitBucket": "instruments",
+            "registrySlot": 1,
+            "defaultInstrumentId": qc_id or None,
+        }
+    )
+    bindings.append(
+        {
+            "scope": "radiationProtection",
+            "sectionType": "instrumentPersonnel",
+            "label": "主要检测仪器_工作场所放射防护检测",
+            "submitPath": "instruments.radiationProtection",
+            "submitBucket": "instruments",
+            "registrySlot": 2,
+            "defaultInstrumentId": rp_id or None,
+        }
+    )
+    return bindings
+
+
 def build_instruments_root_for_frontend_export(*, task_obj=None, payload: dict | None = None) -> dict:
     """
     生成写入「前端导出 JSON」根级的仪器块（不再内嵌全库仪器表）：
     - instruments：见 merge_task_template_bound_instruments_into_payload（无提交用模板绑定，有提交以前端为准）；
-    - 全量下拉数据请前端调用登记/台账接口（如 GET …/registry/instruments/），避免把数据库所有仪器打进 JSON。
+    - instrumentBindings：质控/防护两章仪器格与台账 id 的对应关系；
+    - 全量下拉数据请前端调用登记/台账接口（如 GET …/registry/instruments/）。
     """
     merged = merge_task_template_bound_instruments_into_payload(dict(payload or {}), task_obj)
     raw = merged.get("instruments")
     instruments = list(raw) if isinstance(raw, list) else []
-    return {
-        "instruments": instruments,
-    }
+    out: dict = {"instruments": instruments}
+    if task_obj is not None:
+        out["instrumentBindings"] = _build_instrument_bindings_for_task(task_obj, instruments)
+    return out
 
 
 def _instrument_guard_scalar_tokens(source_data: dict) -> frozenset[str]:
@@ -2019,6 +2087,10 @@ def _build_instrument_text_aliases_from_submit(
         out[f"检测仪器{idx}"] = line
         out[f"仪器{idx}"] = line
         out[f"检测仪器_仪器{idx}"] = line
+    if slot_lines.get(1):
+        out["主要检测仪器_质量控制（性能）检测"] = slot_lines[1]
+    if slot_lines.get(2):
+        out["主要检测仪器_工作场所放射防护检测"] = slot_lines[2]
     if slot_lines:
         merged = "；".join(slot_lines[k] for k in sorted(slot_lines))
         out["检测仪器列表"] = merged

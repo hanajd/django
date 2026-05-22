@@ -1501,7 +1501,7 @@
         <button id="btnImportTemplate" type="button" title="把下拉框中选中的 JSON 版式套到当前 PDF 上">从文件库载入版式</button>
         <button id="btnImportContent" type="button" title="仅载入 JSON 里已保存的填写内容，不改变框线位置">载入已保存的填写内容</button>
         <button id="btnClearWorkspace" type="button" title="清空画布上全部填写框、版式元数据与浏览器映射草稿，便于重新划框；不解除任务与 PDF 绑定">一键清除</button>
-        <input type="text" id="templateName" placeholder="保存到文件库时的文件名（可选）">
+        <input type="text" id="templateName" placeholder="坐标 JSON 文件名（默认与 PDF 同名）">
         <button id="saveTemplate" type="button" title="保存当前各框坐标与属性到文件库「模板」">保存坐标模板 JSON</button>
         <button id="saveFrontendTemplate" type="button" title="按规则生成业务语义化前端表单 JSON（坐标写入 pdfBindings）">保存前端规则 JSON</button>
         </div>
@@ -1538,7 +1538,7 @@
                     <span>章节导航</span>
                     <button type="button" id="btnAssignSections" title="按 PDF 标题纵坐标重新识别各框所属章节">识别章节</button>
                 </div>
-                <p class="sidebar-hint" style="margin:0 0 8px;">与自动框选一致：按 PDF 六大章节归类；点击筛选列表，选中栏位可在下方修改章节。</p>
+                <p class="sidebar-hint" style="margin:0 0 8px;">按 PDF 内「一、」…「六、」章节标题纵坐标归类：栏位落在两标题之间归属上一章，末章以下归属第六章；点击「识别章节」可重算。</p>
                 <div id="sectionNav" class="section-nav-chips"></div>
                 <div id="structureFieldEditor" class="structure-grid" style="display:none;">
                     <label>当前栏位所属章节
@@ -1717,9 +1717,22 @@
             return !isReportTemplateEditor();
         }
 
+        /** 任务 ID 可能来自 URL 注入（数字）或上下文（字符串），统一为 trim 后的字符串。 */
+        function resolvedLibraryTaskIdStr() {
+            return String(
+                templateContext.libraryTaskId || window.HTMLPDF_INITIAL_LIBRARY_TASK_ID || ''
+            ).trim();
+        }
+
+        function resolvedLibraryTemplateFileIdStr() {
+            return String(
+                templateContext.libraryTemplateFileId || window.HTMLPDF_INITIAL_TEMPLATE_PDF_ID || ''
+            ).trim();
+        }
+
         function htmlpdfEditorApiBody(extra) {
             const body = Object.assign({}, extra || {});
-            const lt = (templateContext.libraryTaskId || window.HTMLPDF_INITIAL_LIBRARY_TASK_ID || '').trim();
+            const lt = resolvedLibraryTaskIdStr();
             if (lt) body.library_task_id = Number(lt);
             return body;
         }
@@ -2366,8 +2379,8 @@
         }
 
         async function loadReportTaskContext(templateJsonFileId) {
-            const tid = (templateContext.libraryTaskId || '').trim();
-            const pdfId = (templateContext.libraryTemplateFileId || window.HTMLPDF_INITIAL_TEMPLATE_PDF_ID || '').trim();
+            const tid = resolvedLibraryTaskIdStr();
+            const pdfId = resolvedLibraryTemplateFileIdStr();
             if (!tid && !pdfId) {
                 reportTaskContext = {
                     isReport: false,
@@ -2868,18 +2881,34 @@
             return 'f' + (fallbackIndex + 1);
         }
 
-        function ensureUniqueFieldIds(fieldList) {
-            const used = new Set();
+        /** 仅保证 pdfFieldId（PDF 回填键）唯一；标签 placeholder 可重名，编辑器 DOM 键与 id 均用 pdfFieldId。 */
+        function ensurePdfFieldIds(fieldList) {
+            const usedPdf = new Set();
+            let maxN = 0;
             (fieldList || []).forEach((f, idx) => {
-                let base = normalizeFieldId(f && f.id, idx);
-                let candidate = base;
-                let seq = 2;
-                while (used.has(candidate)) {
-                    candidate = `${base}__${seq++}`;
+                if (!f) return;
+                let pid = String(f.pdfFieldId || '').trim();
+                if (!/^f\d+$/i.test(pid)) {
+                    const fromId = normalizeFieldId(f.id, idx);
+                    pid = /^f\d+$/i.test(fromId) ? fromId.toLowerCase() : '';
+                } else {
+                    pid = pid.toLowerCase();
                 }
-                if (f) f.id = candidate;
-                used.add(candidate);
+                if (!pid) pid = 'f' + (idx + 1);
+                const base = pid;
+                let seq = 2;
+                while (usedPdf.has(pid)) {
+                    const m = /^f(\d+)$/.exec(base);
+                    pid = m ? ('f' + (parseInt(m[1], 10) + seq - 1)) : (`${base}__${seq}`);
+                    seq += 1;
+                }
+                f.pdfFieldId = pid;
+                f.id = pid;
+                usedPdf.add(pid);
+                const n = parseInt(String(pid).slice(1), 10);
+                if (!isNaN(n)) maxN = Math.max(maxN, n);
             });
+            if (maxN > 0) fieldIdSeq = maxN + 1;
             return fieldList;
         }
 
@@ -3782,7 +3811,14 @@
             });
             refreshFieldList();
             if (!silent) {
-                alert('已按 PDF 章节更新 ' + (data.count || fields.length) + ' 个栏位的 section 归属。');
+                const anchorN = Array.isArray(data.anchors) ? data.anchors.length : 0;
+                let msg = '已按 PDF 纵坐标更新 ' + (data.count || fields.length) + ' 个栏位的章节归属。';
+                if (anchorN < 2) {
+                    msg += '\n\n警告：仅识别到 ' + anchorN + ' 个章节标题锚点，请确认 PDF 含「一、受检单位基本信息」等六大标题。';
+                } else {
+                    msg += '\n（已识别 ' + anchorN + ' 个章节锚点）';
+                }
+                alert(msg);
             }
         }
 
@@ -4246,8 +4282,10 @@
                 if (normalized.title == null) normalized.title = '';
                 return normalized;
             });
-            ensureUniqueFieldIds(fields);
-            fieldIdSeq = fields.length ? Math.max(...fields.map(f => parseInt(f.id.slice(1)) || 0)) + 1 : 1;
+            ensurePdfFieldIds(fields);
+            if (!fieldIdSeq || fieldIdSeq < 2) {
+                fieldIdSeq = fields.length ? Math.max(...fields.map(f => parseInt(String(f.id || '').slice(1)) || 0)) + 1 : 1;
+            }
             marks = [];
             markerSeq = 1;
             pdfContainer.innerHTML = '';
@@ -4323,7 +4361,7 @@
             if (!jid) return;
             try {
                 const impBody = { template_id: jid };
-                const lt = (templateContext.libraryTaskId || window.HTMLPDF_INITIAL_LIBRARY_TASK_ID || '').trim();
+                const lt = resolvedLibraryTaskIdStr();
                 if (lt) impBody.library_task_id = Number(lt);
                 const res = await fetch('/files/htmlpdf/api/import-json-from-library/', {
                     method: 'POST',
@@ -4632,8 +4670,10 @@
         }
 
         function addTextFieldByRect(pageNo, realX, realY, realW, realH) {
+            const pid = nextId();
             const f = {
-                id: nextId(),
+                id: pid,
+                pdfFieldId: pid,
                 page: pageNo,
                 x: realX,
                 y: realY,
@@ -4666,8 +4706,10 @@
             if (currentFieldType === 'check') {
                 const showSize = 18;
                 const realSize = showSize / meta.scale;
+                const pid = nextId();
                 const f = {
-                    id: nextId(),
+                    id: pid,
+                    pdfFieldId: pid,
                     page: p,
                     x: (pt.x - showSize / 2) / meta.scale,
                     y: (pt.y - showSize / 2) / meta.scale,
@@ -4774,8 +4816,10 @@
                     addTextFieldByRect(drawPage, realX, realY, realW, realH);
                     return;
                 }
+                const pid = nextId();
                 const f = {
-                    id: nextId(),
+                    id: pid,
+                    pdfFieldId: pid,
                     page: drawPage,
                     x: realX,
                     y: realY,
@@ -4835,8 +4879,10 @@
                     const rawType = String(raw.fieldType || 'text').toLowerCase();
                     const isCheck = rawType === 'check';
                     const isImage = rawType === 'image';
+                    const pid = nextId();
                     const f = normalizeFieldSize({
-                        id: nextId(),
+                        id: pid,
+                        pdfFieldId: pid,
                         page: raw.page,
                         x: raw.x,
                         y: raw.y,
@@ -4864,6 +4910,9 @@
                 });
                 refreshFieldList();
                 applyAllNamingMarks();
+                if (shouldUseSiteRecordSections()) {
+                    await assignTemplateSectionsFromPdf(true);
+                }
                 const checkCount = list.filter(x => String(x.fieldType || '').toLowerCase() === 'check').length;
                 const imageCount = list.filter(x => String(x.fieldType || '').toLowerCase() === 'image').length;
                 const textCount = list.length - checkCount - imageCount;
@@ -4929,13 +4978,15 @@
                 title: f.title != null ? String(f.title) : ''
                 };
             }).map(item => normalizeFieldSize(item));
-            ensureUniqueFieldIds(loadedFields);
+            ensurePdfFieldIds(loadedFields);
             fields.forEach(item => {
                 if (item.wrap) item.wrap.remove();
                 else item.el?.remove();
             });
             fields = loadedFields;
-            fieldIdSeq = fields.length ? Math.max(...fields.map(f => parseInt(f.id.slice(1)) || 0)) + 1 : 1;
+            if (!fieldIdSeq || fieldIdSeq < 2) {
+                fieldIdSeq = fields.length ? Math.max(...fields.map(f => parseInt(String(f.id || '').slice(1)) || 0)) + 1 : 1;
+            }
             selectedFieldId = null;
             closeFormulaModal();
             fields.forEach(f => mountField(f));
@@ -4962,7 +5013,7 @@
             refreshSectionNav();
             if (isReportTemplateEditor()) {
                 clearAllFieldsSiteRecordSectionMeta();
-            } else if (!loadedFields.some(f => f.templateSectionKey)) {
+            } else {
                 assignTemplateSectionsFromPdf(true).catch(() => {});
             }
         }
@@ -5025,7 +5076,7 @@
             const selected = templateJsonSelect.value;
             if (!selected) throw new Error('请先选择模板 JSON');
             const body = { template_id: Number(selected) };
-            const lt = (templateContext.libraryTaskId || '').trim();
+            const lt = resolvedLibraryTaskIdStr();
             if (lt) body.library_task_id = Number(lt);
             const res = await fetch('/files/htmlpdf/api/import-json-from-library/', {
                 method: 'POST',
@@ -5037,10 +5088,11 @@
             return data;
         }
 
-        async function refreshTemplateJsonOptions() {
+        async function refreshTemplateJsonOptions(preferredId) {
             const res = await fetch('/files/htmlpdf/api/template-jsons/');
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || '读取模板 JSON 列表失败');
+            const prefer = String(preferredId || templateJsonSelect.value || '').trim();
             templateJsonSelect.innerHTML = '<option value="">选择模板 JSON</option>';
             (data.templates || []).forEach(t => {
                 const opt = document.createElement('option');
@@ -5048,7 +5100,9 @@
                 opt.textContent = t.name;
                 templateJsonSelect.appendChild(opt);
             });
-            if ((data.templates || []).length) {
+            if (prefer && Array.from(templateJsonSelect.options).some(o => o.value === prefer)) {
+                templateJsonSelect.value = prefer;
+            } else if ((data.templates || []).length) {
                 templateJsonSelect.value = String(data.templates[0].id);
             }
         }
@@ -5223,9 +5277,8 @@
 
         function exportJsonMerged() {
             const name = document.getElementById('templateName').value.trim() || 'template';
-            const libTask = (templateContext.libraryTaskId || '').trim();
-            const libPdf = (templateContext.libraryTemplateFileId || '').trim()
-                || String(window.HTMLPDF_INITIAL_TEMPLATE_PDF_ID || '');
+            const libTask = resolvedLibraryTaskIdStr();
+            const libPdf = resolvedLibraryTemplateFileIdStr();
             fetch('/files/htmlpdf/api/export-json/', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -5262,18 +5315,30 @@
             }).then(async r => {
                 const d = await parseJsonResponseOrThrow(r, '保存坐标模板失败');
                 let msg = '坐标模板 JSON 已保存到文件库「模板」分类';
-                if (d.binding_rotation && d.binding_rotation.ok) {
-                    msg += '；已更新任务模板 JSON 绑定';
-                    if (d.file && d.file.id) {
-                        templateContext.libraryTemplateFileId = String(d.file.id);
-                    }
+                const rot = d.binding_rotation;
+                if (rot && rot.ok) {
+                    msg += '；已更新任务模板 JSON 绑定（任务 #' + (rot.library_task_id || resolvedLibraryTaskIdStr()) + '）';
+                    setSuppressAutoImport(false);
+                } else if (rot && rot.error) {
+                    msg += '\n\n注意：未更新任务绑定 — ' + rot.error;
+                } else if (resolvedLibraryTaskIdStr()) {
+                    msg += '\n\n注意：未更新任务绑定，再次进入编辑器可能仍载入旧 JSON。请从任务模板库进入编辑页后重试保存。';
                 }
                 alert(msg);
                 clearMapCacheForCurrentScope();
                 if (d.file && d.file.library_url) {
                     window.open(d.file.library_url, '_blank');
                 }
-                refreshTemplateJsonOptions().catch(() => {});
+                const savedJsonId = d.file && d.file.id ? Number(d.file.id) : 0;
+                await refreshTemplateJsonOptions().catch(() => {});
+                if (savedJsonId) {
+                    if (templateJsonSelect) {
+                        templateJsonSelect.value = String(savedJsonId);
+                    }
+                    if (rot && rot.ok) {
+                        await autoImportLibraryJson(savedJsonId);
+                    }
+                }
             }).catch(err => alert(err.message));
         }
 
@@ -5284,9 +5349,9 @@
         function saveFrontendTemplate() {
             const baseName = document.getElementById('templateName').value.trim() || 'template';
             const name = baseName.endsWith('.json') ? baseName.replace(/\.json$/i, '_frontend.json') : (baseName + '_frontend.json');
-            const libTpl = (templateContext.libraryTemplateFileId || '').trim()
+            const libTpl = resolvedLibraryTemplateFileIdStr()
                 || (templateJsonSelect && templateJsonSelect.value ? String(templateJsonSelect.value).trim() : '');
-            const libTask = (templateContext.libraryTaskId || '').trim();
+            const libTask = resolvedLibraryTaskIdStr();
             fetch('/files/htmlpdf/api/export-frontend-json/', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -5451,6 +5516,13 @@
                         reportTaskContext.isReport = reportTaskContext.outputTarget === 'report';
                     }
                     templateContext.libraryTemplateFileId = String(initialTemplatePdfId);
+                    if (d.suggested_json_save_name) {
+                        const tn = document.getElementById('templateName');
+                        if (tn) tn.value = d.suggested_json_save_name;
+                    } else if (d.template_pdf_stem) {
+                        const tn = document.getElementById('templateName');
+                        if (tn) tn.value = d.template_pdf_stem + '.json';
+                    }
                     renderPdfAndFields(d.pdf_url, [], async () => {
                         if (d.auto_import_json && d.default_json_template_id && !shouldSuppressAutoImport()) {
                             await autoImportLibraryJson(d.default_json_template_id);

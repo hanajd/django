@@ -366,6 +366,63 @@ def _contains_any(text: str, tokens: tuple[str, ...]) -> bool:
     return any(t in text for t in tokens)
 
 
+_INSTRUMENT_SCOPE_QC_MARKERS = (
+    "主要检测仪器_质量控制",
+    "质量控制（性能）检测",
+    "质量控制(性能)检测",
+)
+_INSTRUMENT_SCOPE_RADIATION_MARKERS = (
+    "主要检测仪器_工作场所放射防护",
+    "主要检测仪器_放射防护",
+    "工作场所放射防护检测",
+)
+
+
+def _infer_instrument_scope_from_text(*texts: str) -> str | None:
+    """新版模板：质控章/防护章内各有一个「主要检测仪器_*」仪器选择格。"""
+    blob = "|".join(str(t or "").strip() for t in texts if str(t or "").strip())
+    if not blob:
+        return None
+    norm = normalize_field_text_by_underscore_rules(blob)
+    if any(m in blob or m in norm for m in _INSTRUMENT_SCOPE_QC_MARKERS):
+        return "qualityControl"
+    if any(m in blob or m in norm for m in _INSTRUMENT_SCOPE_RADIATION_MARKERS):
+        return "radiationProtection"
+    return None
+
+
+def _apply_scoped_instrument_select_field(field_obj: Dict[str, Any]) -> bool:
+    """将分章节「主要检测仪器_*」标为 instrument_select，并写入 instruments.{scope} 提交路径。"""
+    if not isinstance(field_obj, dict):
+        return False
+    src0 = field_obj.get("source") if isinstance(field_obj.get("source"), dict) else {}
+    scope = _infer_instrument_scope_from_text(
+        str(field_obj.get("label") or ""),
+        str(field_obj.get("id") or ""),
+        str(src0.get("hierarchyKey") or ""),
+        str(src0.get("key") or ""),
+    )
+    if not scope:
+        return False
+    slot = 1 if scope == "qualityControl" else 2
+    field_obj["type"] = "instrument_select"
+    field_obj["instrumentScope"] = scope
+    field_obj["registrySlot"] = slot
+    if not str(field_obj.get("label") or "").strip():
+        field_obj["label"] = (
+            "主要检测仪器_质量控制（性能）检测"
+            if scope == "qualityControl"
+            else "主要检测仪器_工作场所放射防护检测"
+        )
+    src = src0 if isinstance(src0, dict) else {}
+    src["submitBucket"] = "instruments"
+    src["submitPath"] = f"instruments.{scope}"
+    field_obj["source"] = src
+    field_obj["submitBucket"] = "instruments"
+    field_obj["submitPath"] = f"instruments.{scope}"
+    return True
+
+
 def _assign_submit_bucket(field_obj: Dict[str, Any]) -> Dict[str, str]:
     """
     为前端字段标注提交归属桶，便于前端渲染后直接组装 submit payload：
@@ -392,9 +449,16 @@ def _assign_submit_bucket(field_obj: Dict[str, Any]) -> Dict[str, str]:
     ) or ft == "signature":
         return {"bucket": "signatures", "path": f"signatures.{fid}"}
 
-    # instruments: 检测仪器相关
+    inst_scope = _infer_instrument_scope_from_text(label, hierarchy_key, fid)
+    if inst_scope == "qualityControl":
+        return {"bucket": "instruments", "path": "instruments.qualityControl"}
+    if inst_scope == "radiationProtection":
+        return {"bucket": "instruments", "path": "instruments.radiationProtection"}
+
+    # instruments: 检测仪器相关（第三章人员/清单；不含已分章节的 scoped 仪器格）
     if _contains_any(haystack, ("检测仪器", "仪器", "校准日期", "有效期")) or fid == "instruments":
-        return {"bucket": "instruments", "path": "instruments"}
+        if not inst_scope:
+            return {"bucket": "instruments", "path": "instruments"}
 
     # reportInfo
     if _contains_any(haystack, ("委托编号", "受检编号", "检测日期", "环境温度", "湿度", "temperature", "humidity")):
@@ -1009,6 +1073,8 @@ def _classify_by_pdf_template_section(
         k in label
         for k in ("参与主要检测人员名单", "校核员及校核日期", "受检单位陪同人")
     )
+    if is_signature:
+        return ("step_signature", "综合结论与签字", "sec_signature", "签字与结论", "form")
 
     if key == "site_unit_basic":
         if _contains_any(
@@ -1024,14 +1090,6 @@ def _classify_by_pdf_template_section(
         return ("step_basic_info", "基本信息", "sec_device_info", "受检设备基本信息", "form")
 
     if key == "site_instruments_staff":
-        if is_signature:
-            return (
-                "step_instruments",
-                "检测仪器与人员",
-                "sec_instruments_staff",
-                "受检设备主要检测仪器及检测人员",
-                "form",
-            )
         if "检测仪器" in label or re.match(r"^仪器\d+$", label):
             return (
                 "step_instruments",
@@ -1621,6 +1679,12 @@ def _compact_single_form_field(field: Dict[str, Any], section_key: str = "") -> 
     if sp:
         out["submitPath"] = sp
 
+    bucket = str(field.get("submitBucket") or src.get("submitBucket") or "").strip()
+    if bucket:
+        out["submitBucket"] = bucket
+    elif sp and "." in sp:
+        out["submitBucket"] = sp.split(".", 1)[0]
+
     schema_key = str(field.get("schemaKey") or src.get("key") or "").strip()
     if schema_key:
         out["schemaKey"] = schema_key
@@ -1669,6 +1733,8 @@ def _compact_single_form_field(field: Dict[str, Any], section_key: str = "") -> 
         "columns",
         "initialRows",
         "options",
+        "instrumentScope",
+        "registrySlot",
     ):
         val = field.get(key)
         if val is None or val == "" or val == []:
@@ -3170,11 +3236,33 @@ def _relocate_equipment_fields_to_basic_info(payload: Dict[str, Any]) -> Dict[st
 
 
 def _extract_instrument_index(field: Dict[str, Any]) -> int:
+    # 分章节仪器格：质控=1，防护=2（与 registrySlot / instrumentBindings 一致）
+    scope = str(field.get("instrumentScope") or "").strip()
+    if scope == "qualityControl":
+        return 1
+    if scope == "radiationProtection":
+        return 2
+    try:
+        slot = int(field.get("registrySlot") or 0)
+        if slot > 0:
+            return slot
+    except (TypeError, ValueError):
+        pass
+    sp = str(field.get("submitPath") or "")
+    if "instruments.qualityControl" in sp:
+        return 1
+    if "instruments.radiationProtection" in sp:
+        return 2
     # 编号提取优先级：label > pdfFieldId > id
     label = str(field.get("label") or "")
     src = field.get("source") if isinstance(field.get("source"), dict) else {}
     pdf_id = str(src.get("pdfFieldId") or "")
     fid = str(field.get("id") or "")
+    scope_from_text = _infer_instrument_scope_from_text(label, fid, sp)
+    if scope_from_text == "qualityControl":
+        return 1
+    if scope_from_text == "radiationProtection":
+        return 2
     for text in (label, pdf_id, fid):
         m = re.search(r"(?:检测仪器|仪器|instrument)\s*([0-9]+)", text, re.IGNORECASE)
         if m:
@@ -3213,9 +3301,13 @@ def _arrange_instruments_row_layout(payload: Dict[str, Any]) -> Dict[str, Any]:
             fields = section.get("fields")
             if not isinstance(fields, list) or not fields:
                 continue
+            scoped_instrument_selects: List[Dict[str, Any]] = []
             grouped: Dict[int, Dict[str, List[Dict[str, Any]]]] = {}
             for f in fields:
                 if not isinstance(f, dict):
+                    continue
+                if str(f.get("type") or "").lower() == "instrument_select":
+                    scoped_instrument_selects.append(f)
                     continue
                 idx = _extract_instrument_index(f)
                 src = f.get("source") if isinstance(f.get("source"), dict) else {}
@@ -3313,11 +3405,12 @@ def _arrange_instruments_row_layout(payload: Dict[str, Any]) -> Dict[str, Any]:
                         "fields": inner_fields,
                     }
                 )
-            section["fields"] = rebuilt
+            section["fields"] = scoped_instrument_selects + rebuilt
             if rebuilt:
                 section["instrumentSlotsWrap"] = True
 
     # 将误归到检测仪器区的非仪器字段回流到质控检测项目，避免干扰仪器行布局。
+    # instrument_select（质控/防护）始终留在「仪器及检测人员」章，不进入 spillover。
     if spillover_fields:
         qc_step = next((s for s in steps if isinstance(s, dict) and str(s.get("id") or "") == "step_qc_items"), None)
         if not isinstance(qc_step, dict):
@@ -3339,6 +3432,82 @@ def _arrange_instruments_row_layout(payload: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
+def _relocate_signatures_to_signature_step(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    签字栏位只保留在 step_signature，避免与「仪器及检测人员」等章节重复展示。
+    同角色多处 PDF 框已在 build 阶段合并为单个 signature 字段（pdfFieldIds）。
+    """
+    steps = payload.get("steps")
+    if not isinstance(steps, list):
+        return payload
+
+    collected: Dict[str, Dict[str, Any]] = {}
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        for section in step.get("sections", []):
+            if not isinstance(section, dict):
+                continue
+            kept: List[Dict[str, Any]] = []
+            for field in section.get("fields", []):
+                if not isinstance(field, dict):
+                    kept.append(field)
+                    continue
+                if str(field.get("type") or "").lower() != "signature":
+                    kept.append(field)
+                    continue
+                fid = str(field.get("id") or "").strip()
+                if not fid:
+                    kept.append(field)
+                    continue
+                if fid not in collected:
+                    collected[fid] = copy.deepcopy(field)
+            section["fields"] = kept
+            matrix = section.get("matrix")
+            if isinstance(matrix, dict):
+                for bucket_key in ("headerFields",):
+                    rows = matrix.get(bucket_key)
+                    if isinstance(rows, list):
+                        matrix[bucket_key] = [
+                            f
+                            for f in rows
+                            if not (isinstance(f, dict) and str(f.get("type") or "").lower() == "signature")
+                        ]
+                for row in matrix.get("rows") or []:
+                    if not isinstance(row, dict):
+                        continue
+                    cells = row.get("cells")
+                    if isinstance(cells, dict):
+                        row["cells"] = {
+                            k: v
+                            for k, v in cells.items()
+                            if not (isinstance(v, dict) and str(v.get("type") or "").lower() == "signature")
+                        }
+
+    if not collected:
+        return payload
+
+    sig_fields = sorted(collected.values(), key=lambda f: str(f.get("id") or ""))
+    sig_step = {
+        "id": "step_signature",
+        "title": "综合结论与签字",
+        "sections": [
+            {
+                "id": "sec_signature",
+                "title": "签字与结论",
+                "layout": "form",
+                "fields": sig_fields,
+            }
+        ],
+    }
+    out_steps: List[Dict[str, Any]] = [
+        s for s in steps if isinstance(s, dict) and str(s.get("id") or "") != "step_signature"
+    ]
+    out_steps.append(sig_step)
+    payload["steps"] = out_steps
+    return payload
+
+
 def _force_signature_step_last(payload: Dict[str, Any]) -> Dict[str, Any]:
     steps = payload.get("steps")
     if not isinstance(steps, list) or not steps:
@@ -3349,17 +3518,7 @@ def _force_signature_step_last(payload: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(step, dict):
             continue
         sid = str(step.get("id") or "")
-        has_signature = False
-        for section in step.get("sections", []):
-            if not isinstance(section, dict):
-                continue
-            for field in section.get("fields", []):
-                if isinstance(field, dict) and str(field.get("type") or "").lower() == "signature":
-                    has_signature = True
-                    break
-            if has_signature:
-                break
-        if sid == "step_signature" or has_signature:
+        if sid == "step_signature":
             signature_steps.append(step)
         else:
             normal_steps.append(step)
@@ -3825,13 +3984,17 @@ def _merge_sections_by_site_record_chapters(payload: Dict[str, Any]) -> Dict[str
     buckets: Dict[str, Dict[str, Any]] = {
         k: {"fields": [], "matrix": None, "layout": "form", "table": None} for k in chapter_order
     }
-    signature_steps: List[Dict[str, Any]] = []
+    signature_fields: List[Dict[str, Any]] = []
     misc_sections: List[Dict[str, Any]] = []
 
     def _append_fields(chapter: str, fields: List[Any]) -> None:
         for f in fields or []:
-            if isinstance(f, dict):
-                buckets[chapter]["fields"].append(copy.deepcopy(f))
+            if not isinstance(f, dict):
+                continue
+            if str(f.get("type") or "").lower() == "signature":
+                signature_fields.append(copy.deepcopy(f))
+                continue
+            buckets[chapter]["fields"].append(copy.deepcopy(f))
 
     def _maybe_take_matrix(chapter: str, sec: Dict[str, Any]) -> None:
         matrix = sec.get("matrix")
@@ -3851,9 +4014,6 @@ def _merge_sections_by_site_record_chapters(payload: Dict[str, Any]) -> Dict[str
         if not isinstance(step, dict):
             continue
         sid = str(step.get("id") or "")
-        if sid == "step_signature":
-            signature_steps.append(copy.deepcopy(step))
-            continue
         for sec in step.get("sections") or []:
             if not isinstance(sec, dict):
                 continue
@@ -3900,7 +4060,27 @@ def _merge_sections_by_site_record_chapters(payload: Dict[str, Any]) -> Dict[str
     ]
     if misc_sections:
         new_steps[0]["sections"].extend(misc_sections)
-    new_steps.extend(signature_steps)
+    if signature_fields:
+        by_id: Dict[str, Dict[str, Any]] = {}
+        for f in signature_fields:
+            fid = str(f.get("id") or "").strip()
+            if fid:
+                by_id[fid] = f
+        if by_id:
+            new_steps.append(
+                {
+                    "id": "step_signature",
+                    "title": "综合结论与签字",
+                    "sections": [
+                        {
+                            "id": "sec_signature",
+                            "title": "签字与结论",
+                            "layout": "form",
+                            "fields": sorted(by_id.values(), key=lambda x: str(x.get("id") or "")),
+                        }
+                    ],
+                }
+            )
     payload["steps"] = new_steps
     return payload
 
@@ -3996,6 +4176,7 @@ def _finalize_frontend_schema_result(result: Dict[str, Any], *, merge_split_date
     result = _consolidate_orphan_inspection_steps(result)
     result = _merge_sections_by_site_record_chapters(result)
     result = _sort_fields_by_coordinate_order(result)
+    result = _relocate_signatures_to_signature_step(result)
     result = _force_signature_step_last(result)
     result = _inject_visibility_conditional_rules(result)
     result = _apply_floor_plan_field_types(result)
@@ -4115,8 +4296,7 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
         fields_raw = template_obj.get("fields") if isinstance(template_obj.get("fields"), list) else []
     fields_raw = materialize_unified_pdf_fields(fields_raw)
 
-    # 保留模板中的每一条栏位。仅用 pdfFieldId 去重时，后出现的会覆盖先前的，导致例如「环境温度/湿度_°C」
-    # 与别处误标为同一 f6 的栏位被吃掉；编辑器重复分配序号时也应全部导出。
+    # 保留模板中的每一条栏位；同 section 内仅按 pdfFieldId 跳过重复槽位。label 可重名，导出 id=pdfFieldId。
     normalized_items: List[Dict[str, Any]] = []
     for idx, row in enumerate(fields_raw, start=1):
         if not isinstance(row, dict):
@@ -4132,7 +4312,6 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
         "step_signature": "综合结论与签字",
     }
     section_bucket: Dict[str, Dict[str, Dict[str, Any]]] = {k: {} for k in step_order}
-    used_ids = set()
     found_test_type_checks: Dict[str, str] = {}
     instrument_check_labels: List[str] = []
 
@@ -4196,55 +4375,26 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
             if ts_title_for_sec:
                 sec.setdefault("templateSectionTitle", ts_title_for_sec)
         fallback_id = f"field{idx}"
-        # 下划线命名时，字段 id 使用最后一段语义（同前缀字段归一分组）
-        # 例如：高对比分辨力_kv / 高对比分辨力_报出值 -> kv / reportValue
+        current_pdf_id = _ensure_pdf_field_id(str(item.get("pdfFieldId") or ""), idx) or f"f{idx}"
         semantic_id_prefix, semantic_type = infer_field_properties(item["label"])
         if signature_role:
             field_id, field_label = signature_role
-        elif auto_hierarchy:
-            field_id, field_label = _auto_semantic_field_id_label(item, fallback_id, item["label"])
-        elif hierarchy:
-            field_id = _underscore_field_id(hierarchy_key, fallback_id)
-            field_label = _underscore_field_label(hierarchy_key, item["label"])
-            # 仪器勾选常见命名如：检测仪器1_2，会被下划线后缀误识别成“2”。
-            # 这里强制恢复到“检测仪器N”，确保后续能与 text/date 正确配对成同一行。
-            hparts = [p for p in normalize_field_text_by_underscore_rules(str(hierarchy_key or "")).split("_") if p]
-            if hparts and re.match(r"^检测仪器\d+$", hparts[0]) and str(item.get("fieldType") or "").lower() == "check":
-                field_label = hparts[0]
-                field_id = _camel_case(hparts[0], field_id or fallback_id)
         else:
-            if semantic_id_prefix:
-                field_id = semantic_id_prefix
-            else:
-                field_id = _to_english_id(item["label"], item["rawId"], fallback_id)
+            # 允许 label/占位命名重名：表单 id 与 PDF 回填键统一为 pdfFieldId，submitPath 仍由标签/层级推断。
+            field_id = current_pdf_id
             field_label = item["label"]
-        # 历史别名收敛，避免导出 noCommission/noInspection。
-        if field_id == "noCommission":
-            field_id = "commissionNo"
-        if field_id == "noInspection":
-            field_id = "inspectionNo"
-
-        # 对编号类语义，避免重复字段占用同一 pdfFieldId。
-        if field_id in {"commissionNo", "inspectionNo"}:
-            current_pdf_id = str(item.get("pdfFieldId") or "").strip()
-            if current_pdf_id:
-                dup = any(
-                    isinstance(ff, dict)
-                    and str(ff.get("id") or "") == field_id
-                    and str(((ff.get("source") if isinstance(ff.get("source"), dict) else {}) or {}).get("pdfFieldId") or "").strip()
-                    == current_pdf_id
-                    for ff in sec.get("fields", [])
-                )
-                if dup:
-                    continue
-        if not signature_role:
-            base_id = field_id
-            n = 2
-            while field_id in used_ids:
-                field_id = f"{base_id}{n}"
-                n += 1
-            used_ids.add(field_id)
-        else:
+            if current_pdf_id and any(
+                isinstance(ff, dict)
+                and str(
+                    (ff.get("source") if isinstance(ff.get("source"), dict) else {}).get("pdfFieldId")
+                    or ff.get("pdfFieldId")
+                    or ""
+                ).strip()
+                == current_pdf_id
+                for ff in sec.get("fields", [])
+            ):
+                continue
+        if signature_role:
             # 签名固定 3 个前端输入：同角色多处 PDF 签名框合并到一个输入。
             merged_target = next(
                 (
@@ -4278,7 +4428,6 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
                 src["pages"] = sorted(existed_pages)
                 merged_target["source"] = src
                 continue
-            used_ids.add(field_id)
         # Semantic role mapping can override inferred type for strict role semantics.
         if semantic_type:
             ft = semantic_type
@@ -4332,6 +4481,7 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
         submit_binding = _assign_submit_bucket(field_obj)
         field_obj["source"]["submitBucket"] = submit_binding["bucket"]
         field_obj["source"]["submitPath"] = submit_binding["path"]
+        _apply_scoped_instrument_select_field(field_obj)
         # 约束：归到 testResult 的输入统一按 number 渲染与提交。
         if submit_binding["bucket"] == "testResult":
             field_obj["type"] = "number"

@@ -27,6 +27,8 @@
 
 **接手注意**：迁移存储或清理磁盘时，需与 `apps.core.library_file_service`、`pipeline_service` 中的路径假设一致。
 
+**启动校验**（`apps.core.library_media_integrity`）：服务启动后扫描未在回收站中的 `LibraryFile`，若 `FILE_LIBRARY_ROOT` 下无对应磁盘文件则自动移入回收站；卡住的 OCR 任务（源文件均缺失）标记为失败。可通过 `LIBRARY_MEDIA_INTEGRITY_ON_STARTUP=0` 或 `LIBRARY_MEDIA_INTEGRITY_SKIP=1` 关闭；亦可手动执行 `python manage.py check_library_media`（`--dry-run` 仅统计）。
+
 ## 5. 认证与安全
 
 - Web：Session + `CsrfViewMiddleware`，`LOGIN_URL` / `LOGIN_REDIRECT_URL` 见 `settings`。  

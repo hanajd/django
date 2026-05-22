@@ -852,6 +852,67 @@ def _normalize_cell_text(text: str) -> str:
     return "".join(str(text or "").split()).strip()
 
 
+_CELL_PLACEHOLDER_ONLY_RE = re.compile(r"^[_\-\—·．。．/\\\s]+$")
+_RADIATION_CIRCLED_NUMS = "①②③④⑤⑥⑦⑧⑨⑩"
+
+
+def _extract_radiation_circled_symbol(text: str) -> str:
+    """从单元格文本中提取单个圈号 ①–⑩（允许与少量噪声共存）。"""
+    t = _normalize_cell_text(text)
+    if not t:
+        return ""
+    if len(t) == 1 and t in _RADIATION_CIRCLED_NUMS:
+        return t
+    found = [ch for ch in t if ch in _RADIATION_CIRCLED_NUMS]
+    if len(found) == 1:
+        return found[0]
+    return ""
+
+
+def _cell_has_underline_slot_in_targets(
+    table_id: int,
+    row: int,
+    col: int,
+    red_cell_targets: Dict[tuple, Dict[str, Any]],
+) -> bool:
+    for k in red_cell_targets.keys():
+        if len(k) < 4:
+            continue
+        if int(k[0]) != int(table_id) or int(k[1]) != int(row) or int(k[2]) != int(col):
+            continue
+        if "__ul" in str(k[3]):
+            return True
+    return False
+
+
+def _is_cell_empty_for_auto_box(
+    table_id: int,
+    row: int,
+    col: int,
+    cell_texts: Dict[tuple, str],
+    cell_texts_non_red: Dict[tuple, str],
+    cell_black_prefix_texts: Dict[tuple, str],
+) -> bool:
+    """
+    是否应对该格生成「整格」输入框。
+    待填格常仅有红色下划线/红字占位，cell_texts 非空但 cell_texts_non_red 为空，须按非红字判断。
+    """
+    key = (int(table_id), int(row), int(col))
+    nr = _normalize_cell_text(cell_texts_non_red.get(key, ""))
+    blk = _normalize_cell_text(cell_black_prefix_texts.get(key, ""))
+    if _span_text_is_signature_label(nr) or _span_text_is_signature_label(blk):
+        return False
+    if _extract_radiation_circled_symbol(nr) or _extract_radiation_circled_symbol(blk):
+        return False
+    if nr:
+        if _CELL_PLACEHOLDER_ONLY_RE.fullmatch(nr):
+            return True
+        return False
+    if blk and not _CELL_PLACEHOLDER_ONLY_RE.fullmatch(blk):
+        return False
+    return True
+
+
 def _normalize_common_label_noise(text: str) -> str:
     """
     纠正常见 PDF 断字/串字导致的列名噪声。
@@ -1577,9 +1638,6 @@ def _radiation_measurement_read_cols(header_map: Dict[str, int]) -> List[int]:
     return list(range(start, end))
 
 
-_RADIATION_CIRCLED_NUMS = "①②③④⑤⑥⑦⑧⑨⑩"
-
-
 def _radiation_column_role_label(col: int, header_map: Dict[str, int], cell_texts: Dict[tuple, str], table_id: int) -> str:
     """工作场所防护表：列角色名（含 M / Mbar / D 标记）。"""
     c = int(col)
@@ -1767,14 +1825,40 @@ def _resolve_radiation_background_fill_cell(
     symbol_col: int,
     cells_by_rc: Dict[tuple, Dict],
     cell_texts: Dict[tuple, str],
+    cell_texts_non_red: Dict[tuple, str],
+    cell_black_prefix_texts: Dict[tuple, str],
     used_cells: set,
 ) -> Optional[tuple]:
-    """为圈号定位单个填写格：优先正上方空白格，按水平重叠匹配读数列（处理合并列）。"""
+    """
+    为圈号定位单个填写格：
+    1）同行左侧紧邻空白格（本底水平右侧 ①–⑩ 常见：填写格在圈号左侧）；
+    2）正上方空白格（圈号作列标、填写格在上一行时）。
+    不再回退到圈号格本身，避免框在 ① 字符上。
+    """
     sym_cell = cells_by_rc.get((int(symbol_row), int(symbol_col)))
     if sym_cell is None or sym_cell.get("rect") is None:
         return None
     sym_rect = sym_cell["rect"]
     sym_cx = (float(sym_rect.x0) + float(sym_rect.x1)) / 2.0
+
+    def _try_cell(ri: int, ci: int) -> Optional[tuple]:
+        if (ri, ci) in used_cells:
+            return None
+        cell = cells_by_rc.get((ri, ci))
+        if cell is None or cell.get("rect") is None:
+            return None
+        if not _is_cell_empty_for_auto_box(
+            table_id, ri, ci, cell_texts, cell_texts_non_red, cell_black_prefix_texts
+        ):
+            return None
+        used_cells.add((ri, ci))
+        return ri, ci, cell
+
+    for dc in range(1, 8):
+        hit = _try_cell(int(symbol_row), int(symbol_col) - dc)
+        if hit:
+            return hit
+
     candidates: List[tuple] = []
     for (r, c), cell in cells_by_rc.items():
         ri, ci = int(r), int(c)
@@ -1782,10 +1866,9 @@ def _resolve_radiation_background_fill_cell(
             continue
         if (ri, ci) in used_cells:
             continue
-        txt = _normalize_cell_text(cell_texts.get((table_id, ri, ci), ""))
-        if txt:
-            if len(txt) == 1 and txt in _RADIATION_CIRCLED_NUMS:
-                continue
+        if not _is_cell_empty_for_auto_box(
+            table_id, ri, ci, cell_texts, cell_texts_non_red, cell_black_prefix_texts
+        ):
             continue
         cr = cell.get("rect")
         if cr is None:
@@ -1799,8 +1882,7 @@ def _resolve_radiation_background_fill_cell(
         ri, ci, cell, _ = candidates[0]
         used_cells.add((ri, ci))
         return ri, ci, cell
-    used_cells.add((int(symbol_row), int(symbol_col)))
-    return int(symbol_row), int(symbol_col), sym_cell
+    return None
 
 
 def _radiation_target_key_at_cell(
@@ -1822,26 +1904,22 @@ def _ensure_radiation_empty_cell_boxes(
     table_id: int,
     cells_by_rc: Dict[tuple, Dict],
     cell_texts: Dict[tuple, str],
+    cell_texts_non_red: Dict[tuple, str],
     cell_black_prefix_texts: Dict[tuple, str],
     underline_cell_keys: set,
     page_no: int,
     red_cell_targets: Dict[tuple, Dict[str, Any]],
 ) -> None:
     """防护结果表：为仍无输入框的空白格补整格框（含仅有下划线装饰但未检出下划线框的格）。"""
-    ul_keys = {
-        (int(k[0]), int(k[1]), int(k[2]))
-        for k in red_cell_targets.keys()
-        if len(k) >= 4 and "__ul" in str(k[3])
-    }
     for (row, col), cell in cells_by_rc.items():
         ri, ci = int(row), int(col)
-        cell_txt = _normalize_cell_text(cell_texts.get((table_id, ri, ci), ""))
-        cell_blk = _normalize_cell_text(cell_black_prefix_texts.get((table_id, ri, ci), ""))
-        if _span_text_is_signature_label(cell_txt) or _span_text_is_signature_label(cell_blk):
+        if not _is_cell_empty_for_auto_box(
+            table_id, ri, ci, cell_texts, cell_texts_non_red, cell_black_prefix_texts
+        ):
             continue
-        if cell_txt:
-            continue
-        if (int(table_id), ri, ci) in underline_cell_keys and (int(table_id), ri, ci) in ul_keys:
+        if (int(table_id), ri, ci) in underline_cell_keys and _cell_has_underline_slot_in_targets(
+            table_id, ri, ci, red_cell_targets
+        ):
             continue
         if _radiation_target_key_at_cell(red_cell_targets, table_id, ri, ci) is not None:
             continue
@@ -1863,18 +1941,54 @@ def _ensure_radiation_empty_cell_boxes(
         }
 
 
+def _find_radiation_background_rows(
+    table_id: int,
+    point_col: int,
+    cells_by_rc: Dict[tuple, Dict],
+    cell_texts: Dict[tuple, str],
+) -> set:
+    """含「本底」标签的行（含圈号行与上一行填写行）。"""
+    rows: set = set()
+    for (row, col), _cell in cells_by_rc.items():
+        ri, ci = int(row), int(col)
+        txt = str(cell_texts.get((table_id, ri, ci), "") or "")
+        if "本底" not in txt:
+            continue
+        if ci == int(point_col) or ci <= int(point_col) + 2:
+            rows.add(ri)
+    expanded: set = set()
+    for ri in rows:
+        expanded.add(ri)
+        expanded.add(ri - 1)
+        expanded.add(ri + 1)
+    return expanded
+
+
 def _collect_radiation_background_circled_slots(
     table_id: int,
+    point_col: int,
     cells_by_rc: Dict[tuple, Dict],
     cell_texts: Dict[tuple, str],
 ) -> List[Dict[str, Any]]:
-    """本底水平行：①–⑩ 圈号单元格及其上方空白填写区。"""
+    """本底水平右侧：①–⑩ 圈号格（仅取检测点列右侧的圈号，避免误匹配其它行）。"""
+    bg_rows = _find_radiation_background_rows(table_id, point_col, cells_by_rc, cell_texts)
     slots: List[Dict[str, Any]] = []
+    seen: set = set()
     for (row, col), _cell in cells_by_rc.items():
-        txt = _normalize_cell_text(cell_texts.get((table_id, int(row), int(col)), ""))
-        if len(txt) == 1 and txt in _RADIATION_CIRCLED_NUMS:
-            slots.append({"symbol": txt, "row": int(row), "col": int(col)})
-    slots.sort(key=lambda s: (s["row"], s["col"]))
+        ri, ci = int(row), int(col)
+        if bg_rows and ri not in bg_rows:
+            continue
+        if ci <= int(point_col):
+            continue
+        sym = _extract_radiation_circled_symbol(cell_texts.get((table_id, ri, ci), ""))
+        if not sym:
+            continue
+        key = (ri, ci, sym)
+        if key in seen:
+            continue
+        seen.add(key)
+        slots.append({"symbol": sym, "row": ri, "col": ci})
+    slots.sort(key=lambda s: (_RADIATION_CIRCLED_NUMS.index(s["symbol"]), s["col"], s["row"]))
     return slots
 
 
@@ -1883,6 +1997,7 @@ def _ensure_radiation_paren_and_background_boxes(
     header_map: Dict[str, int],
     cells_by_rc: Dict[tuple, Dict],
     cell_texts: Dict[tuple, str],
+    cell_texts_non_red: Dict[tuple, str],
     cell_black_prefix_texts: Dict[tuple, str],
     spans: Sequence[Dict[str, Any]],
     page_no: int,
@@ -1937,7 +2052,9 @@ def _ensure_radiation_paren_and_background_boxes(
             "radiationColumn": "备注",
         }
 
-    circled = _collect_radiation_background_circled_slots(table_id, cells_by_rc, cell_texts)
+    circled = _collect_radiation_background_circled_slots(
+        table_id, point_col, cells_by_rc, cell_texts
+    )
     if not circled:
         return
     used_fill_cells: set = set()
@@ -1946,7 +2063,14 @@ def _ensure_radiation_paren_and_background_boxes(
         num_row = int(slot["row"])
         num_col = int(slot["col"])
         resolved = _resolve_radiation_background_fill_cell(
-            table_id, num_row, num_col, cells_by_rc, cell_texts, used_fill_cells
+            table_id,
+            num_row,
+            num_col,
+            cells_by_rc,
+            cell_texts,
+            cell_texts_non_red,
+            cell_black_prefix_texts,
+            used_fill_cells,
         )
         if not resolved:
             continue
@@ -3541,23 +3665,34 @@ def _signature_image_box_size(
 
 
 # 新版现场记录 PDF：按章节标题（纵坐标）划分输入框归属；与旧版 submit 桶兼容。
+# 锚点为 PDF 内六大章节标题行（常带「一、」…「六、」前缀），栏位按同页 Y 落在相邻锚点之间归属。
 SITE_RECORD_TEMPLATE_SECTIONS: List[Dict[str, Any]] = [
     {
         "key": "site_unit_basic",
         "title": "受检单位基本信息",
-        "aliases": ["受检单位基本信息"],
+        "aliases": [
+            "一、受检单位基本信息",
+            "一.受检单位基本信息",
+            "受检单位基本信息",
+        ],
         "order": 10,
     },
     {
         "key": "site_device_basic",
         "title": "受检设备基本信息",
-        "aliases": ["受检设备基本信息"],
+        "aliases": [
+            "二、受检设备基本信息",
+            "二.受检设备基本信息",
+            "受检设备基本信息",
+        ],
         "order": 20,
     },
     {
         "key": "site_instruments_staff",
         "title": "受检设备主要检测仪器及检测人员",
         "aliases": [
+            "三、受检设备主要检测仪器及检测人员",
+            "三.受检设备主要检测仪器及检测人员",
             "受检设备主要检测仪器及检测人员",
             "主要检测仪器及检测人员",
         ],
@@ -3567,6 +3702,9 @@ SITE_RECORD_TEMPLATE_SECTIONS: List[Dict[str, Any]] = [
         "key": "site_qc_performance",
         "title": "质量控制（性能）检测项目及结果",
         "aliases": [
+            "四、质量控制（性能）检测项目及结果",
+            "四、质量控制(性能)检测项目及结果",
+            "四.质量控制（性能）检测项目及结果",
             "质量控制（性能）检测项目及结果",
             "质量控制(性能)检测项目及结果",
             "质量控制检测项目及结果",
@@ -3577,6 +3715,9 @@ SITE_RECORD_TEMPLATE_SECTIONS: List[Dict[str, Any]] = [
         "key": "site_radiation_protection",
         "title": "工作场所放射防护检测结果",
         "aliases": [
+            "五、工作场所放射防护检测结果",
+            "五、工作场所防护检测结果",
+            "五.工作场所放射防护检测结果",
             "工作场所放射防护检测结果",
             "工作场所防护检测结果",
             "工作场所放射防护检测",
@@ -3587,10 +3728,18 @@ SITE_RECORD_TEMPLATE_SECTIONS: List[Dict[str, Any]] = [
     {
         "key": "site_layout_diagram",
         "title": "平面布局示意图",
-        "aliases": ["平面布局示意图", "平面布局图"],
+        "aliases": [
+            "六、平面布局示意图",
+            "六、平面布局图",
+            "六.平面布局示意图",
+            "平面布局示意图",
+            "平面布局图",
+        ],
         "order": 60,
     },
 ]
+
+_CN_CHAPTER_PREFIX_RE = re.compile(r"^[一二三四五六七八九十百]+[、.．:：]?")
 
 
 def _compact_pdf_heading_text(text: str) -> str:
@@ -3630,36 +3779,62 @@ def _group_spans_into_lines(spans: Sequence[Dict[str, Any]], y_tol: float = 5.0)
     return lines
 
 
+def _normalize_site_record_heading(text: str) -> str:
+    """去掉空白与「一、」类章节序号，便于与锚点标题匹配。"""
+    t = _compact_pdf_heading_text(text)
+    if not t:
+        return ""
+    return _CN_CHAPTER_PREFIX_RE.sub("", t)
+
+
 def _match_site_record_section_key(compact_text: str) -> Optional[str]:
-    text = _compact_pdf_heading_text(compact_text)
-    if not text:
+    text = _normalize_site_record_heading(compact_text)
+    raw_compact = _compact_pdf_heading_text(compact_text)
+    if not text and not raw_compact:
         return None
     best_key = None
+    best_score = 0
     best_order = -1
     for spec in SITE_RECORD_TEMPLATE_SECTIONS:
-        for alias in spec.get("aliases") or []:
-            ac = _compact_pdf_heading_text(alias)
-            if not ac:
+        key = str(spec.get("key") or "")
+        order = int(spec.get("order") or 0)
+        alias_candidates = [str(spec.get("title") or "")]
+        alias_candidates.extend(spec.get("aliases") or [])
+        for alias in alias_candidates:
+            ac_norm = _normalize_site_record_heading(str(alias or ""))
+            ac_raw = _compact_pdf_heading_text(str(alias or ""))
+            if not ac_norm and not ac_raw:
                 continue
-            if ac in text or text in ac:
-                order = int(spec.get("order") or 0)
-                if order >= best_order:
-                    best_order = order
-                    best_key = str(spec.get("key") or "")
-    return best_key or None
+            score = 0
+            for probe in (text, raw_compact):
+                if not probe:
+                    continue
+                for ac in (ac_norm, ac_raw):
+                    if not ac:
+                        continue
+                    if probe == ac:
+                        score = max(score, 1000 + len(ac))
+                    elif ac in probe:
+                        score = max(score, len(ac))
+                    elif probe in ac and len(probe) >= 4:
+                        score = max(score, len(probe))
+            if score > best_score or (score == best_score and score > 0 and order > best_order):
+                best_score = score
+                best_order = order
+                best_key = key
+    return best_key if best_score > 0 else None
 
 
 def extract_site_record_section_anchors(pdf_path: str) -> List[Dict[str, Any]]:
-    """从 PDF 全文识别现场记录章节标题，返回按 (page, y) 排序的锚点列表。"""
+    """从 PDF 全文识别六大章节标题锚点；每页每章仅保留最靠上（最小 y）的一处。"""
     doc = fitz.open(pdf_path)
     anchors: List[Dict[str, Any]] = []
-    seen: set = set()
     try:
         for i in range(len(doc)):
             page = doc[i]
             page_no = i + 1
             spans = extract_text_spans(page)
-            candidates: List[Dict[str, Any]] = []
+            by_key: Dict[str, Dict[str, Any]] = {}
             for line in _group_spans_into_lines(spans):
                 line_text = _line_text_compact(line)
                 key = _match_site_record_section_key(line_text)
@@ -3673,21 +3848,17 @@ def extract_site_record_section_anchors(pdf_path: str) -> List[Dict[str, Any]]:
                 y = min(_span_top_y(sp) for sp in line)
                 spec = next((s for s in SITE_RECORD_TEMPLATE_SECTIONS if s.get("key") == key), None)
                 title = str(spec.get("title") or key) if spec else key
-                dedupe = (page_no, key, round(y, 1))
-                if dedupe in seen:
-                    continue
-                seen.add(dedupe)
-                candidates.append(
-                    {
+                prev = by_key.get(key)
+                if prev is None or y < float(prev.get("y") or 0.0):
+                    by_key[key] = {
                         "page": page_no,
                         "y": y,
                         "key": key,
                         "title": title,
                         "order": int(spec.get("order") or 0) if spec else 0,
                     }
-                )
-            candidates.sort(key=lambda a: (a["y"], a.get("order", 0)))
-            anchors.extend(candidates)
+            page_anchors = sorted(by_key.values(), key=lambda a: float(a.get("y") or 0.0))
+            anchors.extend(page_anchors)
     finally:
         doc.close()
     anchors.sort(key=lambda a: (int(a.get("page") or 1), float(a.get("y") or 0.0), int(a.get("order") or 0)))
@@ -3702,6 +3873,54 @@ def _field_sort_pos(field: Dict[str, Any]) -> tuple:
     )
 
 
+def _field_section_anchor_y(field: Dict[str, Any]) -> float:
+    """栏位用于章节归属的纵坐标：取框顶 y（与 PDF 标题行 y 对齐）。"""
+    try:
+        return float(field.get("y") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _anchors_grouped_by_page(anchors: Sequence[Dict[str, Any]]) -> Dict[int, List[Dict[str, Any]]]:
+    by_page: Dict[int, List[Dict[str, Any]]] = {}
+    for anchor in anchors:
+        if not isinstance(anchor, dict):
+            continue
+        page = int(anchor.get("page") or 1)
+        by_page.setdefault(page, []).append(anchor)
+    for page in by_page:
+        by_page[page].sort(key=lambda a: float(a.get("y") or 0.0))
+    return by_page
+
+
+def _pick_section_on_page(
+    page_anchors: Sequence[Dict[str, Any]],
+    field_y: float,
+    *,
+    carry: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    同页内：取 y 不超过栏位顶部的最后一个章节锚点。
+    栏位在最后一个锚点下方（含紧贴）仍归属该章（如「六」以下属平面布局图）。
+    栏位在第一个锚点之上时沿用上一页末章 carry。
+    """
+    if not page_anchors:
+        return carry
+    picked: Optional[Dict[str, Any]] = None
+    for anchor in page_anchors:
+        ay = float(anchor.get("y") or 0.0)
+        if ay <= field_y:
+            picked = anchor
+        else:
+            break
+    if picked is None:
+        return carry if carry is not None else page_anchors[0]
+    last_anchor = page_anchors[-1]
+    if field_y >= float(last_anchor.get("y") or 0.0):
+        return last_anchor
+    return picked
+
+
 def _resolve_template_section_for_field(
     field: Dict[str, Any],
     anchors: Sequence[Dict[str, Any]],
@@ -3709,15 +3928,22 @@ def _resolve_template_section_for_field(
     if not anchors:
         return None
     fp = int(field.get("page") or 1)
-    fy = float(field.get("y") or 0.0)
-    picked = None
-    for anchor in anchors:
-        ap = int(anchor.get("page") or 1)
-        ay = float(anchor.get("y") or 0.0)
-        if (ap, ay) <= (fp, fy):
-            picked = anchor
-        else:
+    fy = _field_section_anchor_y(field)
+    by_page = _anchors_grouped_by_page(anchors)
+    carry: Optional[Dict[str, Any]] = None
+    picked: Optional[Dict[str, Any]] = None
+    for page in sorted(by_page.keys()):
+        page_anchors = by_page[page]
+        if page < fp:
+            if page_anchors:
+                carry = page_anchors[-1]
+            continue
+        if page > fp:
             break
+        picked = _pick_section_on_page(page_anchors, fy, carry=carry)
+        break
+    if picked is None:
+        picked = carry
     if picked is None:
         picked = anchors[0]
     return {
@@ -3732,7 +3958,7 @@ def assign_template_sections_to_fields(
     *,
     anchors: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
-    """按章节锚点纵坐标，为每个输入框写入 templateSectionKey / templateSectionTitle。"""
+    """按同页纵坐标与六大章节标题锚点，为每个输入框写入 templateSectionKey / templateSectionTitle。"""
     if not fields:
         return fields
     anchor_list = list(anchors) if anchors is not None else extract_site_record_section_anchors(pdf_path)
@@ -3747,6 +3973,11 @@ def assign_template_sections_to_fields(
         field["templateSectionKey"] = sec["templateSectionKey"]
         field["templateSectionTitle"] = sec["templateSectionTitle"]
     return fields
+
+
+def site_record_section_anchors_for_pdf(pdf_path: str) -> List[Dict[str, Any]]:
+    """供编辑器 API 返回已识别章节锚点（调试/提示用）。"""
+    return extract_site_record_section_anchors(pdf_path)
 
 
 def _spans_inside_table_cell(cell: Dict[str, Any], spans: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -4084,8 +4315,8 @@ def extract_signature_image_boxes(pdf_path: str) -> List[Dict[str, Any]]:
                 "placeholder": slot_id,
                 "fieldType": "image",
                 "pdfFieldId": str(slot.get("pdfFieldId") or ""),
-                "templateSectionKey": "site_instruments_staff",
-                "templateSectionTitle": "受检设备主要检测仪器及检测人员",
+                "templateSectionKey": "",
+                "templateSectionTitle": "",
             }
         )
     return out
@@ -4204,16 +4435,22 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                         "page": page_no,
                     }
                 )
-            # 空白单元格自动框：无文字且该格无下划线槽位时才整格框选
+            # 空白单元格自动框：非红字为空且该格无已检出下划线槽位时才整格框选
             for table_id, cells_by_rc in table_cells_by_rc.items():
                 for (row, col), cell in cells_by_rc.items():
-                    cell_txt = _normalize_cell_text(cell_texts.get((table_id, row, col), ""))
-                    cell_blk = _normalize_cell_text(cell_black_prefix_texts.get((table_id, row, col), ""))
-                    if _span_text_is_signature_label(cell_txt) or _span_text_is_signature_label(cell_blk):
+                    ri, ci = int(row), int(col)
+                    if not _is_cell_empty_for_auto_box(
+                        int(table_id),
+                        ri,
+                        ci,
+                        cell_texts,
+                        cell_texts_non_red,
+                        cell_black_prefix_texts,
+                    ):
                         continue
-                    if cell_txt:
-                        continue
-                    if (int(table_id), int(row), int(col)) in underline_cell_keys:
+                    if (int(table_id), ri, ci) in underline_cell_keys and _cell_has_underline_slot_in_targets(
+                        int(table_id), ri, ci, red_cell_targets
+                    ):
                         continue
                     key = (int(table_id), int(row), int(col), str(cell.get("cell_id") or ""))
                     if key in red_cell_targets:
@@ -4325,6 +4562,7 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                     int(tid),
                     table_cells_by_rc.get(int(tid)) or {},
                     cell_texts,
+                    cell_texts_non_red,
                     cell_black_prefix_texts,
                     underline_cell_keys,
                     page_no,
@@ -4343,6 +4581,7 @@ def extract_red_text_field_boxes(pdf_path: str, cfg: Optional[Config] = None) ->
                     header_map_by_table[int(tid)],
                     table_cells_by_rc.get(int(tid)) or {},
                     cell_texts,
+                    cell_texts_non_red,
                     cell_black_prefix_texts,
                     spans,
                     page_no,

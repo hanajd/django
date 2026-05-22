@@ -6,7 +6,7 @@
     {% if forloop.last %}
     <span class="font-medium text-slate-900">{{ crumb.label }}</span>
     {% else %}
-    <a href="{{ explorer_base_url }}{% if crumb.path %}{% if '?' in explorer_base_url %}&{% else %}?{% endif %}fl_path={{ crumb.path|urlencode }}{% endif %}"
+    <a href="{{ explorer_base_url }}{% if crumb.path %}{% if '?' in explorer_base_url %}&{% else %}?{% endif %}fl_path={{ crumb.path|urlencode }}{% endif %}{{ explorer_nav_suffix|default:'' }}"
        class="hover:text-indigo-600">{{ crumb.label }}</a>
     {% endif %}
     {% endfor %}
@@ -36,12 +36,12 @@
         <div class="folder-explorer-card group relative flex flex-col items-center gap-1 p-4 rounded-xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-md transition-all text-center"
              {% if ent.drop_accepts %}data-drop-accepts="{{ ent.drop_accepts }}" data-drop-id="{{ ent.entity_pk }}" data-drop-org-level="{{ ent.org_level }}"{% endif %}
              >
-            <a href="{{ explorer_base_url }}{% if '?' in explorer_base_url %}&{% else %}?{% endif %}fl_path={{ ent.path|urlencode }}{{ ent.link_suffix }}"
+            <a href="{{ explorer_base_url }}{% if '?' in explorer_base_url %}&{% else %}?{% endif %}fl_path={{ ent.path|urlencode }}{{ ent.link_suffix }}{{ explorer_nav_suffix|default:'' }}"
                class="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-50 text-amber-600 group-hover:bg-amber-100"
                title="打开文件夹">
                 <i class="{% if ent.icon == 'project' %}ri-file-text-line text-2xl{% elif ent.icon == 'hospital' %}ri-hospital-line text-2xl{% elif ent.icon == 'campus' %}ri-building-2-line text-2xl{% elif ent.icon == 'department' %}ri-stethoscope-line text-2xl{% elif ent.icon == 'site_record' %}ri-file-paper-2-line text-2xl{% elif ent.icon == 'report' %}ri-file-chart-line text-2xl{% elif ent.icon == 'task' %}ri-stack-line text-2xl{% elif ent.icon == 'site' %}ri-file-paper-2-line text-2xl{% elif ent.icon == 'submit_data' %}ri-file-code-line text-2xl{% elif ent.icon == 'submit_signature' %}ri-quill-pen-line text-2xl{% elif ent.icon == 'submit_photo' %}ri-image-2-line text-2xl{% else %}ri-folder-fill text-2xl{% endif %}"></i>
             </a>
-            <a href="{{ explorer_base_url }}{% if '?' in explorer_base_url %}&{% else %}?{% endif %}fl_path={{ ent.path|urlencode }}{{ ent.link_suffix }}"
+            <a href="{{ explorer_base_url }}{% if '?' in explorer_base_url %}&{% else %}?{% endif %}fl_path={{ ent.path|urlencode }}{{ ent.link_suffix }}{{ explorer_nav_suffix|default:'' }}"
                class="library-dnd-source w-full px-1 text-sm font-medium text-slate-900 line-clamp-2 leading-snug rounded-lg py-1 hover:bg-slate-50{% if ent.drag_type %} cursor-grab active:cursor-grabbing{% endif %}"
                {% if ent.drag_type %}draggable="true" data-drag-type="{{ ent.drag_type }}" data-drag-id="{{ ent.entity_pk }}" data-org-level="{{ ent.org_level }}"{% endif %}
                title="{% if ent.drag_type %}按住名称拖动{% else %}打开{% endif %}">{{ ent.label }}</a>

@@ -16,6 +16,7 @@
 | `ensure_party_a_demo` | `ensure_party_a_demo.py` | 甲方演示/引导环境相关数据 |
 | `ensure_template_tester` | `ensure_template_tester.py` | 模板测试账号相关 |
 | `purge_library_trash` | `purge_library_trash.py` | 永久删除回收站中超时（默认 31 天）的文件库记录；建议由 cron 每日执行 |
+| `check_library_media` | `check_library_media.py` | 校验 DB 文件库记录与 `media/file_library` 磁盘是否一致；缺失则移入回收站。启动时默认自动执行，可加 `--dry-run` |
 
 使用方式：`python3 manage.py <command> [options]`
 

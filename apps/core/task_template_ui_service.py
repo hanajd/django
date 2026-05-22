@@ -1,11 +1,13 @@
 """任务模板库与模板编辑器共用的 UI 辅助（编辑模式 URL、文件分组、层级目录）。"""
 from __future__ import annotations
 
+from collections import defaultdict
+from pathlib import Path
 from urllib.parse import quote
 
 from django.urls import reverse
 
-from apps.core.library_folder_service import TreeNode, _norm_path, _parse_segments
+from apps.core.library_folder_service import FolderEntry, TreeNode, _norm_path, _parse_segments
 from apps.core.library_task_folder_service import (
     UNCATEGORIZED_KEY,
     UNCATEGORIZED_LABEL,
@@ -18,17 +20,28 @@ from apps.core.library_task_folder_service import (
 )
 from apps.core.models import LibraryFile, LibraryTask, LibraryTaskFolder
 
+SESSION_TASK_LIBRARY_EDIT = "task_library_edit_mode"
+
 
 def task_library_edit_mode(request) -> bool:
+    """
+    编辑模式：点击「编辑」后写入 session，导航换任务/文件夹时保持编辑，直到「取消编辑」。
+    """
     v = (request.GET.get("edit") or request.POST.get("edit") or "").strip().lower()
-    return v in ("1", "true", "yes", "on")
+    if v in ("0", "false", "no", "off"):
+        request.session.pop(SESSION_TASK_LIBRARY_EDIT, None)
+        return False
+    if v in ("1", "true", "yes", "on"):
+        request.session[SESSION_TASK_LIBRARY_EDIT] = True
+        return True
+    return bool(request.session.get(SESSION_TASK_LIBRARY_EDIT))
 
 
 def task_library_page_url(
     fl_path: str = "",
     *,
     manage_task_id: int | None = None,
-    edit: bool = False,
+    edit: bool | None = None,
     return_project: str = "",
     export_project_id: str = "",
     new_report: bool = False,
@@ -44,8 +57,10 @@ def task_library_page_url(
         parts.append(f"return_project={quote(str(return_project))}")
     if export_project_id:
         parts.append(f"export_project_id={quote(str(export_project_id))}")
-    if edit:
+    if edit is True:
         parts.append("edit=1")
+    elif edit is False:
+        parts.append("edit=0")
     if new_report:
         parts.append("new_report=1")
     if new_site:
@@ -100,6 +115,92 @@ def group_template_files_for_bind(files: list) -> dict[str, list]:
         else:
             grouped["other"].append(f)
     return grouped
+
+
+def group_template_files_by_stem(
+    files: list,
+    linked_ids: set[int] | None = None,
+) -> list[dict]:
+    """
+    按主文件名（stem）将 PDF 与 JSON 配成一行，便于绑定面板展示「谁对应谁」。
+    """
+    linked = linked_ids or set()
+    buckets: dict[str, dict] = defaultdict(
+        lambda: {"pdf": None, "json": None, "other": []}
+    )
+    order: list[str] = []
+    for f in files or []:
+        name = str(getattr(f, "original_name", None) or "").strip()
+        if not name:
+            continue
+        low = name.lower()
+        stem = Path(name).stem
+        if stem not in buckets:
+            order.append(stem)
+        row = buckets[stem]
+        fid = int(getattr(f, "pk", None) or getattr(f, "id", 0) or 0)
+        entry = {
+            "file": f,
+            "id": fid,
+            "name": name,
+            "linked": fid in linked,
+        }
+        if low.endswith(".pdf"):
+            row["pdf"] = entry
+        elif low.endswith(".json"):
+            row["json"] = entry
+        else:
+            row["other"].append(entry)
+    out: list[dict] = []
+    for stem in order:
+        row = buckets[stem]
+        if not row["pdf"] and not row["json"] and not row["other"]:
+            continue
+        out.append(
+            {
+                "stem": stem,
+                "pdf": row["pdf"],
+                "json": row["json"],
+                "other": row["other"],
+                "pdf_linked": bool(row["pdf"] and row["pdf"]["linked"]),
+                "json_linked": bool(row["json"] and row["json"]["linked"]),
+            }
+        )
+    return out
+
+
+def append_edit_mode_to_explorer_links(
+    tree: list[TreeNode],
+    entries: list[FolderEntry],
+    *,
+    edit: bool,
+) -> None:
+    """导航树/文件夹卡片链接追加 edit=1，避免点选后退出编辑。"""
+    if not edit:
+        return
+    suffix = "&edit=1"
+
+    def _walk(nodes: list[TreeNode]) -> None:
+        for n in nodes:
+            if n.link_suffix and suffix not in n.link_suffix:
+                n.link_suffix = str(n.link_suffix) + suffix
+            elif not n.link_suffix:
+                n.link_suffix = suffix
+            if n.children:
+                _walk(n.children)
+
+    _walk(tree)
+    for ent in entries:
+        if ent.link_suffix and suffix not in ent.link_suffix:
+            ent.link_suffix = str(ent.link_suffix) + suffix
+        elif not ent.link_suffix:
+            ent.link_suffix = suffix
+
+
+def suggested_template_json_save_name(pdf_original_name: str) -> str:
+    """坐标模板 JSON 默认与 PDF 主文件名一致（扩展名 .json）。"""
+    stem = Path(str(pdf_original_name or "").strip()).stem or "template"
+    return f"{stem}.json"
 
 
 def _template_pdfs_for_task(

@@ -1,0 +1,57 @@
+{# 按主文件名配对展示 PDF ↔ JSON，避免分组列表对不上号 #}
+<div class="space-y-3">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+        <p class="text-xs text-slate-600">按<strong>主文件名</strong>配对；勾选后点「加入模板」或「从模板移除」。</p>
+        <label class="inline-flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
+            <input type="checkbox" id="check-all-task-files" class="rounded border-slate-300 text-indigo-600">
+            全选本页
+        </label>
+    </div>
+    <div class="rounded-xl border border-slate-200 bg-white overflow-hidden max-h-[min(28rem,55vh)] overflow-y-auto divide-y divide-slate-100">
+        {% for pair in task_mgmt_file_pairs %}
+        <div class="px-4 py-3 hover:bg-slate-50/80 {% if pair.pdf_linked or pair.json_linked %}bg-emerald-50/20{% endif %}">
+            <div class="flex flex-wrap items-center gap-2 mb-2">
+                <i class="ri-folder-3-line text-amber-500"></i>
+                <span class="font-mono text-sm font-medium text-slate-800">{{ pair.stem }}</span>
+                {% if pair.pdf_linked and pair.json_linked %}
+                <span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">PDF+JSON 已绑定</span>
+                {% elif pair.pdf_linked %}
+                <span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">PDF 已绑定</span>
+                {% elif pair.json_linked %}
+                <span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-900">JSON 已绑定</span>
+                {% endif %}
+            </div>
+            <div class="grid gap-2 sm:grid-cols-2">
+                <div class="flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50/50 px-3 py-2 min-h-[3rem]">
+                    {% if pair.pdf %}
+                    <input type="checkbox" name="file_ids" value="{{ pair.pdf.id }}" class="row-task-file rounded border-slate-300 text-indigo-600 shrink-0"
+                           {% if pair.pdf_linked %}checked{% endif %}>
+                    <i class="ri-file-pdf-2-line text-red-500 text-lg shrink-0"></i>
+                    <span class="min-w-0 text-sm text-slate-800 truncate" title="{{ pair.pdf.name }}">{{ pair.pdf.name }}</span>
+                    {% else %}
+                    <span class="text-xs text-slate-400 pl-8">（无 PDF）</span>
+                    {% endif %}
+                </div>
+                <div class="flex items-center gap-3 rounded-lg border border-slate-100 bg-slate-50/50 px-3 py-2 min-h-[3rem]">
+                    {% if pair.json %}
+                    <input type="checkbox" name="file_ids" value="{{ pair.json.id }}" class="row-task-file rounded border-slate-300 text-indigo-600 shrink-0"
+                           {% if pair.json_linked %}checked{% endif %}>
+                    <i class="ri-braces-line text-violet-500 text-lg shrink-0"></i>
+                    <span class="min-w-0 text-sm text-slate-800 truncate" title="{{ pair.json.name }}">{{ pair.json.name }}</span>
+                    {% else %}
+                    <span class="text-xs text-slate-400 pl-8">（无 JSON，可在编辑器保存后生成）</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% for o in pair.other %}
+            <div class="mt-2 flex items-center gap-3 rounded-lg border border-dashed border-slate-200 px-3 py-2">
+                <input type="checkbox" name="file_ids" value="{{ o.id }}" class="row-task-file rounded border-slate-300 text-indigo-600">
+                <span class="text-sm text-slate-700 truncate">{{ o.name }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% empty %}
+        <p class="px-4 py-10 text-center text-sm text-slate-400">文件库「模板」分类暂无文件，请先上方上传或到文件库添加。</p>
+        {% endfor %}
+    </div>
+</div>

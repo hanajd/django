@@ -462,12 +462,12 @@ class LibraryTask(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("创建时间"))
     updated_at = models.DateTimeField(auto_now=True, verbose_name=_("更新时间"))
     bound_instrument_ids = models.JSONField(
-        default=list,
+        default=dict,
         blank=True,
         verbose_name=_("模板默认检测仪器"),
         help_text=_(
-            "有序的主数据仪器 id 列表（对应 InstrumentCatalog）。"
-            "合并到提交的 instruments 中用于下拉与 PDF 展示；与提交去重后追加。"
+            "JSON 对象：qualityControl / radiationProtection 各对应一台 InstrumentCatalog 主键；"
+            "质控与防护独立绑定。兼容旧版有序列表。"
         ),
     )
 

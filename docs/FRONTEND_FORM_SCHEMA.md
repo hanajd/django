@@ -32,25 +32,86 @@ steps[]                    # 办理步骤（通常 1 步「检测原始记录」
         └── matrix         # 固定表头+多行（matrixTable，可选）
 ```
 
-### 2.1 现场记录六大章节（`section.id`）
+### 2.1 现场记录六大章节（运行态）
 
-与 PDF 标题一致，常见 `id`：
+移动端 `GET …/export-frontend-json`（默认 `mode=runtime`）**始终输出六大业务章节**，即使某章暂无栏位也会保留空 `fields: []`。请用稳定 **`sectionType`** 驱动前端逻辑，**不要**靠中文 `title` 判断章节。
 
-| `section.id` | 标题 |
-|--------------|------|
-| `site_unit_basic` | 受检单位基本信息 |
-| `site_device_basic` | 受检设备基本信息 |
-| `site_instruments_staff` | 受检设备主要检测仪器及检测人员 |
-| `site_qc_performance` | 质量控制（性能）检测项目及结果 |
-| `site_radiation_protection` | 工作场所放射防护检测结果 |
-| `site_layout_diagram` | 平面布局示意图 |
+| `sectionType` | `sectionKey` | 典型 `id` | 标题 |
+|---------------|--------------|-----------|------|
+| `clientBasicInfo` | `client_basic_info` | `sec_client_basic` | 受检单位基本信息 |
+| `equipmentBasicInfo` | `equipment_basic_info` | `sec_equipment_basic` | 受检设备基本信息 |
+| `instrumentPersonnel` | `instrument_personnel` | `sec_instrument_personnel` | 受检设备主要检测仪器及检测人员（含质控/防护两个 `instrument_select`） |
+| `qualityControl` | `quality_control` | `sec_qc` | 质量控制（性能）检测项目及结果 |
+| `radiationProtection` | `radiation_protection` | `sec_radiation_protection` | 工作场所放射防护检测结果 |
+| `floorPlan` | `floor_plan` | `sec_floor_plan` | 平面布局示意图 |
 
-`section` 仅保留：
+`section` 运行态保留：
 
-- `id`：章节键（与上表一致）
-- `title`：章节中文标题
-- `layout`：仅非 `form` 时写出（如 `matrix` / `matrixTable` / `table`）
-- `fields` / `matrix`：二选一或并存
+- `id` / `sectionKey` / `sectionType` / `title`
+- `layout`：仅非 `form` 时写出（如 `matrixTable`）
+- `fields` / `matrix`
+- 可选 `capabilities` / `behavior`（轻量行为配置，见 2.2）
+
+示例（空章占位）：
+
+```json
+{
+  "id": "sec_qc",
+  "sectionKey": "quality_control",
+  "sectionType": "qualityControl",
+  "title": "质量控制（性能）检测项目及结果",
+  "fields": []
+}
+```
+
+### 2.2 质控 / 防护检测仪器（同属第三章）
+
+两个仪器选择格**都在** `sectionType: "instrumentPersonnel"`（「受检设备主要检测仪器及检测人员」）的 `fields[]` 中，**不会**放到质控或防护检测结果章。标签示例：
+
+- `主要检测仪器_质量控制（性能）检测`
+- `主要检测仪器_工作场所放射防护检测`
+
+导出为 `type: "instrument_select"`，并带：
+
+| 字段 | 说明 |
+|------|------|
+| `instrumentScope` | `qualityControl` 或 `radiationProtection`（提交语义，非章节类型） |
+| `registrySlot` | `1`（质控）或 `2`（防护） |
+| `submitPath` | `instruments.qualityControl` / `instruments.radiationProtection` |
+| `submitBucket` | `instruments` |
+
+该章 `capabilities` 含 `instrumentSelect`。根级 `instrumentBindings` 与任务模板独立绑定对齐（后台分别选质控仪器、防护仪器，非按勾选顺序）：
+
+```json
+"instrumentBindings": [
+  {
+    "scope": "qualityControl",
+    "sectionType": "instrumentPersonnel",
+    "label": "主要检测仪器_质量控制（性能）检测",
+    "submitPath": "instruments.qualityControl",
+    "registrySlot": 1,
+    "defaultInstrumentId": "12"
+  },
+  {
+    "scope": "radiationProtection",
+    "sectionType": "instrumentPersonnel",
+    "label": "主要检测仪器_工作场所放射防护检测",
+    "submitPath": "instruments.radiationProtection",
+    "registrySlot": 2,
+    "defaultInstrumentId": "15"
+  }
+]
+```
+
+前端：在 **instrumentPersonnel** 章节渲染两个 `instrument_select`；提交写入 `instruments.qualityControl` / `instruments.radiationProtection`；下拉走台账 API。
+
+### 2.3 `capabilities` / `behavior`（可选）
+
+| `sectionType` | `capabilities` | `behavior` |
+|---------------|----------------|------------|
+| `equipmentBasicInfo` | `["deviceOcr"]` | — |
+| `qualityControl` | `["retainPhotos"]` | — |
+| `radiationProtection` | `["editableMatrixRows"]` | `{ "maxCustomRows": 22 }` |
 
 ---
 
@@ -60,25 +121,25 @@ steps[]                    # 办理步骤（通常 1 步「检测原始记录」
 
 ```json
 {
-  "id": "commissionNo",
-  "type": "text",
-  "label": "委托编号",
-  "pdfFieldId": "f1",
-  "submitPath": "reportInfo.commissionNo",
-  "required": false,
-  "defaultValue": null,
-  "width": "half"
+  "id": "doseValue",
+  "type": "number",
+  "label": "剂量值",
+  "pdfFieldId": "f56",
+  "submitPath": "testResult.doseValue",
+  "submitBucket": "testResult"
 }
 ```
+
+运行态栏位为**扁平对象**（无嵌套 `source`），至少保留 `pdfFieldId`、`submitPath`；有分桶时写 `submitBucket`。`schemaKey` / `hierarchyKey` 等语义键仍在顶层。
 
 ### 3.1 必填/常用属性
 
 | 属性 | 说明 |
 |------|------|
-| `id` | 表单内稳定逻辑 ID |
+| `id` | 与 `pdfFieldId` 一致（`f1`、`f2`…）；**允许 `label` 重名**，勿用展示名当唯一键 |
 | `type` | 控件类型（见下表） |
-| `label` | 展示标签 |
-| `pdfFieldId` | **PDF 回填键**（与坐标模板中 `f1`、`f2`… 一致） |
+| `label` | 展示标签（可与其他栏位相同） |
+| `pdfFieldId` | **PDF 回填与 dynamicData 键**（与坐标模板一致；移动端/服务端回填均以此为准） |
 | `pdfFieldIds` | 多 PDF 框合并为一个输入时（如多处签名） |
 | `submitPath` | **提交/读写**用的点路径（常含 `testResult.auto…`），不是界面标题 |
 | `schemaKey` | 稳定逻辑键（原 `source.key`），如 `step_qc_items.sec_xxx.t0_r8_c5.measuredValue` |
@@ -105,7 +166,8 @@ steps[]                    # 办理步骤（通常 1 步「检测原始记录」
 | `checkboxGroup` | 选项组（少用） |
 | `computed` | 只读计算列（含 `formula`、`dependsOn`） |
 | `verdict` | 判定列（含 `rule`） |
-| `signature` | 签字（检测员/校核/陪同人等） |
+| `signature` | 签字（检测员/校核/陪同人等）；**仅**出现在 `step_signature`，不与「仪器及人员」章重复 |
+| `instrument_select` | 检测仪器下拉（对接 `GET …/registry/instruments/` + 根级 `instruments[]`） |
 | `floorPlan` | **仅**「平面布局示意图」章节内的平面图 image |
 | `table` | 检测仪器清单等可编辑表（含 `columns`、`initialRows`） |
 
@@ -163,7 +225,29 @@ steps[]                    # 办理步骤（通常 1 步「检测原始记录」
 
 ---
 
-## 4. 表格语义：`table`（重点：工作场所放射防护）
+## 4. 工作场所放射防护：`matrixTable` + 22 可编辑点位
+
+`radiationProtection` 章节在运行态导出为 **`layout: "matrixTable"`**（不再用大量平铺 `fields`）。
+
+- 预留 **22 行**可新增点位：`testResult.protectionPoints[0].point` … `[21].point`
+- 行头列 `point`（检测点位）标记 `editable: true`，前端可编辑并随草稿/提交保存
+- PDF 模板已有数据的行按 `table.row` 映射到矩阵单元；其余行为空行占位
+
+`rowHeaderColumns` 示例：
+
+```json
+{
+  "id": "point",
+  "title": "检测点位",
+  "editable": true,
+  "submitPath": "testResult.protectionPoints[0].point",
+  "submitBucket": "testResult"
+}
+```
+
+质控等其它表格仍可使用平铺 `fields` + 顶层 `table` 语义（见 4.1）。
+
+### 4.1 表格语义：`table`（质控等平铺栏位）
 
 带表格语义的栏位，导出为顶层 **`table`** 对象（不再使用嵌套 `source.autoSemantic`）。  
 质控表与防护表均保留 **`itemName` / `typeName` / `fieldName` / `row` / `col`**；防护表额外有点位列语义：
@@ -313,8 +397,21 @@ steps[]                    # 办理步骤（通常 1 步「检测原始记录」
 
 ## 8. 平面布局图（`floorPlan`）
 
-- **仅** `site_layout_diagram` 章节内、**非签字**的 **image** 框为 `floorPlan`。
-- 签字栏仍为 `signature`（`pdfFieldId` 或 `pdfFieldIds`）。
+- **仅** `sectionType: "floorPlan"` 章节内、**非签字**的平面图栏位为 `type: "floorPlan"`。
+- 须带 `pdfFieldId` 与 `submitPath`（常为 `signatures.floorPlan`）；前端输出绘制结果 **base64** 图片。
+
+```json
+{
+  "id": "floorPlan",
+  "type": "floorPlan",
+  "label": "平面布局示意图",
+  "pdfFieldId": "f637",
+  "submitPath": "signatures.floorPlan",
+  "submitBucket": "signatures"
+}
+```
+
+签字栏仍为 `signature`（`pdfFieldId` 或 `pdfFieldIds`）。
 
 ---
 
@@ -339,17 +436,23 @@ steps[]                    # 办理步骤（通常 1 步「检测原始记录」
 
 ---
 
-## 10. 获取方式与任务模板绑定
+## 10. 获取方式与导出模式
 
-| 文件 | 保存入口 | 是否绑定任务模板 |
-|------|----------|------------------|
-| 坐标模板 `*_template.json`（`unified_form_template/v2`，含 `pdf.fields`） | HTMLPDF「保存坐标模板 JSON」 | **是**（轮换任务主 JSON 绑定） |
-| 前端规则 `*_frontend.json`（本文 schema） | HTMLPDF「保存前端规则 JSON」 / App 导出接口 | **否**（仅文件库辅助；保存时会从任务 M2M 剥离误关联的辅助 JSON） |
+| 场景 | 接口 | 格式 |
+|------|------|------|
+| **移动端 / App（默认）** | `GET /api/v2/inspections/projects/{projectId}/tasks/{taskNo}/export-frontend-json` | 运行态 compact JSON，`Content-Type: application/json`，**无** `indent=2`，支持 **ETag / 304** 与 **gzip** |
+| 后台调试 | 同上 + `?mode=editor` | 可读 `indent=2` 附件下载（含更多编辑器结构，仅供调试） |
+| HTMLPDF 编辑器 | `POST /files/htmlpdf/api/export-frontend-json/` | 文件库辅助 JSON，不写任务主绑定 |
 
-- App：`GET /api/v2/inspections/projects/{projectId}/tasks/{taskNo}/export-frontend-json`（下载，不写任务绑定）
-- 后台 HTMLPDF：`POST /files/htmlpdf/api/export-frontend-json/`
+运行态响应序列化：
 
-重新导出后，防护表栏位应包含完整 `table` 对象；旧版含 `pdfBindings` / 嵌套 `source` 的 JSON 已废弃。
+```python
+json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+```
+
+服务端日志（与前端对齐排障）：`taskNo, bytes, steps, sections, fields, matrixRows, matrixCells`。
+
+坐标模板 `*_template.json`（`unified_form_template/v2`）仍单独保存 `pdf.fields[].rect`；**不会**出现在移动端运行态 JSON 中。
 
 ---
 
@@ -364,6 +467,9 @@ steps[]                    # 办理步骤（通常 1 步「检测原始记录」
 | 判定说明 | 顶层 `judgmentCriterionText` |
 | 逻辑键 | 顶层 `schemaKey`（原 `source.key`）、`hierarchyKey` |
 | 根级 `sections` 目录副本 | 已移除（章节仅在 `steps.sections`） |
+| `sectionType` / `sectionKey` | 六大章节稳定枚举，前端勿依赖中文标题 |
+| 防护章 | 运行态为 `matrixTable` + 22 行 `protectionPoints` |
+| 移动端 JSON 体积 | compact + gzip；`mode=editor` 仅调试用 |
 | `precision` | 数值/计算栏小数位，常为 `1` |
 
-如有新模板类型，以后端 `utils/frontend_schema_rule_engine.py` 导出结果为准。
+实现入口：`utils/frontend_schema_rule_engine.py`（规则拼装）+ `utils/frontend_runtime_export.py`（运行态压平）。

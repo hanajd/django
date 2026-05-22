@@ -43,7 +43,9 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',  # CORS 中间件
+    'django.middleware.gzip.GZipMiddleware',
     'django.middleware.common.CommonMiddleware',
+    'django.middleware.http.ConditionalGetMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'apps.core.middleware.WebSessionLeaseMiddleware',
@@ -142,6 +144,12 @@ PIPELINE_BATCH_ARCHIVE = FILE_LIBRARY_TEMP_ROOT / 'batches'
 PIPELINE_PREVIEW_IMG = FILE_LIBRARY_TEMP_ROOT / 'preview_images'
 PIPELINE_STATIC = FILE_LIBRARY_TEMP_ROOT / 'static'
 PIPELINE_MINERU_MD = FILE_LIBRARY_TEMP_ROOT / 'mineru_md'
+
+# 启动时校验文件库记录与 media 磁盘是否一致（见 apps.core.library_media_integrity）
+# 设为 0/false/no 或 export LIBRARY_MEDIA_INTEGRITY_SKIP=1 可跳过
+LIBRARY_MEDIA_INTEGRITY_ON_STARTUP = os.environ.get(
+    'LIBRARY_MEDIA_INTEGRITY_ON_STARTUP', '1'
+).lower() not in ('0', 'false', 'no')
 
 # MinerU / Ollama：管线启动前由 apps.core.pipeline_service 同步到 os.environ
 # MINERU_BACKEND：未在环境中设置时 Django 默认 pipeline（避免 hybrid+vLLM 依赖 Triton/gcc 失败）。

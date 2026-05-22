@@ -13,3 +13,6 @@ class CoreConfig(AppConfig):
     def ready(self):
         # 注册信号（延迟 import 避免 AppRegistry 未就绪）
         from apps.core import signals  # noqa: F401
+        from apps.core.library_media_integrity import run_library_media_integrity_on_startup
+
+        run_library_media_integrity_on_startup()

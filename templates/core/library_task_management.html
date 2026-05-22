@@ -80,7 +80,7 @@
         <div class="min-w-0 space-y-6">
             {% if not manage_task and not show_new_report_form and not show_new_site_form %}
             <div class="rounded-2xl border border-slate-200/90 bg-white shadow-sm p-4 sm:p-6">
-                {% include "core/partials/folder_explorer_main.html" with explorer_base_url=task_explorer_base folder_breadcrumbs=folder_breadcrumbs folder_entries=folder_entries files_at_path=files_at_path explorer_dnd_enabled=task_explorer_dnd_enabled explorer_dnd_post_url=task_explorer_dnd_post_url explorer_dnd_mode="task_library" fl_path=fl_path %}
+                {% include "core/partials/folder_explorer_main.html" with explorer_base_url=task_explorer_base folder_breadcrumbs=folder_breadcrumbs folder_entries=folder_entries files_at_path=files_at_path explorer_dnd_enabled=task_explorer_dnd_enabled explorer_dnd_post_url=task_explorer_dnd_post_url explorer_dnd_mode="task_library" fl_path=fl_path explorer_nav_suffix=explorer_nav_suffix %}
                 {% if not folder_entries %}
                 <p class="mt-6 text-center text-sm text-slate-500">在左侧选择任务分类，进入报告模板；在报告下新建现场记录并绑定版式模板。</p>
                 {% endif %}
@@ -195,7 +195,7 @@
 
                         {% if parent_report_task_for_site %}
                         <p class="text-xs mt-1">
-                            <a href="{% url 'library_task_management' %}?manage_task={{ parent_report_task_for_site.pk }}{% if fl_path %}&fl_path={{ fl_path|urlencode }}{% endif %}{% if rp %}&return_project={{ rp }}{% endif %}"
+                            <a href="{% url 'library_task_management' %}?manage_task={{ parent_report_task_for_site.pk }}{% if fl_path %}&fl_path={{ fl_path|urlencode }}{% endif %}{{ explorer_nav_suffix }}{% if rp %}&return_project={{ rp }}{% endif %}"
                                class="inline-flex items-center gap-1 text-indigo-700 hover:text-indigo-900 font-medium">
                                 <i class="ri-file-chart-line"></i>
                                 所属报告模板：{{ parent_report_task_for_site.name }}
@@ -256,7 +256,7 @@
                         <p class="text-xs text-slate-600 leading-relaxed">在报告下新建的现场记录将自动关联；点击下方进入各模板维护版式文件。</p>
                         <div class="grid gap-2 sm:grid-cols-2">
                             {% for st in report_linked_site_tasks %}
-                            <a href="{% url 'library_task_management' %}?fl_path={{ fl_path|urlencode }}&manage_task={{ st.pk }}{% if rp %}&return_project={{ rp }}{% endif %}"
+                            <a href="{% url 'library_task_management' %}?fl_path={{ fl_path|urlencode }}&manage_task={{ st.pk }}{{ explorer_nav_suffix }}{% if rp %}&return_project={{ rp }}{% endif %}"
                                class="flex items-center gap-3 rounded-xl border border-white bg-white px-3 py-2.5 shadow-sm hover:border-cyan-300 hover:shadow-md transition-all group">
                                 <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-cyan-100 text-cyan-700 group-hover:bg-cyan-200">
                                     <i class="ri-stethoscope-line text-lg"></i>
@@ -399,7 +399,7 @@
 
                     {% if task_edit_mode %}
                     <div id="guide-task-template-bind-panel" class="space-y-8 pt-6 border-t border-slate-100">
-                    <p class="text-sm text-slate-600">从文件库<strong>模板</strong>分类勾选文件（已按 PDF / JSON / 其它分组），加入或移出本任务模板。</p>
+                    {% include "core/partials/library_task_template_upload_panel.html" %}
 
                     <form method="post" class="space-y-4 p-5 rounded-xl border border-slate-200 bg-slate-50/50">
                         {% csrf_token %}
@@ -409,20 +409,30 @@
                         {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
                         {% if rp %}<input type="hidden" name="return_project" value="{{ rp }}">{% endif %}
                         <h3 class="text-sm font-semibold text-slate-900">模板默认检测仪器</h3>
-                        <p class="text-xs text-slate-500 leading-relaxed">勾选仪器台账记录后保存；将按顺序并入检测提交的 <span class="font-mono">instruments</span>（与已有项按主键去重）。</p>
-                        <div class="max-h-48 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 text-sm space-y-0.5">
-                            {% for dev in instrument_catalog_for_task %}
-                            <label class="flex flex-wrap items-center gap-2 py-2 px-2 hover:bg-slate-50 rounded-lg cursor-pointer">
-                                <input type="checkbox" name="bound_instrument_ids" value="{{ dev.id }}" class="rounded border-slate-300 text-indigo-600"
-                                       {% if dev.id in task_bound_instrument_ids %}checked{% endif %}>
-                                <span class="font-mono text-xs text-slate-500 shrink-0">{{ dev.code }}</span>
-                                <span class="text-slate-800">{{ dev.name }}</span>
-                                {% if dev.model %}<span class="text-slate-400 text-xs">({{ dev.model }})</span>{% endif %}
-                            </label>
-                            {% empty %}
-                            <p class="text-slate-400 text-sm px-2 py-6 text-center">暂无启用的仪器主数据。</p>
-                            {% endfor %}
+                        <p class="text-xs text-slate-500 leading-relaxed">质控与防护<strong>分开</strong>各选一台（可选）；分别对应前端 JSON 中「受检设备主要检测仪器及检测人员」章内的 <span class="font-mono">instruments.qualityControl</span> / <span class="font-mono">instruments.radiationProtection</span>，与第四、五章检测内容无关。</p>
+                        <div class="grid gap-4 sm:grid-cols-2">
+                            <div class="space-y-1.5">
+                                <label class="block text-xs font-medium text-slate-600">质控（性能）检测仪器</label>
+                                <select name="bound_instrument_quality_control" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800">
+                                    <option value="">— 不绑定 —</option>
+                                    {% for dev in instrument_catalog_for_task %}
+                                    <option value="{{ dev.id }}" {% if task_bound_instrument_qc_id == dev.id %}selected{% endif %}>{{ dev.code }} · {{ dev.name }}{% if dev.model %} ({{ dev.model }}){% endif %}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="space-y-1.5">
+                                <label class="block text-xs font-medium text-slate-600">工作场所放射防护检测仪器</label>
+                                <select name="bound_instrument_radiation_protection" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800">
+                                    <option value="">— 不绑定 —</option>
+                                    {% for dev in instrument_catalog_for_task %}
+                                    <option value="{{ dev.id }}" {% if task_bound_instrument_rp_id == dev.id %}selected{% endif %}>{{ dev.code }} · {{ dev.name }}{% if dev.model %} ({{ dev.model }}){% endif %}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
                         </div>
+                        {% if not instrument_catalog_for_task %}
+                        <p class="text-slate-400 text-sm py-2">暂无启用的仪器主数据。</p>
+                        {% endif %}
                         <button type="submit" class="px-4 py-2 rounded-xl bg-slate-800 text-white text-sm font-medium hover:bg-slate-900">保存仪器绑定</button>
                     </form>
 
@@ -436,7 +446,7 @@
                             <button type="submit" name="action" value="bind_task_files" class="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 shadow-sm">将勾选加入模板</button>
                             <button type="submit" name="action" value="unbind_task_files" class="px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-800 text-sm font-medium hover:bg-slate-50">从模板移除勾选</button>
                         </div>
-                        {% include "core/partials/library_task_template_bind_groups.html" %}
+                        {% include "core/partials/library_task_template_bind_pairs.html" %}
                     </form>
                     </div>
                     {% endif %}

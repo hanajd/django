@@ -130,6 +130,9 @@ from apps.core.task_template_ui_service import (
     group_template_files_for_bind,
     htmlpdf_editor_open_url,
     htmlpdf_editor_page_url,
+    append_edit_mode_to_explorer_links,
+    group_template_files_by_stem,
+    suggested_template_json_save_name,
     task_library_edit_mode,
     task_library_page_url,
 )
@@ -4917,7 +4920,7 @@ def htmlpdf_editor_open(request, pk: int):
     )
     if return_manage_raw:
         try:
-            inject += f"window.HTMLPDF_INITIAL_LIBRARY_TASK_ID={int(return_manage_raw)};"
+            inject += f"window.HTMLPDF_INITIAL_LIBRARY_TASK_ID={json_std.dumps(str(int(return_manage_raw)))};"
         except ValueError:
             pass
     inject += "</script>"
@@ -5123,6 +5126,10 @@ def htmlpdf_api_use_template_pdf(request):
             ),
             "default_json_template_id": default_json_template_id,
             "auto_import_json": auto_import_json,
+            "suggested_json_save_name": suggested_template_json_save_name(
+                lf.original_name or ""
+            ),
+            "template_pdf_stem": Path(lf.original_name or "").stem,
         }
     )
 
@@ -5985,26 +5992,37 @@ def _maybe_rotate_task_json_binding_after_export(
         return None
     task = _resolve_library_task_for_htmlpdf_frontend_export(request, data, meta)
     if task is None:
-        return None
+        return {
+            "ok": False,
+            "skipped": True,
+            "error": (
+                "未解析到库任务（LibraryTask）。请从「任务模板库」进入编辑器（URL 含 return_manage_task），"
+                "或保存时提交 libraryTaskId / 已绑定任务的模板 PDF 的 library_template_file_id。"
+            ),
+        }
     try:
         new_id = int(new_file_row.get("id"))
     except (TypeError, ValueError):
-        return None
+        return {"ok": False, "skipped": True, "error": "新模板文件 id 无效"}
     lf = LibraryFile.objects.filter(
         pk=new_id, category=LibraryFile.CATEGORY_TEMPLATE
     ).first()
     if lf is None:
-        return None
+        return {"ok": False, "skipped": True, "error": "新模板文件不存在"}
     name = (lf.original_name or "").lower()
     if not name.endswith(".json"):
-        return None
+        return {"ok": False, "skipped": True, "error": "仅 JSON 模板可绑定任务"}
     from apps.core.library_task_template_binding_service import (
         is_auxiliary_template_json_file,
         replace_task_template_file_binding,
     )
 
     if is_auxiliary_template_json_file(lf):
-        return None
+        return {
+            "ok": False,
+            "skipped": True,
+            "error": "前端规则 JSON / 矩阵 JSON 不参与任务主模板绑定，请使用「保存坐标模板 JSON」",
+        }
 
     return replace_task_template_file_binding(
         task=task,
@@ -6058,13 +6076,34 @@ def _resolve_library_task_for_htmlpdf_frontend_export(request, data: dict, meta=
     lf = LibraryFile.objects.filter(pk=fid, category=LibraryFile.CATEGORY_TEMPLATE).first()
     if lf is None or not library_file_access_allowed(request.user, lf):
         return None
+    preferred = None
+    if lt_raw is not None and str(lt_raw).strip() != "":
+        try:
+            preferred = LibraryTask.objects.filter(pk=int(lt_raw)).first()
+        except (TypeError, ValueError):
+            preferred = None
+        if preferred is not None and not _task_ok(preferred):
+            preferred = None
+    name_low = (lf.original_name or "").lower()
+    if name_low.endswith(".pdf"):
+        from apps.core.htmlpdf_report_mapping_service import resolve_library_task_for_template_pdf
+
+        t = resolve_library_task_for_template_pdf(lf.pk, preferred_task=preferred)
+        return t if _task_ok(t) else None
     tasks = list(LibraryTask.objects.filter(library_files=lf).distinct().order_by("code"))
     tasks = [t for t in tasks if _task_ok(t)]
     if not tasks:
         return None
+    if preferred is not None:
+        for t in tasks:
+            if t.pk == preferred.pk:
+                return t
     for t in tasks:
-        raw_ids = getattr(t, "bound_instrument_ids", None) or []
-        if isinstance(raw_ids, list) and len(raw_ids) > 0:
+        from utils.task_bound_instruments import bound_instrument_ids_for_legacy_list, normalize_task_bound_instruments
+
+        if bound_instrument_ids_for_legacy_list(
+            normalize_task_bound_instruments(getattr(t, "bound_instrument_ids", None) or [])
+        ):
             return t
     return tasks[0]
 
@@ -6688,7 +6727,16 @@ def htmlpdf_api_assign_template_sections(request):
             }
         )
     rows = htmlpdf_service.assign_template_sections_for_editor(request.user.id, fields)
-    return JsonResponse({"fields": rows, "count": len(rows)})
+    anchors: list = []
+    try:
+        pdf_path = htmlpdf_service.htmlpdf_source_pdf_path(request.user.id)
+        if pdf_path.is_file():
+            from htmlpdf.full_text_coordinate_boxing import site_record_section_anchors_for_pdf
+
+            anchors = site_record_section_anchors_for_pdf(str(pdf_path))
+    except Exception:
+        anchors = []
+    return JsonResponse({"fields": rows, "count": len(rows), "anchors": anchors})
 
 
 @login_required
@@ -6730,8 +6778,7 @@ def _library_task_management_redirect_url(request) -> str:
     tt = (request.POST.get("task_tab") or request.GET.get("task_tab") or "").strip()
     if tt in _FILE_LIBRARY_VALID_TABS:
         q.append("task_tab=" + tt)
-    ed = (request.POST.get("edit") or request.GET.get("edit") or "").strip().lower()
-    if ed in ("1", "true", "yes", "on"):
+    if task_library_edit_mode(request):
         q.append("edit=1")
     nt = (request.POST.get("new_task") or request.GET.get("new_task") or "").strip().lower()
     if nt in ("1", "true", "yes", "on"):
@@ -7106,6 +7153,71 @@ def library_task_management(request):
             ):
                 messages.error(request, "导入未完成，请检查目录结构")
             return redirect(reverse("library_task_management") + "?edit=1")
+        if action == "upload_task_template_files":
+            try:
+                manage_tid = int(request.POST.get("manage_task_id", "") or 0)
+            except ValueError:
+                manage_tid = 0
+            task_obj = LibraryTask.objects.filter(pk=manage_tid).first() if manage_tid else None
+            if task_obj is None:
+                messages.error(request, "请先选择任务模板")
+            elif not library_user_may_edit_library_task(request.user, task_obj):
+                messages.error(request, "无权编辑该任务模板")
+            else:
+                uploads = list(request.FILES.getlist("template_files"))
+                if not uploads:
+                    messages.error(request, "请选择 PDF 文件（可同时选择同名 JSON）")
+                else:
+                    from pathlib import Path as _Path
+
+                    pdf_by_stem: dict[str, object] = {}
+                    json_by_stem: dict[str, object] = {}
+                    other_files: list = []
+                    for uf in uploads:
+                        nm = str(getattr(uf, "name", "") or "").strip()
+                        if not nm:
+                            continue
+                        low = nm.lower()
+                        stem = _Path(nm).stem
+                        if low.endswith(".pdf"):
+                            pdf_by_stem[stem] = uf
+                        elif low.endswith(".json"):
+                            json_by_stem[stem] = uf
+                        else:
+                            other_files.append(uf)
+                    to_save: list = []
+                    for stem, pdf_f in pdf_by_stem.items():
+                        to_save.append(pdf_f)
+                        jf = json_by_stem.pop(stem, None)
+                        if jf is not None:
+                            to_save.append(jf)
+                    to_save.extend(json_by_stem.values())
+                    to_save.extend(other_files)
+                    created, skipped = save_library_binary_uploads(
+                        request.user,
+                        to_save,
+                        LibraryFile.CATEGORY_TEMPLATE,
+                    )
+                    bound = 0
+                    if created:
+                        ids = [int(row["id"]) for row in created if row.get("id")]
+                        task_obj.library_files.add(
+                            *LibraryFile.objects.filter(pk__in=ids)
+                        )
+                        bound = len(ids)
+                    for s in skipped:
+                        fn = s.get("filename") or "(无名)"
+                        messages.warning(request, f"跳过 {fn}：{s.get('reason', '')}")
+                    if bound:
+                        messages.success(
+                            request,
+                            f"已上传并绑定 {bound} 个文件到「{task_obj.code}」",
+                        )
+                    elif created:
+                        messages.success(request, "文件已上传，请在下方向模板勾选绑定")
+                    elif skipped:
+                        messages.error(request, "未成功上传任何文件")
+            return redirect(_library_task_management_redirect_url(request))
         if action == "create_report_task":
             name = request.POST.get("name", "").strip()
             code_in = request.POST.get("code", "").strip()
@@ -7353,23 +7465,28 @@ def library_task_management(request):
                     messages.error(request, result.get("error") or "恢复失败")
             return redirect(_library_task_management_redirect_url(request))
         elif action == "update_task_bound_instruments":
+            from utils.task_bound_instruments import serialize_task_bound_instruments
+
             try:
                 tid = int(request.POST.get("manage_task_id", "") or 0)
             except ValueError:
                 tid = 0
             task_obj = LibraryTask.objects.filter(pk=tid).first() if tid else None
-            raw_ids = request.POST.getlist("bound_instrument_ids")
-            cleaned: list[int] = []
-            seen: set[int] = set()
-            for x in raw_ids:
+
+            def _post_instrument_id(name: str) -> int | None:
+                raw = str(request.POST.get(name, "") or "").strip()
+                if not raw:
+                    return None
                 try:
-                    pid = int(x)
+                    pk = int(raw)
+                    return pk if pk > 0 else None
                 except (TypeError, ValueError):
-                    continue
-                if pid <= 0 or pid in seen:
-                    continue
-                seen.add(pid)
-                cleaned.append(pid)
+                    return None
+
+            cleaned = serialize_task_bound_instruments(
+                quality_control_id=_post_instrument_id("bound_instrument_quality_control"),
+                radiation_protection_id=_post_instrument_id("bound_instrument_radiation_protection"),
+            )
             if task_obj is None:
                 messages.error(request, "任务模板不存在")
             elif not library_user_may_edit_library_task(request.user, task_obj):
@@ -7377,9 +7494,10 @@ def library_task_management(request):
             else:
                 task_obj.bound_instrument_ids = cleaned
                 task_obj.save(update_fields=["bound_instrument_ids", "updated_at"])
+                n = len(cleaned)
                 messages.success(
                     request,
-                    f"已保存任务模板「{task_obj.code}」的默认检测仪器绑定（{len(cleaned)} 条）。",
+                    f"已保存任务模板「{task_obj.code}」的质控/防护默认仪器（共 {n} 项）。",
                 )
             return redirect(_library_task_management_redirect_url(request))
         else:
@@ -7426,6 +7544,7 @@ def library_task_management(request):
     task_mgmt_cat = _library_category_for_tab(task_mgmt_tab)
     task_mgmt_files = []
     task_mgmt_files_grouped: dict[str, list] = {"pdf": [], "json": [], "other": []}
+    task_mgmt_file_pairs: list = []
     task_mgmt_linked_ids = set()
     task_linked_files = []
     export_project_id_val = ""
@@ -7483,6 +7602,9 @@ def library_task_management(request):
                                 "id", flat=True
                             )
                         )
+                        task_mgmt_file_pairs = group_template_files_by_stem(
+                            task_mgmt_files, task_mgmt_linked_ids
+                        )
                     else:
                         task_linked_files = [
                             f
@@ -7517,18 +7639,17 @@ def library_task_management(request):
         workbench_back_url += f"?project_id={return_project_id}&tab=commission"
 
     instrument_catalog_for_task: list = []
-    task_bound_instrument_ids: list = []
+    task_bound_instrument_qc_id = None
+    task_bound_instrument_rp_id = None
     if manage_task and can_manage_in_task_library:
+        from utils.task_bound_instruments import normalize_task_bound_instruments
+
         instrument_catalog_for_task = list(
             InstrumentCatalog.objects.filter(is_active=True).order_by("code", "id")
         )
-        raw_bound = getattr(manage_task, "bound_instrument_ids", None) or []
-        if isinstance(raw_bound, list):
-            for x in raw_bound:
-                try:
-                    task_bound_instrument_ids.append(int(x))
-                except (TypeError, ValueError):
-                    continue
+        bound = normalize_task_bound_instruments(getattr(manage_task, "bound_instrument_ids", None) or [])
+        task_bound_instrument_qc_id = bound.get("qualityControl")
+        task_bound_instrument_rp_id = bound.get("radiationProtection")
 
     has_report_source_task_relation = _librarytask_has_report_source_relation()
 
@@ -7599,6 +7720,8 @@ def library_task_management(request):
         manage_task_id=manage_task_id_val,
         has_report_source_relation=_librarytask_has_report_source_relation(),
     )
+    if task_library_edit:
+        append_edit_mode_to_explorer_links(folder_tree, folder_entries, edit=True)
     explorer_current_folder_id = ""
     explorer_current_report_id = ""
     segs_fl = _parse_task_fl_segments(fl_path) if fl_path else []
@@ -7619,8 +7742,14 @@ def library_task_management(request):
     )
     task_explorer_base = reverse("library_task_management")
     rp_q = (request.GET.get("return_project") or "").strip()
+    base_q: list[str] = []
     if rp_q:
-        task_explorer_base += f"?return_project={quote(rp_q)}"
+        base_q.append(f"return_project={quote(rp_q)}")
+    if task_library_edit:
+        base_q.append("edit=1")
+    if base_q:
+        task_explorer_base += "?" + "&".join(base_q)
+    explorer_nav_suffix = "&edit=1" if task_library_edit else ""
 
     return render(
         request,
@@ -7636,7 +7765,9 @@ def library_task_management(request):
             "task_mgmt_tab": task_mgmt_tab or "ocr",
             "task_mgmt_files": task_mgmt_files,
             "task_mgmt_files_grouped": task_mgmt_files_grouped,
+            "task_mgmt_file_pairs": task_mgmt_file_pairs,
             "task_mgmt_linked_ids": task_mgmt_linked_ids,
+            "explorer_nav_suffix": explorer_nav_suffix,
             "task_library_edit": task_library_edit,
             "htmlpdf_editor_url": htmlpdf_editor_page_url(
                 manage_task_id=manage_task_id_val,
@@ -7652,6 +7783,7 @@ def library_task_management(request):
             "task_library_readonly_url": task_library_page_url(
                 fl_path,
                 manage_task_id=manage_task_id_val,
+                edit=False,
                 return_project=return_project_id,
                 export_project_id=export_project_id_val,
             ),
@@ -7665,7 +7797,8 @@ def library_task_management(request):
             "task_edit_mode": task_edit_mode,
             "show_new_task_form": show_new_task_form,
             "instrument_catalog_for_task": instrument_catalog_for_task,
-            "task_bound_instrument_ids": task_bound_instrument_ids,
+            "task_bound_instrument_qc_id": task_bound_instrument_qc_id,
+            "task_bound_instrument_rp_id": task_bound_instrument_rp_id,
             "workbench_back_url": workbench_back_url,
             "return_project_id": return_project_id,
             "file_library_tabs": [
