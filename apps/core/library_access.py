@@ -298,12 +298,14 @@ def library_test_peer_user_ids() -> frozenset[int]:
 
 
 def library_user_may_access_instrument_database(user) -> bool:
-    """检测仪器台账：管理员或具备业务登记的 test 沙箱账号。"""
+    """检测仪器台账：管理员、业务登记权限，或 test 沙箱账号（见 ensure_party_a_demo）。"""
     if not getattr(user, "is_authenticated", False):
         return False
     if role_has(user, "perm_manage_users"):
         return True
-    return library_user_is_test_peer(user) and role_has(user, "perm_biz_registry")
+    if library_user_is_test_peer(user):
+        return True
+    return role_has(user, "perm_biz_registry")
 
 
 def library_user_has_party_a_demo_restrictions(user) -> bool:
@@ -413,6 +415,8 @@ def role_has(user, perm: str) -> bool:
     if perm in overrides:
         return overrides[perm]
     if perm == "perm_library_task_templates_write" and library_user_has_party_a_demo_restrictions(user):
+        return True
+    if perm == "perm_biz_registry" and library_user_has_party_a_demo_restrictions(user):
         return True
     return bool(getattr(role, perm, False))
 

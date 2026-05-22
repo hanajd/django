@@ -127,6 +127,12 @@
                         <span>医院信息管理</span>
                     </a>
                     {% endif %}
+                    {% if can_access_instrument_database %}
+                    <a id="sidebar-link-instrument-database" href="{% url 'database_device_list' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
+                        <i class="ri-flask-line text-lg"></i>
+                        <span>检测仪器台账</span>
+                    </a>
+                    {% endif %}
                     {% if show_library_task_nav %}
                     <a id="sidebar-link-task-templates" href="{% url 'library_task_management' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
                         <i class="ri-stack-line text-lg"></i>

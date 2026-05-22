@@ -1,142 +1,277 @@
 {% extends 'base.html' %}
 
-{% block page_title %}数据库管理{% endblock %}
+{% block title %}检测仪器台账{% endblock %}
 
 {% block content %}
-<div class="mx-auto max-w-7xl space-y-6">
-    <div>
-        <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">台账</p>
-        <h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-900">检测仪器</h1>
-        <p class="mt-1 text-sm text-slate-600">每台物理仪器对应<strong>唯一编号</strong>；同种仪器（名称+型号）可有多条台账。出库后绑定项目，同一时间仅能在一个项目现场；入库后释放。人员派工同步任务时会按任务模板绑定自动出库。</p>
+<div class="mx-auto max-w-7xl space-y-6" id="instrument-catalog-app">
+    <div class="flex flex-wrap items-start justify-between gap-4">
+        <div>
+            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">数据库管理</p>
+            <h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-900">检测仪器台账</h1>
+            <p class="mt-1.5 max-w-2xl text-sm text-slate-600 leading-relaxed">
+                每台仪器唯一编号；同名称+型号可有多台。在库设备可被项目占用，派工同步任务时按模板种类自动出库。
+            </p>
+        </div>
+        <a href="{% url 'database_device_list' %}?new=1{% if search_q %}&q={{ search_q|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}"
+           class="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 transition">
+            <i class="ri-add-line text-lg"></i> 新增仪器
+        </a>
     </div>
 
-    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-8">
-        <h2 class="text-base font-semibold text-slate-900">{% if editing_device %}编辑检测仪器{% else %}新增检测仪器{% endif %}</h2>
-        <form method="post" class="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div class="rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm">
+            <p class="text-xs font-medium text-slate-500">台账总数</p>
+            <p class="mt-1 text-2xl font-semibold tabular-nums text-slate-900">{{ instrument_stats.total }}</p>
+        </div>
+        <div class="rounded-2xl border border-emerald-200/80 bg-emerald-50/50 p-4 shadow-sm">
+            <p class="text-xs font-medium text-emerald-800">在库</p>
+            <p class="mt-1 text-2xl font-semibold tabular-nums text-emerald-900">{{ instrument_stats.in_stock }}</p>
+        </div>
+        <div class="rounded-2xl border border-amber-200/80 bg-amber-50/50 p-4 shadow-sm">
+            <p class="text-xs font-medium text-amber-900">已出库</p>
+            <p class="mt-1 text-2xl font-semibold tabular-nums text-amber-950">{{ instrument_stats.checked_out }}</p>
+        </div>
+        <div class="rounded-2xl border border-slate-200/90 bg-slate-50/80 p-4 shadow-sm">
+            <p class="text-xs font-medium text-slate-500">当前列表</p>
+            <p class="mt-1 text-2xl font-semibold tabular-nums text-slate-700">{{ instrument_stats.filtered }}</p>
+        </div>
+    </div>
+
+    {% if show_device_form %}
+    <section class="rounded-2xl border border-indigo-200/90 bg-gradient-to-br from-indigo-50/50 to-white p-5 sm:p-6 shadow-sm" id="instrument-form-panel">
+        <div class="flex items-center justify-between gap-3 mb-5">
+            <h2 class="text-base font-semibold text-slate-900 flex items-center gap-2">
+                <i class="ri-{% if editing_device %}edit-2{% else %}add-circle{% endif %}-line text-indigo-600"></i>
+                {% if editing_device %}编辑仪器 · {{ editing_device.code }}{% else %}登记新仪器{% endif %}
+            </h2>
+            <a href="{% url 'database_device_list' %}{% if search_q or status_filter %}?{% endif %}{% if search_q %}q={{ search_q|urlencode }}{% endif %}{% if search_q and status_filter %}&{% endif %}{% if status_filter %}status={{ status_filter }}{% endif %}"
+               class="text-sm text-slate-500 hover:text-slate-800 px-2 py-1 rounded-lg hover:bg-white/80">关闭</a>
+        </div>
+        <form method="post" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {% csrf_token %}
             <input type="hidden" name="action" value="{% if editing_device %}update{% else %}create{% endif %}">
-            {% if editing_device %}
-            <input type="hidden" name="device_id" value="{{ editing_device.id }}">
-            {% endif %}
-            <input name="code" required placeholder="仪器编号 *" value="{% if editing_device %}{{ editing_device.code }}{% endif %}"
-                class="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20">
-            <input name="name" required placeholder="仪器设备名称 *" value="{% if editing_device %}{{ editing_device.name }}{% endif %}"
-                class="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20">
-            <input name="model" placeholder="型号" value="{% if editing_device %}{{ editing_device.model }}{% endif %}"
-                class="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20">
-            <input name="calibration_org" placeholder="检定/校准单位" value="{% if editing_device %}{{ editing_device.calibration_org }}{% endif %}"
-                class="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20">
-            <input name="certificate_no" placeholder="证书编号" value="{% if editing_device %}{{ editing_device.certificate_no }}{% endif %}"
-                class="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20">
-            <input type="date" name="certificate_valid_until" value="{% if editing_device and editing_device.certificate_valid_until %}{{ editing_device.certificate_valid_until|date:'Y-m-d' }}{% endif %}"
-                class="rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-900 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20">
-            <input name="remarks" placeholder="备注说明" value="{% if editing_device %}{{ editing_device.remarks }}{% endif %}"
-                class="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 lg:col-span-2">
-            <div class="flex flex-wrap items-center gap-2 md:col-span-2 lg:col-span-4">
-                <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700">
-                    <i class="ri-save-3-line"></i>
-                    {% if editing_device %}保存修改{% else %}新增{% endif %}
+            {% if editing_device %}<input type="hidden" name="device_id" value="{{ editing_device.id }}">{% endif %}
+            <label class="block">
+                <span class="text-xs font-medium text-slate-600 mb-1 block">仪器编号 <span class="text-red-500">*</span></span>
+                <input name="code" required value="{% if editing_device %}{{ editing_device.code }}{% endif %}"
+                       class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20">
+            </label>
+            <label class="block">
+                <span class="text-xs font-medium text-slate-600 mb-1 block">设备名称 <span class="text-red-500">*</span></span>
+                <input name="name" required value="{% if editing_device %}{{ editing_device.name }}{% endif %}"
+                       class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20">
+            </label>
+            <label class="block">
+                <span class="text-xs font-medium text-slate-600 mb-1 block">型号</span>
+                <input name="model" value="{% if editing_device %}{{ editing_device.model }}{% endif %}"
+                       class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20">
+            </label>
+            <label class="block">
+                <span class="text-xs font-medium text-slate-600 mb-1 block">检定/校准单位</span>
+                <input name="calibration_org" value="{% if editing_device %}{{ editing_device.calibration_org }}{% endif %}"
+                       class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20">
+            </label>
+            <label class="block">
+                <span class="text-xs font-medium text-slate-600 mb-1 block">证书编号</span>
+                <input name="certificate_no" value="{% if editing_device %}{{ editing_device.certificate_no }}{% endif %}"
+                       class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20">
+            </label>
+            <label class="block">
+                <span class="text-xs font-medium text-slate-600 mb-1 block">证书有效期</span>
+                <input type="date" name="certificate_valid_until"
+                       value="{% if editing_device and editing_device.certificate_valid_until %}{{ editing_device.certificate_valid_until|date:'Y-m-d' }}{% endif %}"
+                       class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20">
+            </label>
+            <label class="block sm:col-span-2 lg:col-span-3">
+                <span class="text-xs font-medium text-slate-600 mb-1 block">备注</span>
+                <input name="remarks" value="{% if editing_device %}{{ editing_device.remarks }}{% endif %}"
+                       class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20">
+            </label>
+            <div class="sm:col-span-2 lg:col-span-3 flex flex-wrap gap-2 pt-1">
+                <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700">
+                    <i class="ri-save-3-line"></i> {% if editing_device %}保存{% else %}创建{% endif %}
                 </button>
-                {% if editing_device %}
-                <a href="{% url 'database_device_list' %}" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50">
-                    取消编辑
-                </a>
-                {% endif %}
+                <a href="{% url 'database_device_list' %}{% if search_q or status_filter %}?{% endif %}{% if search_q %}q={{ search_q|urlencode }}{% endif %}{% if search_q and status_filter %}&{% endif %}{% if status_filter %}status={{ status_filter }}{% endif %}"
+                   class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">取消</a>
             </div>
         </form>
     </section>
+    {% endif %}
 
-    <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ring-1 ring-slate-900/[0.04]">
-        <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-slate-100 text-left text-sm">
-                <thead class="bg-slate-50">
+    <section class="rounded-2xl border border-slate-200/90 bg-white shadow-sm overflow-hidden">
+        <div class="border-b border-slate-100 px-4 py-3 sm:px-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <form method="get" class="flex flex-1 flex-wrap items-center gap-2 min-w-0">
+                <div class="relative flex-1 min-w-[12rem] max-w-md">
+                    <i class="ri-search-line absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                    <input type="search" name="q" value="{{ search_q }}" placeholder="搜索编号、名称、型号、证书号…"
+                           class="w-full rounded-xl border border-slate-200 bg-slate-50/50 pl-9 pr-3 py-2 text-sm focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-500/20">
+                </div>
+                <select name="status" onchange="this.form.submit()"
+                        class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20">
+                    <option value="">全部状态</option>
+                    <option value="in_stock" {% if status_filter == 'in_stock' %}selected{% endif %}>仅在库</option>
+                    <option value="checked_out" {% if status_filter == 'checked_out' %}selected{% endif %}>仅已出库</option>
+                </select>
+                <button type="submit" class="rounded-xl bg-slate-800 px-3 py-2 text-sm font-medium text-white hover:bg-slate-900">筛选</button>
+                {% if search_q or status_filter %}
+                <a href="{% url 'database_device_list' %}" class="text-sm text-slate-500 hover:text-slate-800 px-2 py-2">清除</a>
+                {% endif %}
+            </form>
+        </div>
+
+        <div class="hidden lg:block overflow-x-auto">
+            <table class="min-w-full text-sm text-left">
+                <thead class="bg-slate-50/90 text-xs font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-100">
                     <tr>
-                        <th class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">ID</th>
-                        <th class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">编号</th>
-                        <th class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">名称</th>
-                        <th class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">型号</th>
-                        <th class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">检定单位</th>
-                        <th class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">证书号</th>
-                        <th class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">有效期</th>
-                        <th class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">库存</th>
-                        <th class="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">出库项目</th>
-                        <th class="min-w-[8rem] px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">备注</th>
-                        <th class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">更新</th>
-                        <th class="whitespace-nowrap px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">操作</th>
+                        <th class="px-5 py-3">编号</th>
+                        <th class="px-5 py-3">名称 / 型号</th>
+                        <th class="px-5 py-3">证书</th>
+                        <th class="px-5 py-3">状态</th>
+                        <th class="px-5 py-3">出库项目</th>
+                        <th class="px-5 py-3 text-right">操作</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
                     {% for d in devices %}
-                    <tr class="align-top transition hover:bg-slate-50/80">
-                        <td class="whitespace-nowrap px-4 py-3 text-slate-500 tabular-nums">{{ d.id }}</td>
-                        <td class="whitespace-nowrap px-4 py-3 font-medium text-slate-900">{{ d.code }}</td>
-                        <td class="px-4 py-3 text-slate-900">{{ d.name }}</td>
-                        <td class="px-4 py-3 text-slate-600">{{ d.model|default:"—" }}</td>
-                        <td class="max-w-[10rem] truncate px-4 py-3 text-slate-600" title="{{ d.calibration_org|default:'' }}">{{ d.calibration_org|default:"—" }}</td>
-                        <td class="px-4 py-3 text-slate-600">{{ d.certificate_no|default:"—" }}</td>
-                        <td class="whitespace-nowrap px-4 py-3 tabular-nums text-slate-600">{{ d.certificate_valid_until|date:"Y-m-d"|default:"—" }}</td>
-                        <td class="whitespace-nowrap px-4 py-3">
+                    <tr class="hover:bg-slate-50/60 transition-colors group">
+                        <td class="px-5 py-4 font-mono font-medium text-slate-900 whitespace-nowrap">{{ d.code }}</td>
+                        <td class="px-5 py-4">
+                            <div class="font-medium text-slate-900">{{ d.name }}</div>
+                            {% if d.model %}<div class="text-xs text-slate-500 mt-0.5">{{ d.model }}</div>{% endif %}
+                        </td>
+                        <td class="px-5 py-4 text-slate-600 text-xs max-w-[10rem]">
+                            {% if d.certificate_no %}<div>{{ d.certificate_no }}</div>{% endif %}
+                            {% if d.certificate_valid_until %}
+                            <div class="text-slate-400 mt-0.5">至 {{ d.certificate_valid_until|date:"Y-m-d" }}</div>
+                            {% elif not d.certificate_no %}—{% endif %}
+                        </td>
+                        <td class="px-5 py-4 whitespace-nowrap">
                             {% if d.checkout_project_id %}
-                            <span class="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-900">已出库</span>
+                            <span class="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 ring-1 ring-amber-200/60">
+                                <span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span> 已出库
+                            </span>
                             {% else %}
-                            <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">在库</span>
+                            <span class="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200/60">
+                                <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span> 在库
+                            </span>
                             {% endif %}
                         </td>
-                        <td class="px-4 py-3 text-xs text-slate-600">
-                            {% if d.checkout_project %}{{ d.checkout_project.code }} · {{ d.checkout_project.name }}{% else %}—{% endif %}
+                        <td class="px-5 py-4 text-xs text-slate-600 max-w-[12rem]">
+                            {% if d.checkout_project %}
+                            <span class="font-medium text-slate-800">{{ d.checkout_project.code }}</span>
+                            <span class="block text-slate-500 truncate" title="{{ d.checkout_project.name }}">{{ d.checkout_project.name }}</span>
+                            {% else %}<span class="text-slate-400">—</span>{% endif %}
                         </td>
-                        <td class="px-4 py-3 text-sm text-slate-600">{{ d.remarks|default:"—" }}</td>
-                        <td class="whitespace-nowrap px-4 py-3 text-slate-500 tabular-nums">{{ d.updated_at|date:"Y-m-d H:i" }}</td>
-                        <td class="whitespace-nowrap px-4 py-3 text-right">
-                            <div class="inline-flex flex-wrap items-center justify-end gap-2">
-                                {% if d.checkout_project_id %}
-                                <form method="post" class="inline">
-                                    {% csrf_token %}
-                                    <input type="hidden" name="action" value="instrument_checkin">
-                                    <input type="hidden" name="device_id" value="{{ d.id }}">
-                                    <button type="submit" class="inline-flex items-center gap-1 rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800">入库</button>
-                                </form>
-                                {% else %}
-                                <form method="post" class="inline flex items-center gap-1">
-                                    {% csrf_token %}
-                                    <input type="hidden" name="action" value="instrument_checkout">
-                                    <input type="hidden" name="device_id" value="{{ d.id }}">
-                                    <select name="project_id" required class="max-w-[8rem] rounded border border-slate-200 text-xs py-1">
-                                        <option value="">项目</option>
-                                        {% for p in active_projects %}
-                                        <option value="{{ p.id }}">{{ p.code }}</option>
-                                        {% endfor %}
-                                    </select>
-                                    <button type="submit" class="rounded-lg bg-violet-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-violet-700">出库</button>
-                                </form>
-                                {% endif %}
-                                <a href="{% url 'database_device_list' %}?edit={{ d.id }}" class="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-emerald-700">
-                                    <i class="ri-edit-line"></i> 编辑
-                                </a>
-                                <form method="post" class="inline" onsubmit="return confirm('确认删除该检测仪器吗？');">
-                                    {% csrf_token %}
-                                    <input type="hidden" name="action" value="delete">
-                                    <input type="hidden" name="device_id" value="{{ d.id }}">
-                                    <button type="submit" class="inline-flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-red-700">
-                                        <i class="ri-delete-bin-line"></i> 删除
-                                    </button>
-                                </form>
-                            </div>
+                        <td class="px-5 py-4 text-right">
+                            <details class="relative inline-block text-left">
+                                <summary class="list-none cursor-pointer inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 shadow-sm">
+                                    操作 <i class="ri-arrow-down-s-line"></i>
+                                </summary>
+                                <div class="absolute right-0 z-20 mt-1 w-52 rounded-xl border border-slate-200 bg-white py-1 shadow-lg ring-1 ring-slate-900/5">
+                                    <a href="{% url 'database_device_list' %}?edit={{ d.id }}{% if search_q %}&q={{ search_q|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}"
+                                       class="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                                        <i class="ri-edit-line text-indigo-600"></i> 编辑资料
+                                    </a>
+                                    {% if d.checkout_project_id %}
+                                    <form method="post" class="border-t border-slate-100">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="action" value="instrument_checkin">
+                                        <input type="hidden" name="device_id" value="{{ d.id }}">
+                                        <button type="submit" class="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left">
+                                            <i class="ri-inbox-archive-line text-slate-600"></i> 入库
+                                        </button>
+                                    </form>
+                                    {% else %}
+                                    <form method="post" class="border-t border-slate-100 px-3 py-2 space-y-2">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="action" value="instrument_checkout">
+                                        <input type="hidden" name="device_id" value="{{ d.id }}">
+                                        <select name="project_id" required class="w-full rounded-lg border border-slate-200 text-xs py-1.5">
+                                            <option value="">选择项目</option>
+                                            {% for p in active_projects %}
+                                            <option value="{{ p.id }}">{{ p.code }} · {{ p.name }}</option>
+                                            {% endfor %}
+                                        </select>
+                                        <button type="submit" class="w-full rounded-lg bg-violet-600 py-1.5 text-xs font-medium text-white hover:bg-violet-700">出库到项目</button>
+                                    </form>
+                                    {% endif %}
+                                    <form method="post" class="border-t border-slate-100" onsubmit="return confirm('确定删除仪器 {{ d.code }}？此操作不可恢复。');">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="action" value="delete">
+                                        <input type="hidden" name="device_id" value="{{ d.id }}">
+                                        <button type="submit" class="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 text-left">
+                                            <i class="ri-delete-bin-line"></i> 删除
+                                        </button>
+                                    </form>
+                                </div>
+                            </details>
                         </td>
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="12" class="px-4 py-16 text-center text-slate-500">
-                            <span class="flex flex-col items-center gap-2">
-                                <i class="ri-database-2-line text-3xl text-slate-300"></i>
-                                <span>暂无检测仪器数据</span>
-                            </span>
+                        <td colspan="6" class="px-5 py-20 text-center">
+                            <i class="ri-flask-line text-4xl text-slate-300"></i>
+                            <p class="mt-3 text-slate-500">{% if search_q or status_filter %}没有匹配的仪器{% else %}暂无仪器，点击右上角「新增仪器」登记{% endif %}</p>
                         </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
+
+        <div class="lg:hidden divide-y divide-slate-100">
+            {% for d in devices %}
+            <article class="p-4 space-y-3">
+                <div class="flex items-start justify-between gap-3">
+                    <div>
+                        <span class="font-mono text-sm font-semibold text-indigo-700">{{ d.code }}</span>
+                        <h3 class="text-base font-medium text-slate-900 mt-0.5">{{ d.name }}</h3>
+                        {% if d.model %}<p class="text-xs text-slate-500">{{ d.model }}</p>{% endif %}
+                    </div>
+                    {% if d.checkout_project_id %}
+                    <span class="shrink-0 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-900">已出库</span>
+                    {% else %}
+                    <span class="shrink-0 text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">在库</span>
+                    {% endif %}
+                </div>
+                {% if d.checkout_project %}
+                <p class="text-xs text-slate-600"><span class="text-slate-400">项目</span> {{ d.checkout_project.code }} · {{ d.checkout_project.name }}</p>
+                {% endif %}
+                <div class="flex flex-wrap gap-2">
+                    <a href="{% url 'database_device_list' %}?edit={{ d.id }}" class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700">编辑</a>
+                    {% if d.checkout_project_id %}
+                    <form method="post" class="inline">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="instrument_checkin">
+                        <input type="hidden" name="device_id" value="{{ d.id }}">
+                        <button type="submit" class="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-medium text-white">入库</button>
+                    </form>
+                    {% else %}
+                    <form method="post" class="inline-flex flex-wrap items-center gap-1">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="instrument_checkout">
+                        <input type="hidden" name="device_id" value="{{ d.id }}">
+                        <select name="project_id" required class="rounded-lg border border-slate-200 text-xs py-1.5 max-w-[10rem]">
+                            <option value="">项目</option>
+                            {% for p in active_projects %}<option value="{{ p.id }}">{{ p.code }}</option>{% endfor %}
+                        </select>
+                        <button type="submit" class="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white">出库</button>
+                    </form>
+                    {% endif %}
+                </div>
+            </article>
+            {% empty %}
+            <p class="py-16 text-center text-slate-500 text-sm">暂无数据</p>
+            {% endfor %}
+        </div>
     </section>
 </div>
+{% if show_device_form %}
+<script>
+(function () {
+    var panel = document.getElementById('instrument-form-panel');
+    if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+})();
+</script>
+{% endif %}
 {% endblock %}

@@ -60,6 +60,7 @@ _PARTY_A_OVERRIDES = {
     "perm_assign_tasks": False,
     "perm_library_task_templates_write": True,
     "perm_create_library_project": True,
+    "perm_biz_registry": True,
     "party_a_demo_restrictions": True,
     "perm_manage_users": False,
     "perm_manage_roles": False,

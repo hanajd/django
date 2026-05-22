@@ -559,15 +559,58 @@ def database_device_list(request):
         except (ValueError, InstrumentCatalog.DoesNotExist):
             editing_device = None
 
-    devices = (
-        InstrumentCatalog.objects.select_related("checkout_project", "checked_out_by")
-        .order_by("code", "id")
+    search_q = (request.GET.get("q") or "").strip()
+    status_filter = (request.GET.get("status") or "").strip()
+
+    devices_qs = InstrumentCatalog.objects.select_related(
+        "checkout_project", "checked_out_by"
     )
-    active_projects = LibraryProject.objects.filter(is_active=True).order_by("-updated_at")[:200]
+    if search_q:
+        from django.db.models import Q
+
+        devices_qs = devices_qs.filter(
+            Q(code__icontains=search_q)
+            | Q(name__icontains=search_q)
+            | Q(model__icontains=search_q)
+            | Q(certificate_no__icontains=search_q)
+        )
+    if status_filter == "in_stock":
+        devices_qs = devices_qs.filter(checkout_project__isnull=True)
+    elif status_filter == "checked_out":
+        devices_qs = devices_qs.exclude(checkout_project__isnull=True)
+
+    devices = list(devices_qs.order_by("code", "id"))
+
+    base_stats = InstrumentCatalog.objects.all()
+    instrument_stats = {
+        "total": base_stats.count(),
+        "in_stock": base_stats.filter(checkout_project__isnull=True).count(),
+        "checked_out": base_stats.exclude(checkout_project__isnull=True).count(),
+        "filtered": len(devices),
+    }
+
+    active_projects = LibraryProject.objects.filter(is_active=True)
+    if library_user_has_party_a_demo_restrictions(request.user):
+        scoped = list(library_user_scoped_project_ids(request.user))
+        if scoped:
+            active_projects = active_projects.filter(pk__in=scoped)
+    active_projects = list(active_projects.order_by("-updated_at")[:200])
+
+    show_device_form = bool(editing_device) or (request.GET.get("new") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
     context = {
         "devices": devices,
         "editing_device": editing_device,
         "active_projects": active_projects,
+        "instrument_stats": instrument_stats,
+        "search_q": search_q,
+        "status_filter": status_filter,
+        "show_device_form": show_device_form,
     }
     return render(request, "core/database_device_list.html", context)
 
