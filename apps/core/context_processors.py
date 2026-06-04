@@ -14,6 +14,10 @@ from apps.core.library_access import (
     role_permission_map,
     role_ui_context,
 )
+from apps.core.menu_context_cache import (
+    get_cached_menu_context_payload,
+    set_cached_menu_context_payload,
+)
 from apps.core.models import Menu
 from apps.core.usage_workflow_tour import tour_is_active
 
@@ -99,8 +103,9 @@ def _build_usage_site_tour_manifest(request):
                     "allow_interaction": True,
                     "popover": _usage_site_tour_pop(
                         "新建项目（请操作）",
-                        "展开「新建项目」，填写<strong>项目名称</strong>（编码可留空），点<strong>创建</strong>。"
-                        "创建成功后，一般会停留在当前项目并自动打开上方的「任务与模板」页签；若没有，请手动点该页签。确认后点「下一步」前往文件库上传模板。",
+                        "点左侧<strong>新建项目</strong>，在弹窗中按文件夹选择医院/院区/科室，"
+                        "勾选设备与检测类型，指定统筹人后点<strong>创建项目</strong>。"
+                        "创建成功后会进入项目工作台对应页签。",
                     ),
                 },
                 {
@@ -290,6 +295,43 @@ def _build_usage_site_tour_manifest(request):
     return {"finish_label": "完成练习", "segments": segments}
 
 
+def _menus_for_user(user):
+    if user.is_superuser:
+        return (
+            Menu.objects.filter(parent=None, is_visible=True)
+            .exclude(name="文件与提取")
+            .prefetch_related("children")
+        )
+    try:
+        role = user.profile.role
+        return (
+            Menu.objects.filter(parent=None, is_visible=True, roles=role)
+            .exclude(name="文件与提取")
+            .prefetch_related("children")
+        )
+    except Exception:
+        return []
+
+
+def _build_menu_context_payload(request):
+    """可缓存部分（不含 menus QuerySet）。"""
+    user = request.user
+    role_perm = role_permission_map(user)
+    payload = {
+        "hide_process_pipeline": (not role_has(user, "perm_process_pipeline"))
+        or library_user_has_party_a_demo_restrictions(user),
+        "role_perm": role_perm,
+        "can_access_instrument_database": library_user_may_access_instrument_database(user),
+        "show_library_task_nav": library_user_may_access_task_template_library_nav(user),
+        "show_hospital_info_nav": library_user_may_access_hospital_info_nav(user),
+        "show_backend_usage_guide": library_user_has_party_a_demo_restrictions(user),
+        "usage_site_tour_manifest": _build_usage_site_tour_manifest(request),
+        "usage_workflow_tour_active": tour_is_active(request),
+    }
+    payload.update(role_ui_context(user))
+    return payload
+
+
 def menu_context(request):
     """动态菜单上下文处理器"""
     user = request.user
@@ -309,38 +351,15 @@ def menu_context(request):
         out.update(role_ui_context(user))
         return out
 
-    role_perm = role_permission_map(user)
-
-    # 超级管理员可以访问所有菜单
-    if user.is_superuser:
-        menus = Menu.objects.filter(
-            parent=None,
-            is_visible=True,
-        ).exclude(name="文件与提取").prefetch_related("children")
+    cached = get_cached_menu_context_payload(user)
+    if cached is None:
+        cached = _build_menu_context_payload(request)
+        set_cached_menu_context_payload(user, cached)
     else:
-        try:
-            role = user.profile.role
-            menus = Menu.objects.filter(
-                parent=None,
-                is_visible=True,
-                roles=role,
-            ).exclude(name="文件与提取").prefetch_related("children")
-        except Exception:
-            menus = []
+        # 流程练习会话状态随请求变化，不写入长期缓存
+        cached = dict(cached)
+        cached["usage_workflow_tour_active"] = tour_is_active(request)
 
-    # 文件库 / OCR 处理由 base 模板固定展示，此处排除同名动态菜单以免重复。
-    # 演示类账号在文件库「OCR」分类已可走 OCR，侧栏不再单独展示本入口以免重复。
-    out = {
-        "menus": menus,
-        "hide_process_pipeline": (not role_has(user, "perm_process_pipeline"))
-        or library_user_has_party_a_demo_restrictions(user),
-        "role_perm": role_perm,
-        "can_access_instrument_database": library_user_may_access_instrument_database(user),
-        "show_library_task_nav": library_user_may_access_task_template_library_nav(user),
-        "show_hospital_info_nav": library_user_may_access_hospital_info_nav(user),
-        "show_backend_usage_guide": library_user_has_party_a_demo_restrictions(user),
-        "usage_site_tour_manifest": _build_usage_site_tour_manifest(request),
-        "usage_workflow_tour_active": tour_is_active(request),
-    }
-    out.update(role_ui_context(user))
+    out = dict(cached)
+    out["menus"] = _menus_for_user(user)
     return out

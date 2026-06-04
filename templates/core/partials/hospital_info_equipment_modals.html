@@ -50,26 +50,47 @@
         {% endif %}
         {{ equipment_dept_picker|json_script:"eq-dept-picker-data" }}
         <div class="space-y-3">
-            <input type="text" name="equipment_name" id="eq-form-name" placeholder="设备名称 *" required
+            <label class="block">
+                <span class="text-xs font-medium text-slate-600">设备类型 *</span>
+                <select name="equipment_device_type" id="eq-form-device-type" required
+                        class="mt-1 w-full px-3 py-2 text-sm rounded-xl bg-slate-50 ring-1 ring-slate-200 border-0">
+                    <option value="">— 请选择设备类型 —</option>
+                    {% for dt in equipment_device_type_choices %}
+                    <option value="{{ dt }}">{{ dt }}</option>
+                    {% endfor %}
+                </select>
+                <p id="eq-form-instance-hint" class="mt-1 text-[10px] text-violet-700 hidden"></p>
+            </label>
+            <input type="text" name="equipment_name" id="eq-form-name" placeholder="设备名称（可选，默认同设备类型）"
                    class="w-full px-3 py-2 text-sm rounded-xl bg-slate-50 ring-1 ring-slate-200 border-0">
             <div class="grid grid-cols-2 gap-2">
-                <input type="text" name="equipment_model" id="eq-form-model" placeholder="型号" class="px-3 py-2 text-sm rounded-xl bg-slate-50 ring-1 ring-slate-200 border-0">
+                <input type="text" name="equipment_model" id="eq-form-model" placeholder="型号（现场检测可回填）" class="px-3 py-2 text-sm rounded-xl bg-slate-50 ring-1 ring-slate-200 border-0">
                 <input type="text" name="equipment_serial_no" id="eq-form-serial" placeholder="编号" class="px-3 py-2 text-sm rounded-xl bg-slate-50 ring-1 ring-slate-200 border-0">
             </div>
             <input type="text" name="equipment_manufacturer" id="eq-form-mfr" placeholder="厂家" class="w-full px-3 py-2 text-sm rounded-xl bg-slate-50 ring-1 ring-slate-200 border-0">
             <input type="text" name="equipment_location" id="eq-form-loc" placeholder="设备位置" class="w-full px-3 py-2 text-sm rounded-xl bg-slate-50 ring-1 ring-slate-200 border-0">
             <input type="text" name="equipment_notes" id="eq-form-notes" placeholder="备注" class="w-full px-3 py-2 text-sm rounded-xl bg-slate-50 ring-1 ring-slate-200 border-0">
         </div>
-        <div id="eq-form-pending-block" class="mt-3 space-y-2 rounded-2xl bg-amber-50/80 p-3 ring-1 ring-amber-100">
-            <p class="text-xs font-medium text-amber-900">未检测：请绑定<strong>报告</strong>层级任务模板（一台设备一份报告；现场记录随报告自动带入项目）</p>
-            <select name="report_task_id" id="eq-form-report-task"
-                    class="w-full px-3 py-2 text-sm rounded-xl bg-white ring-1 ring-slate-200 border-0">
-                <option value="">— 选择报告模板 —</option>
-                {% for opt in report_task_options %}
-                <option value="{{ opt.id }}">{{ opt.label }}</option>
-                {% endfor %}
-            </select>
+        <div id="eq-form-pending-block" class="mt-3 space-y-2">
+            <div id="eq-form-auto-bind-hint" class="rounded-2xl bg-emerald-50/90 p-3 ring-1 ring-emerald-100 text-xs text-emerald-900 leading-relaxed">
+                <p class="font-medium">添加时将自动绑定报告模板</p>
+                <p class="mt-1 text-emerald-800/90">同科室同类型多台将自动编号为<strong>设备1、设备2</strong>并合并展示。报告模板按任务库「验收检测」「状态检测」+ 设备类型文件夹自动绑定。</p>
+            </div>
+            <div id="eq-form-manual-bindings-wrap" class="hidden rounded-2xl bg-amber-50/80 p-3 ring-1 ring-amber-100 space-y-2">
+                <p class="text-xs font-medium text-amber-900">手动调整检测类别与报告模板（可选）</p>
+                <input type="hidden" name="report_task_bindings" id="eq-form-report-task-bindings" value="[]">
+                <input type="hidden" id="eq-binding-picker-scratch" value="" tabindex="-1" aria-hidden="true">
+                <div id="eq-form-bindings-list" class="space-y-2"></div>
+                <button type="button" id="eq-form-add-binding"
+                        class="w-full py-2 rounded-xl border border-dashed border-amber-300/80 text-xs font-medium text-amber-900 hover:bg-amber-100/60">
+                    <i class="ri-add-line"></i> 添加检测类型
+                </button>
+                <p class="text-[10px] text-amber-800/90">目录：检测类型 → 设备类型 → 报告</p>
+            </div>
         </div>
+        {% if equipment_binding_type_suggestions %}
+        {{ equipment_binding_type_suggestions|json_script:"eq-binding-type-suggestions" }}
+        {% endif %}
         <div id="eq-form-completed-block" class="mt-3 space-y-2 hidden">
             <p class="text-xs font-medium text-emerald-800">已检测：可更换关联的成品报告（保存后自动更新检测信息）</p>
             <select name="report_file_id" id="eq-form-report-file"
@@ -114,7 +135,7 @@
                 <i class="ri-close-line text-xl"></i>
             </button>
         </div>
-        <p class="text-xs text-slate-500 mb-3">将设备已绑定的<strong>报告模板</strong>及该报告下属的现场记录模板一并加入所选项目。</p>
+        <p class="text-xs text-slate-500 mb-3">将设备已绑定的各检测类型<strong>报告模板</strong>及对应现场记录模板一并加入所选项目。</p>
         <select name="project_id" required class="w-full px-3 py-2.5 text-sm rounded-xl bg-slate-50 ring-1 ring-slate-200 border-0">
             <option value="">— 选择项目 —</option>
             {% for opt in project_options %}
@@ -147,6 +168,10 @@
     });
 
     var pendingBlock = document.getElementById('eq-form-pending-block');
+    var manualBindingsWrap = document.getElementById('eq-form-manual-bindings-wrap');
+    var autoBindHint = document.getElementById('eq-form-auto-bind-hint');
+    var deviceTypeSelect = document.getElementById('eq-form-device-type');
+    var instanceHintEl = document.getElementById('eq-form-instance-hint');
     var completedBlock = document.getElementById('eq-form-completed-block');
     var statusHint = document.getElementById('eq-form-status-hint');
     var deptPickerEl = document.getElementById('eq-dept-picker-data');
@@ -201,21 +226,243 @@
     if (campusSelect) {
         campusSelect.addEventListener('change', function () {
             populateDepartmentsForCampus(campusSelect.value, null);
+            refreshInstanceHint();
         });
+    }
+    if (deptSelect) {
+        deptSelect.addEventListener('change', refreshInstanceHint);
+    }
+    if (deviceTypeSelect) {
+        deviceTypeSelect.addEventListener('change', refreshInstanceHint);
+    }
+
+    function currentDeptIdForForm() {
+        if (!deptSelect) return 0;
+        var v = parseInt(deptSelect.value, 10);
+        return isNaN(v) ? 0 : v;
+    }
+
+    function refreshInstanceHint() {
+        if (!instanceHintEl || !deviceTypeSelect) return;
+        var isEdit = document.getElementById('eq-form-equipment-id').value;
+        if (isEdit) {
+            instanceHintEl.classList.add('hidden');
+            return;
+        }
+        var dt = deviceTypeSelect.value;
+        var deptId = currentDeptIdForForm();
+        if (!dt) {
+            instanceHintEl.classList.add('hidden');
+            return;
+        }
+        var url = apiBase + '?fl_path={{ fl_path|urlencode }}&device_type=' + encodeURIComponent(dt);
+        if (deptId) url += '&department_id=' + deptId;
+        fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.ok || !data.next_instance_label) {
+                    instanceHintEl.classList.add('hidden');
+                    return;
+                }
+                instanceHintEl.textContent = '将登记为同类型第 ' + data.next_instance_label + '（' + (data.suggested_name || '') + '）';
+                instanceHintEl.classList.remove('hidden');
+            })
+            .catch(function () { instanceHintEl.classList.add('hidden'); });
+    }
+
+    function escHtml(s) {
+        return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    }
+
+    function findReportInCatalog(rid) {
+        if (!rid) return null;
+        var catalogEl = document.getElementById('report-task-picker-catalog-data');
+        if (!catalogEl) return null;
+        var catalog;
+        try { catalog = JSON.parse(catalogEl.textContent); } catch (e) { return null; }
+        var found = null;
+        function walk(node) {
+            (node.reports || []).forEach(function (r) {
+                if (r.id === rid) found = r;
+            });
+            (node.folders || []).forEach(walk);
+        }
+        walk({ folders: catalog.folders, reports: [] });
+        if (catalog.uncategorized) walk({ folders: [], reports: catalog.uncategorized.reports || [] });
+        return found;
+    }
+
+    var bindingsListEl = document.getElementById('eq-form-bindings-list');
+    var bindingsHidden = document.getElementById('eq-form-report-task-bindings');
+    var bindingSuggestionsEl = document.getElementById('eq-binding-type-suggestions');
+    var bindingTypeSuggestions = bindingSuggestionsEl
+        ? JSON.parse(bindingSuggestionsEl.textContent) : [];
+    var eqBindingsState = [];
+
+    function syncBindingsHidden() {
+        if (!bindingsHidden) return;
+        var payload = eqBindingsState.map(function (b) {
+            return {
+                inspection_type: (b.inspection_type || '').trim(),
+                report_task_id: b.report_task_id ? parseInt(b.report_task_id, 10) : 0
+            };
+        }).filter(function (b) {
+            return b.inspection_type && b.report_task_id;
+        });
+        bindingsHidden.value = JSON.stringify(payload);
+    }
+
+    function renderBindingRows() {
+        if (!bindingsListEl) return;
+        if (!eqBindingsState.length) {
+            bindingsListEl.innerHTML = '<p class="text-[11px] text-amber-800/80 text-center py-2">请添加至少一种检测类型并选择报告模板</p>';
+            syncBindingsHidden();
+            return;
+        }
+        bindingsListEl.innerHTML = eqBindingsState.map(function (b, idx) {
+            var rid = b.report_task_id ? parseInt(b.report_task_id, 10) : 0;
+            var r = rid ? findReportInCatalog(rid) : null;
+            var tplLabel = b.task_label || (r ? (r.label || r.name) : (rid ? ('模板 #' + rid) : ''));
+            var tplHint = r && r.folderBreadcrumb
+                ? '<span class="block text-[10px] text-slate-500 mt-0.5">' + escHtml(r.folderBreadcrumb) + '</span>' : '';
+            var siteHtml = '';
+            if (r && r.siteTasks && r.siteTasks.length) {
+                siteHtml = '<ul class="mt-1.5 space-y-0.5 text-[10px] text-cyan-800 pl-1">' +
+                    r.siteTasks.map(function (st) {
+                        return '<li><i class="ri-file-paper-2-line"></i> ' +
+                            escHtml((st.code ? st.code + ' · ' : '') + st.name) + '</li>';
+                    }).join('') + '</ul>';
+            }
+            var datalistId = 'eq-binding-types-' + idx;
+            var dlOpts = bindingTypeSuggestions.map(function (name) {
+                return '<option value="' + escHtml(name) + '"></option>';
+            }).join('');
+            return '<div class="rounded-xl border border-white bg-white p-3 ring-1 ring-amber-200/70" data-binding-row="' + idx + '">' +
+                '<div class="flex items-start gap-2">' +
+                '<label class="flex-1 min-w-0 block">' +
+                '<span class="text-[10px] font-medium text-slate-500">检测类型</span>' +
+                '<input type="text" list="' + datalistId + '" value="' + escHtml(b.inspection_type || '') + '" ' +
+                'placeholder="如：验收检测" data-binding-type class="mt-0.5 w-full px-2 py-1.5 text-sm rounded-lg bg-slate-50 ring-1 ring-slate-200 border-0">' +
+                '<datalist id="' + datalistId + '">' + dlOpts + '</datalist>' +
+                '</label>' +
+                '<button type="button" data-binding-remove="' + idx + '" class="shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50" title="移除此类型">' +
+                '<i class="ri-delete-bin-6-line"></i></button></div>' +
+                '<button type="button" class="report-task-picker-open mt-2 w-full text-left rounded-lg px-2.5 py-2 ring-1 ring-slate-200/80 hover:ring-indigo-300 hover:bg-indigo-50/30"' +
+                ' data-form-id="equipment-edit-form" data-input-id="eq-binding-picker-scratch" data-auto-submit="0"' +
+                ' data-binding-index="' + idx + '" data-current-id="' + (rid || '') + '">' +
+                (tplLabel
+                    ? '<span class="block text-xs font-medium text-slate-900">' + escHtml(tplLabel) + '</span>' + tplHint
+                    : '<span class="block text-xs text-amber-800">点击选择该类型的报告模板…</span>') +
+                '</button>' + siteHtml + '</div>';
+        }).join('');
+        syncBindingsHidden();
+        bindingsListEl.querySelectorAll('[data-binding-type]').forEach(function (inp) {
+            inp.addEventListener('input', function () {
+                var row = inp.closest('[data-binding-row]');
+                if (!row) return;
+                var idx = parseInt(row.getAttribute('data-binding-row'), 10);
+                if (eqBindingsState[idx]) {
+                    eqBindingsState[idx].inspection_type = inp.value;
+                    syncBindingsHidden();
+                }
+            });
+        });
+        bindingsListEl.querySelectorAll('[data-binding-remove]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var idx = parseInt(btn.getAttribute('data-binding-remove'), 10);
+                eqBindingsState.splice(idx, 1);
+                renderBindingRows();
+            });
+        });
+        bindingsListEl.querySelectorAll('.report-task-picker-open').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.preventDefault();
+                if (typeof window.openReportTaskPickerForButton === 'function') {
+                    window.openReportTaskPickerForButton(btn);
+                }
+            });
+        });
+    }
+
+    window.applyEquipmentBindingPick = function (report, pickIndex) {
+        var idx = pickIndex;
+        if (idx === undefined || idx === null || isNaN(idx)) return;
+        if (!eqBindingsState[idx]) return;
+        if (!report || !report.id) return;
+        var row = eqBindingsState[idx];
+        row.report_task_id = report.id;
+        row.task_label = report.label || report.name || '';
+        renderBindingRows();
+    };
+
+    function defaultBindingTypeName() {
+        for (var i = 0; i < bindingTypeSuggestions.length; i++) {
+            var name = bindingTypeSuggestions[i];
+            var used = eqBindingsState.some(function (b) {
+                return (b.inspection_type || '').trim() === name;
+            });
+            if (!used) return name;
+        }
+        return '';
+    }
+
+    function addBindingRow(prefill) {
+        eqBindingsState.push(prefill || {
+            inspection_type: defaultBindingTypeName(),
+            report_task_id: 0,
+            task_label: ''
+        });
+        renderBindingRows();
+    }
+
+    var addBindingBtn = document.getElementById('eq-form-add-binding');
+    if (addBindingBtn) {
+        addBindingBtn.addEventListener('click', function () { addBindingRow(); });
     }
 
     function setFormMode(mode) {
         if (mode === 'completed') {
-            pendingBlock.classList.add('hidden');
+            if (pendingBlock) pendingBlock.classList.add('hidden');
             completedBlock.classList.remove('hidden');
         } else {
-            pendingBlock.classList.remove('hidden');
+            if (pendingBlock) pendingBlock.classList.remove('hidden');
             completedBlock.classList.add('hidden');
         }
     }
 
+    function setUiAddVsEdit(isEdit) {
+        if (manualBindingsWrap) manualBindingsWrap.classList.toggle('hidden', !isEdit);
+        if (autoBindHint) autoBindHint.classList.toggle('hidden', isEdit);
+        if (bindingsHidden) {
+            if (isEdit) {
+                bindingsHidden.setAttribute('name', 'report_task_bindings');
+            } else {
+                bindingsHidden.removeAttribute('name');
+            }
+        }
+        var nameInput = document.getElementById('eq-form-name');
+        if (nameInput) {
+            nameInput.placeholder = isEdit
+                ? '设备名称'
+                : '设备名称（可选，默认同设备类型）';
+        }
+    }
+
     function fillForm(eq, st) {
+        var isEdit = !!(eq && eq.id);
+        setUiAddVsEdit(isEdit);
         document.getElementById('eq-form-equipment-id').value = eq ? eq.id : '';
+        if (deviceTypeSelect) {
+            deviceTypeSelect.value = eq && eq.device_type ? String(eq.device_type) : '';
+        }
+        if (instanceHintEl) {
+            if (isEdit && eq && eq.instance_label) {
+                instanceHintEl.textContent = '当前：' + eq.instance_label;
+                instanceHintEl.classList.remove('hidden');
+            } else {
+                refreshInstanceHint();
+            }
+        }
         document.getElementById('eq-form-name').value = eq ? eq.name : '';
         document.getElementById('eq-form-model').value = eq ? (eq.model || '') : '';
         document.getElementById('eq-form-serial').value = eq ? (eq.serial_no || '') : '';
@@ -227,8 +474,23 @@
         } else {
             resetDepartmentPicker();
         }
-        var rt = document.getElementById('eq-form-report-task');
-        if (rt) rt.value = eq && eq.report_task_id ? String(eq.report_task_id) : '';
+        eqBindingsState = [];
+        if (eq && eq.report_task_bindings && eq.report_task_bindings.length) {
+            eq.report_task_bindings.forEach(function (b) {
+                eqBindingsState.push({
+                    inspection_type: b.inspection_type || '',
+                    report_task_id: b.report_task_id || 0,
+                    task_label: b.task_label || ''
+                });
+            });
+        } else if (eq && eq.report_task_id) {
+            eqBindingsState.push({
+                inspection_type: '默认',
+                report_task_id: eq.report_task_id,
+                task_label: ''
+            });
+        }
+        renderBindingRows();
         var rf = document.getElementById('eq-form-report-file');
         if (rf) rf.value = eq && eq.report_file_id ? String(eq.report_file_id) : '';
         if (st && st.key === 'completed') {
@@ -242,9 +504,12 @@
         }
     }
 
-    window.hospitalInfoOpenEquipmentForm = function (equipmentId) {
+    window.hospitalInfoOpenEquipmentForm = function (equipmentId, presetDeviceType) {
         document.getElementById('eq-form-title').textContent = equipmentId ? '编辑设备' : '添加设备';
         var url = apiBase + (equipmentId ? ('?equipment_id=' + equipmentId) : ('?fl_path={{ fl_path|urlencode }}'));
+        if (!equipmentId && presetDeviceType) {
+            url += '&device_type=' + encodeURIComponent(presetDeviceType);
+        }
         fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.json(); })
             .then(function (data) {
@@ -253,6 +518,15 @@
                     deptPicker = data.department_picker;
                 }
                 fillForm(data.equipment, data.status);
+                if (!equipmentId && presetDeviceType && deviceTypeSelect) {
+                    deviceTypeSelect.value = presetDeviceType;
+                    refreshInstanceHint();
+                } else if (!equipmentId) {
+                    refreshInstanceHint();
+                }
+                if (equipmentId && !eqBindingsState.length) {
+                    addBindingRow();
+                }
                 editDlg.showModal();
             })
             .catch(function () { alert('加载设备信息失败'); });
@@ -300,7 +574,8 @@
         var addBtn = e.target.closest('[data-eq-add]');
         if (addBtn) {
             e.preventDefault();
-            window.hospitalInfoOpenEquipmentForm(null);
+            var preset = addBtn.getAttribute('data-eq-preset-type') || '';
+            window.hospitalInfoOpenEquipmentForm(null, preset || null);
             return;
         }
         var editBtn = e.target.closest('[data-eq-edit]');
@@ -332,3 +607,5 @@
     });
 })();
 </script>
+
+{% include "core/partials/library_report_task_picker_sheet.html" %}

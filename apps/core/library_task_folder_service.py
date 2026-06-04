@@ -42,6 +42,31 @@ def folder_from_path_segment(val: str, by_id: dict[int, LibraryTaskFolder]) -> L
     return by_id.get(fid)
 
 
+def _folder_descendant_ids(
+    folder_id: int,
+    children_by_parent: dict[int | None, list[LibraryTaskFolder]],
+) -> set[int]:
+    """分类自身 + 所有下级子分类 id。"""
+    out = {folder_id}
+    stack = [folder_id]
+    while stack:
+        pid = stack.pop()
+        for child in children_by_parent.get(pid, []):
+            out.add(child.pk)
+            stack.append(child.pk)
+    return out
+
+
+def count_reports_in_folder_tree(
+    folder_id: int,
+    report_by_folder: dict[int | None, list[LibraryTask]],
+    children_by_parent: dict[int | None, list[LibraryTaskFolder]],
+) -> int:
+    """统计某分类及其子分类下挂接的报告任务数（检测类型层应显示汇总，而非仅直属 0）。"""
+    fids = _folder_descendant_ids(folder_id, children_by_parent)
+    return sum(len(report_by_folder.get(fid, [])) for fid in fids)
+
+
 def report_tasks_for_folder(
     tasks: list[LibraryTask],
     folder_id: int | None,
@@ -130,12 +155,15 @@ def _folder_tree_nodes(
                 drag_id=rt.pk,
             )
         )
+    n_reports_tree = count_reports_in_folder_tree(
+        folder.pk, report_by_folder, children_by_parent
+    )
     return TreeNode(
         id=folder.folder_segment(),
         label=folder.name,
         path=fpath,
         node_type="folder",
-        count=len(subfolders) + len(reports),
+        count=n_reports_tree,
         children=child_nodes,
         drop_accepts="report",
         drop_id=folder.pk,
@@ -228,15 +256,23 @@ def build_task_category_explorer(
 
     if not segs:
         for f in children_by_parent.get(None, []):
-            n_reports = len(report_by_folder.get(f.pk, []))
+            n_direct = len(report_by_folder.get(f.pk, []))
+            n_reports = count_reports_in_folder_tree(
+                f.pk, report_by_folder, children_by_parent
+            )
             n_children = len(children_by_parent.get(f.pk, []))
+            meta = f"{n_reports} 个报告"
+            if n_children:
+                meta += f" · {n_children} 个子分类"
+            if n_reports != n_direct and n_direct == 0 and n_children:
+                meta += "（在子分类下）"
             folders_panel.append(
                 FolderEntry(
                     kind="folder",
                     label=f.name,
                     path=f.folder_segment(),
-                    meta=f"{n_reports} 个报告" + (f" · {n_children} 个子分类" if n_children else ""),
-                    count=n_reports + n_children,
+                    meta=meta,
+                    count=n_reports,
                     drop_accepts="report",
                     entity_pk=f.pk,
                 )

@@ -1,5 +1,14 @@
 {# 项目工作台：左侧树浏览委托单位（新建/编辑组织请到医院信息管理） #}
 <aside id="guide-project-sidebar" class="lg:sticky lg:top-4 space-y-4">
+    {% if can_create_library_project %}
+    <button type="button" id="guide-project-create"
+            onclick="if(window.openProjectCreateModal){window.openProjectCreateModal();}return false;"
+            class="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-indigo-600 text-white text-sm font-semibold shadow-md shadow-indigo-600/20 hover:bg-indigo-700 transition-colors">
+        <i class="ri-add-circle-line text-lg"></i>
+        新建项目
+    </button>
+    {% endif %}
+
     <div class="rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden flex flex-col max-h-[min(72vh,40rem)]">
         <div class="px-3 py-2.5 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white shrink-0 space-y-2">
             <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">委托单位</span>
@@ -11,39 +20,4 @@
             {% include "core/partials/folder_explorer_tree.html" with explorer_base_url=workbench_explorer_base tree_root_label="全部医院" nav_path=fl_path nav_path_key="fl_path" folder_tree_nodes=folder_tree_nodes explorer_dnd_enabled=explorer_dnd_enabled %}
         </div>
     </div>
-
-    {% if can_assign_tasks or role_perm.perm_create_library_project %}
-    <details id="guide-project-create" class="rounded-2xl border border-dashed border-indigo-200 bg-indigo-50/30 overflow-hidden group">
-        <summary class="px-4 py-3 cursor-pointer text-sm font-medium text-indigo-900 list-none flex items-center justify-between">
-            <span><i class="ri-add-circle-line align-middle mr-1"></i> 新建项目</span>
-            <i class="ri-arrow-down-s-line text-slate-400 group-open:rotate-180 transition-transform"></i>
-        </summary>
-        <div class="px-4 pb-4 pt-0 border-t border-indigo-100/80">
-            <p class="text-xs text-slate-600 mt-3 mb-3">须选择已在<a href="{% url 'hospital_info_manage' %}" class="text-indigo-600 underline">医院信息管理</a>中维护的委托单位；不支持在此新建医院/院区/科室。</p>
-            <form method="post" class="space-y-3">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="create_project">
-                <label class="block text-xs font-medium text-slate-600">委托单位 *</label>
-                <select name="commission_org_id" required class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
-                    <option value="">— 请选择 —</option>
-                    {% for org in commission_org_rows %}
-                    <option value="{{ org.id }}">{{ org.full_display_name }}</option>
-                    {% endfor %}
-                </select>
-                <input type="text" name="project_name" placeholder="项目名称 *" required class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm">
-                {% if all_library_tasks %}
-                <div class="max-h-32 overflow-y-auto rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
-                    {% for t in all_library_tasks %}
-                    <label class="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50">
-                        <input type="checkbox" name="task_ids" value="{{ t.id }}" class="rounded border-slate-300 text-indigo-600">
-                        <span class="truncate"><span class="font-mono text-xs text-slate-500">{{ t.code }}</span> · {{ t.name }}</span>
-                    </label>
-                    {% endfor %}
-                </div>
-                {% endif %}
-                <button type="submit" class="w-full py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">创建</button>
-            </form>
-        </div>
-    </details>
-    {% endif %}
 </aside>

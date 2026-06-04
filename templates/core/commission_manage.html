@@ -93,8 +93,9 @@
             </div>
             <form method="get" class="flex flex-wrap items-center gap-2">
                 {% if subject_user %}<input type="hidden" name="user_id" value="{{ subject_user.pk }}">{% endif %}
-                <input type="search" name="search" value="{{ search }}" placeholder="编号/名称/单位…"
-                       class="rounded-xl border border-slate-200 px-3 py-2 text-sm w-48">
+                <input type="search" name="search" value="{{ search }}" placeholder="委托编号 260001 或名称/单位…"
+                       class="rounded-xl border border-slate-200 px-3 py-2 text-sm w-56"
+                       title="输入六位委托编号可精确查询；也可搜项目名称或委托单位">
                 <select name="status" class="rounded-xl border border-slate-200 px-3 py-2 text-sm" onchange="this.form.submit()">
                     <option value="">全部状态</option>
                     <option value="completed" {% if status_filter == 'completed' %}selected{% endif %}>已完成</option>

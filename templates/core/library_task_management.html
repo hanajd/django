@@ -217,16 +217,21 @@
                             <i class="ri-layout-masonry-line"></i> 模板编辑器
                         </a>
                         {% endif %}
-                        {% if can_manage_templates and task_library_edit %}
+                        {% if can_manage_templates and task_library_edit and task_may_edit %}
                         <form method="post" class="inline" onsubmit="return confirm('确定删除该任务模板？相关分配记录将一并解除。');">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="delete_task">
-                            <input type="hidden" name="task_id" value="{{ manage_task_id_val }}">
+                            <input type="hidden" name="task_id" value="{% if manage_task_id_val %}{{ manage_task_id_val }}{% else %}{{ manage_task.id }}{% endif %}">
+                            <input type="hidden" name="manage_task_id" value="{% if manage_task_id_val %}{{ manage_task_id_val }}{% else %}{{ manage_task.id }}{% endif %}">
                             {% if rp %}<input type="hidden" name="return_project" value="{{ rp }}">{% endif %}
                             {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
                             <input type="hidden" name="edit" value="1">
                             <button type="submit" class="px-3 py-2 rounded-xl text-sm font-medium bg-red-50 text-red-700 hover:bg-red-100 border border-red-100">删除模板</button>
                         </form>
+                        {% elif can_manage_templates and task_library_edit and manage_task and not task_may_edit %}
+                        <span class="px-3 py-2 rounded-xl text-xs text-slate-500 bg-slate-50 ring-1 ring-slate-200" title="该模板由其他账号创建且未挂到您可见的项目，无法删除">
+                            不可删除（非您权限范围）
+                        </span>
                         {% endif %}
                     </div>
                 </div>
@@ -268,6 +273,7 @@
                         <button type="button" data-task-sheet="task-sheet-instruments"
                                 class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white text-slate-800 text-sm font-medium ring-1 ring-slate-200 hover:bg-slate-50">
                             <i class="ri-flask-line"></i> 维护仪器种类
+                            {% if instrument_kind_groups %}<span class="text-[11px] opacity-80">({{ instrument_kind_groups|length }} 种)</span>{% endif %}
                         </button>
                         {% endif %}
                     </div>
@@ -275,101 +281,100 @@
 
                     <div>
                         <h3 class="text-sm font-semibold text-slate-800 mb-3">已绑定的模板文件</h3>
+                        {% if task_edit_mode %}
+                        <p class="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-2">PDF 与 JSON 可<strong>分别</strong>解除绑定（文件仍保留在文件库）；辅助 JSON（前端规则 / 矩阵）不参与主模板回填。</p>
+                        {% endif %}
                         {% if task_primary_json_file %}
                         <p class="text-xs text-slate-500 mb-2">任务主 JSON（坐标模板，用于回填/PDF 生成）：<span class="font-medium text-slate-800">{{ task_primary_json_file.original_name }}</span></p>
                         {% endif %}
-                        {% if task_auxiliary_json_files %}
-                        <p class="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-2">辅助 JSON（前端规则 / 矩阵）不参与主模板回填；可在下方单独解除绑定。</p>
-                        {% endif %}
-                        <div class="rounded-xl border border-slate-200 overflow-hidden max-h-80 overflow-y-auto">
-                            <table class="min-w-full text-sm text-left">
-                                <thead class="bg-slate-50 text-slate-500 text-xs uppercase sticky top-0 border-b border-slate-100">
+                        <div class="rounded-xl border border-slate-200 overflow-x-auto max-h-[28rem] overflow-y-auto">
+                            <table class="min-w-full text-sm text-left table-fixed w-full min-w-[52rem]">
+                                <thead class="bg-slate-50 text-slate-500 text-xs uppercase sticky top-0 border-b border-slate-100 z-10">
                                     <tr>
-                                        <th class="px-4 py-2.5">模板组</th>
-                                        <th class="px-4 py-2.5">文件</th>
-                                        <th class="px-4 py-2.5 w-40">操作</th>
+                                        <th class="px-3 py-2.5 w-28">模板组</th>
+                                        <th class="px-3 py-2.5">文件</th>
+                                        <th class="px-3 py-2.5 w-36 sticky right-0 bg-slate-50 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.06)]">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-slate-100">
                                     {% for pair in task_linked_file_pairs %}
-                                    <tr class="hover:bg-slate-50/80 align-top">
-                                        <td class="px-4 py-3 font-mono text-slate-700 text-xs whitespace-nowrap">{{ pair.stem }}</td>
-                                        <td class="px-4 py-3 space-y-2">
+                                    <tr class="hover:bg-slate-50/80 align-top group">
+                                        <td class="px-3 py-3 font-mono text-slate-700 text-xs align-top">
+                                            <span class="line-clamp-2 break-all" title="{{ pair.stem }}">{{ pair.stem }}</span>
+                                        </td>
+                                        <td class="px-3 py-3 space-y-2 min-w-0 align-top">
                                             {% if pair.pdf %}
-                                            <div class="flex flex-wrap items-center gap-2">
-                                                <i class="ri-file-pdf-2-line text-red-500"></i>
-                                                <span class="text-slate-800">{{ pair.pdf.name }}</span>
+                                            <div class="flex items-start gap-2 min-w-0">
+                                                <i class="ri-file-pdf-2-line text-red-500 shrink-0 mt-0.5"></i>
+                                                <span class="text-slate-800 truncate min-w-0" title="{{ pair.pdf.name }}">{{ pair.pdf.name }}</span>
                                             </div>
                                             {% endif %}
                                             {% if pair.json %}
-                                            <div class="flex flex-wrap items-center gap-2">
-                                                <i class="ri-braces-line text-violet-500"></i>
-                                                <span class="text-slate-800">{{ pair.json.name }}</span>
+                                            <div class="flex items-start gap-2 min-w-0">
+                                                <i class="ri-braces-line text-violet-500 shrink-0 mt-0.5"></i>
+                                                <span class="text-slate-800 truncate min-w-0 flex-1" title="{{ pair.json.name }}">{{ pair.json.name }}</span>
                                                 {% if task_primary_json_file and pair.json.id == task_primary_json_file.id %}
-                                                <span class="text-[11px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800">主 JSON</span>
+                                                <span class="text-[11px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 shrink-0">主 JSON</span>
                                                 {% elif pair.json.id in task_auxiliary_json_ids %}
-                                                <span class="text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-900">辅助</span>
+                                                <span class="text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 shrink-0">辅助</span>
                                                 {% endif %}
                                             </div>
                                             {% endif %}
                                             {% for o in pair.other %}
-                                            <div class="flex flex-wrap items-center gap-2 text-slate-700">
-                                                <i class="ri-file-line text-slate-400"></i>
-                                                <span>{{ o.name }}</span>
+                                            <div class="flex items-start gap-2 min-w-0 text-slate-700">
+                                                <i class="ri-file-line text-slate-400 shrink-0"></i>
+                                                <span class="truncate" title="{{ o.name }}">{{ o.name }}</span>
                                             </div>
                                             {% endfor %}
                                         </td>
-                                        <td class="px-4 py-3 whitespace-nowrap space-y-1">
+                                        <td class="px-3 py-3 align-top sticky right-0 bg-white group-hover:bg-slate-50/80 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.06)]">
+                                            <div class="flex flex-col gap-1 items-stretch text-xs">
+                                            {% if pair.pdf and role_perm.perm_file_download %}
+                                            <a href="{% url 'file_library_download' pair.pdf.id %}" class="text-emerald-700 hover:underline font-medium">下载 PDF</a>
+                                            {% endif %}
+                                            {% if pair.json and role_perm.perm_file_download %}
+                                            <a href="{% url 'file_library_download' pair.json.id %}" class="text-emerald-700 hover:underline font-medium">下载 JSON</a>
+                                            {% endif %}
                                             {% if pair.pdf and role_perm.perm_file_preview %}
-                                            <a href="{% url 'file_preview' pair.pdf.id %}" target="_blank" rel="noopener" class="block text-indigo-600 hover:underline text-xs">预览 PDF</a>
+                                            <a href="{% url 'file_preview' pair.pdf.id %}" target="_blank" rel="noopener" class="text-indigo-600 hover:underline">预览 PDF</a>
                                             {% endif %}
                                             {% if pair.pdf and role_perm.perm_htmlpdf or pair.pdf and role_perm.perm_process_pipeline %}
                                             <a href="{% url 'htmlpdf_editor_open' pair.pdf.id %}?return_manage_task={{ manage_task.id }}&return_fl_path={{ fl_path|urlencode }}"
-                                               class="block text-violet-600 hover:underline text-xs">编辑版式</a>
+                                               class="text-violet-600 hover:underline">编辑版式</a>
                                             {% endif %}
                                             {% if task_edit_mode %}
                                             {% if pair.pdf %}
-                                            <form method="post" class="mt-2"
-                                                  onsubmit="return confirm('{% if pair.json and pair.json.id not in task_auxiliary_json_ids %}将解除「{{ pair.stem }}」的 PDF 与主 JSON 绑定（文件仍保留在文件库）。{% else %}确定解除 PDF「{{ pair.pdf.name }}」与本模板的绑定？{% endif %}');">
+                                            <form method="post" class="mt-1"
+                                                  onsubmit="return confirm('仅解除 PDF「{{ pair.pdf.name }}」与本模板的绑定，JSON 模板（若有）仍保持绑定。文件仍保留在文件库。');">
                                                 {% csrf_token %}
                                                 <input type="hidden" name="action" value="unbind_task_template_file">
                                                 <input type="hidden" name="manage_task_id" value="{{ manage_task.id }}">
                                                 <input type="hidden" name="file_id" value="{{ pair.pdf.id }}">
-                                                <input type="hidden" name="include_paired" value="{% if pair.json and pair.json.id not in task_auxiliary_json_ids %}1{% else %}0{% endif %}">
+                                                <input type="hidden" name="include_paired" value="0">
+                                                <input type="hidden" name="edit" value="1">
+                                                {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
+                                                {% if rp %}<input type="hidden" name="return_project" value="{{ rp }}">{% endif %}
+                                                <button type="submit" class="text-red-600 hover:text-red-800 text-xs font-medium">解除 PDF 绑定</button>
+                                            </form>
+                                            {% endif %}
+                                            {% if pair.json %}
+                                            <form method="post" class="mt-1"
+                                                  onsubmit="return confirm('仅解除{% if pair.json.id in task_auxiliary_json_ids %}辅助 {% endif %}JSON「{{ pair.json.name }}」与本模板的绑定，PDF（若有）仍保持绑定。文件仍保留在文件库。');">
+                                                {% csrf_token %}
+                                                <input type="hidden" name="action" value="unbind_task_template_file">
+                                                <input type="hidden" name="manage_task_id" value="{{ manage_task.id }}">
+                                                <input type="hidden" name="file_id" value="{{ pair.json.id }}">
+                                                <input type="hidden" name="include_paired" value="0">
                                                 <input type="hidden" name="edit" value="1">
                                                 {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
                                                 {% if rp %}<input type="hidden" name="return_project" value="{{ rp }}">{% endif %}
                                                 <button type="submit" class="text-red-600 hover:text-red-800 text-xs font-medium">
-                                                    {% if pair.json and pair.json.id not in task_auxiliary_json_ids %}解除整组绑定{% else %}解除 PDF 绑定{% endif %}
+                                                    {% if pair.json.id in task_auxiliary_json_ids %}解除辅助 JSON 绑定{% else %}解除 JSON 绑定{% endif %}
                                                 </button>
                                             </form>
-                                            {% elif pair.json %}
-                                            <form method="post" class="mt-2" onsubmit="return confirm('确定解除「{{ pair.json.name }}」与本模板的绑定？');">
-                                                {% csrf_token %}
-                                                <input type="hidden" name="action" value="unbind_task_template_file">
-                                                <input type="hidden" name="manage_task_id" value="{{ manage_task.id }}">
-                                                <input type="hidden" name="file_id" value="{{ pair.json.id }}">
-                                                <input type="hidden" name="include_paired" value="0">
-                                                <input type="hidden" name="edit" value="1">
-                                                {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
-                                                {% if rp %}<input type="hidden" name="return_project" value="{{ rp }}">{% endif %}
-                                                <button type="submit" class="text-red-600 hover:text-red-800 text-xs font-medium">解除绑定</button>
-                                            </form>
-                                            {% endif %}
-                                            {% if pair.json and pair.json.id in task_auxiliary_json_ids and pair.pdf %}
-                                            <form method="post" onsubmit="return confirm('确定解除辅助 JSON 的绑定？');">
-                                                {% csrf_token %}
-                                                <input type="hidden" name="action" value="unbind_task_template_file">
-                                                <input type="hidden" name="manage_task_id" value="{{ manage_task.id }}">
-                                                <input type="hidden" name="file_id" value="{{ pair.json.id }}">
-                                                <input type="hidden" name="include_paired" value="0">
-                                                <input type="hidden" name="edit" value="1">
-                                                {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
-                                                {% if rp %}<input type="hidden" name="return_project" value="{{ rp }}">{% endif %}
-                                                <button type="submit" class="text-red-600 hover:text-red-800 text-xs font-medium">解除辅助 JSON</button>
-                                            </form>
                                             {% endif %}
                                             {% endif %}
+                                            </div>
                                         </td>
                                     </tr>
                                     {% empty %}
@@ -382,34 +387,37 @@
 
                     {% if task_show_instrument_binding %}
                     <div class="rounded-xl border border-slate-200 bg-slate-50/60 p-4 space-y-3">
-                        <h3 class="text-sm font-semibold text-slate-800">已绑定的仪器种类</h3>
-                        <p class="text-xs text-slate-500">具体编号在人员派工时按台账顺序分配；报告所用仪器由各现场记录模板汇总，不在报告模板单独绑定。</p>
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <h3 class="text-sm font-semibold text-slate-800">已绑定的仪器种类</h3>
+                            {% if task_edit_mode %}
+                            <button type="button" data-task-sheet="task-sheet-instruments"
+                                    class="text-xs font-medium text-indigo-700 hover:underline">修改绑定</button>
+                            {% endif %}
+                        </div>
+                        <p class="text-xs text-slate-500">质控、防护均可绑定多种；具体编号在进入检测环节时自动出库。多台设备/多个委托可共用同种仪器。报告模板汇总各现场记录所绑种类。</p>
                         <div class="grid gap-3 sm:grid-cols-2 text-sm">
                             <div>
-                                <span class="text-xs font-medium text-slate-500">质控（性能）</span>
-                                <ul class="mt-1 space-y-1">
-                                    {% for kg in instrument_kind_groups %}
-                                    {% if kg.form_value in task_bound_qc_kind_values %}
-                                    <li class="text-slate-800">{{ kg.name }}{% if kg.model %} <span class="text-slate-400">({{ kg.model }})</span>{% endif %}
-                                        <span class="block text-[11px] font-mono text-slate-500">{{ kg.codes|join:"、" }}</span>
+                                <span class="text-xs font-medium text-slate-500">质控（性能）· {{ task_bound_qc_kind_list|length }} 种</span>
+                                <ul class="mt-1 space-y-1.5">
+                                    {% for spec in task_bound_qc_kind_list %}
+                                    <li class="text-slate-800 rounded-lg bg-white px-2 py-1 ring-1 ring-slate-100">
+                                        {{ spec.name }}{% if spec.model %} <span class="text-slate-400">({{ spec.model }})</span>{% endif %}
                                     </li>
-                                    {% endif %}
                                     {% empty %}
+                                    <li class="text-slate-400 text-xs">未绑定</li>
                                     {% endfor %}
-                                    {% if not task_bound_qc_kind_values %}<li class="text-slate-400 text-xs">未绑定</li>{% endif %}
                                 </ul>
                             </div>
                             <div>
-                                <span class="text-xs font-medium text-slate-500">放射防护</span>
-                                <ul class="mt-1 space-y-1">
-                                    {% for kg in instrument_kind_groups %}
-                                    {% if kg.form_value in task_bound_rp_kind_values %}
-                                    <li class="text-slate-800">{{ kg.name }}{% if kg.model %} <span class="text-slate-400">({{ kg.model }})</span>{% endif %}
-                                        <span class="block text-[11px] font-mono text-slate-500">{{ kg.codes|join:"、" }}</span>
+                                <span class="text-xs font-medium text-slate-500">放射防护 · {{ task_bound_rp_kind_list|length }} 种</span>
+                                <ul class="mt-1 space-y-1.5">
+                                    {% for spec in task_bound_rp_kind_list %}
+                                    <li class="text-slate-800 rounded-lg bg-white px-2 py-1 ring-1 ring-slate-100">
+                                        {{ spec.name }}{% if spec.model %} <span class="text-slate-400">({{ spec.model }})</span>{% endif %}
                                     </li>
-                                    {% endif %}
+                                    {% empty %}
+                                    <li class="text-slate-400 text-xs">未绑定</li>
                                     {% endfor %}
-                                    {% if not task_bound_rp_kind_values %}<li class="text-slate-400 text-xs">未绑定</li>{% endif %}
                                 </ul>
                             </div>
                         </div>

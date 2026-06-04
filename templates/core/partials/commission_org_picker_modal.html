@@ -38,7 +38,13 @@
                             {% endif %}
                         </div>
 
-                        <nav id="picker-breadcrumbs" class="flex flex-wrap items-center gap-1 text-xs text-slate-600 mb-2 px-0.5" aria-label="路径"></nav>
+                        <div class="flex flex-wrap items-center gap-2 mb-2 px-0.5">
+                            <button type="button" id="picker-back-btn"
+                                    class="hidden inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-800 shadow-sm">
+                                <i class="ri-arrow-left-line text-base"></i> 返回上一级
+                            </button>
+                            <nav id="picker-breadcrumbs" class="flex flex-wrap items-center gap-1 text-xs text-slate-600 min-w-0 flex-1" aria-label="路径"></nav>
+                        </div>
 
                         <div id="picker-folder-grid" class="grid grid-cols-2 gap-2 min-h-[8rem] max-h-[14rem] overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/50 p-2">
                         </div>
@@ -57,5 +63,5 @@
     </div>
 </div>
 
-{{ commission_org_picker_tree|json_script:"commission-org-picker-data" }}
 {{ project_picker_initial|json_script:"project-picker-initial-data" }}
+{% include "core/partials/commission_org_folder_picker_init.html" with picker_modal_id="project-edit-modal" picker_form_id="project-edit-modal-form" picker_open_btn_id="open-project-edit-modal" picker_back_btn_id="picker-back-btn" picker_hidden_org_id="picker-commission-org-id" picker_label_id="picker-selected-label" picker_crumbs_id="picker-breadcrumbs" picker_grid_id="picker-folder-grid" picker_select_current_id="picker-select-current-btn" picker_hint_id="picker-hint" picker_initial_script_id="project-picker-initial-data" %}

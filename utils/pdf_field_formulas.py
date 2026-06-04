@@ -99,10 +99,76 @@ def raw_field_formulas_from_template(template_obj: Mapping[str, Any]) -> Any:
     return _root_only_field_formulas_raw(template_obj)
 
 
+def _iter_form_schema_steps(template_obj: Mapping[str, Any]) -> List[Any]:
+    steps: List[Any] = []
+    for key in ("formSchema",):
+        fs = template_obj.get(key)
+        if isinstance(fs, dict) and isinstance(fs.get("steps"), list):
+            steps = fs.get("steps") or []
+            break
+    if not steps and isinstance(template_obj.get("steps"), list):
+        steps = template_obj.get("steps") or []
+    return steps
+
+
+def _collect_form_schema_field_formulas(template_obj: Mapping[str, Any]) -> Dict[str, str]:
+    """从已保存的 ``formSchema.steps``（或根级 ``steps``）提取 ``pdfFieldId -> 公式``。"""
+    out: Dict[str, str] = {}
+    steps = _iter_form_schema_steps(template_obj)
+    if not steps:
+        return out
+    for fld in _iter_frontend_field_dicts({"steps": steps}):
+        src = fld.get("source") if isinstance(fld.get("source"), dict) else {}
+        pid = normalize_pdf_field_id(
+            str(fld.get("pdfFieldId") or src.get("pdfFieldId") or "")
+        )
+        expr = str(
+            fld.get("formula")
+            or fld.get("fieldExpression")
+            or src.get("pdfFieldExpression")
+            or src.get("fieldExpression")
+            or ""
+        ).strip()
+        if pid and expr:
+            out[pid] = expr
+    return out
+
+
+def _collect_form_schema_field_metadata(template_obj: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """从 ``formSchema.steps`` 提取判定元数据（按 pdfFieldId）。"""
+    meta: Dict[str, Dict[str, Any]] = {}
+    steps = _iter_form_schema_steps(template_obj)
+    if not steps:
+        return meta
+    for fld in _iter_frontend_field_dicts({"steps": steps}):
+        src = fld.get("source") if isinstance(fld.get("source"), dict) else {}
+        pid = normalize_pdf_field_id(
+            str(fld.get("pdfFieldId") or src.get("pdfFieldId") or "")
+        )
+        if not pid:
+            continue
+        chunk: Dict[str, Any] = {}
+        jct = fld.get("judgmentCriteriaByTestType")
+        if not isinstance(jct, dict) or not jct:
+            jct = src.get("judgmentCriteriaByTestType")
+        if isinstance(jct, dict) and jct:
+            chunk["judgmentCriteriaByTestType"] = jct
+        fv = fld.get("fieldVerdict")
+        if not isinstance(fv, dict) or not fv:
+            fv = src.get("fieldVerdict")
+        if isinstance(fv, dict) and fv:
+            chunk["fieldVerdict"] = fv
+        if fld.get("judgmentCriteriaManual") or src.get("judgmentCriteriaManual"):
+            chunk["judgmentCriteriaManual"] = True
+        if chunk:
+            meta[pid] = {**meta.get(pid, {}), **chunk}
+    return meta
+
+
 def collect_merged_field_formulas_dict(template_obj: Mapping[str, Any]) -> Dict[str, str]:
     """
-    合并公式来源（优先级：pdf.fields 栏位上的 ``fieldExpression`` / ``pdfFieldExpression``
-    高于模板根 ``fieldFormulas``，同目标 id 以栏位为准）。
+    合并公式来源（优先级：``pdf.fields`` 栏位 > 已保存 ``formSchema.steps`` >
+    模板根 ``fieldFormulas``）。
     """
     out: Dict[str, str] = {}
     pdf = template_obj.get("pdf") if isinstance(template_obj.get("pdf"), dict) else {}
@@ -115,6 +181,9 @@ def collect_merged_field_formulas_dict(template_obj: Mapping[str, Any]) -> Dict[
             expr = str(row.get("fieldExpression") or row.get("pdfFieldExpression") or "").strip()
             if pid and expr:
                 out[pid] = expr
+    for k, v in _collect_form_schema_field_formulas(template_obj).items():
+        if k not in out:
+            out[k] = v
     root = _coerce_field_formulas_dict(_root_only_field_formulas_raw(template_obj))
     for k, v in root.items():
         if k not in out:
@@ -123,8 +192,8 @@ def collect_merged_field_formulas_dict(template_obj: Mapping[str, Any]) -> Dict[
 
 
 def _collect_pdf_field_metadata_by_id(template_obj: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
-    """从 ``pdf.fields`` 提取判定相关元数据（按 pdfFieldId 索引）。"""
-    meta: Dict[str, Dict[str, Any]] = {}
+    """从 ``pdf.fields`` 与 ``formSchema.steps`` 提取判定相关元数据（按 pdfFieldId 索引）。"""
+    meta: Dict[str, Dict[str, Any]] = dict(_collect_form_schema_field_metadata(template_obj))
     pdf = template_obj.get("pdf") if isinstance(template_obj.get("pdf"), dict) else {}
     fields = pdf.get("fields")
     if not isinstance(fields, list):
@@ -142,8 +211,10 @@ def _collect_pdf_field_metadata_by_id(template_obj: Mapping[str, Any]) -> Dict[s
         fv = row.get("fieldVerdict")
         if isinstance(fv, dict) and fv:
             chunk["fieldVerdict"] = fv
+        if row.get("judgmentCriteriaManual"):
+            chunk["judgmentCriteriaManual"] = True
         if chunk:
-            meta[pid] = chunk
+            meta[pid] = {**meta.get(pid, {}), **chunk}
     return meta
 
 
@@ -178,6 +249,64 @@ def _iter_frontend_field_dicts(frontend: Mapping[str, Any]):
                         yield cell
 
 
+def _root_field_formulas_from_template_obj(template_obj: Mapping[str, Any]) -> Any:
+    raw = _root_only_field_formulas_raw(template_obj)
+    if raw not in (None, "", [], {}):
+        return raw
+    fs = template_obj.get("formSchema")
+    if isinstance(fs, dict):
+        for key in ("fieldFormulas", "pdfFieldFormulas"):
+            v = fs.get(key)
+            if v not in (None, "", [], {}):
+                return v
+    return None
+
+
+def build_pdf_field_formula_merge_source(
+    input_fields: List[Any],
+    template_blob: Optional[Mapping[str, Any]] = None,
+    *,
+    root_field_formulas: Any = None,
+) -> Dict[str, Any]:
+    """
+    构造 ``merge_field_formulas_into_frontend`` 用的模板片段。
+
+    始终以当前编辑器/请求中的 ``pdf.fields`` 为主；库中模板仅补充缺失的公式与判定。
+    """
+    rows: List[Dict[str, Any]] = [
+        dict(r) for r in (input_fields or []) if isinstance(r, dict)
+    ]
+    if root_field_formulas is not None:
+        attach_root_field_formulas_to_pdf_field_rows(rows, root_field_formulas)
+    if isinstance(template_blob, dict):
+        attach_root_field_formulas_to_pdf_field_rows(
+            rows, _root_field_formulas_from_template_obj(template_blob)
+        )
+        blob_exprs = collect_merged_field_formulas_dict(template_blob)
+        blob_meta = _collect_pdf_field_metadata_by_id(template_blob)
+        for row in rows:
+            pid = normalize_pdf_field_id(str(row.get("pdfFieldId") or ""))
+            if not pid:
+                continue
+            if not str(row.get("fieldExpression") or row.get("pdfFieldExpression") or "").strip():
+                ex = blob_exprs.get(pid)
+                if ex:
+                    row["fieldExpression"] = ex
+            extra = blob_meta.get(pid) or {}
+            jct = extra.get("judgmentCriteriaByTestType")
+            if isinstance(jct, dict) and jct and not row.get("judgmentCriteriaByTestType"):
+                row["judgmentCriteriaByTestType"] = jct
+            fv = extra.get("fieldVerdict")
+            if isinstance(fv, dict) and fv and not row.get("fieldVerdict"):
+                row["fieldVerdict"] = fv
+            if extra.get("judgmentCriteriaManual") and not row.get("judgmentCriteriaManual"):
+                row["judgmentCriteriaManual"] = True
+    out: Dict[str, Any] = {"pdf": {"fields": rows}}
+    if root_field_formulas is not None:
+        out["fieldFormulas"] = root_field_formulas
+    return out
+
+
 def embed_pdf_field_formulas_into_frontend_fields(
     frontend: Dict[str, Any],
     template_obj: Mapping[str, Any],
@@ -193,21 +322,32 @@ def embed_pdf_field_formulas_into_frontend_fields(
     for fld in _iter_frontend_field_dicts(frontend):
         src = fld.get("source")
         if not isinstance(src, dict):
-            continue
-        pid = normalize_pdf_field_id(str(src.get("pdfFieldId") or ""))
+            src = {}
+        pid = normalize_pdf_field_id(
+            str(src.get("pdfFieldId") or fld.get("pdfFieldId") or "")
+        )
         if not pid:
             continue
+        if not src.get("pdfFieldId"):
+            src["pdfFieldId"] = pid
+            fld["source"] = src
         expr = fmap.get(pid)
         if expr:
             src["pdfFieldExpression"] = expr
             fld["formula"] = expr
+            fld["fieldExpression"] = expr
         extra = meta_by_id.get(pid)
         if not extra:
             continue
         if "judgmentCriteriaByTestType" in extra:
             src["judgmentCriteriaByTestType"] = extra["judgmentCriteriaByTestType"]
+            fld["judgmentCriteriaByTestType"] = extra["judgmentCriteriaByTestType"]
         if "fieldVerdict" in extra:
             src["fieldVerdict"] = extra["fieldVerdict"]
+            fld["fieldVerdict"] = extra["fieldVerdict"]
+        if extra.get("judgmentCriteriaManual"):
+            src["judgmentCriteriaManual"] = True
+            fld["judgmentCriteriaManual"] = True
 
 
 def _sanitize_expression_preview(expr: str, max_len: int = 512) -> str:

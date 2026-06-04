@@ -17,19 +17,13 @@ from django.conf import settings
 from django.utils import timezone
 
 from apps.core import pipeline_service
-from apps.core.library_file_service import soft_delete_library_file
+from apps.core.library_file_service import (
+    library_file_exists_on_disk,
+    soft_delete_library_file,
+)
 from apps.core.models import LibraryFile, LibraryOCRProcessTask, LibraryProject
 
 logger = logging.getLogger(__name__)
-
-
-def library_file_exists_on_disk(lf: LibraryFile) -> bool:
-    """与 LibraryTaskTemplateBindingHistory.file_still_available 一致：仅检查磁盘。"""
-    try:
-        path = pipeline_service.library_absolute_path(lf.relative_path)
-        return path.is_file()
-    except (ValueError, OSError):
-        return False
 
 
 def should_run_startup_media_integrity() -> bool:
@@ -58,18 +52,23 @@ def should_run_startup_media_integrity() -> bool:
     return True
 
 
-def reconcile_library_files_missing_on_disk(*, dry_run: bool = False) -> dict[str, int]:
+def reconcile_library_files_missing_on_disk(
+    *,
+    dry_run: bool = False,
+    category: str | None = None,
+) -> dict[str, int]:
     """
     扫描所有未在回收站中的 LibraryFile；磁盘不存在则软删。
-    磁盘存在的不改动。
+    磁盘存在的不改动。category 可限定单分类（如文件库当前 Tab）。
     """
     missing = 0
     ok = 0
-    for lf in (
-        LibraryFile.objects.only("id", "relative_path", "deleted_at", "original_name")
-        .order_by("id")
-        .iterator(chunk_size=500)
-    ):
+    qs = LibraryFile.objects.only("id", "relative_path", "deleted_at", "original_name").order_by(
+        "id"
+    )
+    if category:
+        qs = qs.filter(category=category)
+    for lf in qs.iterator(chunk_size=500):
         if library_file_exists_on_disk(lf):
             ok += 1
             continue

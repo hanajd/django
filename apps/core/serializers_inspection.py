@@ -90,17 +90,41 @@ class InspectionSubmitSerializer(serializers.Serializer):
         author_text = _pick_signature_text(
             signatures,
             dynamic_data,
-            ("author", "inspector", "mainInspector", "检测员", "f76"),
+            (
+                "inspector",
+                "f36",
+                "author",
+                "mainInspector",
+                "检测员",
+                "f76",
+                "f665",
+            ),
         )
         reviewer_text = _pick_signature_text(
             signatures,
             dynamic_data,
-            ("reviewer", "checker", "校核员及校核日期", "校核", "f78"),
+            (
+                "checker",
+                "f35",
+                "reviewer",
+                "校核员及校核日期",
+                "校核",
+                "f78",
+                "f676",
+            ),
         )
         approver_text = _pick_signature_text(
             signatures,
             dynamic_data,
-            ("approver", "authorizedSignatory", "accompanyingPerson", "受检单位陪同人", "f77"),
+            (
+                "accompanyingPerson",
+                "f34",
+                "approver",
+                "authorizedSignatory",
+                "受检单位陪同人",
+                "f77",
+                "f677",
+            ),
         )
         attrs["_author_png"] = decode_png_base64_any(author_text)
         attrs["_reviewer_png"] = decode_png_base64_any(reviewer_text)

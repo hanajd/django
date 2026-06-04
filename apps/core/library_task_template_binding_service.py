@@ -84,9 +84,13 @@ def pick_task_primary_json_template(task: LibraryTask) -> LibraryFile | None:
     """任务主 JSON：优先含 pdf.fields 的统一模板，排除 *_frontend.json / *_matrix.json。"""
     candidates: list[tuple[int, int, LibraryFile]] = []
     fallback: LibraryFile | None = None
+    from apps.core.library_file_service import library_file_exists_on_disk
+
     for lf in task.library_files.filter(category=LibraryFile.CATEGORY_TEMPLATE).order_by(
         "-created_at", "-id"
     ):
+        if not library_file_exists_on_disk(lf):
+            continue
         if not (lf.original_name or "").lower().endswith(".json"):
             continue
         if is_auxiliary_template_json_filename(lf.original_name or ""):
@@ -119,7 +123,11 @@ def get_task_template_pair(task: LibraryTask) -> tuple[LibraryFile | None, Libra
         .order_by("-created_at", "-id")
         .distinct()
     )
+    from apps.core.library_file_service import library_file_exists_on_disk
+
     for lf in qs:
+        if not library_file_exists_on_disk(lf):
+            continue
         role = infer_template_file_role(lf)
         if role == LibraryTaskTemplateBindingHistory.ROLE_PDF and pdf_lf is None:
             pdf_lf = lf
@@ -253,11 +261,11 @@ def collect_task_template_unbind_ids(
     task: LibraryTask,
     file_id: int,
     *,
-    include_paired: bool = True,
+    include_paired: bool = False,
 ) -> tuple[list[int], str]:
     """
     解析要从任务解除绑定的文件 id。
-    include_paired：解除 PDF 时同时解除同名 stem 的主 JSON（及反向含 PDF）。
+    默认仅解除 file_id 对应文件；include_paired=True 时连带解除同名 stem 的 PDF/主 JSON 配对。
     """
     lf = (
         LibraryFile.objects.filter(
@@ -297,9 +305,9 @@ def unbind_template_files_from_task(
     file_id: int,
     *,
     user,
-    include_paired: bool = True,
+    include_paired: bool = False,
 ) -> dict[str, Any]:
-    """从任务模板解除文件绑定（不删除文件库中的文件）。"""
+    """从任务模板解除文件绑定（不删除文件库中的文件）。默认仅解除指定文件；include_paired=True 时连带同名 stem 的配对文件。"""
     if not library_user_may_edit_library_task(user, task):
         return {"ok": False, "error": "无权维护该任务模板"}
     ids, stem = collect_task_template_unbind_ids(
@@ -308,6 +316,7 @@ def unbind_template_files_from_task(
     if not ids:
         return {"ok": False, "error": "该文件未绑定到此任务模板"}
 
+    target_lf = LibraryFile.objects.filter(pk=file_id).first()
     names = list(
         LibraryFile.objects.filter(pk__in=ids).values_list("original_name", flat=True)
     )
@@ -318,6 +327,18 @@ def unbind_template_files_from_task(
 
     if len(ids) > 1:
         msg = f"已解除绑定「{stem}」下的 {len(ids)} 个文件（{'、'.join(names)}）"
+    elif target_lf is not None:
+        role = infer_template_file_role(target_lf)
+        label = names[0] if names else stem
+        if role == LibraryTaskTemplateBindingHistory.ROLE_PDF:
+            msg = f"已解除 PDF 绑定：{label}"
+        elif role == LibraryTaskTemplateBindingHistory.ROLE_JSON:
+            if is_auxiliary_template_json_file(target_lf):
+                msg = f"已解除辅助 JSON 绑定：{label}"
+            else:
+                msg = f"已解除 JSON 绑定：{label}"
+        else:
+            msg = f"已解除绑定：{label}"
     else:
         msg = f"已解除绑定：{names[0] if names else stem}"
     return {"ok": True, "detached_ids": ids, "message": msg}
@@ -351,6 +372,76 @@ def restore_task_template_from_history(*, history_id: int, user) -> dict[str, An
         user=user,
         source="restore_history",
     )
+
+
+def list_task_editor_template_json_options(
+    task: LibraryTask,
+    *,
+    user,
+    pdf_template_id: int | None = None,
+) -> list[dict[str, Any]]:
+    """
+    模板编辑器下拉：仅当前任务的主 JSON、其它已绑定 JSON、绑定历史中的 JSON（不含全库 500 条）。
+    """
+    from apps.core.library_access import library_file_access_allowed
+
+    primary = pick_task_primary_json_template(task)
+    if pdf_template_id is not None:
+        on_task = LibraryFile.objects.filter(
+            pk=int(pdf_template_id),
+            category=LibraryFile.CATEGORY_TEMPLATE,
+            library_tasks=task,
+        ).exists()
+        if not on_task:
+            primary = None
+
+    seen: set[int] = set()
+    rows: list[dict[str, Any]] = []
+
+    def _append(lf: LibraryFile | None, *, kind: str, label: str) -> None:
+        if lf is None or lf.pk in seen:
+            return
+        if not (lf.original_name or "").lower().endswith(".json"):
+            return
+        if is_auxiliary_template_json_file(lf):
+            return
+        if not library_file_access_allowed(user, lf):
+            return
+        seen.add(int(lf.pk))
+        rows.append(
+            {
+                "id": int(lf.pk),
+                "name": lf.original_name or f"#{lf.pk}",
+                "kind": kind,
+                "label": label,
+                "isPrimary": kind == "primary",
+            }
+        )
+
+    if primary is not None:
+        _append(primary, kind="primary", label="主模板")
+
+    for lf in list_task_template_files_by_role(task, LibraryTaskTemplateBindingHistory.ROLE_JSON):
+        if primary is not None and lf.pk == primary.pk:
+            continue
+        _append(lf, kind="bound", label="当前绑定")
+
+    history_qs = (
+        LibraryTaskTemplateBindingHistory.objects.filter(
+            library_task=task,
+            file_role=LibraryTaskTemplateBindingHistory.ROLE_JSON,
+        )
+        .select_related("library_file")
+        .order_by("-replaced_at", "-id")
+    )
+    for hist in history_qs:
+        lf = hist.library_file
+        if lf is None or not hist.file_still_available:
+            continue
+        ts = hist.replaced_at.strftime("%Y-%m-%d %H:%M") if hist.replaced_at else ""
+        _append(lf, kind="history", label=f"历史 {ts}".strip())
+
+    return rows
 
 
 def serialize_binding_history_row(row: LibraryTaskTemplateBindingHistory) -> dict[str, Any]:

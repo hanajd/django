@@ -111,6 +111,28 @@ def _match_strict_gt(crit: str) -> Optional[float]:
 
 def _eval_simple(v: float, crit: str) -> Optional[bool]:
     c = crit
+    # 仅允差：±m（中心值按 0 处理，便于模板里写「±2」）
+    m = re.search(
+        r"^[±]\s*([-+]?(?:\d+\.?\d*|\.\d+))(?:\s|$)",
+        c.strip(),
+    )
+    if m:
+        try:
+            tol = abs(float(m.group(1)))
+            return abs(v) <= tol + 1e-9
+        except ValueError:
+            return None
+    m = re.search(
+        r"^\+/\-\s*([-+]?(?:\d+\.?\d*|\.\d+))(?:\s|$)",
+        c.strip(),
+        re.IGNORECASE,
+    )
+    if m:
+        try:
+            tol = abs(float(m.group(1)))
+            return abs(v) <= tol + 1e-9
+        except ValueError:
+            return None
     # n±m / n ± m
     m = re.search(
         r"([-+]?(?:\d+\.?\d*|\.\d+))\s*[±]\s*([-+]?(?:\d+\.?\d*|\.\d+))",

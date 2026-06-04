@@ -148,6 +148,41 @@ def _fn_avg(*args: Any) -> Optional[float]:
     return sum(xs) / len(xs)
 
 
+def _fn_var(*args: Any) -> Optional[float]:
+    """样本方差（分母 n-1）；少于 2 个有效数值时返回 None。"""
+    xs = _flatten_numbers(*args)
+    n = len(xs)
+    if n < 2:
+        return None
+    mean = sum(xs) / n
+    return sum((x - mean) ** 2 for x in xs) / (n - 1)
+
+
+def _fn_std(*args: Any) -> Optional[float]:
+    """样本标准差（分母 n-1）；std / stdev / stddev 同义。"""
+    v = _fn_var(*args)
+    if v is None:
+        return None
+    if v < 0:
+        return 0.0
+    return math.sqrt(v)
+
+
+def _fn_median(*args: Any) -> Optional[float]:
+    xs = sorted(_flatten_numbers(*args))
+    if not xs:
+        return None
+    n = len(xs)
+    mid = n // 2
+    if n % 2 == 1:
+        return float(xs[mid])
+    return float(xs[mid - 1] + xs[mid]) / 2.0
+
+
+def _fn_count(*args: Any) -> int:
+    return len(_flatten_numbers(*args))
+
+
 def _fn_sum(*args: Any) -> Optional[float]:
     xs = _flatten_numbers(*args)
     if not xs:
@@ -385,6 +420,13 @@ def build_eval_namespace(
         "len",
         "sum",
         "avg",
+        "var",
+        "variance",
+        "std",
+        "stdev",
+        "stddev",
+        "median",
+        "count",
         "coalesce",
         "__if__",
         "isEmpty",
@@ -417,6 +459,13 @@ def build_eval_namespace(
         "len": len,
         "sum": _fn_sum,
         "avg": _fn_avg,
+        "var": _fn_var,
+        "variance": _fn_var,
+        "std": _fn_std,
+        "stdev": _fn_std,
+        "stddev": _fn_std,
+        "median": _fn_median,
+        "count": _fn_count,
         "coalesce": _fn_coalesce,
         "__if__": _fn_if,
         "isEmpty": _is_empty,

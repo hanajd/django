@@ -80,32 +80,16 @@ steps[]                    # 办理步骤（通常 1 步「检测原始记录」
 | `submitPath` | `instruments.qualityControl` / `instruments.radiationProtection` |
 | `submitBucket` | `instruments` |
 
-该章 `capabilities` 含 `instrumentSelect`。根级 `instrumentBindings` 与任务模板独立绑定对齐（后台分别选质控一套、防护一套仪器，各可多选，非按勾选顺序）：
+该章 `capabilities` 含 `instrumentSelect`。根级仅 **`instruments[]`**：后台为项目/任务绑定的质控、防护**全套**仪器（每项带 `instrumentScope`、`registrySlot`；质控在前、防护在后）。不再导出 `instrumentsByScope`、`instrumentSetsByScope`、`instrumentBindings`。
 
 ```json
-"instrumentBindings": [
-  {
-    "scope": "qualityControl",
-    "sectionType": "instrumentPersonnel",
-    "label": "主要检测仪器_质量控制（性能）检测",
-    "submitPath": "instruments.qualityControl",
-    "registrySlot": 1,
-    "defaultInstrumentId": "12",
-    "defaultInstrumentIds": ["12", "34"]
-  },
-  {
-    "scope": "radiationProtection",
-    "sectionType": "instrumentPersonnel",
-    "label": "主要检测仪器_工作场所放射防护检测",
-    "submitPath": "instruments.radiationProtection",
-    "registrySlot": 2,
-    "defaultInstrumentId": "15",
-    "defaultInstrumentIds": ["15", "16"]
-  }
+"instruments": [
+  { "id": "1", "instrumentId": "1", "instrumentScope": "qualityControl", "registrySlot": 1, "name": "…" },
+  { "id": "40", "instrumentId": "40", "instrumentScope": "radiationProtection", "registrySlot": 2, "name": "…" }
 ]
 ```
 
-前端：在 **instrumentPersonnel** 章节渲染两个 `instrument_select`；提交写入 `instruments.qualityControl` / `instruments.radiationProtection`；下拉走台账 API。
+前端：在 **instrumentPersonnel** 章节渲染两个 `instrument_select`；提交时质控/防护主选写入 `instruments.qualityControl` / `instruments.radiationProtection`（或根级 `instruments[]` 中带 scope 的列表）；下拉走台账 API。
 
 ### 2.3 `capabilities` / `behavior`（可选）
 
@@ -444,7 +428,7 @@ steps[]                    # 办理步骤（通常 1 步「检测原始记录」
 |------|------|------|
 | **移动端 / App（默认）** | `GET /api/v2/inspections/projects/{projectId}/tasks/{taskNo}/export-frontend-json` | 运行态 compact JSON，`Content-Type: application/json`，**无** `indent=2`，支持 **ETag / 304** 与 **gzip** |
 | 后台调试 | 同上 + `?mode=editor` | 可读 `indent=2` 附件下载（含更多编辑器结构，仅供调试） |
-| HTMLPDF 编辑器 | `POST /files/htmlpdf/api/export-frontend-json/` | 文件库辅助 JSON，不写任务主绑定 |
+| HTMLPDF 编辑器 | `POST /files/htmlpdf/api/export-frontend-json/` | 若请求带 `libraryTaskId` + 可解析的 `projectId`（或任务已分配到项目），与 ``export-frontend-json`` **完全同构**（`build_runtime_frontend_for_inspection_export`：提交回填 + filled_fields + defaultValue）；否则仅为空模板规则导出；`indent=2` 便于后台对照 |
 
 运行态响应序列化：
 
@@ -474,4 +458,4 @@ json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 | 移动端 JSON 体积 | compact + gzip；`mode=editor` 仅调试用 |
 | `precision` | 数值/计算栏小数位，常为 `1` |
 
-实现入口：`utils/frontend_schema_rule_engine.py`（规则拼装）+ `utils/frontend_runtime_export.py`（运行态压平）。
+实现入口：`utils/frontend_export_pipeline.py`（任务/编辑器共用）+ `utils/frontend_schema_rule_engine.py`（规则拼装）+ `utils/frontend_runtime_export.py`（运行态压平）。

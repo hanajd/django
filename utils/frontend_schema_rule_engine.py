@@ -7,6 +7,39 @@ from utils.unified_template_fields import frontend_rect_from_field, materialize_
 from utils.pdf_field_formulas import merge_field_formulas_into_frontend
 
 
+_FORM_SCHEMA_EXTRA_KEYS = (
+    "lookupTables",
+    "fieldVerdictPlan",
+    "fieldFormulas",
+    "pdfFieldFormulas",
+)
+
+
+def _schema_extras_from_template(template_obj: Dict[str, Any], form_schema_top: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep frontend schema extensions while rebuilding steps from PDF fields."""
+    out: Dict[str, Any] = {}
+    for key in _FORM_SCHEMA_EXTRA_KEYS:
+        for container in (form_schema_top, template_obj):
+            if not isinstance(container, dict):
+                continue
+            val = container.get(key)
+            if val in (None, "", [], {}):
+                continue
+            if isinstance(val, (dict, list)):
+                out[key] = copy.deepcopy(val)
+                break
+    return out
+
+
+def _apply_schema_extras(payload: Dict[str, Any], extras: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(payload, dict) or not isinstance(extras, dict):
+        return payload
+    for key, val in extras.items():
+        if val not in (None, "", [], {}):
+            payload[key] = copy.deepcopy(val)
+    return payload
+
+
 _TYPE_NUMBER_KEYWORDS = (
     "kv",
     "ma",
@@ -1536,6 +1569,107 @@ def _rect_from_field_for_binding(field: Dict[str, Any]) -> List[float] | None:
     return frontend_rect_from_field(field)
 
 
+def _is_pdf_overlay_payload(payload: Dict[str, Any]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    value = payload.get("pdfOverlay")
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _pdf_anchor_from_field(field: Dict[str, Any]) -> Dict[str, Any] | None:
+    """Return Flutter-friendly PDF anchor: ``{page, rect:[x0,y0,x1,y1]}``."""
+    if not isinstance(field, dict):
+        return None
+
+    existing = field.get("pdfAnchor")
+    if isinstance(existing, dict):
+        rect = existing.get("rect")
+        if isinstance(rect, (list, tuple)) and len(rect) >= 4:
+            try:
+                explicit_page = existing.get("page") or field.get("page")
+                if len(rect) >= 5 and explicit_page in (None, ""):
+                    page = int(rect[0])
+                    x = float(rect[1])
+                    y = float(rect[2])
+                    w = float(rect[3])
+                    h = float(rect[4])
+                    x0, y0, x1, y1 = x, y, x + max(w, 0.0), y + max(h, 0.0)
+                else:
+                    page = int(explicit_page or 1)
+                    x0 = float(rect[0])
+                    y0 = float(rect[1])
+                    x1 = float(rect[2])
+                    y1 = float(rect[3])
+            except (TypeError, ValueError):
+                pass
+            else:
+                out = {
+                    "page": page,
+                    "rect": [
+                        round(min(x0, x1), 2),
+                        round(min(y0, y1), 2),
+                        round(max(x0, x1), 2),
+                        round(max(y0, y1), 2),
+                    ],
+                }
+                at = str(existing.get("anchorType") or field.get("anchorType") or "").strip()
+                if at:
+                    out["anchorType"] = at
+                return out
+
+    rect = _rect_from_field_for_binding(field)
+    if not rect or len(rect) < 5:
+        return None
+    try:
+        page = int(rect[0])
+        x = float(rect[1])
+        y = float(rect[2])
+        w = float(rect[3])
+        h = float(rect[4])
+    except (TypeError, ValueError):
+        return None
+    if w <= 0 and h <= 0:
+        return None
+
+    src = field.get("source") if isinstance(field.get("source"), dict) else {}
+    out = {
+        "page": page,
+        "rect": [
+            round(x, 2),
+            round(y, 2),
+            round(x + max(w, 0.0), 2),
+            round(y + max(h, 0.0), 2),
+        ],
+    }
+    at = str(field.get("anchorType") or src.get("anchorType") or "").strip()
+    if at:
+        out["anchorType"] = at
+    return out
+
+
+def _attach_pdf_anchors_to_form_schema(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep page/coords for PDF overlay mode while removing legacy coordinate noise."""
+    if not isinstance(payload, dict):
+        return payload
+    payload.pop("pdfBindings", None)
+    payload.pop("pdf", None)
+    payload["pdfOverlay"] = True
+    for _section, field in _iter_form_field_nodes(payload):
+        inject_table_row_col_meta(field)
+        anchor = _pdf_anchor_from_field(field)
+        if anchor is not None:
+            field["pdfAnchor"] = anchor
+        for key in ("rect", "page", "x", "y", "w", "h", "__order", "__bbox"):
+            field.pop(key, None)
+        src = field.get("source")
+        if isinstance(src, dict):
+            for key in ("page", "x", "y", "w", "h", "pages", "pdfBinding", "anchorType"):
+                src.pop(key, None)
+    return payload
+
+
 def _attach_rect_and_strip_legacy_coords(payload: Dict[str, Any]) -> Dict[str, Any]:
     """兼容旧调用名：仅剥离表单 steps 中的坐标键（回填靠 ``pdfFieldId``，不写 pdfBindings）。"""
     return _strip_pdf_coords_from_form_schema(payload)
@@ -1550,6 +1684,8 @@ def _strip_pdf_coords_from_form_schema(payload: Dict[str, Any]) -> Dict[str, Any
     """前端表单 JSON 不含 PDF 坐标；回填仅依赖各栏位 ``pdfFieldId``（或 ``pdfFieldIds``）。"""
     if not isinstance(payload, dict):
         return payload
+    if _is_pdf_overlay_payload(payload):
+        return _attach_pdf_anchors_to_form_schema(payload)
     payload.pop("pdfBindings", None)
     payload.pop("pdf", None)
     for _section, field in _iter_form_field_nodes(payload):
@@ -1641,8 +1777,13 @@ def _attach_export_table_semantic(field: Dict[str, Any], section_key: str = "") 
             field["mean"] = True
 
 
-def _compact_single_form_field(field: Dict[str, Any], section_key: str = "") -> Dict[str, Any]:
-    """单栏位最小结构：语义 + pdfFieldId + submitPath，无嵌套 source / pdfAnchor。"""
+def _compact_single_form_field(
+    field: Dict[str, Any],
+    section_key: str = "",
+    *,
+    keep_pdf_anchor: bool = False,
+) -> Dict[str, Any]:
+    """单栏位最小结构；PDF 覆盖模式额外保留 ``pdfAnchor``。"""
     if not isinstance(field, dict):
         return field
     src = field.get("source") if isinstance(field.get("source"), dict) else {}
@@ -1669,11 +1810,17 @@ def _compact_single_form_field(field: Dict[str, Any], section_key: str = "") -> 
         pid = str(
             src.get("pdfFieldId")
             or field.get("pdfFieldId")
-            or field.get("pdfAnchor")
             or ""
         ).strip()
         if pid:
             out["pdfFieldId"] = pid
+
+    if keep_pdf_anchor:
+        anchor = field.get("pdfAnchor")
+        if not isinstance(anchor, dict):
+            anchor = _pdf_anchor_from_field(field)
+        if isinstance(anchor, dict):
+            out["pdfAnchor"] = anchor
 
     sp = str(field.get("submitPath") or src.get("submitPath") or "").strip()
     if sp:
@@ -1694,6 +1841,24 @@ def _compact_single_form_field(field: Dict[str, Any], section_key: str = "") -> 
     jct = str(field.get("judgmentCriterionText") or src.get("judgmentCriterionText") or "").strip()
     if jct:
         out["judgmentCriterionText"] = jct[:500]
+    jctt = field.get("judgmentCriteriaByTestType")
+    if not isinstance(jctt, dict) or not jctt:
+        jctt = src.get("judgmentCriteriaByTestType")
+    if isinstance(jctt, dict) and jctt:
+        compact_jct: Dict[str, Any] = {}
+        for k in ("acceptance", "status"):
+            v = str(jctt.get(k) or "").strip()
+            if v:
+                compact_jct[k] = v
+        if compact_jct:
+            out["judgmentCriteriaByTestType"] = compact_jct
+    if field.get("judgmentCriteriaManual") or src.get("judgmentCriteriaManual"):
+        out["judgmentCriteriaManual"] = True
+    fv = field.get("fieldVerdict")
+    if not isinstance(fv, dict) or not fv:
+        fv = src.get("fieldVerdict")
+    if isinstance(fv, dict) and fv:
+        out["fieldVerdict"] = fv
     vw = field.get("visibleWhen")
     if vw not in (None, "", {}):
         out["visibleWhen"] = vw
@@ -1721,6 +1886,17 @@ def _compact_single_form_field(field: Dict[str, Any], section_key: str = "") -> 
     if width not in (None, "", "half", 0.5):
         out["width"] = width
     ftype_l = str(out.get("type") or "text").lower()
+    pfx = str(
+        field.get("formula")
+        or field.get("fieldExpression")
+        or src.get("pdfFieldExpression")
+        or src.get("fieldExpression")
+        or ""
+    ).strip()
+    if pfx:
+        out["fieldExpression"] = pfx
+        if ftype_l in ("computed", "number") or field.get("formula") or src.get("pdfFieldExpression"):
+            out["formula"] = pfx
     for key in (
         "unit",
         "precision",
@@ -1745,7 +1921,12 @@ def _compact_single_form_field(field: Dict[str, Any], section_key: str = "") -> 
     return out
 
 
-def _compact_matrix_object(matrix: Dict[str, Any], section_key: str = "") -> Dict[str, Any]:
+def _compact_matrix_object(
+    matrix: Dict[str, Any],
+    section_key: str = "",
+    *,
+    keep_pdf_anchor: bool = False,
+) -> Dict[str, Any]:
     if not isinstance(matrix, dict):
         return matrix
     out: Dict[str, Any] = {}
@@ -1755,7 +1936,11 @@ def _compact_matrix_object(matrix: Dict[str, Any], section_key: str = "") -> Dic
         out["title"] = matrix["title"]
     headers = matrix.get("headerFields")
     if isinstance(headers, list) and headers:
-        out["headerFields"] = [_compact_single_form_field(f, section_key) for f in headers if isinstance(f, dict)]
+        out["headerFields"] = [
+            _compact_single_form_field(f, section_key, keep_pdf_anchor=keep_pdf_anchor)
+            for f in headers
+            if isinstance(f, dict)
+        ]
     rows_out: List[Dict[str, Any]] = []
     for row in matrix.get("rows") or []:
         if not isinstance(row, dict):
@@ -1765,7 +1950,7 @@ def _compact_matrix_object(matrix: Dict[str, Any], section_key: str = "") -> Dic
         if not isinstance(cells, dict):
             continue
         cells_compact = {
-            k: _compact_single_form_field(v, section_key)
+            k: _compact_single_form_field(v, section_key, keep_pdf_anchor=keep_pdf_anchor)
             for k, v in cells.items()
             if isinstance(v, dict)
         }
@@ -1794,9 +1979,10 @@ def _prune_enums_to_used(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _compact_form_schema_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """压平 steps 栏位结构，去掉 source/pdfAnchor/pdfBindings 等重复块。"""
+    """压平 steps 栏位结构；PDF 覆盖模式保留 ``pdfAnchor``。"""
     if not isinstance(payload, dict):
         return payload
+    keep_pdf_anchor = _is_pdf_overlay_payload(payload)
     payload.pop("pdfBindings", None)
     payload.pop("pdf", None)
     payload.pop("sections", None)
@@ -1822,7 +2008,11 @@ def _compact_form_schema_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
             matrix = sec.get("matrix")
             if isinstance(matrix, dict):
-                sec["matrix"] = _compact_matrix_object(matrix, sk)
+                sec["matrix"] = _compact_matrix_object(
+                    matrix,
+                    sk,
+                    keep_pdf_anchor=keep_pdf_anchor,
+                )
             fields = sec.get("fields")
             if isinstance(fields, list):
                 compacted: List[Any] = []
@@ -1830,14 +2020,24 @@ def _compact_form_schema_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
                     if not isinstance(f, dict):
                         continue
                     if str(f.get("type") or "").lower() == "table" and isinstance(f.get("columns"), list):
-                        tbl = _compact_single_form_field(f, sk)
+                        tbl = _compact_single_form_field(
+                            f,
+                            sk,
+                            keep_pdf_anchor=keep_pdf_anchor,
+                        )
                         if f.get("columns"):
                             tbl["columns"] = f["columns"]
                         if f.get("initialRows"):
                             tbl["initialRows"] = f["initialRows"]
                         compacted.append(tbl)
                     else:
-                        compacted.append(_compact_single_form_field(f, sk))
+                        compacted.append(
+                            _compact_single_form_field(
+                                f,
+                                sk,
+                                keep_pdf_anchor=keep_pdf_anchor,
+                            )
+                        )
                 if compacted:
                     sec["fields"] = compacted
                 else:
@@ -4085,35 +4285,62 @@ def _merge_sections_by_site_record_chapters(payload: Dict[str, Any]) -> Dict[str
     return payload
 
 
+_LAYOUT_DIAGRAM_SECTION_KEYS = frozenset(
+    {
+        "site_layout_diagram",
+        "floor_plan",
+        "sec_site_layout_diagram",
+        "sec_floor_plan",
+    }
+)
+
+
+def _section_is_layout_diagram(section: Dict[str, Any]) -> bool:
+    ch = str(
+        section.get("sectionKey")
+        or section.get("templateSectionKey")
+        or section.get("id")
+        or ""
+    ).strip()
+    sec_title = str(section.get("title") or "")
+    if ch in _LAYOUT_DIAGRAM_SECTION_KEYS:
+        return True
+    if sec_title in ("平面布局示意图", "平面布局图"):
+        return True
+    return str(section.get("sectionType") or "").strip() == "floorPlan"
+
+
+def _layout_section_field_targets(section: Dict[str, Any]) -> List[Any]:
+    targets = list(section.get("fields") or [])
+    matrix = section.get("matrix")
+    if isinstance(matrix, dict):
+        targets.extend(matrix.get("headerFields") or [])
+        for row in matrix.get("rows") or []:
+            if isinstance(row, dict) and isinstance(row.get("cells"), dict):
+                targets.extend(row["cells"].values())
+    return targets
+
+
 def _apply_floor_plan_field_types(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """仅在「平面布局示意图」章节内，将平面图 image 标为 floorPlan；签字仍为 signature。"""
-    layout_keys = frozenset({"site_layout_diagram"})
+    """平面布局示意图章：图片栏 floorPlan；其余 number 栏位改为 text；签字仍为 signature。"""
     for step in payload.get("steps") or []:
         if not isinstance(step, dict):
             continue
         for section in step.get("sections") or []:
-            if not isinstance(section, dict):
+            if not isinstance(section, dict) or not _section_is_layout_diagram(section):
                 continue
-            ch = str(section.get("sectionKey") or section.get("templateSectionKey") or "").strip()
-            sec_title = str(section.get("title") or "")
-            in_layout = ch in layout_keys or sec_title == "平面布局示意图" or sec_title == "平面布局图"
-            if not in_layout:
-                continue
-            targets = list(section.get("fields") or [])
-            matrix = section.get("matrix")
-            if isinstance(matrix, dict):
-                targets.extend(matrix.get("headerFields") or [])
-                for row in matrix.get("rows") or []:
-                    if isinstance(row, dict) and isinstance(row.get("cells"), dict):
-                        targets.extend(row["cells"].values())
-            for field in targets:
+            for field in _layout_section_field_targets(section):
                 if not isinstance(field, dict):
                     continue
-                if not _field_is_floor_plan_image(field, in_layout_section=True):
+                if _field_is_floor_plan_image(field, in_layout_section=True):
+                    field["type"] = "floorPlan"
+                    field["defaultValue"] = None
+                    field.pop("enumRef", None)
                     continue
-                field["type"] = "floorPlan"
-                field["defaultValue"] = None
-                field.pop("enumRef", None)
+                if str(field.get("type") or "").lower() == "number":
+                    field["type"] = "text"
+                    field.pop("precision", None)
+                    field.pop("unit", None)
     return payload
 
 
@@ -4262,6 +4489,7 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
     pdf_url = str(template_obj.get("pdfUrl") or meta.get("pdfUrl") or "").strip()
     locale = str(template_obj.get("locale") or meta.get("locale") or "zh-CN").strip() or "zh-CN"
     form_schema_top = template_obj.get("formSchema") if isinstance(template_obj.get("formSchema"), dict) else {}
+    schema_extras = _schema_extras_from_template(template_obj, form_schema_top)
     constants = template_obj.get("constants") if isinstance(template_obj.get("constants"), dict) else {}
     if not constants and isinstance(form_schema_top.get("constants"), dict):
         constants = form_schema_top["constants"]
@@ -4280,11 +4508,13 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
             "reportType": report_type,
             "standard": standard,
             "pdfUrl": pdf_url,
+            "pdfOverlay": True,
             "locale": locale,
             "constants": constants,
             "enums": enums,
             "steps": copy.deepcopy(editor_steps),
         }
+        _apply_schema_extras(result, schema_extras)
         return merge_field_formulas_into_frontend(
             _finalize_frontend_schema_result(result, merge_split_dates=merge_split_dates),
             template_obj,
@@ -4375,7 +4605,9 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
             if ts_title_for_sec:
                 sec.setdefault("templateSectionTitle", ts_title_for_sec)
         fallback_id = f"field{idx}"
-        current_pdf_id = _ensure_pdf_field_id(str(item.get("pdfFieldId") or ""), idx) or f"f{idx}"
+        current_pdf_id = str(item.get("pdfFieldId") or "").strip()
+        if not re.match(r"^f\d+$", current_pdf_id):
+            current_pdf_id = fallback_id
         semantic_id_prefix, semantic_type = infer_field_properties(item["label"])
         if signature_role:
             field_id, field_label = signature_role
@@ -4439,7 +4671,7 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
             "defaultValue": False if ft == "boolean" else None,
             "width": "half",
             "source": {
-                "pdfFieldId": item["pdfFieldId"],
+                "pdfFieldId": current_pdf_id,
                 "page": item["page"],
                 "anchorType": item["fieldType"],
             },
@@ -4541,8 +4773,18 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
                 },
             )
 
-    # 归位：第一页“仪器1..n”转为检测仪器表格（无坐标，仅前端渲染）
-    if instrument_check_labels:
+    # 归位：第一页“仪器1..n”转为检测仪器表格（旧版 PDF）；已有质控/防护 instrument_select 时不再生成，避免与两栏绑定重复。
+    has_scoped_instrument_select = False
+    for _sec in section_bucket.get("step_instruments", {}).values():
+        if not isinstance(_sec, dict):
+            continue
+        for _fld in _sec.get("fields", []):
+            if isinstance(_fld, dict) and str(_fld.get("type") or "").lower() == "instrument_select":
+                has_scoped_instrument_select = True
+                break
+        if has_scoped_instrument_select:
+            break
+    if instrument_check_labels and not has_scoped_instrument_select:
         instrument_check_labels = sorted(set(instrument_check_labels), key=lambda x: int(re.sub(r"\\D+", "", x) or 0))
         sec = section_bucket["step_instruments"].setdefault(
             "sec_instruments",
@@ -4596,11 +4838,13 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
         "reportType": report_type,
         "standard": standard,
         "pdfUrl": pdf_url,
+        "pdfOverlay": True,
         "locale": locale,
         "constants": constants,
         "enums": enums,
         "steps": steps,
     }
+    _apply_schema_extras(result, schema_extras)
     return merge_field_formulas_into_frontend(
         _finalize_frontend_schema_result(result, merge_split_dates=merge_split_dates),
         template_obj,

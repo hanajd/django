@@ -753,7 +753,12 @@ class CommissionOrgEquipment(models.Model):
         blank=True,
         default="",
         verbose_name=_("设备类型"),
-        help_text=_("与任务模板库「设备类型」文件夹对应，如 CT、DR"),
+        help_text=_("与任务模板库「设备类型」文件夹对应（如 01 CT、02DR），匹配时忽略前导序号"),
+    )
+    instance_no = models.PositiveIntegerField(
+        default=1,
+        verbose_name=_("同类型台次"),
+        help_text=_("同一科室、同一设备类型下的序号，展示为设备1、设备2…"),
     )
     report_task_bindings = models.JSONField(
         default=list,
@@ -799,10 +804,14 @@ class CommissionOrgEquipment(models.Model):
     class Meta:
         verbose_name = _("委托单位设备")
         verbose_name_plural = verbose_name
-        ordering = ["sort_order", "id"]
+        ordering = ["department_id", "device_type", "instance_no", "sort_order", "id"]
 
     def __str__(self):
         return self.name
+
+    @property
+    def instance_label(self) -> str:
+        return f"设备{self.instance_no or 1}"
 
     @property
     def has_completed_inspection(self) -> bool:
@@ -885,6 +894,16 @@ class LibraryProjectEquipment(models.Model):
         related_name="project_links",
         verbose_name=_("受检设备"),
     )
+    inspection_type = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        verbose_name=_("本次检测类型"),
+        help_text=_(
+            "本次委托该设备执行的检测类型（如验收检测、状态检测），"
+            "对应设备主数据 report_task_bindings"
+        ),
+    )
     report_task = models.ForeignKey(
         "LibraryTask",
         null=True,
@@ -903,8 +922,8 @@ class LibraryProjectEquipment(models.Model):
         ordering = ["sort_order", "id"]
         constraints = [
             models.UniqueConstraint(
-                fields=["project", "equipment"],
-                name="uniq_project_equipment",
+                fields=["project", "equipment", "inspection_type"],
+                name="uniq_project_equipment_inspection_type",
             ),
         ]
 
@@ -967,8 +986,17 @@ class LibraryProject(models.Model):
         verbose_name=_("已分配检测仪器"),
         help_text=_(
             "人员派工时为项目确定的具体仪器编号："
-            '{"qualityControl":[id,...],"radiationProtection":[id,...]}。'
+            '{"shareMode":"per_task","qualityControl":[id,...],'
+            '"radiationProtection":[id,...],"byTask":{"任务id":{...}}}。'
             "任务模板仅绑种类时不含编号。"
+        ),
+    )
+    instrument_share_across_tasks = models.BooleanField(
+        default=False,
+        verbose_name=_("同种仪器跨模板共用"),
+        help_text=_(
+            "未勾选：各现场记录任务模板分别分配物理编号（同模板下多台设备自动共用）。"
+            "勾选：多个任务模板若要求同种仪器，整项目只分配一台。"
         ),
     )
 
@@ -1168,17 +1196,11 @@ class LibraryTaskTemplateBindingHistory(models.Model):
     @property
     def file_still_available(self) -> bool:
         lf = self.library_file
-        if lf is None:
+        if lf is None or lf.deleted_at:
             return False
-        if lf.deleted_at:
-            return False
-        try:
-            from apps.core import pipeline_service
+        from apps.core.library_file_service import library_file_exists_on_disk
 
-            p = pipeline_service.library_absolute_path(lf.relative_path)
-            return p.is_file()
-        except Exception:
-            return False
+        return library_file_exists_on_disk(lf)
 
 
 class InspectedOrganization(models.Model):
@@ -1693,8 +1715,14 @@ class InstrumentCatalog(models.Model):
         blank=True,
         on_delete=models.SET_NULL,
         related_name="checked_out_instruments",
-        verbose_name=_("当前出库项目"),
-        help_text=_("非空表示该编号的仪器已出库至该项目；同一时间仅能归属一个项目。"),
+        verbose_name=_("最近出库项目"),
+        help_text=_("展示用；实际关联以 checkout_project_ids 为准，可多项目/委托共用。"),
+    )
+    checkout_project_ids = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name=_("出库关联项目"),
+        help_text=_("允许多个委托/项目共用同一台仪器；结束某一项目时仅移除对应 id。"),
     )
     checked_out_at = models.DateTimeField(null=True, blank=True, verbose_name=_("出库时间"))
     checked_out_by = models.ForeignKey(

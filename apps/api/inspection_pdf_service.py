@@ -596,6 +596,18 @@ def _load_site_record_json_merged_only(
 SUBMIT_PAYLOAD_REQUIRED_KEYS = frozenset({"reportInfo", "hospitalInfo", "equipmentInfo", "testResult"})
 
 
+def _normalize_submit_payload_for_fill(data: dict | None) -> dict | None:
+    if not isinstance(data, dict):
+        return data
+    from apps.api.inspection_submit_payload_service import (
+        consolidate_submit_signatures,
+        normalize_floor_plan_dynamic_data,
+    )
+
+    data = normalize_floor_plan_dynamic_data(data)
+    return consolidate_submit_signatures(data)
+
+
 def resolve_submit_payload_for_report(task_no: str, case: InspectionCase, project) -> dict | None:
     """
     解析用于报告回填的检测提交正文：优先同 taskNo 的 InspectionSubmission，其次同案件最新检测提交 .json 文件。
@@ -610,7 +622,7 @@ def resolve_submit_payload_for_report(task_no: str, case: InspectionCase, projec
         if sub is not None:
             raw = sub.raw_payload if isinstance(sub.raw_payload, dict) else {}
             if raw and SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(raw.keys()):
-                return raw
+                return _normalize_submit_payload_for_fill(raw)
             fb = {
                 "taskNo": sub.task_no,
                 "projectId": getattr(project, "code", "") or "",
@@ -623,7 +635,7 @@ def resolve_submit_payload_for_report(task_no: str, case: InspectionCase, projec
             if sub.submitted_at:
                 fb["submittedAt"] = sub.submitted_at.isoformat()
             if SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(fb.keys()):
-                return fb
+                return _normalize_submit_payload_for_fill(fb)
     for lf in (
         LibraryFile.objects.filter(
             category=LibraryFile.CATEGORY_INSPECTION_SUBMIT,
@@ -642,7 +654,7 @@ def resolve_submit_payload_for_report(task_no: str, case: InspectionCase, projec
         except Exception:
             continue
         if isinstance(data, dict) and SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(data.keys()):
-            return data
+            return _normalize_submit_payload_for_fill(data)
     return None
 
 
@@ -699,6 +711,18 @@ def resolve_submit_payload_for_site_record_pdf_lf(lf: LibraryFile) -> tuple[dict
         return None, None, "关联案件或项目不存在"
     project = case.library_project
 
+    site_tasks = [
+        t
+        for t in lf.library_tasks.all()
+        if getattr(t, "output_target", None) == LibraryTask.OUTPUT_SITE_RECORD
+    ]
+    if site_tasks:
+        site_task = sorted(site_tasks, key=lambda x: ((x.code or ""), x.id))[0]
+        for tn in _task_no_strings_for_library_task(project, site_task):
+            payload = resolve_submit_payload_for_report(tn, case, project)
+            if payload and SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(payload.keys()):
+                return payload, case, ""
+
     marker = "-现场记录.pdf"
     lower = name.lower()
     idx = lower.rfind(marker.lower())
@@ -725,8 +749,8 @@ def resolve_submit_payload_for_site_record_pdf_lf(lf: LibraryFile) -> tuple[dict
     return (
         None,
         case,
-        "无法匹配检测提交数据：请使用系统导出的现场记录 PDF（文件名中含任务编号，"
-        "旧版形如「{taskNo}-现场记录.pdf」，新版在「__task__」之后为任务编号），"
+        "无法匹配检测提交数据：请使用系统导出的现场记录 PDF（已关联现场记录任务模板），"
+        "或旧版文件名中含任务编号（如「{taskNo}-现场记录.pdf」），"
         "或确保该案件下仅有唯一一份检测提交 JSON。",
     )
 

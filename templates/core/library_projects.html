@@ -9,13 +9,15 @@
             <h1 class="text-2xl font-bold text-slate-900 tracking-tight">项目工作台</h1>
             <p class="mt-1 text-sm text-slate-500 max-w-2xl">委托由<strong>医院</strong>派发、<strong>设备</strong>为检测内容：先在「委托情况」挂载受检设备，再在「人员派工」按五级岗位配置参与人并同步 App 任务，最后在「进度跟踪」查看填报与审核环节。{% if not hide_project_workbench_files_tab %}非模板类文件请在「文件」页补充。{% endif %}</p>
         </div>
-        {% if show_library_task_nav %}
-        <a href="{% url 'library_task_management' %}{% if selected_project_id %}?return_project={{ selected_project_id }}{% endif %}"
-           class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-medium shadow-sm hover:bg-slate-800 transition-colors">
-            <i class="ri-stack-line text-lg"></i>
-            任务模板库
-        </a>
-        {% endif %}
+        <div class="flex flex-wrap items-center gap-2 shrink-0">
+            {% if show_library_task_nav %}
+            <a href="{% url 'library_task_management' %}{% if selected_project_id %}?return_project={{ selected_project_id }}{% endif %}"
+               class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-medium shadow-sm hover:bg-slate-800 transition-colors">
+                <i class="ri-stack-line text-lg"></i>
+                任务模板库
+            </a>
+            {% endif %}
+        </div>
     </div>
 
     <div id="library-explorer-dnd-scope" class="grid grid-cols-1 lg:grid-cols-[minmax(260px,300px)_minmax(0,1fr)] gap-6 items-start"
@@ -26,6 +28,12 @@
         <main class="min-w-0 rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden">
             {% if not selected_project %}
             <div class="p-4 sm:p-6">
+                {% if can_create_library_project %}
+                <div class="mb-5 rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50/80 to-white p-5">
+                    <p class="text-sm font-semibold text-indigo-950">根据合同新建委托项目</p>
+                    <p class="text-xs text-slate-600 mt-1 max-w-xl">请点击左侧<strong>「新建项目」</strong>，在向导中依次选择委托单位、受检设备与检测类型，并可指定统筹人完成派单。</p>
+                </div>
+                {% endif %}
                 {% include "core/partials/folder_explorer_main.html" with explorer_base_url=workbench_explorer_base folder_breadcrumbs=folder_breadcrumbs folder_entries=folder_entries files_at_path=files_at_path explorer_dnd_enabled=explorer_dnd_enabled explorer_dnd_allow_org_move=explorer_dnd_allow_org_move explorer_dnd_post_url=explorer_dnd_post_url fl_path=fl_path %}
                 {% if not folder_entries %}
                 <p class="mt-6 text-center text-sm text-slate-500">在左侧树或上方进入医院、院区或科室，再打开项目进入工作台。组织维护请至<a href="{% url 'hospital_info_manage' %}" class="text-indigo-600 underline">医院信息管理</a>。</p>
@@ -249,6 +257,14 @@
         </main>
     </div>
 </div>
+{% if can_create_library_project or can_edit_project_workbench %}
+{{ commission_org_picker_tree|json_script:"commission-org-picker-data" }}
+{% endif %}
+{% if can_create_library_project %}
+{{ create_wizard_config|json_script:"project-create-wizard-config-data" }}
+{% include "core/partials/project_create_modal.html" %}
+<script src="/static/js/project_create_wizard.js?v=2"></script>
+{% endif %}
 {% if can_edit_project_workbench and selected_project %}
 {% include "core/partials/commission_org_picker_modal.html" %}
 {% endif %}
@@ -272,209 +288,6 @@
             document.querySelectorAll('.row-project-file').forEach(function (cb) { cb.checked = !!e.target.checked; });
         });
     }
-})();
-
-(function () {
-    var modal = document.getElementById('project-edit-modal');
-    var openBtn = document.getElementById('open-project-edit-modal');
-    if (!modal || !openBtn) return;
-
-    var treeEl = document.getElementById('commission-org-picker-data');
-    var initialEl = document.getElementById('project-picker-initial-data');
-    if (!treeEl || !initialEl) return;
-
-    var hospitals = JSON.parse(treeEl.textContent);
-    var initial = JSON.parse(initialEl.textContent);
-    var orgById = {};
-
-    function walk(nodes) {
-        (nodes || []).forEach(function (n) {
-            orgById[n.id] = n;
-            walk(n.children);
-        });
-    }
-    walk(hospitals);
-
-    var pathIds = Array.isArray(initial.path) ? initial.path.slice() : [];
-    var selectedOrgId = initial.orgId || null;
-
-    var grid = document.getElementById('picker-folder-grid');
-    var crumbs = document.getElementById('picker-breadcrumbs');
-    var labelEl = document.getElementById('picker-selected-label');
-    var hiddenOrg = document.getElementById('picker-commission-org-id');
-    var selectCurrentBtn = document.getElementById('picker-select-current-btn');
-    var hintEl = document.getElementById('picker-hint');
-    var form = document.getElementById('project-edit-modal-form');
-
-    function levelIcon(level) {
-        if (level === 'hospital') return 'ri-hospital-line text-rose-500';
-        if (level === 'campus') return 'ri-building-2-line text-amber-600';
-        if (level === 'department') return 'ri-stethoscope-line text-teal-600';
-        return 'ri-folder-fill text-amber-500';
-    }
-
-    function currentOrg() {
-        if (!pathIds.length) return null;
-        return orgById[pathIds[pathIds.length - 1]] || null;
-    }
-
-    function currentChildren() {
-        if (!pathIds.length) return hospitals;
-        var cur = currentOrg();
-        return cur && cur.children ? cur.children : [];
-    }
-
-    function updateSelectionUI() {
-        if (selectedOrgId && orgById[selectedOrgId]) {
-            labelEl.textContent = orgById[selectedOrgId].full_display_name;
-            hiddenOrg.value = String(selectedOrgId);
-        } else {
-            labelEl.innerHTML = '<span class="text-slate-400">请进入并选择委托单位层级</span>';
-            hiddenOrg.value = '';
-        }
-        var cur = currentOrg();
-        selectCurrentBtn.disabled = !cur;
-    }
-
-    function renderCrumbs() {
-        crumbs.innerHTML = '';
-        var rootBtn = document.createElement('button');
-        rootBtn.type = 'button';
-        rootBtn.className = 'hover:text-indigo-600 font-medium';
-        rootBtn.textContent = '全部医院';
-        rootBtn.addEventListener('click', function () {
-            pathIds = [];
-            render();
-        });
-        crumbs.appendChild(rootBtn);
-        pathIds.forEach(function (oid, idx) {
-            var sep = document.createElement('span');
-            sep.className = 'text-slate-300';
-            sep.textContent = '/';
-            crumbs.appendChild(sep);
-            var o = orgById[oid];
-            if (!o) return;
-            var btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'hover:text-indigo-600 truncate max-w-[8rem]';
-            btn.textContent = o.name;
-            btn.addEventListener('click', function () {
-                pathIds = pathIds.slice(0, idx + 1);
-                render();
-            });
-            crumbs.appendChild(btn);
-        });
-    }
-
-    function renderGrid() {
-        grid.innerHTML = '';
-        var children = currentChildren();
-        if (!children.length) {
-            var empty = document.createElement('p');
-            empty.className = 'col-span-2 text-center text-sm text-slate-400 py-8';
-            empty.textContent = pathIds.length ? '此层级下暂无下级，可点「选当前层级」' : '暂无医院，请先在「医院信息管理」中创建';
-            grid.appendChild(empty);
-            return;
-        }
-        children.forEach(function (node) {
-            var card = document.createElement('div');
-            card.className = 'flex flex-col rounded-xl border border-slate-200 bg-white p-3 hover:border-indigo-300 hover:shadow-sm transition-all';
-            var top = document.createElement('button');
-            top.type = 'button';
-            top.className = 'flex flex-col items-center gap-1.5 text-center flex-1 w-full';
-            top.innerHTML = '<span class="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-50"><i class="' + levelIcon(node.level) + ' text-xl"></i></span><span class="text-sm font-medium text-slate-900 line-clamp-2">' + escapeHtml(node.name) + '</span><span class="text-[10px] text-slate-500">' + escapeHtml(node.level_label) + '</span>';
-            top.addEventListener('click', function () {
-                if (node.children && node.children.length) {
-                    pathIds.push(node.id);
-                    render();
-                } else {
-                    selectOrg(node.id);
-                }
-            });
-            card.appendChild(top);
-            var pick = document.createElement('button');
-            pick.type = 'button';
-            pick.className = 'mt-2 w-full py-1 text-[11px] font-medium text-indigo-700 rounded-lg border border-indigo-100 bg-indigo-50/80 hover:bg-indigo-100';
-            pick.textContent = '选此层级';
-            pick.addEventListener('click', function (e) {
-                e.stopPropagation();
-                selectOrg(node.id);
-            });
-            card.appendChild(pick);
-            grid.appendChild(card);
-        });
-    }
-
-    function escapeHtml(s) {
-        var d = document.createElement('div');
-        d.textContent = s || '';
-        return d.innerHTML;
-    }
-
-    function selectOrg(id) {
-        selectedOrgId = id;
-        updateSelectionUI();
-        if (hintEl) {
-            hintEl.classList.remove('hidden');
-            hintEl.textContent = '已选择：' + (orgById[id] ? orgById[id].full_display_name : '');
-        }
-    }
-
-    function render() {
-        renderCrumbs();
-        renderGrid();
-        updateSelectionUI();
-        var cur = currentOrg();
-        if (hintEl) {
-            if (cur) {
-                hintEl.classList.remove('hidden');
-                hintEl.textContent = '当前位置：' + cur.full_display_name + ' — 可进入下级，或点「选当前层级」/「选此层级」';
-            } else {
-                hintEl.classList.add('hidden');
-            }
-        }
-    }
-
-    selectCurrentBtn.addEventListener('click', function () {
-        var cur = currentOrg();
-        if (cur) selectOrg(cur.id);
-    });
-
-    form.addEventListener('submit', function (e) {
-        var cur = currentOrg();
-        if (cur) {
-            hiddenOrg.value = String(cur.id);
-        }
-        if (!hiddenOrg.value) {
-            e.preventDefault();
-            alert('请先进入委托单位层级；保存时将使用当前位置（医院 / 院区 / 科室均可，后两级可省略）');
-        }
-    });
-
-    function openModal() {
-        pathIds = Array.isArray(initial.path) ? initial.path.slice() : [];
-        selectedOrgId = initial.orgId || null;
-        render();
-        modal.classList.remove('hidden');
-        modal.setAttribute('aria-hidden', 'false');
-        document.body.classList.add('overflow-hidden');
-    }
-
-    function closeModal() {
-        modal.classList.add('hidden');
-        modal.setAttribute('aria-hidden', 'true');
-        document.body.classList.remove('overflow-hidden');
-    }
-
-    openBtn.addEventListener('click', openModal);
-    modal.querySelectorAll('[data-modal-dismiss]').forEach(function (el) {
-        el.addEventListener('click', closeModal);
-    });
-    document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
-    });
-
-    render();
 })();
 </script>
 {% include "core/partials/library_explorer_dnd_include.html" %}

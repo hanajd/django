@@ -12,6 +12,40 @@ from typing import Any, Dict, List
 _PDF_ID = re.compile(r"^f\d+$")
 
 
+def pdf_field_reading_order_key(field: Dict[str, Any]) -> tuple:
+    """与 HTMLPDF 画板 ``getFieldsInReadingOrder`` 一致：page → y → x。"""
+    try:
+        page = int(field.get("page") or 1)
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        y = float(field.get("y") or 0)
+    except (TypeError, ValueError):
+        y = 0.0
+    try:
+        x = float(field.get("x") or 0)
+    except (TypeError, ValueError):
+        x = 0.0
+    tie = str(field.get("pdfFieldId") or field.get("id") or "")
+    return (page, y, x, tie)
+
+
+def reindex_pdf_field_ids_by_list_order(fields: List[Any]) -> List[Dict[str, Any]]:
+    """按模板/编辑器 fields 数组顺序赋 f1..fN，与 HTMLPDF 侧栏、画板角标一致（不按坐标排序）。"""
+    rows: List[Dict[str, Any]] = []
+    for raw in fields or []:
+        if isinstance(raw, dict):
+            rows.append(dict(raw))
+    for idx, f in enumerate(rows, start=1):
+        f["pdfFieldId"] = f"f{idx}"
+    return rows
+
+
+def reindex_pdf_field_ids_by_reading_order(fields: List[Any]) -> List[Dict[str, Any]]:
+    """已弃用：画板序号以列表顺序为准，请用 ``reindex_pdf_field_ids_by_list_order``。"""
+    return reindex_pdf_field_ids_by_list_order(fields)
+
+
 def materialize_unified_pdf_fields(fields: List[Any]) -> List[Dict[str, Any]]:
     """Expand ``rect`` shorthands and apply safe defaults. Idempotent for full rows."""
     out: List[Dict[str, Any]] = []
@@ -65,23 +99,7 @@ def materialize_unified_pdf_fields(fields: List[Any]) -> List[Dict[str, Any]]:
             else:
                 f["pdfFieldId"] = f"f{idx + 1}"
         out.append(f)
-    used: set[str] = set()
-
-    def _next_free_f(start: int) -> str:
-        n = max(1, int(start))
-        while f"f{n}" in used:
-            n += 1
-        return f"f{n}"
-
-    for idx, f in enumerate(out):
-        pid = str(f.get("pdfFieldId") or "").strip()
-        if not _PDF_ID.match(pid):
-            pid = _next_free_f(idx + 1)
-        if pid in used:
-            pid = _next_free_f(idx + 1)
-        used.add(pid)
-        f["pdfFieldId"] = pid
-    return out
+    return reindex_pdf_field_ids_by_list_order(out)
 
 
 def compact_unified_pdf_fields_for_storage(fields: List[Any]) -> List[Dict[str, Any]]:
@@ -159,15 +177,83 @@ def frontend_rect_from_materialized(mf: Dict[str, Any]) -> List[float] | None:
     return [page, round(x, 2), round(y, 2), round(w, 2), round(h, 2)]
 
 
+def _pdf_anchor_from_materialized_field(mf: Dict[str, Any]) -> Dict[str, Any] | None:
+    """由模板 ``pdf.fields`` 条目生成 Flutter ``pdfAnchor``。"""
+    rect = frontend_rect_from_materialized(mf)
+    if not rect or len(rect) < 5:
+        return None
+    try:
+        page = int(rect[0])
+        x = float(rect[1])
+        y = float(rect[2])
+        w = float(rect[3])
+        h = float(rect[4])
+    except (TypeError, ValueError):
+        return None
+    if w <= 0 and h <= 0:
+        return None
+    out: Dict[str, Any] = {
+        "page": page,
+        "rect": [
+            round(x, 2),
+            round(y, 2),
+            round(x + max(w, 0.0), 2),
+            round(y + max(h, 0.0), 2),
+        ],
+    }
+    ft = str(mf.get("fieldType") or "").strip().lower()
+    if ft and ft != "text":
+        out["anchorType"] = ft
+    return out
+
+
+def _inject_form_field_coords_from_pdf_fields(
+    frontend_obj: Dict[str, Any], pdf_fields: List[Any]
+) -> Dict[str, Any]:
+    """将 ``filled_fields`` 中的 page/rect 写入表单 steps（规则引擎常已剥掉坐标）。"""
+    if not isinstance(frontend_obj, dict) or not pdf_fields:
+        return frontend_obj
+    from utils.frontend_schema_rule_engine import _iter_form_field_nodes
+
+    index: Dict[str, Dict[str, Any]] = {}
+    for mf in pdf_fields:
+        if not isinstance(mf, dict):
+            continue
+        pid = str(mf.get("pdfFieldId") or mf.get("id") or "").strip()
+        if not pid:
+            continue
+        anchor = _pdf_anchor_from_materialized_field(mf)
+        if anchor:
+            index[pid] = anchor
+    if not index:
+        return frontend_obj
+
+    for _section, field in _iter_form_field_nodes(frontend_obj):
+        pid = str(field.get("pdfFieldId") or field.get("id") or "").strip()
+        anchor = index.get(pid)
+        if not anchor:
+            continue
+        field["pdfAnchor"] = dict(anchor)
+        rect = anchor["rect"]
+        field["page"] = anchor["page"]
+        field["x"] = rect[0]
+        field["y"] = rect[1]
+        field["w"] = max(0.0, float(rect[2]) - float(rect[0]))
+        field["h"] = max(0.0, float(rect[3]) - float(rect[1]))
+    return frontend_obj
+
+
 def enrich_frontend_steps_rect_from_pdf_fields(
     frontend_obj: Dict[str, Any], pdf_fields: List[Any]
 ) -> Dict[str, Any]:
-    """任务导出收尾：确保无 steps 内坐标、无 pdfBindings（回填仅用 pdfFieldId）。"""
+    """任务导出收尾：PDF 覆盖模式保留 Flutter 可用的 ``pdfAnchor``。"""
     if not isinstance(frontend_obj, dict):
         return frontend_obj
-    from utils.frontend_schema_rule_engine import _compact_form_schema_payload, _strip_pdf_coords_from_form_schema
+    from utils.frontend_schema_rule_engine import _attach_pdf_anchors_to_form_schema, _compact_form_schema_payload
 
-    frontend_obj = _strip_pdf_coords_from_form_schema(frontend_obj)
+    frontend_obj["pdfOverlay"] = True
+    frontend_obj = _inject_form_field_coords_from_pdf_fields(frontend_obj, pdf_fields)
+    frontend_obj = _attach_pdf_anchors_to_form_schema(frontend_obj)
     return _compact_form_schema_payload(frontend_obj)
 
 

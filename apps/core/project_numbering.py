@@ -50,6 +50,27 @@ def generate_library_project_code(*, now=None) -> str:
     return f"{yy}{next_seq:04d}"
 
 
+def allocate_library_project_code(*, now=None, max_attempts: int = 24) -> str:
+    """
+    分配全局唯一的委托编号（格式 YY####）。
+    并发创建时若编号已被占用，自动顺延重试。
+    """
+    last_tried = ""
+    for _ in range(max(1, max_attempts)):
+        code = generate_library_project_code(now=now)
+        last_tried = code
+        if not LibraryProject.objects.filter(code=code).exists():
+            return code
+    raise ValueError(
+        f"委托编号分配失败（最近尝试 {last_tried}），请稍后重试"
+    )
+
+
+def is_standard_commission_code(text: str) -> bool:
+    """是否为标准委托编号（两位年 + 四位序号）。"""
+    return bool(PROJECT_CODE_RE.fullmatch(str(text or "").strip()))
+
+
 def project_public_id(project: LibraryProject | None) -> str:
     """对外展示的委托编号（projectId / commissionNo）。"""
     if project is None:

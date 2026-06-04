@@ -1,13 +1,12 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}平板 App 后台管理系统{% endblock %}</title>
-    <!-- TailwindCSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 图标库 -->
-    <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/admin.css' %}">
+    <link rel="stylesheet" href="{% static 'vendor/remixicon/remixicon.css' %}">
     <style>
         /* 自定义样式 */
         .sidebar-item {
@@ -230,9 +229,9 @@
         <!-- 主内容区 -->
         <main class="flex min-h-0 flex-1 flex-col overflow-y-auto bg-slate-50/90">
             <!-- 顶栏 -->
-            <header class="sticky top-0 z-10 border-b border-slate-200/90 bg-white/95 px-6 py-3.5 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/85">
+            <header id="admin-page-header" class="sticky top-0 z-10 border-b border-slate-200/90 bg-white/95 px-6 py-3.5 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/85">
                 <div class="flex items-center justify-between gap-4">
-                    <h2 class="text-base font-semibold tracking-tight text-slate-900 sm:text-lg">{% block page_title %}仪表盘{% endblock %}</h2>
+                    <h2 id="admin-page-title" class="text-base font-semibold tracking-tight text-slate-900 sm:text-lg">{% block page_title %}仪表盘{% endblock %}</h2>
                     <div class="flex items-center gap-3">
                         {% if show_backend_usage_guide %}
                         <a href="{% url 'backend_usage_guide' %}" class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 shadow-sm hover:bg-slate-50">
@@ -246,8 +245,8 @@
                 </div>
             </header>
             
-            <!-- 内容区 -->
-            <div class="flex-1 p-6 lg:p-8">
+            <!-- 内容区（PJAX 局部刷新目标） -->
+            <div id="admin-page-body" class="flex-1 p-6 lg:p-8">
                 {% if messages %}
                 <div class="mb-6 space-y-2">
                     {% for message in messages %}
@@ -263,6 +262,7 @@
             </div>
         </main>
     </div>
+    <script src="{% static 'js/admin-pjax.js' %}" defer></script>
     
     {% else %}
     <!-- 未登录：显示登录页 -->

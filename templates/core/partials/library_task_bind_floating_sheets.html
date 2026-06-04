@@ -1,75 +1,103 @@
-{# 编辑模式下：上传并绑定模板；仪器种类 — 悬浮层 #}
-<div id="task-sheet-backdrop" class="fixed inset-0 z-40 hidden bg-slate-900/40 backdrop-blur-[1px]" aria-hidden="true"></div>
+{# 编辑模式：上传模板、维护仪器种类 — 居中悬浮窗 #}
+<div id="task-sheet-backdrop"
+     class="fixed inset-0 z-[100] bg-slate-900/45 backdrop-blur-[2px] hidden"
+     aria-hidden="true"></div>
 
-<div id="task-sheet-files" class="task-floating-sheet fixed inset-y-0 right-0 z-50 hidden w-full max-w-lg flex flex-col bg-white shadow-2xl ring-1 ring-slate-200" role="dialog" aria-modal="true" aria-labelledby="task-sheet-files-title">
-    <div class="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4 shrink-0">
-        <h3 id="task-sheet-files-title" class="text-base font-semibold text-slate-900">上传并绑定模板</h3>
-        <button type="button" class="task-sheet-close rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800" aria-label="关闭">
-            <i class="ri-close-line text-xl"></i>
-        </button>
-    </div>
-    <div class="flex-1 overflow-y-auto px-5 py-5">
-        {% include "core/partials/library_task_template_upload_panel.html" %}
-        <p class="text-xs text-slate-500 mt-4 leading-relaxed">上传后会自动绑定到当前模板。解除绑定请在主页面「已绑定的模板文件」列表中操作（同名 PDF/JSON 可一并解除）。</p>
+<div id="task-sheet-files"
+     class="fixed inset-0 z-[110] flex items-center justify-center p-4 sm:p-6 pointer-events-none hidden"
+     role="dialog" aria-modal="true" aria-labelledby="task-sheet-files-title">
+    <div class="pointer-events-auto relative w-full max-w-xl max-h-[min(90vh,40rem)] flex flex-col rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200/80 overflow-hidden">
+        <div class="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4 shrink-0 bg-gradient-to-r from-indigo-50/80 to-white">
+            <h3 id="task-sheet-files-title" class="text-base font-semibold text-slate-900">上传并绑定模板</h3>
+            <button type="button" class="task-sheet-close rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="关闭">
+                <i class="ri-close-line text-xl"></i>
+            </button>
+        </div>
+        <div class="flex-1 overflow-y-auto px-5 py-5">
+            {% include "core/partials/library_task_template_upload_panel.html" %}
+            <p class="text-xs text-slate-500 mt-4 leading-relaxed">上传后会自动绑定到当前模板。解除绑定请在主页面「已绑定的模板文件」中分别操作「解除 PDF 绑定」或「解除 JSON 绑定」。</p>
+        </div>
     </div>
 </div>
 
 {% if task_show_instrument_binding %}
-<div id="task-sheet-instruments" class="task-floating-sheet fixed inset-y-0 right-0 z-50 hidden w-full max-w-xl flex flex-col bg-white shadow-2xl ring-1 ring-slate-200" role="dialog" aria-modal="true" aria-labelledby="task-sheet-instruments-title">
-    <div class="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4 shrink-0">
-        <h3 id="task-sheet-instruments-title" class="text-base font-semibold text-slate-900">维护仪器种类绑定</h3>
-        <button type="button" class="task-sheet-close rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800" aria-label="关闭">
-            <i class="ri-close-line text-xl"></i>
-        </button>
-    </div>
-    <div class="flex-1 overflow-y-auto px-5 py-5">
-        <form method="post" class="space-y-4">
+<div id="task-sheet-instruments"
+     class="fixed inset-0 z-[110] flex items-center justify-center p-4 sm:p-6 pointer-events-none hidden"
+     role="dialog" aria-modal="true" aria-labelledby="task-sheet-instruments-title">
+    <div class="pointer-events-auto relative w-full max-w-2xl max-h-[min(90vh,44rem)] flex flex-col rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200/80 overflow-hidden">
+        <div class="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4 shrink-0 bg-gradient-to-r from-violet-50/80 to-white">
+            <div class="min-w-0">
+                <h3 id="task-sheet-instruments-title" class="text-base font-semibold text-slate-900">维护仪器种类绑定</h3>
+                <p class="text-[11px] text-slate-500 mt-0.5">共 {{ instrument_kind_groups|length }} 种（名称+型号）；可多选</p>
+            </div>
+            <button type="button" class="task-sheet-close rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="关闭">
+                <i class="ri-close-line text-xl"></i>
+            </button>
+        </div>
+        <form method="post" class="flex flex-col flex-1 min-h-0">
             {% csrf_token %}
             <input type="hidden" name="action" value="update_task_bound_instruments">
             <input type="hidden" name="manage_task_id" value="{{ manage_task.id }}">
             <input type="hidden" name="edit" value="1">
             {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
             {% if rp %}<input type="hidden" name="return_project" value="{{ rp }}">{% endif %}
-            <p class="text-xs text-slate-500 leading-relaxed">只勾选<strong>仪器种类</strong>（名称+型号）；具体编号在<strong>项目工作台 → 人员派工</strong>时按台账顺序分配。</p>
-            <div class="grid gap-4 sm:grid-cols-1">
-                <div class="space-y-1.5">
-                    <label class="block text-xs font-medium text-slate-600">质控（性能）仪器种类</label>
-                    <div class="max-h-52 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 text-sm space-y-0.5">
+            <div class="px-5 pt-4 pb-2 shrink-0 border-b border-slate-100 space-y-2">
+                <p class="text-xs text-slate-600 leading-relaxed">只勾选<strong>仪器种类</strong>（质控、防护均可多选）；具体编号在进入检测环节时按台账顺序<strong>自动出库</strong>。多台受检设备/多个委托可<strong>共用</strong>同种仪器。</p>
+                <div class="relative">
+                    <i class="ri-search-line absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                    <input type="search" id="instrument-kind-search" placeholder="搜索名称、型号、编号…"
+                           class="w-full rounded-xl border border-slate-200 bg-slate-50/80 pl-9 pr-3 py-2 text-sm focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-500/20"
+                           autocomplete="off">
+                </div>
+            </div>
+            <div class="flex-1 overflow-y-auto px-5 py-4 grid gap-4 sm:grid-cols-2 min-h-0">
+                <div class="space-y-1.5 min-h-0 flex flex-col">
+                    <label class="block text-xs font-semibold text-slate-700 shrink-0">质控（性能）</label>
+                    <div class="flex-1 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 text-sm space-y-0.5 min-h-[8rem] max-h-[14rem]" id="instrument-kind-qc-list">
                         {% for kg in instrument_kind_groups %}
-                        <label class="flex items-start gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                        <label class="instrument-kind-row flex items-start gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer"
+                               data-search="{{ kg.name }} {{ kg.model }} {{ kg.codes|join:' ' }}">
                             <input type="checkbox" name="bound_kind_quality_control" value="{{ kg.form_value }}"
                                    class="rounded border-slate-300 text-indigo-600 shrink-0 mt-0.5"
                                    {% if kg.form_value in task_bound_qc_kind_values %}checked{% endif %}>
                             <span class="min-w-0">
                                 <span class="block font-medium text-slate-800">{{ kg.name }}{% if kg.model %} <span class="text-slate-400 font-normal">({{ kg.model }})</span>{% endif %}</span>
-                                <span class="block text-[11px] text-slate-500 font-mono">编号：{{ kg.codes|join:"、" }} · 在库 {{ kg.in_stock }}/{{ kg.total }}</span>
+                                <span class="block text-[11px] text-slate-500 font-mono truncate" title="{{ kg.codes|join:'、' }}">编号：{{ kg.codes|join:"、" }} · 在库 {{ kg.in_stock }}/{{ kg.total }}</span>
                             </span>
                         </label>
                         {% empty %}
-                        <p class="text-slate-400 text-xs px-2 py-3">暂无启用的仪器主数据。</p>
+                        <p class="text-slate-400 text-xs px-2 py-3">台账中暂无启用的仪器，请先在「检测仪器台账」登记。</p>
                         {% endfor %}
+                        <p id="instrument-kind-qc-empty" class="hidden text-slate-400 text-xs px-2 py-3">无匹配种类</p>
                     </div>
                 </div>
-                <div class="space-y-1.5">
-                    <label class="block text-xs font-medium text-slate-600">工作场所放射防护仪器种类</label>
-                    <div class="max-h-52 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 text-sm space-y-0.5">
+                <div class="space-y-1.5 min-h-0 flex flex-col">
+                    <label class="block text-xs font-semibold text-slate-700 shrink-0">工作场所放射防护</label>
+                    <div class="flex-1 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 text-sm space-y-0.5 min-h-[8rem] max-h-[14rem]" id="instrument-kind-rp-list">
                         {% for kg in instrument_kind_groups %}
-                        <label class="flex items-start gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                        <label class="instrument-kind-row flex items-start gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer"
+                               data-search="{{ kg.name }} {{ kg.model }} {{ kg.codes|join:' ' }}">
                             <input type="checkbox" name="bound_kind_radiation_protection" value="{{ kg.form_value }}"
                                    class="rounded border-slate-300 text-indigo-600 shrink-0 mt-0.5"
                                    {% if kg.form_value in task_bound_rp_kind_values %}checked{% endif %}>
                             <span class="min-w-0">
                                 <span class="block font-medium text-slate-800">{{ kg.name }}{% if kg.model %} <span class="text-slate-400 font-normal">({{ kg.model }})</span>{% endif %}</span>
-                                <span class="block text-[11px] text-slate-500 font-mono">编号：{{ kg.codes|join:"、" }} · 在库 {{ kg.in_stock }}/{{ kg.total }}</span>
+                                <span class="block text-[11px] text-slate-500 font-mono truncate" title="{{ kg.codes|join:'、' }}">编号：{{ kg.codes|join:"、" }} · 在库 {{ kg.in_stock }}/{{ kg.total }}</span>
                             </span>
                         </label>
                         {% empty %}
-                        <p class="text-slate-400 text-xs px-2 py-3">暂无启用的仪器主数据。</p>
+                        <p class="text-slate-400 text-xs px-2 py-3">台账中暂无启用的仪器。</p>
                         {% endfor %}
+                        <p id="instrument-kind-rp-empty" class="hidden text-slate-400 text-xs px-2 py-3">无匹配种类</p>
                     </div>
                 </div>
             </div>
-            <button type="submit" class="w-full px-4 py-2.5 rounded-xl bg-slate-800 text-white text-sm font-medium hover:bg-slate-900">保存仪器绑定</button>
+            <div class="shrink-0 border-t border-slate-100 px-5 py-4 flex flex-wrap gap-2">
+                <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-900">
+                    <i class="ri-save-3-line"></i> 保存仪器绑定
+                </button>
+                <button type="button" class="task-sheet-close rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">取消</button>
+            </div>
         </form>
     </div>
 </div>
@@ -78,12 +106,14 @@
 <script>
 (function () {
     var backdrop = document.getElementById('task-sheet-backdrop');
-    var sheets = document.querySelectorAll('.task-floating-sheet');
+    var sheets = document.querySelectorAll('#task-sheet-files, #task-sheet-instruments');
+
     function closeAll() {
         if (backdrop) backdrop.classList.add('hidden');
-        sheets.forEach(function (el) { el.classList.add('hidden'); });
+        sheets.forEach(function (el) { if (el) el.classList.add('hidden'); });
         document.body.classList.remove('overflow-hidden');
     }
+
     function openSheet(id) {
         closeAll();
         var el = document.getElementById(id);
@@ -91,19 +121,57 @@
         backdrop.classList.remove('hidden');
         el.classList.remove('hidden');
         document.body.classList.add('overflow-hidden');
+        if (id === 'task-sheet-instruments') {
+            var search = document.getElementById('instrument-kind-search');
+            if (search) {
+                try { search.focus({ preventScroll: true }); } catch (e) { search.focus(); }
+            }
+        }
     }
+
     document.querySelectorAll('[data-task-sheet]').forEach(function (btn) {
-        btn.addEventListener('click', function () {
+        btn.addEventListener('click', function (e) {
+            e.preventDefault();
             var id = btn.getAttribute('data-task-sheet');
             if (id) openSheet(id);
         });
     });
+
     document.querySelectorAll('.task-sheet-close').forEach(function (btn) {
         btn.addEventListener('click', closeAll);
     });
+
     if (backdrop) backdrop.addEventListener('click', closeAll);
+
     document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') closeAll();
     });
+
+    var searchInput = document.getElementById('instrument-kind-search');
+    if (searchInput) {
+        function filterKinds() {
+            var q = (searchInput.value || '').toLowerCase().trim();
+            document.querySelectorAll('.instrument-kind-row').forEach(function (row) {
+                var hay = (row.getAttribute('data-search') || '').toLowerCase();
+                var show = !q || hay.indexOf(q) >= 0;
+                row.classList.toggle('hidden', !show);
+            });
+            ['qc', 'rp'].forEach(function (side) {
+                var list = document.getElementById('instrument-kind-' + side + '-list');
+                var empty = document.getElementById('instrument-kind-' + side + '-empty');
+                if (!list || !empty) return;
+                var rows = list.querySelectorAll('.instrument-kind-row:not(.hidden)');
+                var hasStatic = list.querySelector('p.text-slate-400:not(.hidden)') && !list.querySelector('.instrument-kind-row');
+                empty.classList.toggle('hidden', rows.length > 0 || hasStatic);
+            });
+        }
+        searchInput.addEventListener('input', filterKinds);
+    }
+
+    {% if task_sheet_open == 'files' %}
+    openSheet('task-sheet-files');
+    {% elif task_sheet_open == 'instruments' %}
+    openSheet('task-sheet-instruments');
+    {% endif %}
 })();
 </script>

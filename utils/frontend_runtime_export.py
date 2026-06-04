@@ -84,6 +84,9 @@ _RUNTIME_STRIP_ROOT_KEYS = (
     "sections",
     "templateSections",
     "instrumentCatalogOptions",
+    "instrumentsByScope",
+    "instrumentSetsByScope",
+    "instrumentBindings",
     "formSchema",
     "fields",
     "meta",
@@ -142,10 +145,19 @@ def _section_chapter_key(sec: Dict[str, Any]) -> str:
     return ""
 
 
-def _compact_runtime_field(field: Dict[str, Any], section_key: str = "") -> Dict[str, Any]:
+def _compact_runtime_field(
+    field: Dict[str, Any],
+    section_key: str = "",
+    *,
+    keep_pdf_anchor: bool = False,
+) -> Dict[str, Any]:
     from utils.frontend_schema_rule_engine import _compact_single_form_field
 
-    out = _compact_single_form_field(field, section_key)
+    out = _compact_single_form_field(
+        field,
+        section_key,
+        keep_pdf_anchor=keep_pdf_anchor,
+    )
     src = field.get("source") if isinstance(field.get("source"), dict) else {}
     bucket = str(field.get("submitBucket") or src.get("submitBucket") or "").strip()
     if bucket:
@@ -163,10 +175,19 @@ def _compact_runtime_field(field: Dict[str, Any], section_key: str = "") -> Dict
     return out
 
 
-def _compact_runtime_matrix(matrix: Dict[str, Any], section_key: str = "") -> Dict[str, Any]:
+def _compact_runtime_matrix(
+    matrix: Dict[str, Any],
+    section_key: str = "",
+    *,
+    keep_pdf_anchor: bool = False,
+) -> Dict[str, Any]:
     from utils.frontend_schema_rule_engine import _compact_matrix_object
 
-    compacted = _compact_matrix_object(matrix, section_key)
+    compacted = _compact_matrix_object(
+        matrix,
+        section_key,
+        keep_pdf_anchor=keep_pdf_anchor,
+    )
     row_headers = matrix.get("rowHeaderColumns")
     if isinstance(row_headers, list) and row_headers:
         compacted["rowHeaderColumns"] = []
@@ -194,6 +215,7 @@ def _compact_runtime_matrix(matrix: Dict[str, Any], section_key: str = "") -> Di
 def _compact_runtime_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         return payload
+    keep_pdf_anchor = _is_pdf_overlay_payload(payload)
     for key in _RUNTIME_STRIP_ROOT_KEYS:
         payload.pop(key, None)
     payload.pop("pdfBindings", None)
@@ -214,7 +236,11 @@ def _compact_runtime_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
             matrix = sec.get("matrix")
             if isinstance(matrix, dict):
-                sec["matrix"] = _compact_runtime_matrix(matrix, sk)
+                sec["matrix"] = _compact_runtime_matrix(
+                    matrix,
+                    sk,
+                    keep_pdf_anchor=keep_pdf_anchor,
+                )
             fields = sec.get("fields")
             if isinstance(fields, list):
                 compacted = []
@@ -222,14 +248,24 @@ def _compact_runtime_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
                     if not isinstance(f, dict):
                         continue
                     if str(f.get("type") or "").lower() == "table" and isinstance(f.get("columns"), list):
-                        tbl = _compact_runtime_field(f, sk)
+                        tbl = _compact_runtime_field(
+                            f,
+                            sk,
+                            keep_pdf_anchor=keep_pdf_anchor,
+                        )
                         if f.get("columns"):
                             tbl["columns"] = f["columns"]
                         if f.get("initialRows"):
                             tbl["initialRows"] = f["initialRows"]
                         compacted.append(tbl)
                     else:
-                        compacted.append(_compact_runtime_field(f, sk))
+                        compacted.append(
+                            _compact_runtime_field(
+                                f,
+                                sk,
+                                keep_pdf_anchor=keep_pdf_anchor,
+                            )
+                        )
                 if compacted:
                     sec["fields"] = compacted
                 else:
@@ -239,12 +275,24 @@ def _compact_runtime_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     return _prune_enums_to_used(payload)
 
 
-def _strip_runtime_field_noise(field: Dict[str, Any]) -> None:
+def _is_pdf_overlay_payload(payload: Dict[str, Any]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    value = payload.get("pdfOverlay")
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _strip_runtime_field_noise(field: Dict[str, Any], *, keep_pdf_anchor: bool = False) -> None:
     for key in _RUNTIME_STRIP_FIELD_KEYS:
+        if keep_pdf_anchor and key == "pdfAnchor":
+            continue
         field.pop(key, None)
 
 
 def _iter_runtime_fields(payload: Dict[str, Any]):
+    keep_pdf_anchor = _is_pdf_overlay_payload(payload)
     for step in payload.get("steps") or []:
         if not isinstance(step, dict):
             continue
@@ -253,14 +301,14 @@ def _iter_runtime_fields(payload: Dict[str, Any]):
                 continue
             for f in sec.get("fields") or []:
                 if isinstance(f, dict):
-                    _strip_runtime_field_noise(f)
+                    _strip_runtime_field_noise(f, keep_pdf_anchor=keep_pdf_anchor)
                     yield sec, f
             matrix = sec.get("matrix")
             if not isinstance(matrix, dict):
                 continue
             for f in matrix.get("headerFields") or []:
                 if isinstance(f, dict):
-                    _strip_runtime_field_noise(f)
+                    _strip_runtime_field_noise(f, keep_pdf_anchor=keep_pdf_anchor)
                     yield sec, f
             for row in matrix.get("rows") or []:
                 if not isinstance(row, dict):
@@ -269,7 +317,7 @@ def _iter_runtime_fields(payload: Dict[str, Any]):
                 if isinstance(cells, dict):
                     for f in cells.values():
                         if isinstance(f, dict):
-                            _strip_runtime_field_noise(f)
+                            _strip_runtime_field_noise(f, keep_pdf_anchor=keep_pdf_anchor)
                             yield sec, f
 
 
@@ -285,6 +333,23 @@ def _radiation_column_to_cell_key(col_name: str, reading_index: int = 0) -> str:
         idx = int(reading_index or 1)
         return f"reading{min(max(idx, 1), 3)}"
     return re.sub(r"[^a-zA-Z0-9_]+", "_", col).strip("_") or "value"
+
+
+def _protection_fields_have_matrix_semantics(fields: List[Dict[str, Any]]) -> bool:
+    """防护章仅当 PDF/规则已标注表格行号时才升级为 matrixTable，否则平铺 fields 保留全部 pdfFieldId。"""
+    with_row = 0
+    for f in fields or []:
+        if not isinstance(f, dict):
+            continue
+        tbl = f.get("table") if isinstance(f.get("table"), dict) else {}
+        if tbl.get("row") is not None:
+            with_row += 1
+            continue
+        src = f.get("source") if isinstance(f.get("source"), dict) else {}
+        sem = src.get("autoSemantic") if isinstance(src.get("autoSemantic"), dict) else {}
+        if sem.get("row") is not None:
+            with_row += 1
+    return with_row > 0
 
 
 def _group_protection_fields(fields: List[Dict[str, Any]]) -> Dict[int, Dict[str, Dict[str, Any]]]:
@@ -534,8 +599,35 @@ def _upgrade_radiation_protection_section(sec: Dict[str, Any], titles: Dict[str,
         }
         return out
 
-    if fields:
+    if fields and _protection_fields_have_matrix_semantics(fields):
         return _build_protection_matrix_from_fields(fields, title)
+
+    if fields:
+        keep_pdf_anchor = _is_pdf_overlay_payload({"pdfOverlay": True})
+        compacted: List[Dict[str, Any]] = []
+        for f in fields:
+            if not isinstance(f, dict):
+                continue
+            compacted.append(
+                _compact_runtime_field(
+                    copy.deepcopy(f),
+                    "site_radiation_protection",
+                    keep_pdf_anchor=keep_pdf_anchor,
+                )
+            )
+        out = {
+            "id": str(meta["id"]),
+            "sectionKey": str(meta["sectionKey"]),
+            "sectionType": str(meta["sectionType"]),
+            "title": title,
+            "fields": compacted,
+        }
+        if meta.get("capabilities"):
+            out["capabilities"] = list(meta["capabilities"])
+        if meta.get("behavior"):
+            out["behavior"] = dict(meta["behavior"])
+        return out
+
     return sec
 
 
@@ -619,28 +711,51 @@ def _ensure_site_record_sections(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _apply_floor_plan_runtime_types(payload: Dict[str, Any]) -> Dict[str, Any]:
+    from utils.frontend_schema_rule_engine import (
+        _field_is_floor_plan_image,
+        _layout_section_field_targets,
+        _section_is_layout_diagram,
+    )
+
     for step in payload.get("steps") or []:
         if not isinstance(step, dict):
             continue
         for sec in step.get("sections") or []:
-            if not isinstance(sec, dict):
+            if not isinstance(sec, dict) or not _section_is_layout_diagram(sec):
                 continue
-            if str(sec.get("sectionType") or "") != "floorPlan":
-                continue
-            for f in sec.get("fields") or []:
+            for f in _layout_section_field_targets(sec):
                 if not isinstance(f, dict):
                     continue
-                ft = str(f.get("type") or "").lower()
-                if ft in ("image", "file", "photo") or "平面" in str(f.get("label") or ""):
+                if _field_is_floor_plan_image(f, in_layout_section=True):
                     f["type"] = "floorPlan"
-                    if not f.get("submitPath"):
+                    sp = str(f.get("submitPath") or "").strip()
+                    bucket = str(f.get("submitBucket") or "").strip().lower()
+                    if not sp and bucket in ("signatures",):
                         f["submitPath"] = "signatures.floorPlan"
+                        f.setdefault("submitBucket", "signatures")
                     if not f.get("pdfFieldId"):
                         pid = str(f.get("id") or "f637")
                         if pid.startswith("f") or pid.isdigit():
                             f["pdfFieldId"] = pid if pid.startswith("f") else f"f{pid}"
-                    f.setdefault("submitBucket", "signatures")
+                    continue
+                if str(f.get("type") or "").lower() == "number":
+                    f["type"] = "text"
+                    f.pop("precision", None)
+                    f.pop("unit", None)
     return payload
+
+
+def prepare_library_frontend_json_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    仅对「已有 steps、未走任务导出管线」的矩阵模板等做运行态压平。
+    现场记录类模板请用 ``utils.frontend_export_pipeline.build_runtime_frontend_schema``。
+    """
+    if not isinstance(payload, dict):
+        return payload
+    out = copy.deepcopy(payload)
+    out.pop("bindings", None)
+    out.pop("pdfBindings", None)
+    return finalize_runtime_frontend_export(out)
 
 
 def finalize_runtime_frontend_export(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -655,8 +770,6 @@ def finalize_runtime_frontend_export(payload: Dict[str, Any]) -> Dict[str, Any]:
     from utils.frontend_schema_rule_engine import _strip_pdf_coords_from_form_schema
 
     result = _strip_pdf_coords_from_form_schema(result)
-    for _sec, field in _iter_runtime_fields(result):
-        pass
 
     result = _ensure_site_record_sections(result)
     result = _apply_floor_plan_runtime_types(result)

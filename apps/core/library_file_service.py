@@ -7,7 +7,7 @@ import subprocess
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from django.conf import settings
 from django.http import FileResponse, Http404
@@ -23,9 +23,28 @@ from apps.core.models import (
 )
 
 
-def safe_library_basename(name: str) -> str:
-    base = os.path.basename(name.replace("\\", "/"))
-    return base[:240] if base else "unnamed"
+# Linux 单文件名通常上限 255 字节（UTF-8）；预留 uuid 前缀等余量
+LIBRARY_DISK_FILENAME_MAX_BYTES = 200
+
+
+def safe_library_basename(name: str, *, max_bytes: int = LIBRARY_DISK_FILENAME_MAX_BYTES) -> str:
+    """路径安全的展示用文件名，按 UTF-8 字节截断以适配磁盘。"""
+    base = os.path.basename(name.replace("\\", "/")) or "unnamed"
+    base = re.sub(r'[/\\:*?"<>|\r\n\x00-\x1f]', "_", base)
+    if len(base.encode("utf-8")) <= max_bytes:
+        return base
+    ext = Path(base).suffix
+    ext_b = ext.encode("utf-8")
+    stem = Path(base).stem
+    budget = max(1, max_bytes - len(ext_b))
+    while stem:
+        candidate = stem + ext
+        if len(candidate.encode("utf-8")) <= max_bytes:
+            return candidate
+        stem = stem[:-1]
+    digest = hashlib.sha256(base.encode("utf-8")).hexdigest()[:16]
+    fallback = f"{digest}{ext}"
+    return fallback if len(fallback.encode("utf-8")) <= max_bytes else digest[: max_bytes // 2]
 
 
 def sanitize_library_original_filename_fragment(s: str, max_len: int = 120) -> str:
@@ -131,12 +150,49 @@ def library_disk_dir_and_rel_prefix(category: str) -> Tuple[Path, str]:
     raise ValueError(f"unsupported library category: {category}")
 
 
+def library_file_exists_on_disk(lf: LibraryFile) -> bool:
+    """仅依据 media 磁盘判断文件是否可读（与绑定历史 file_still_available 一致）。"""
+    try:
+        path = pipeline_service.library_absolute_path(lf.relative_path)
+        return path.is_file()
+    except (ValueError, OSError):
+        return False
+
+
 def soft_delete_library_file(lf: LibraryFile) -> None:
     """移入回收站（仅标记 deleted_at，不删磁盘）。"""
     if lf.deleted_at is not None:
         return
     lf.deleted_at = timezone.now()
     lf.save(update_fields=["deleted_at"])
+
+
+def keep_library_files_on_disk(
+    files: Iterable[LibraryFile],
+    *,
+    prune_missing: bool = False,
+) -> Tuple[List[LibraryFile], int]:
+    """
+    仅保留 media 上真实存在的文件。
+    prune_missing=True 时，将缺失磁盘的活跃记录软删进回收站。
+    """
+    kept: List[LibraryFile] = []
+    pruned = 0
+    for lf in files:
+        if lf.deleted_at is not None:
+            continue
+        if library_file_exists_on_disk(lf):
+            kept.append(lf)
+        elif prune_missing:
+            soft_delete_library_file(lf)
+            pruned += 1
+    return kept, pruned
+
+
+def require_library_file_on_disk(lf: LibraryFile) -> None:
+    """预览/下载前校验；磁盘不存在则 404。"""
+    if not library_file_exists_on_disk(lf):
+        raise Http404("媒体目录中不存在该文件，可能已被删除或未同步到本机")
 
 
 def hard_delete_library_file_disk_and_row(lf: LibraryFile) -> None:
@@ -284,8 +340,10 @@ def save_library_binary_uploads(
             display_name = safe
         else:
             uid = uuid.uuid4().hex
-            disk_name = f"{uid}_{safe}"
-            display_name = safe
+            display_name = safe_library_basename(name, max_bytes=220)
+            ext = Path(display_name).suffix.lower()
+            # 磁盘仅用短名，避免 uuid_长中文名 超过 255 字节；task 等元数据在 original_name
+            disk_name = f"{uid}{ext}" if ext else uid
 
         if user is not None and enforce_storage_quota:
             cap = library_user_file_library_quota_bytes(user)

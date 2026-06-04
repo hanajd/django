@@ -1,0 +1,418 @@
+{# 委托立项 / 医院设备：选择报告任务模板（原生 dialog，可叠在其它 showModal 弹窗之上） #}
+<dialog id="report-task-picker-dialog"
+        class="rounded-3xl shadow-2xl border-0 p-0 w-[calc(100%-1.5rem)] max-w-4xl max-h-[min(92vh,44rem)] backdrop:bg-slate-900/45"
+        aria-labelledby="report-task-picker-title">
+    <div class="relative flex flex-col max-h-[min(92vh,44rem)] overflow-hidden bg-white">
+        <div class="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 shrink-0 bg-gradient-to-r from-indigo-50/80 to-white">
+            <div class="min-w-0">
+                <h3 id="report-task-picker-title" class="text-base font-semibold text-slate-900">选择报告任务模板</h3>
+                <p class="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                    目录层级：<strong>检测类型 → 设备类型 → 报告</strong>；选中报告后其下属现场记录将自动带入本项目。
+                    <span id="report-task-picker-device" class="text-rose-700 font-medium"></span>
+                </p>
+            </div>
+            <button type="button" class="report-task-picker-close rounded-lg p-2 text-slate-500 hover:bg-slate-100 shrink-0" aria-label="关闭">
+                <i class="ri-close-line text-xl"></i>
+            </button>
+        </div>
+
+        <div class="flex flex-1 min-h-0 flex-col lg:flex-row">
+            <aside class="lg:w-56 shrink-0 border-b lg:border-b-0 lg:border-r border-slate-100 bg-slate-50/60 flex flex-col min-h-0 max-h-[10rem] lg:max-h-none">
+                <div class="px-3 py-2 border-b border-slate-100 shrink-0">
+                    <input type="search" id="report-task-picker-filter" placeholder="筛选分类…"
+                           class="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-indigo-500/20"
+                           autocomplete="off">
+                </div>
+                <div id="report-task-picker-tree" class="flex-1 overflow-y-auto p-2 text-sm min-h-0"></div>
+            </aside>
+
+            <div class="flex-1 flex flex-col min-h-0 min-w-0">
+                <div class="px-4 py-2 border-b border-slate-100 shrink-0">
+                    <nav id="report-task-picker-crumbs" class="flex flex-wrap items-center gap-1 text-xs text-slate-600" aria-label="路径"></nav>
+                </div>
+                <div id="report-task-picker-main" class="flex-1 overflow-y-auto p-4 min-h-0 space-y-4">
+                </div>
+            </div>
+        </div>
+
+        <div class="shrink-0 border-t border-slate-100 px-5 py-4 flex flex-wrap items-center justify-between gap-3 bg-slate-50/50">
+            <p id="report-task-picker-selection" class="text-xs text-slate-600 min-w-0 flex-1">
+                <span class="text-slate-400">请点选一份报告模板</span>
+            </p>
+            <div class="flex flex-wrap gap-2 shrink-0">
+                <button type="button" class="report-task-picker-close rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">取消</button>
+                <button type="button" id="report-task-picker-confirm" disabled
+                        class="rounded-xl bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                    确认并保存
+                </button>
+            </div>
+        </div>
+    </div>
+</dialog>
+
+{% if report_task_picker_catalog %}
+{{ report_task_picker_catalog|json_script:"report-task-picker-catalog-data" }}
+<script>
+(function () {
+    var catalogEl = document.getElementById('report-task-picker-catalog-data');
+    if (!catalogEl) return;
+
+    var catalog = JSON.parse(catalogEl.textContent);
+    var pickerDlg = document.getElementById('report-task-picker-dialog');
+    var treeEl = document.getElementById('report-task-picker-tree');
+    var mainEl = document.getElementById('report-task-picker-main');
+    var crumbsEl = document.getElementById('report-task-picker-crumbs');
+    var filterInput = document.getElementById('report-task-picker-filter');
+    var selectionEl = document.getElementById('report-task-picker-selection');
+    var confirmBtn = document.getElementById('report-task-picker-confirm');
+    var deviceHint = document.getElementById('report-task-picker-device');
+
+    var pathStack = [];
+    var selectedReport = null;
+    var activeForm = null;
+    var activeInput = null;
+    var activeLabelEl = null;
+    var activeSiteEl = null;
+    var activeAutoSubmit = true;
+    var activeBindingIndex = null;
+
+    function nodeAtPath(stack) {
+        var node = { name: catalog.rootLabel, folders: catalog.folders, reports: [], type: 'root' };
+        for (var i = 0; i < stack.length; i++) {
+            var seg = stack[i];
+            if (seg === '__uncategorized__') {
+                node = catalog.uncategorized;
+                break;
+            }
+            var found = null;
+            (node.folders || []).forEach(function (f) {
+                if (f.folderId === seg) found = f;
+            });
+            if (!found) return node;
+            node = found;
+        }
+        return node;
+    }
+
+    function breadcrumbLabels(stack) {
+        var labels = [catalog.rootLabel];
+        var node = { folders: catalog.folders };
+        for (var i = 0; i < stack.length; i++) {
+            if (stack[i] === '__uncategorized__') {
+                labels.push(catalog.uncategorized.name);
+                break;
+            }
+            var found = null;
+            (node.folders || []).forEach(function (f) {
+                if (f.folderId === stack[i]) {
+                    found = f;
+                    labels.push(f.name);
+                }
+            });
+            if (!found) break;
+            node = found;
+        }
+        return labels;
+    }
+
+    function renderTreeFilter(q) {
+        q = (q || '').toLowerCase().trim();
+        treeEl.querySelectorAll('[data-tree-item]').forEach(function (el) {
+            var text = (el.getAttribute('data-tree-search') || '').toLowerCase();
+            el.classList.toggle('hidden', !!(q && text.indexOf(q) < 0));
+        });
+    }
+
+    function renderTree() {
+        var html = '<ul class="space-y-0.5">';
+        html += treeBtn(catalog.rootLabel, [], pathStack.length === 0);
+        (catalog.folders || []).forEach(function (f) {
+            html += treeFolder(f, []);
+        });
+        if (catalog.uncategorized && (catalog.uncategorized.reports || []).length) {
+            html += treeBtn(catalog.uncategorized.name, ['__uncategorized__'], pathStack[0] === '__uncategorized__');
+        }
+        html += '</ul>';
+        treeEl.innerHTML = html;
+        renderTreeFilter(filterInput ? filterInput.value : '');
+    }
+
+    function treeBtn(label, seg, active) {
+        var pathKey = seg.length ? String(seg[seg.length - 1]) : 'root';
+        return '<li data-tree-item data-tree-search="' + esc(label) + '">' +
+            '<button type="button" data-nav="' + esc(JSON.stringify(seg)) + '" ' +
+            'class="w-full text-left px-2 py-1.5 rounded-lg text-xs truncate ' +
+            (active ? 'bg-indigo-50 text-indigo-900 ring-1 ring-indigo-200 font-medium' : 'text-slate-700 hover:bg-white') + '">' +
+            '<i class="ri-folder-2-line text-amber-500 mr-1"></i>' + esc(label) + '</button></li>';
+    }
+
+    function treeFolder(folder, prefix) {
+        var seg = prefix.concat([folder.folderId]);
+        var active = JSON.stringify(pathStack) === JSON.stringify(seg);
+        var out = '<li data-tree-item data-tree-search="' + esc(folder.name) + '">';
+        out += '<button type="button" data-nav="' + esc(JSON.stringify(seg)) + '" ' +
+            'class="w-full text-left px-2 py-1.5 rounded-lg text-xs truncate ' +
+            (active ? 'bg-indigo-50 text-indigo-900 ring-1 ring-indigo-200 font-medium' : 'text-slate-700 hover:bg-white') + '">' +
+            '<i class="ri-folder-fill text-amber-500 mr-1"></i>' + esc(folder.name) + '</button>';
+        if (folder.folders && folder.folders.length) {
+            out += '<ul class="ml-2 mt-0.5 space-y-0.5 border-l border-slate-200 pl-1">';
+            folder.folders.forEach(function (child) {
+                out += treeFolder(child, seg);
+            });
+            out += '</ul>';
+        }
+        out += '</li>';
+        return out;
+    }
+
+    function esc(s) {
+        return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    }
+
+    function renderMain() {
+        var node = nodeAtPath(pathStack);
+        var crumbs = breadcrumbLabels(pathStack);
+        crumbsEl.innerHTML = crumbs.map(function (label, idx) {
+            var seg = pathStack.slice(0, idx);
+            if (idx === 0) seg = [];
+            else if (idx <= pathStack.length) {
+                if (pathStack[0] === '__uncategorized__' && idx === 1) seg = ['__uncategorized__'];
+                else seg = pathStack.slice(0, idx);
+            }
+            return (idx ? '<i class="ri-arrow-right-s-line text-slate-300"></i>' : '') +
+                '<button type="button" data-nav="' + esc(JSON.stringify(idx === 0 ? [] : pathStack.slice(0, idx))) + '" ' +
+                'class="hover:text-indigo-700 ' + (idx === crumbs.length - 1 ? 'font-medium text-slate-900' : '') + '">' +
+                esc(label) + '</button>';
+        }).join('');
+
+        var html = '';
+        if (node.folders && node.folders.length) {
+            html += '<div><p class="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">设备 / 子分类</p>';
+            html += '<div class="grid grid-cols-2 sm:grid-cols-3 gap-2">';
+            node.folders.forEach(function (f) {
+                var seg = pathStack.concat([f.folderId]);
+                html += '<button type="button" data-nav="' + esc(JSON.stringify(seg)) + '" ' +
+                    'class="flex flex-col items-center gap-1.5 p-3 rounded-xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-sm text-center">' +
+                    '<span class="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 text-amber-600"><i class="ri-folder-fill text-xl"></i></span>' +
+                    '<span class="text-sm font-medium text-slate-900 line-clamp-2">' + esc(f.name) + '</span>' +
+                    (f.meta ? '<span class="text-[10px] text-slate-500">' + esc(f.meta) + '</span>' : '') +
+                    '</button>';
+            });
+            html += '</div></div>';
+        }
+
+        var reports = node.reports || [];
+        if (reports.length) {
+            html += '<div><p class="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">报告模板</p>';
+            html += '<div class="grid gap-2 sm:grid-cols-2">';
+            reports.forEach(function (r) {
+                var sel = selectedReport && selectedReport.id === r.id;
+                html += '<button type="button" data-report-id="' + r.id + '" ' +
+                    'class="text-left p-3 rounded-xl border transition-all ' +
+                    (sel ? 'border-indigo-400 bg-indigo-50/80 ring-2 ring-indigo-200' : 'border-slate-200 bg-white hover:border-violet-300 hover:bg-violet-50/30') + '">' +
+                    '<div class="flex items-start gap-2">' +
+                    '<span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700"><i class="ri-file-chart-line text-lg"></i></span>' +
+                    '<span class="min-w-0 flex-1">' +
+                    '<span class="block text-sm font-semibold text-slate-900">' + esc(r.label || r.name) + '</span>' +
+                    (r.code ? '<span class="block text-[11px] font-mono text-slate-500 mt-0.5">' + esc(r.code) + '</span>' : '') +
+                    '</span></div>';
+                if (r.siteTasks && r.siteTasks.length) {
+                    html += '<ul class="mt-2 pt-2 border-t border-slate-100 space-y-0.5">';
+                    r.siteTasks.forEach(function (st) {
+                        html += '<li class="text-[11px] text-cyan-800 flex items-center gap-1">' +
+                            '<i class="ri-file-paper-2-line shrink-0"></i>' +
+                            '<span class="truncate">' + esc((st.code ? st.code + ' · ' : '') + st.name) + '</span></li>';
+                    });
+                    html += '</ul>';
+                } else {
+                    html += '<p class="mt-2 text-[11px] text-slate-400">暂无关联现场记录</p>';
+                }
+                html += '</button>';
+            });
+            html += '</div></div>';
+        }
+
+        if (!html) {
+            html = '<p class="text-sm text-slate-400 text-center py-12">此分类下暂无报告模板</p>';
+        }
+        mainEl.innerHTML = html;
+    }
+
+    function updateSelectionUI() {
+        if (!selectedReport) {
+            selectionEl.innerHTML = '<span class="text-slate-400">请点选一份报告模板</span>';
+            confirmBtn.disabled = true;
+            return;
+        }
+        var siteN = (selectedReport.siteTasks || []).length;
+        selectionEl.innerHTML = '<span class="font-medium text-indigo-900">' + esc(selectedReport.label || selectedReport.name) + '</span>' +
+            (siteN ? ' <span class="text-slate-500">· 含 ' + siteN + ' 份现场记录</span>' : '');
+        confirmBtn.disabled = false;
+    }
+
+    function findReportById(rid) {
+        function walk(node) {
+            (node.reports || []).forEach(function (r) {
+                if (r.id === rid) selectedReport = r;
+            });
+            (node.folders || []).forEach(walk);
+        }
+        walk({ folders: catalog.folders, reports: [] });
+        if (catalog.uncategorized) walk({ folders: [], reports: catalog.uncategorized.reports || [] });
+    }
+
+    function closePicker() {
+        if (pickerDlg && pickerDlg.open) {
+            pickerDlg.close();
+        }
+        activeForm = null;
+        activeInput = null;
+        activeLabelEl = null;
+        activeSiteEl = null;
+        activeBindingIndex = null;
+    }
+
+    function openPicker(btn) {
+        activeForm = document.getElementById(btn.getAttribute('data-form-id'));
+        activeInput = document.getElementById(btn.getAttribute('data-input-id'));
+        activeLabelEl = document.getElementById(btn.getAttribute('data-label-id'));
+        activeSiteEl = document.getElementById(btn.getAttribute('data-site-id'));
+        activeAutoSubmit = btn.getAttribute('data-auto-submit') !== '0';
+        var bindIdx = btn.getAttribute('data-binding-index');
+        activeBindingIndex = bindIdx !== null && bindIdx !== '' ? parseInt(bindIdx, 10) : null;
+        if (confirmBtn) {
+            confirmBtn.textContent = activeAutoSubmit ? '确认并保存' : '确认选择';
+        }
+        var dev = btn.getAttribute('data-device-name') || '';
+        if (deviceHint) {
+            deviceHint.textContent = dev ? '（设备：' + dev + '）' : '';
+        }
+        pathStack = [];
+        var cur = btn.getAttribute('data-current-id');
+        selectedReport = null;
+        if (cur) {
+            findReportById(parseInt(cur, 10));
+        }
+        renderTree();
+        renderMain();
+        updateSelectionUI();
+        if (pickerDlg && typeof pickerDlg.showModal === 'function') {
+            pickerDlg.showModal();
+        }
+    }
+    window.openReportTaskPickerForButton = openPicker;
+
+    document.querySelectorAll('.report-task-picker-open').forEach(function (btn) {
+        if (btn.getAttribute('data-binding-index') !== null && btn.getAttribute('data-binding-index') !== '') {
+            return;
+        }
+        btn.addEventListener('click', function (e) {
+            e.preventDefault();
+            openPicker(btn);
+        });
+    });
+
+    document.querySelectorAll('.report-task-picker-close').forEach(function (btn) {
+        btn.addEventListener('click', closePicker);
+    });
+    if (pickerDlg) {
+        pickerDlg.addEventListener('cancel', function (e) {
+            e.preventDefault();
+            closePicker();
+        });
+        pickerDlg.addEventListener('click', function (e) {
+            if (e.target === pickerDlg) closePicker();
+        });
+    }
+
+    if (treeEl) {
+        treeEl.addEventListener('click', function (e) {
+            var btn = e.target.closest('[data-nav]');
+            if (!btn) return;
+            pathStack = JSON.parse(btn.getAttribute('data-nav'));
+            renderTree();
+            renderMain();
+        });
+    }
+
+    if (mainEl) {
+        mainEl.addEventListener('click', function (e) {
+            var nav = e.target.closest('[data-nav]');
+            if (nav) {
+                pathStack = JSON.parse(nav.getAttribute('data-nav'));
+                renderTree();
+                renderMain();
+                return;
+            }
+            var rep = e.target.closest('[data-report-id]');
+            if (!rep) return;
+            var rid = parseInt(rep.getAttribute('data-report-id'), 10);
+            findReportById(rid);
+            renderMain();
+            updateSelectionUI();
+        });
+    }
+
+    if (crumbsEl) {
+        crumbsEl.addEventListener('click', function (e) {
+            var btn = e.target.closest('[data-nav]');
+            if (!btn) return;
+            pathStack = JSON.parse(btn.getAttribute('data-nav'));
+            renderTree();
+            renderMain();
+        });
+    }
+
+    if (filterInput) {
+        filterInput.addEventListener('input', function () {
+            renderTreeFilter(filterInput.value);
+        });
+    }
+
+    if (confirmBtn) {
+        confirmBtn.addEventListener('click', function () {
+            if (!selectedReport) return;
+            if (activeBindingIndex !== null && !isNaN(activeBindingIndex)) {
+                if (typeof window.applyEquipmentBindingPick === 'function') {
+                    window.applyEquipmentBindingPick(selectedReport, activeBindingIndex);
+                }
+                closePicker();
+                return;
+            }
+            if (!activeForm || !activeInput) return;
+            activeInput.value = String(selectedReport.id);
+            if (activeLabelEl) {
+                var fb = selectedReport.folderBreadcrumb || '';
+                activeLabelEl.innerHTML = '<span class="block text-xs font-medium text-slate-900">' + esc(selectedReport.label || selectedReport.name) + '</span>' +
+                    (fb ? '<span class="block text-[10px] text-slate-500 mt-0.5">' + esc(fb) + '</span>' : '');
+            }
+            if (activeSiteEl && selectedReport.siteTasks) {
+                if (selectedReport.siteTasks.length) {
+                    activeSiteEl.innerHTML = selectedReport.siteTasks.map(function (st) {
+                        return '<li>' + esc((st.code ? st.code + ' · ' : '') + st.name) + '</li>';
+                    }).join('');
+                    activeSiteEl.classList.remove('hidden');
+                } else {
+                    activeSiteEl.innerHTML = '<li class="text-slate-400">—</li>';
+                    activeSiteEl.classList.remove('hidden');
+                }
+            }
+            var openBtn = document.querySelector(
+                '.report-task-picker-open[data-input-id="' + (activeInput ? activeInput.id : '') + '"]'
+            );
+            if (openBtn) {
+                openBtn.setAttribute('data-current-id', String(selectedReport.id));
+            }
+            closePicker();
+            if (activeAutoSubmit && activeForm) {
+                if (typeof activeForm.requestSubmit === 'function') {
+                    activeForm.requestSubmit();
+                } else {
+                    activeForm.submit();
+                }
+            }
+        });
+    }
+})();
+</script>
+{% endif %}

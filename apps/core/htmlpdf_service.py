@@ -259,6 +259,68 @@ def _load_full_text_coordinate_boxing():
     return mod
 
 
+def _auto_box_rect_key(box: Dict[str, Any], *, tol: float = 0.5) -> tuple:
+    page = int(box.get("page") or 1)
+
+    def _r(v: float) -> float:
+        return round(float(v) / tol) * tol
+
+    return (
+        page,
+        _r(float(box.get("x") or 0)),
+        _r(float(box.get("y") or 0)),
+        _r(float(box.get("w") or 0)),
+        _r(float(box.get("h") or 0)),
+    )
+
+
+def _auto_box_keep_score(box: Dict[str, Any]) -> int:
+    score = len(str(box.get("name") or box.get("text") or ""))
+    if str(box.get("judgmentCriterionText") or "").strip():
+        score += 500
+    if isinstance(box.get("checkboxPair"), dict) and box.get("checkboxPair"):
+        score += 80
+    if str(box.get("fieldType") or "").strip().lower() in ("check", "image"):
+        score += 40
+    if isinstance(box.get("autoSemantic"), dict) and box.get("autoSemantic"):
+        score += 30
+    return score
+
+
+def _dedupe_auto_boxes_by_rect(
+    boxes: List[Dict[str, Any]],
+    *,
+    overlap_fn=None,
+    overlap_threshold: float = 0.72,
+    tol: float = 0.5,
+) -> List[Dict[str, Any]]:
+    """合并同一位置（或高度重叠）的自动框，避免重复划框。"""
+    kept: List[Dict[str, Any]] = []
+    for raw in boxes or []:
+        if not isinstance(raw, dict):
+            continue
+        replaced = False
+        for idx, prev in enumerate(kept):
+            if int(raw.get("page") or 1) != int(prev.get("page") or 1):
+                continue
+            same_place = _auto_box_rect_key(raw, tol=tol) == _auto_box_rect_key(prev, tol=tol)
+            overlap = False
+            if not same_place and callable(overlap_fn):
+                try:
+                    overlap = float(overlap_fn(raw, prev)) >= overlap_threshold
+                except Exception:
+                    overlap = False
+            if not (same_place or overlap):
+                continue
+            if _auto_box_keep_score(raw) > _auto_box_keep_score(prev):
+                kept[idx] = raw
+            replaced = True
+            break
+        if not replaced:
+            kept.append(raw)
+    return kept
+
+
 def htmlpdf_auto_red_text_fields_for_editor(user_id: int) -> List[Dict[str, Any]]:
     """
     自动划框：复用 full_text_coordinate_boxing 的合并规则，仅保留 PDF 中红色字体对应的文本块。
@@ -307,6 +369,7 @@ def htmlpdf_auto_red_text_fields_for_editor(user_id: int) -> List[Dict[str, Any]
             continue
         filtered_boxes.append(b)
     merged = list(filtered_boxes) + list(check_boxes) + list(image_boxes)
+    merged = _dedupe_auto_boxes_by_rect(merged, overlap_fn=overlap_fn)
     fields: List[Dict[str, Any]] = []
     for i, b in enumerate(merged):
         if not isinstance(b, dict):
@@ -516,6 +579,58 @@ def library_template_file_linked_to_report_task(lf) -> bool:
     ).exists()
 
 
+def fields_have_persisted_template_sections(
+    fields: List[Dict[str, Any]], *, min_ratio: float = 0.5
+) -> bool:
+    """磁盘 JSON 已带章节键时无需再扫一遍 PDF（载入变慢的主因之一）。"""
+    rows = [f for f in fields if isinstance(f, dict)]
+    if not rows:
+        return False
+    keyed = sum(
+        1
+        for f in rows
+        if str(f.get("templateSectionKey") or f.get("sectionKey") or "").strip()
+    )
+    return keyed >= max(1, int(len(rows) * min_ratio))
+
+
+def slim_parsed_template_for_editor_layout(parsed: Dict[str, Any]) -> Dict[str, Any]:
+    """编辑器「载入版式」仅需 fields + 元数据，去掉巨型 formSchema.steps 以缩小响应。"""
+    if not isinstance(parsed, dict):
+        return {}
+    meta = parsed.get("template_meta") if isinstance(parsed.get("template_meta"), dict) else {}
+    fs = parsed.get("form_schema") if isinstance(parsed.get("form_schema"), dict) else {}
+    out: Dict[str, Any] = {
+        "fields": parsed.get("fields") or [],
+        "content": parsed.get("content") if isinstance(parsed.get("content"), dict) else {},
+        "bindings": parsed.get("bindings") if isinstance(parsed.get("bindings"), dict) else {},
+        "source_pdf": parsed.get("source_pdf") if isinstance(parsed.get("source_pdf"), dict) else {},
+        "template_meta": meta,
+        "templateId": parsed.get("templateId") or meta.get("templateId") or "",
+        "templateName": parsed.get("templateName") or meta.get("templateName") or "",
+        "version": parsed.get("version") or meta.get("version") or "1.0.0",
+        "reportType": parsed.get("reportType") or meta.get("reportType") or "",
+        "standard": parsed.get("standard") or meta.get("standard") or "",
+        "pdfUrl": parsed.get("pdfUrl") or meta.get("pdfUrl") or "",
+        "locale": parsed.get("locale") or meta.get("locale") or "zh-CN",
+        "constants": (
+            parsed.get("constants")
+            if isinstance(parsed.get("constants"), dict)
+            else (fs.get("constants") if isinstance(fs.get("constants"), dict) else {})
+        ),
+        "enums": (
+            parsed.get("enums")
+            if isinstance(parsed.get("enums"), dict)
+            else (fs.get("enums") if isinstance(fs.get("enums"), dict) else {})
+        ),
+        "schema": parsed.get("schema") or "",
+    }
+    for key in ("fieldFormulas", "fieldVerdictPlan", "lookupTables", "pdfFieldFormulas"):
+        if key in parsed and parsed[key] not in (None, "", [], {}):
+            out[key] = parsed[key]
+    return out
+
+
 def assign_template_sections_for_editor(
     user_id: int, fields: List[Dict[str, Any]], *, skip_for_report: bool = False
 ) -> List[Dict[str, Any]]:
@@ -527,6 +642,8 @@ def assign_template_sections_for_editor(
         strip_site_record_section_fields(rows, remove_all_section_keys=True)
         return rows
     normalize_field_template_sections(rows)
+    if fields_have_persisted_template_sections(rows):
+        return rows
     pdf = htmlpdf_source_pdf_path(user_id)
     if not pdf.is_file():
         return rows
@@ -575,7 +692,7 @@ def parse_template_json(raw_text: str) -> Dict[str, Any]:
                         form_schema = {**form_schema, "steps": _top_steps}
             fields_out = materialize_unified_pdf_fields(pdf_block.get("fields") or [])
             normalize_field_template_sections(fields_out)
-            return {
+            parsed = {
                 "fields": fields_out,
                 "content": data.get("content", {}) if isinstance(data.get("content"), dict) else {},
                 "bindings": data.get("bindings", {}) if isinstance(data.get("bindings"), dict) else {},
@@ -594,6 +711,13 @@ def parse_template_json(raw_text: str) -> Dict[str, Any]:
                 "steps": form_schema.get("steps", []) if isinstance(form_schema.get("steps"), list) else [],
                 "schema": data.get("schema") or "",
             }
+            for key in ("lookupTables", "fieldVerdictPlan", "fieldFormulas", "pdfFieldFormulas"):
+                val = form_schema.get(key) if isinstance(form_schema, dict) else None
+                if val in (None, "", [], {}) and isinstance(data, dict):
+                    val = data.get(key)
+                if val not in (None, "", [], {}) and isinstance(val, (dict, list)):
+                    parsed[key] = val
+            return parsed
         if "fields" not in data and "content" not in data:
             return {
                 "fields": [],

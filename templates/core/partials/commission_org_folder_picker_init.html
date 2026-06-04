@@ -1,0 +1,251 @@
+{# 委托单位文件夹选择器（医院→院区→科室）通用脚本；include 时传入下列变量 #}
+<script>
+(function () {
+    var modal = document.getElementById('{{ picker_modal_id }}');
+    if (!modal) return;
+
+    var treeScriptId = '{{ picker_tree_script_id|default:"commission-org-picker-data" }}';
+    var initialScriptId = '{{ picker_initial_script_id }}';
+
+    function boot() {
+    var treeEl = document.getElementById(treeScriptId);
+    var initialEl = document.getElementById(initialScriptId);
+    if (!treeEl || !initialEl) return;
+
+    var hospitals = JSON.parse(treeEl.textContent);
+    var initial = JSON.parse(initialEl.textContent);
+    var orgById = {};
+
+    function walk(nodes) {
+        (nodes || []).forEach(function (n) {
+            orgById[n.id] = n;
+            walk(n.children);
+        });
+    }
+    walk(hospitals);
+
+    var pathIds = Array.isArray(initial.path) ? initial.path.slice() : [];
+    var selectedOrgId = initial.orgId || null;
+
+    var grid = document.getElementById('{{ picker_grid_id }}');
+    var crumbs = document.getElementById('{{ picker_crumbs_id }}');
+    var labelEl = document.getElementById('{{ picker_label_id }}');
+    var hiddenOrg = document.getElementById('{{ picker_hidden_org_id }}');
+    var selectCurrentBtn = document.getElementById('{{ picker_select_current_id }}');
+    var hintEl = document.getElementById('{{ picker_hint_id }}');
+    var form = document.getElementById('{{ picker_form_id }}');
+    var openBtn = document.getElementById('{{ picker_open_btn_id|default:"" }}');
+    var backBtn = document.getElementById('{{ picker_back_btn_id|default:"" }}');
+
+    function levelIcon(level) {
+        if (level === 'hospital') return 'ri-hospital-line text-rose-500';
+        if (level === 'campus') return 'ri-building-2-line text-amber-600';
+        if (level === 'department') return 'ri-stethoscope-line text-teal-600';
+        return 'ri-folder-fill text-amber-500';
+    }
+
+    function currentOrg() {
+        if (!pathIds.length) return null;
+        return orgById[pathIds[pathIds.length - 1]] || null;
+    }
+
+    function currentChildren() {
+        if (!pathIds.length) return hospitals;
+        var cur = currentOrg();
+        return cur && cur.children ? cur.children : [];
+    }
+
+    function escapeHtml(s) {
+        var d = document.createElement('div');
+        d.textContent = s || '';
+        return d.innerHTML;
+    }
+
+    function updateSelectionUI() {
+        if (!labelEl || !hiddenOrg) return;
+        if (selectedOrgId && orgById[selectedOrgId]) {
+            labelEl.textContent = orgById[selectedOrgId].full_display_name;
+            hiddenOrg.value = String(selectedOrgId);
+        } else {
+            labelEl.innerHTML = '<span class="text-slate-400">请进入并选择委托单位层级</span>';
+            hiddenOrg.value = '';
+        }
+        var cur = currentOrg();
+        if (selectCurrentBtn) selectCurrentBtn.disabled = !cur;
+    }
+
+    function renderCrumbs() {
+        if (!crumbs) return;
+        crumbs.innerHTML = '';
+        var rootBtn = document.createElement('button');
+        rootBtn.type = 'button';
+        rootBtn.className = 'hover:text-indigo-600 font-medium';
+        rootBtn.textContent = '{{ picker_crumb_root_label|default:"全部医院" }}';
+        rootBtn.addEventListener('click', function () {
+            pathIds = [];
+            render();
+        });
+        crumbs.appendChild(rootBtn);
+        pathIds.forEach(function (oid, idx) {
+            var sep = document.createElement('span');
+            sep.className = 'text-slate-300';
+            sep.textContent = '/';
+            crumbs.appendChild(sep);
+            var o = orgById[oid];
+            if (!o) return;
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'hover:text-indigo-600 truncate max-w-[8rem]';
+            btn.textContent = o.name;
+            btn.addEventListener('click', function () {
+                pathIds = pathIds.slice(0, idx + 1);
+                render();
+            });
+            crumbs.appendChild(btn);
+        });
+    }
+
+    function selectOrg(id) {
+        selectedOrgId = id;
+        updateSelectionUI();
+        if (hintEl) {
+            hintEl.classList.remove('hidden');
+            hintEl.textContent = '已选择：' + (orgById[id] ? orgById[id].full_display_name : '');
+        }
+    }
+
+    function renderGrid() {
+        if (!grid) return;
+        grid.innerHTML = '';
+        var children = currentChildren();
+        if (!children.length) {
+            var empty = document.createElement('p');
+            empty.className = 'col-span-2 text-center text-sm text-slate-400 py-8';
+            empty.textContent = pathIds.length
+                ? '此层级下暂无下级，可点「选当前层级」'
+                : '暂无医院，请先在「医院信息管理」中创建';
+            grid.appendChild(empty);
+            return;
+        }
+        children.forEach(function (node) {
+            var card = document.createElement('div');
+            card.className = 'flex flex-col rounded-xl border border-slate-200 bg-white p-3 hover:border-indigo-300 hover:shadow-sm transition-all';
+            var top = document.createElement('button');
+            top.type = 'button';
+            top.className = 'flex flex-col items-center gap-1.5 text-center flex-1 w-full';
+            top.innerHTML = '<span class="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-50"><i class="' +
+                levelIcon(node.level) + ' text-xl"></i></span><span class="text-sm font-medium text-slate-900 line-clamp-2">' +
+                escapeHtml(node.name) + '</span><span class="text-[10px] text-slate-500">' + escapeHtml(node.level_label) + '</span>';
+            top.addEventListener('click', function () {
+                if (node.children && node.children.length) {
+                    pathIds.push(node.id);
+                    render();
+                } else {
+                    selectOrg(node.id);
+                }
+            });
+            card.appendChild(top);
+            var pick = document.createElement('button');
+            pick.type = 'button';
+            pick.className = 'mt-2 w-full py-1 text-[11px] font-medium text-indigo-700 rounded-lg border border-indigo-100 bg-indigo-50/80 hover:bg-indigo-100';
+            pick.textContent = '选此层级';
+            pick.addEventListener('click', function (e) {
+                e.stopPropagation();
+                selectOrg(node.id);
+            });
+            card.appendChild(pick);
+            grid.appendChild(card);
+        });
+    }
+
+    function updateBackButton() {
+        if (!backBtn) return;
+        if (pathIds.length) {
+            backBtn.classList.remove('hidden');
+        } else {
+            backBtn.classList.add('hidden');
+        }
+    }
+
+    if (backBtn) {
+        backBtn.addEventListener('click', function () {
+            if (!pathIds.length) return;
+            pathIds.pop();
+            render();
+        });
+    }
+
+    function render() {
+        renderCrumbs();
+        renderGrid();
+        updateSelectionUI();
+        updateBackButton();
+        var cur = currentOrg();
+        if (hintEl) {
+            if (cur) {
+                hintEl.classList.remove('hidden');
+                hintEl.textContent = '当前位置：' + cur.full_display_name + ' — 可进入下级，或点「选当前层级」/「选此层级」';
+            } else {
+                hintEl.classList.add('hidden');
+            }
+        }
+    }
+
+    if (selectCurrentBtn) {
+        selectCurrentBtn.addEventListener('click', function () {
+            var cur = currentOrg();
+            if (cur) selectOrg(cur.id);
+        });
+    }
+
+    if (form) {
+        form.addEventListener('submit', function (e) {
+            var cur = currentOrg();
+            if (cur && hiddenOrg) {
+                hiddenOrg.value = String(cur.id);
+            }
+            if (hiddenOrg && !hiddenOrg.value) {
+                e.preventDefault();
+                alert('{{ picker_submit_alert|default:"请先选择委托单位：可逐级进入医院/院区/科室，并在任意层级点「选当前层级」" }}');
+            }
+        });
+    }
+
+    function openModal() {
+        pathIds = Array.isArray(initial.path) ? initial.path.slice() : [];
+        selectedOrgId = initial.orgId || null;
+        render();
+        modal.classList.remove('hidden');
+        modal.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('overflow-hidden');
+    }
+
+    function closeModal() {
+        modal.classList.add('hidden');
+        modal.setAttribute('aria-hidden', 'true');
+        document.body.classList.remove('overflow-hidden');
+    }
+
+    if (openBtn) {
+        openBtn.addEventListener('click', openModal);
+    }
+    modal.querySelectorAll('[data-modal-dismiss]').forEach(function (el) {
+        el.addEventListener('click', closeModal);
+    });
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
+    });
+
+    {% if picker_global_open_fn %}
+    window['{{ picker_global_open_fn }}'] = openModal;
+    {% endif %}
+    render();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot);
+    } else {
+        boot();
+    }
+})();
+</script>

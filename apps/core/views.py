@@ -2,6 +2,7 @@
 Web 视图
 使用 Django Template 渲染前后端不分离的页面
 """
+import copy
 import json as json_std
 import importlib.util
 import os
@@ -10,6 +11,7 @@ import uuid
 from datetime import date
 from mimetypes import guess_type
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote, urlencode
 
 from django.conf import settings
@@ -38,14 +40,18 @@ from apps.core.library_file_service import (
     attach_files_to_tasks,
     detach_files_from_projects,
     detach_files_from_tasks,
+    keep_library_files_on_disk,
     library_file_download_response,
+    library_file_exists_on_disk,
     parse_project_ids,
     rename_library_template_file,
+    require_library_file_on_disk,
     safe_library_basename,
     save_library_binary_uploads,
     soft_delete_library_file,
     hard_delete_library_file_disk_and_row,
 )
+from apps.core.library_media_integrity import reconcile_library_files_missing_on_disk
 from apps.core.library_access import (
     APP_SIDE_ROLE_CODES,
     ROLE_DEFAULT_PERMS_BY_CODE,
@@ -72,10 +78,12 @@ from apps.core.library_access import (
     library_user_may_use_htmlpdf_matrix_beta_controls,
     library_user_has_party_a_demo_restrictions,
     library_user_may_access_instrument_database,
-    library_test_peer_user_ids,
+    library_user_may_edit_instrument_database,
+    library_user_is_test_peer,
     library_user_hide_project_workbench_files_tab,
     library_user_may_edit_project_files,
     library_user_may_access_task_template_library_nav,
+    library_filter_tasks_for_template_management,
     library_user_scoped_project_ids,
     library_user_file_library_quota_bytes,
     library_user_file_library_usage_bytes,
@@ -145,14 +153,19 @@ from apps.core.commission_management_service import (
     commission_visible_subject_users,
     library_user_may_access_commission_manage,
 )
+from apps.core.instrument_inventory_service import apply_manual_instrument_assignment
 from apps.core.project_equipment_service import (
-    available_equipments_for_project,
+    available_equipment_rows_for_project,
     bind_equipments_to_project,
+    build_report_task_picker_catalog,
     equipment_scope_label,
     hospital_for_project,
+    preview_equipment_folder_tree_for_org,
+    preview_equipment_rows_for_org,
     project_equipment_cards,
     report_task_options_for_project,
     resolve_workbench_equipment_scope_org,
+    sync_project_task_assignments_for_user,
     unbind_equipment_from_project,
     update_project_equipment_report_task,
 )
@@ -174,8 +187,16 @@ from apps.core.hospital_info_service import (
     equipment_fields_from_report_file,
     equipment_history_rows,
     equipment_previous_submit_payload,
+    apply_equipment_fields_from_submit_payload,
+    build_equipment_groups_for_org_view,
+    equipment_report_binding_labels,
+    equipment_default_display_name,
+    equipment_report_bindings_for_api,
+    next_equipment_instance_no,
     equipments_for_org_view,
+    inspection_type_suggestions_from_picker_catalog,
     library_tasks_for_equipment_binding,
+    normalize_equipment_report_task_bindings,
     parse_report_file_id_for_org,
     parse_report_task_id,
     projects_for_org_binding,
@@ -215,7 +236,10 @@ from utils.frontend_schema_rule_engine import (
     normalize_field_text_by_underscore_rules,
 )
 from utils.pdf_field_formulas import attach_root_field_formulas_to_pdf_field_rows, merge_field_formulas_into_frontend
-from utils.unified_template_fields import compact_unified_pdf_fields_for_storage
+from utils.unified_template_fields import (
+    compact_unified_pdf_fields_for_storage,
+    reindex_pdf_field_ids_by_list_order,
+)
 
 _LIBRARYTASK_HAS_REPORT_SOURCE_RELATION = None
 
@@ -276,6 +300,179 @@ def _export_request_field_formulas_raw(data: dict, form_schema: dict):
             if isinstance(raw, list):
                 return raw
     return None
+
+
+_FORM_SCHEMA_EXTRA_KEYS = (
+    "lookupTables",
+    "fieldVerdictPlan",
+    "fieldFormulas",
+    "pdfFieldFormulas",
+)
+
+
+def _form_schema_extra_payload(data: dict, form_schema: dict) -> dict:
+    """Preserve frontend schema extensions that are not part of constants/enums/steps."""
+    out: dict[str, Any] = {}
+    for key in _FORM_SCHEMA_EXTRA_KEYS:
+        for container in (form_schema, data):
+            if not isinstance(container, dict):
+                continue
+            val = container.get(key)
+            if val in (None, "", [], {}):
+                continue
+            if isinstance(val, (dict, list)):
+                out[key] = val
+                break
+    return out
+
+
+def _merge_form_schema_extras(payload: dict, extras: dict) -> dict:
+    """Write schema extensions both to root runtime JSON and unified formSchema."""
+    if not isinstance(payload, dict) or not isinstance(extras, dict) or not extras:
+        return payload
+    form_schema = payload.get("formSchema") if isinstance(payload.get("formSchema"), dict) else None
+    for key, val in extras.items():
+        if val in (None, "", [], {}):
+            continue
+        payload[key] = val
+        if form_schema is not None:
+            form_schema[key] = val
+    return payload
+
+
+def _iter_runtime_template_fields(payload: dict):
+    """Yield all frontend field dicts, including nested group/repeater and matrix cells."""
+    if not isinstance(payload, dict):
+        return
+
+    def _walk_field(field):
+        if not isinstance(field, dict):
+            return
+        yield field
+        nested = []
+        if isinstance(field.get("fields"), list):
+            nested.extend(field.get("fields") or [])
+        if isinstance(field.get("template"), list):
+            nested.extend(field.get("template") or [])
+        for child in nested:
+            yield from _walk_field(child)
+
+    for step in payload.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        for section in step.get("sections") or []:
+            if not isinstance(section, dict):
+                continue
+            for field in section.get("fields") or []:
+                yield from _walk_field(field)
+            matrix = section.get("matrix")
+            if not isinstance(matrix, dict):
+                continue
+            for field in matrix.get("headerFields") or []:
+                yield from _walk_field(field)
+            for row in matrix.get("rows") or []:
+                if not isinstance(row, dict):
+                    continue
+                cells = row.get("cells")
+                if isinstance(cells, dict):
+                    for field in cells.values():
+                        yield from _walk_field(field)
+
+
+def _build_template_compat_report(payload: dict) -> dict:
+    """
+    Lightweight diagnostics for App-facing dynamic form JSON.
+    Returned in editor save responses so bad ids/bindings are visible before App parsing.
+    """
+    fields = [f for f in _iter_runtime_template_fields(payload) if isinstance(f, dict)]
+    warnings: list[dict[str, Any]] = []
+    field_ids: list[str] = []
+    pdf_ids: list[str] = []
+    enum_refs: set[str] = set()
+    submit_paths: set[str] = set()
+
+    for idx, field in enumerate(fields):
+        fid = str(field.get("id") or "").strip()
+        if fid:
+            field_ids.append(fid)
+        else:
+            warnings.append({"code": "missing_field_id", "index": idx, "message": "存在缺少 id 的字段"})
+        ftype = str(field.get("type") or "").strip()
+        label = str(field.get("label") or fid or f"field[{idx}]").strip()
+        if not ftype:
+            warnings.append({"code": "missing_field_type", "field": fid or label, "message": "字段缺少 type"})
+        pdf_id = str(field.get("pdfFieldId") or "").strip()
+        if pdf_id:
+            pdf_ids.append(pdf_id)
+            if not re.match(r"^f\d+$", pdf_id):
+                warnings.append(
+                    {
+                        "code": "non_physical_pdf_field_id",
+                        "field": fid or label,
+                        "pdfFieldId": pdf_id,
+                        "message": "pdfFieldId 不是 f+数字，可能影响 PDF 回填",
+                    }
+                )
+        if field.get("pdfFieldIds") is not None and not isinstance(field.get("pdfFieldIds"), list):
+            warnings.append(
+                {
+                    "code": "invalid_pdf_field_ids",
+                    "field": fid or label,
+                    "message": "pdfFieldIds 应为数组",
+                }
+            )
+        enum_ref = str(field.get("enumRef") or "").strip()
+        if enum_ref:
+            enum_refs.add(enum_ref)
+        submit_path = str(field.get("submitPath") or "").strip()
+        if submit_path:
+            submit_paths.add(submit_path)
+        if ftype in {"radio", "select"} and "defaultValue" in field and field.get("defaultValue") is not None:
+            if not isinstance(field.get("defaultValue"), str):
+                warnings.append(
+                    {
+                        "code": "select_default_not_string",
+                        "field": fid or label,
+                        "message": "radio/select 的 defaultValue 应为字符串",
+                    }
+                )
+        if ftype == "boolean" and "defaultValue" in field and not isinstance(field.get("defaultValue"), bool):
+            warnings.append(
+                {
+                    "code": "boolean_default_not_bool",
+                    "field": fid or label,
+                    "message": "boolean 的 defaultValue 应为布尔值",
+                }
+            )
+
+    duplicate_ids = sorted({x for x in field_ids if field_ids.count(x) > 1})
+    for fid in duplicate_ids[:20]:
+        warnings.append({"code": "duplicate_field_id", "field": fid, "message": "字段 id 重复"})
+
+    duplicate_pdf_ids = sorted({x for x in pdf_ids if pdf_ids.count(x) > 1})
+    for pid in duplicate_pdf_ids[:20]:
+        warnings.append({"code": "duplicate_pdf_field_id", "pdfFieldId": pid, "message": "pdfFieldId 重复"})
+
+    enums = payload.get("enums") if isinstance(payload.get("enums"), dict) else {}
+    missing_enums = sorted(x for x in enum_refs if x not in enums)
+    for enum_ref in missing_enums[:20]:
+        warnings.append(
+            {
+                "code": "missing_enum_ref",
+                "enumRef": enum_ref,
+                "message": "字段引用的 enumRef 未在顶层 enums 中定义",
+            }
+        )
+
+    return {
+        "ok": len(warnings) == 0,
+        "fieldCount": len(fields),
+        "submitPathCount": len(submit_paths),
+        "pdfFieldIdCount": len(pdf_ids),
+        "enumRefCount": len(enum_refs),
+        "warningCount": len(warnings),
+        "warnings": warnings[:80],
+    }
 
 
 def _parse_perm_overrides_from_post(request) -> dict:
@@ -436,14 +633,56 @@ def usage_workflow_tour_finish(request):
     return JsonResponse({"ok": True, "deleted": stats})
 
 
+def _database_device_list_url(
+    *,
+    edit_id: int | None = None,
+    new: bool = False,
+    search_q: str = "",
+    status_filter: str = "",
+) -> str:
+    params: dict[str, str] = {}
+    if search_q:
+        params["q"] = search_q
+    if status_filter:
+        params["status"] = status_filter
+    if edit_id:
+        params["edit"] = str(edit_id)
+    elif new:
+        params["new"] = "1"
+    base = reverse("database_device_list")
+    return f"{base}?{urlencode(params)}" if params else base
+
+
 @login_required
 def database_device_list(request):
-    """数据库管理：检测仪器台账。"""
+    """数据库管理：检测仪器台账（资料登记/编辑与出库入库）。"""
     if not library_user_may_access_instrument_database(request.user):
         return _require_perm(request, "perm_manage_users")
 
+    def _list_redirect(
+        *,
+        edit_id: int | None = None,
+        new: bool = False,
+        q: str | None = None,
+        status: str | None = None,
+    ):
+        return redirect(
+            _database_device_list_url(
+                edit_id=edit_id,
+                new=new,
+                search_q=q if q is not None else list_search_q,
+                status_filter=status if status is not None else list_status_filter,
+            )
+        )
+
+    list_search_q = (request.GET.get("q") or request.POST.get("list_q") or "").strip()
+    list_status_filter = (request.GET.get("status") or request.POST.get("list_status") or "").strip()
+
     action = (request.POST.get("action") or "").strip()
     if request.method == "POST" and action:
+        if not library_user_may_edit_instrument_database(request.user):
+            messages.error(request, "当前账号无权修改检测仪器台账")
+            return _list_redirect()
         code = (request.POST.get("code") or "").strip()
         name = (request.POST.get("name") or "").strip()
         model = (request.POST.get("model") or "").strip()
@@ -455,11 +694,11 @@ def database_device_list(request):
         if action == "create":
             if not code or not name:
                 messages.error(request, "仪器编号和仪器设备名称不能为空")
-                return redirect("database_device_list")
+                return _list_redirect(new=True)
             if InstrumentCatalog.objects.filter(code=code).exists():
                 messages.error(request, "仪器编号已存在")
-                return redirect("database_device_list")
-            InstrumentCatalog.objects.create(
+                return _list_redirect(new=True)
+            row = InstrumentCatalog.objects.create(
                 code=code,
                 name=name,
                 model=model,
@@ -469,8 +708,8 @@ def database_device_list(request):
                 remarks=remarks,
                 is_active=True,
             )
-            messages.success(request, "检测仪器创建成功")
-            return redirect("database_device_list")
+            messages.success(request, "检测仪器创建成功，可继续修改证书等信息")
+            return _list_redirect(edit_id=int(row.pk))
 
         if action == "update":
             device_id = (request.POST.get("device_id") or "").strip()
@@ -478,13 +717,13 @@ def database_device_list(request):
                 device = InstrumentCatalog.objects.get(id=int(device_id))
             except (ValueError, InstrumentCatalog.DoesNotExist):
                 messages.error(request, "仪器不存在")
-                return redirect("database_device_list")
+                return _list_redirect()
             if not code or not name:
                 messages.error(request, "仪器编号和仪器设备名称不能为空")
-                return redirect("database_device_list")
+                return _list_redirect(edit_id=int(device.pk))
             if InstrumentCatalog.objects.filter(code=code).exclude(id=device.id).exists():
                 messages.error(request, "仪器编号已存在")
-                return redirect("database_device_list")
+                return _list_redirect(edit_id=int(device.pk))
             device.code = code
             device.name = name
             device.model = model
@@ -492,9 +731,20 @@ def database_device_list(request):
             device.certificate_no = certificate_no
             device.certificate_valid_until = certificate_valid_until or None
             device.remarks = remarks
-            device.save(update_fields=["code", "name", "model", "calibration_org", "certificate_no", "certificate_valid_until", "remarks", "updated_at"])
-            messages.success(request, "检测仪器更新成功")
-            return redirect("database_device_list")
+            device.save(
+                update_fields=[
+                    "code",
+                    "name",
+                    "model",
+                    "calibration_org",
+                    "certificate_no",
+                    "certificate_valid_until",
+                    "remarks",
+                    "updated_at",
+                ]
+            )
+            messages.success(request, "仪器资料已保存（编号、证书等已更新；出库状态未改变）")
+            return _list_redirect(edit_id=int(device.pk))
 
         if action == "delete":
             device_id = (request.POST.get("device_id") or "").strip()
@@ -502,65 +752,23 @@ def database_device_list(request):
                 device = InstrumentCatalog.objects.get(id=int(device_id))
             except (ValueError, InstrumentCatalog.DoesNotExist):
                 messages.error(request, "仪器不存在")
-                return redirect("database_device_list")
+                return _list_redirect()
             device.delete()
             messages.success(request, "检测仪器删除成功")
-            return redirect("database_device_list")
-
-        if action == "instrument_checkout":
-            device_id = (request.POST.get("device_id") or "").strip()
-            project_id = (request.POST.get("project_id") or "").strip()
-            try:
-                inst = InstrumentCatalog.objects.get(pk=int(device_id), is_active=True)
-                proj = LibraryProject.objects.get(pk=int(project_id), is_active=True)
-            except (ValueError, InstrumentCatalog.DoesNotExist, LibraryProject.DoesNotExist):
-                messages.error(request, "仪器或项目无效")
-                return redirect("database_device_list")
-            from apps.core.instrument_inventory_service import checkout_instruments_to_project
-
-            n, errs = checkout_instruments_to_project(
-                proj, [inst.pk], user=request.user, note="台账手动出库"
-            )
-            if errs:
-                messages.error(request, errs[0])
-            elif n:
-                messages.success(request, f"已出库 {inst.code} 至项目 {proj.code}")
-            return redirect("database_device_list")
-
-        if action == "instrument_checkin":
-            device_id = (request.POST.get("device_id") or "").strip()
-            try:
-                inst = InstrumentCatalog.objects.select_related("checkout_project").get(
-                    pk=int(device_id)
-                )
-            except (ValueError, InstrumentCatalog.DoesNotExist):
-                messages.error(request, "仪器不存在")
-                return redirect("database_device_list")
-            if not inst.checkout_project_id:
-                messages.info(request, f"{inst.code} 已在库，无需入库")
-                return redirect("database_device_list")
-            from apps.core.instrument_inventory_service import checkin_instruments_from_project
-
-            n = checkin_instruments_from_project(
-                inst.checkout_project,
-                [inst.pk],
-                user=request.user,
-                note="台账手动入库",
-            )
-            if n:
-                messages.success(request, f"已入库 {inst.code}")
-            return redirect("database_device_list")
+            return _list_redirect()
 
     editing_device = None
     edit_id = (request.GET.get("edit") or "").strip()
     if edit_id:
         try:
-            editing_device = InstrumentCatalog.objects.get(id=int(edit_id))
+            editing_device = InstrumentCatalog.objects.select_related("checkout_project").get(
+                id=int(edit_id)
+            )
         except (ValueError, InstrumentCatalog.DoesNotExist):
             editing_device = None
 
-    search_q = (request.GET.get("q") or "").strip()
-    status_filter = (request.GET.get("status") or "").strip()
+    search_q = list_search_q
+    status_filter = list_status_filter
 
     devices_qs = InstrumentCatalog.objects.select_related(
         "checkout_project", "checked_out_by"
@@ -603,6 +811,7 @@ def database_device_list(request):
         "on",
     )
 
+    can_edit = library_user_may_edit_instrument_database(request.user)
     context = {
         "devices": devices,
         "editing_device": editing_device,
@@ -610,7 +819,8 @@ def database_device_list(request):
         "instrument_stats": instrument_stats,
         "search_q": search_q,
         "status_filter": status_filter,
-        "show_device_form": show_device_form,
+        "show_device_form": show_device_form and can_edit,
+        "can_edit_instrument_database": can_edit,
     }
     return render(request, "core/database_device_list.html", context)
 
@@ -1039,9 +1249,9 @@ def _safe_filename(name: str) -> str:
 
 
 def _gen_project_code() -> str:
-    from apps.core.project_numbering import generate_library_project_code
+    from apps.core.project_numbering import allocate_library_project_code
 
-    return generate_library_project_code()
+    return allocate_library_project_code()
 
 
 _COMMISSION_ORG_UNSET_LABEL = "（未填写委托单位）"
@@ -1367,7 +1577,6 @@ def library_projects(request):
                 except (TypeError, ValueError):
                     org = None
             name = request.POST.get("project_name", "").strip()
-            code = _gen_project_code()
             if org is None:
                 messages.error(
                     request,
@@ -1377,17 +1586,34 @@ def library_projects(request):
             if not name:
                 messages.error(request, "项目名称不能为空")
                 return redirect(reverse("library_projects"))
-            elif LibraryProject.objects.filter(code=code).exists():
-                messages.error(request, "项目编码生成冲突，请重试")
+            try:
+                code = _gen_project_code()
+            except ValueError as exc:
+                messages.error(request, str(exc))
+                return redirect(reverse("library_projects"))
+            from django.db import IntegrityError
+
+            row = None
+            for _attempt in range(4):
+                try:
+                    row = LibraryProject.objects.create(
+                        code=code,
+                        name=name,
+                        commission_org=org,
+                        commission_organization=org.full_display_name,
+                        created_by=request.user,
+                    )
+                    break
+                except IntegrityError:
+                    try:
+                        code = _gen_project_code()
+                    except ValueError as exc:
+                        messages.error(request, str(exc))
+                        return redirect(reverse("library_projects"))
+            if row is None:
+                messages.error(request, "委托编号生成冲突，请重试")
                 return redirect(reverse("library_projects"))
             else:
-                row = LibraryProject.objects.create(
-                    code=code,
-                    name=name,
-                    commission_org=org,
-                    commission_organization=org.full_display_name,
-                    created_by=request.user,
-                )
                 register_tour_project(request, row.pk)
                 task_ids = []
                 for x in request.POST.getlist("task_ids"):
@@ -1415,9 +1641,79 @@ def library_projects(request):
                     f"已创建项目：{row.commission_organization} · {row.name}（{row.code}）",
                 )
                 fl = f"{row.commission_org.folder_path()}/p-{row.pk}"
+                next_tab = "commission"
+                raw_eq_ids = []
+                for x in request.POST.getlist("equipment_ids"):
+                    try:
+                        raw_eq_ids.append(int(x))
+                    except (TypeError, ValueError):
+                        continue
+                raw_eq_ids = list(dict.fromkeys([i for i in raw_eq_ids if i > 0]))
+                if raw_eq_ids:
+                    inspection_map: dict[int, str] = {}
+                    for eid in raw_eq_ids:
+                        itype = (request.POST.get(f"inspection_type_{eid}") or "").strip()
+                        if itype:
+                            inspection_map[eid] = itype
+                    added, bind_errs = bind_equipments_to_project(
+                        row,
+                        raw_eq_ids,
+                        request.user,
+                        equipment_inspection_types=inspection_map,
+                        scope_org=org,
+                        fl_path=org.folder_path(),
+                    )
+                    if added:
+                        messages.success(
+                            request, f"已加入 {added} 台受检设备并同步报告/现场任务模板"
+                        )
+                        from apps.core.hospital_info_service import (
+                            sync_project_library_tasks_from_equipments,
+                        )
+
+                        sync_project_library_tasks_from_equipments(row, request.user)
+                    for e in bind_errs:
+                        messages.warning(request, e)
+                assignee_raw = (request.POST.get("primary_assignee") or "").strip()
+                if assignee_raw:
+                    try:
+                        assignee_id = int(assignee_raw)
+                    except ValueError:
+                        assignee_id = 0
+                    assignee = User.objects.filter(
+                        pk=assignee_id,
+                        profile__role__code__in=APP_SIDE_ROLE_CODES,
+                        is_active=True,
+                    ).first()
+                    if assignee is None:
+                        messages.warning(request, "未指定有效的项目统筹人（检测侧账号）")
+                    elif not row.library_tasks.exists():
+                        messages.warning(
+                            request,
+                            "尚未关联任务模板，无法指定统筹人；请先在委托立项中绑定设备。",
+                        )
+                    else:
+                        row.primary_responsible = assignee
+                        row.save(update_fields=["primary_responsible", "updated_at"])
+                        synced, _ = sync_project_task_assignments_for_user(
+                            row, assignee, request.user
+                        )
+                        messages.success(
+                            request,
+                            f"已指定 {assignee.username} 为项目统筹人"
+                            + (f"，并同步 {synced} 条 App 任务" if synced else ""),
+                        )
+                        next_tab = "dispatch"
+                if raw_eq_ids and next_tab != "dispatch":
+                    next_tab = "commission"
+                elif not raw_eq_ids:
+                    messages.info(
+                        request,
+                        "可在「委托立项」继续添加设备，或在「人员派工」配置工作人员。",
+                    )
                 return redirect(
                     reverse("library_projects")
-                    + f"?fl_path={quote(fl)}&project_id={row.pk}&tab=commission"
+                    + f"?fl_path={quote(fl)}&project_id={row.pk}&tab={next_tab}"
                 )
 
         if action in (
@@ -1456,8 +1752,18 @@ def library_projects(request):
                     messages.error(request, "请至少勾选一台设备")
                 else:
                     scope_org = resolve_workbench_equipment_scope_org(proj, fl_path=post_fl)
+                    inspection_map: dict[int, str] = {}
+                    for eid in raw_ids:
+                        itype = (request.POST.get(f"inspection_type_{eid}") or "").strip()
+                        if itype:
+                            inspection_map[eid] = itype
                     added, errs = bind_equipments_to_project(
-                        proj, raw_ids, request.user, scope_org=scope_org, fl_path=post_fl
+                        proj,
+                        raw_ids,
+                        request.user,
+                        equipment_inspection_types=inspection_map,
+                        scope_org=scope_org,
+                        fl_path=post_fl,
                     )
                     if added:
                         messages.success(request, f"已向本次委托加入 {added} 台设备，相关任务模板已同步到项目")
@@ -1478,6 +1784,15 @@ def library_projects(request):
                                 request,
                                 f"项目任务模板已按当前委托设备整理为 {n_sync} 个（已移除无关残留）",
                             )
+                        from apps.core.instrument_inventory_service import (
+                            auto_checkout_on_detection_phase,
+                        )
+
+                        inv = auto_checkout_on_detection_phase(proj, user=request.user)
+                        if inv.ok and inv.checked_out_count:
+                            messages.info(request, f"仪器已自动出库：{inv.message}")
+                        elif not inv.ok and inv.message:
+                            messages.warning(request, f"仪器自动出库未完全成功：{inv.message}")
             elif action == "unbind_project_equipment":
                 try:
                     link_id = int(request.POST.get("link_id", "") or 0)
@@ -1553,6 +1868,125 @@ def library_projects(request):
                 + f"?project_id={project.pk if project else project_id}&tab=dispatch"
             )
 
+        if action == "set_instrument_share_mode":
+            project_raw = request.POST.get("project_id", "").strip()
+            try:
+                project_id = int(project_raw)
+            except ValueError:
+                project_id = 0
+            project = LibraryProject.objects.filter(pk=project_id, is_active=True).first()
+            if project is None:
+                messages.error(request, "请选择有效项目")
+                return redirect(reverse("library_projects") + "?tab=dispatch")
+            if not library_user_may_mutate_project_workbench(request.user, project):
+                messages.error(request, "无权修改本项目的仪器分配策略")
+                return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=dispatch")
+            share = (request.POST.get("instrument_share_across_tasks") or "").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            )
+            project.instrument_share_across_tasks = share
+            project.save(update_fields=["instrument_share_across_tasks", "updated_at"])
+            if share:
+                messages.success(
+                    request,
+                    "已设为「跨模板共用」：多个任务模板要求同种仪器时将只分配一台。"
+                    "若此前已分配编号，请再次「确认同步 App 任务」以重新分配。",
+                )
+            else:
+                messages.success(
+                    request,
+                    "已设为「按任务模板分别分配」（默认）：不同模板默认可各用一台，同一模板下多台设备仍共用。"
+                    "若此前已分配编号，请再次「确认同步 App 任务」以重新分配。",
+                )
+            return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=dispatch")
+
+        if action == "save_manual_instrument_assignment":
+            project_raw = request.POST.get("project_id", "").strip()
+            try:
+                project_id = int(project_raw)
+            except ValueError:
+                project_id = 0
+            project = LibraryProject.objects.filter(pk=project_id, is_active=True).first()
+            if project is None:
+                messages.error(request, "请选择有效项目")
+                return redirect(reverse("library_projects") + "?tab=dispatch")
+            if not library_user_may_mutate_project_workbench(request.user, project):
+                messages.error(request, "无权修改本项目的仪器分配")
+                return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=dispatch")
+            import json
+
+            raw_json = (request.POST.get("instrument_manual_json") or "").strip()
+            by_kind: dict[str, list[int]] = {}
+            if raw_json:
+                try:
+                    payload = json.loads(raw_json)
+                except json.JSONDecodeError:
+                    messages.error(request, "仪器分配数据格式无效，请重试")
+                    return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=dispatch")
+                if isinstance(payload, dict):
+                    items = payload.get("kinds") or payload.get("requirements") or []
+                    for item in items:
+                        if not isinstance(item, dict):
+                            continue
+                        key = str(item.get("key") or "").strip()
+                        ids_raw = item.get("ids") or item.get("selectedIds") or []
+                        if not key:
+                            continue
+                        ids: list[int] = []
+                        if isinstance(ids_raw, (list, tuple)):
+                            for x in ids_raw:
+                                try:
+                                    pk = int(x)
+                                except (TypeError, ValueError):
+                                    continue
+                                if pk > 0:
+                                    ids.append(pk)
+                        by_kind[key] = ids
+            else:
+                from utils.task_bound_instruments import kind_spec_from_form_value
+
+                for key in request.POST:
+                    if not key.startswith("inst_pick_"):
+                        continue
+                    kind_key = key[len("inst_pick_") :]
+                    if kind_spec_from_form_value(kind_key) is None:
+                        continue
+                    ids = []
+                    for x in request.POST.getlist(key):
+                        try:
+                            pk = int(x)
+                        except (TypeError, ValueError):
+                            continue
+                        if pk > 0:
+                            ids.append(pk)
+                    by_kind[kind_key] = ids
+
+            do_checkout = (request.POST.get("checkout_on_save") or "1").strip().lower() not in (
+                "0",
+                "false",
+                "no",
+            )
+            result = apply_manual_instrument_assignment(
+                project,
+                by_kind,
+                user=request.user,
+                checkout=do_checkout,
+            )
+            if result.ok and not result.warning_only:
+                messages.success(request, result.message)
+            elif result.message:
+                messages.warning(request, result.message)
+            else:
+                messages.error(request, "保存失败")
+            tab_q = f"?project_id={project.pk}&tab=dispatch"
+            fl = (request.POST.get("fl_path") or "").strip()
+            if fl:
+                tab_q += f"&fl_path={quote(fl)}"
+            return redirect(reverse("library_projects") + tab_q)
+
         if action == "assign":
             project_raw = request.POST.get("project_id", "").strip()
             assignee_raw = request.POST.get("assignee", "").strip()
@@ -1593,31 +2027,33 @@ def library_projects(request):
                         messages.error(request, "该项目尚未关联任务模板，请先在「任务与模板」中为项目勾选任务模板")
                     else:
                         from apps.core.instrument_inventory_service import (
-                            ensure_instruments_for_project_dispatch,
+                            auto_checkout_on_detection_phase,
                         )
 
-                        inv = ensure_instruments_for_project_dispatch(
+                        inv = auto_checkout_on_detection_phase(
                             project, user=request.user
                         )
-                        if not inv.ok:
-                            messages.error(request, inv.message)
-                        else:
-                            if inv.checked_out_count:
-                                messages.info(request, inv.message)
-                            created_count, file_n = _sync_library_project_tasks_to_user(
-                                project, assignee, request.user
+                        if inv.checked_out_count and inv.ok and not inv.warning_only:
+                            messages.info(request, f"仪器已自动出库：{inv.message}")
+                        elif inv.message and (inv.warning_only or not inv.ok):
+                            messages.warning(
+                                request,
+                                f"仪器自动分配提示（不影响任务同步）：{inv.message}",
                             )
-                            if created_count:
-                                messages.success(
-                                    request,
-                                    f"已向 {assignee.username} 分配项目「{project.name}」下 {created_count} 个任务模板，"
-                                    f"并同步 {file_n} 个模板文件到项目。",
-                                )
-                            else:
-                                messages.info(
-                                    request,
-                                    f"{assignee.username} 已拥有该项目全部任务模板；已同步 {file_n} 个模板文件到项目。",
-                                )
+                        created_count, file_n = _sync_library_project_tasks_to_user(
+                            project, assignee, request.user
+                        )
+                        if created_count:
+                            messages.success(
+                                request,
+                                f"已向 {assignee.username} 分配项目「{project.name}」下 {created_count} 个任务模板，"
+                                f"并同步 {file_n} 个模板文件到项目。",
+                            )
+                        else:
+                            messages.info(
+                                request,
+                                f"{assignee.username} 已拥有该项目全部任务模板；已同步 {file_n} 个模板文件到项目。",
+                            )
             redir_pid = int(project_raw) if (project_raw or "").strip().isdigit() else (selected_project_id or 0)
             tab_q = f"?project_id={redir_pid}&tab=dispatch" if redir_pid else "?tab=dispatch"
             return redirect(reverse("library_projects") + tab_q)
@@ -1843,32 +2279,6 @@ def library_projects(request):
                     row.delete()
             return redirect(reverse("library_projects") + f"?project_id={proj.pk}&tab=dispatch")
 
-        if action == "instrument_checkin_project":
-            post_raw = request.POST.get("project_id", "").strip()
-            try:
-                post_pid = int(post_raw) if post_raw else None
-            except ValueError:
-                post_pid = None
-            proj = LibraryProject.objects.filter(pk=post_pid).first() if post_pid else None
-            if proj is None:
-                proj = selected_project
-            if proj is None:
-                messages.error(request, "请选择项目")
-                return redirect(reverse("library_projects"))
-            if not library_user_may_mutate_project_workbench(request.user, proj):
-                messages.error(request, "无权操作本项目仪器入库")
-            else:
-                from apps.core.instrument_inventory_service import checkin_instruments_from_project
-
-                n = checkin_instruments_from_project(
-                    proj, None, user=request.user, note="项目工作台手动入库"
-                )
-                messages.success(
-                    request,
-                    f"已入库 {n} 台仪器（解除与项目「{proj.name}」的出库绑定）",
-                )
-            return redirect(reverse("library_projects") + f"?project_id={proj.pk}&tab=dispatch")
-
         if action == "delete_project":
             post_raw = request.POST.get("project_id", "").strip()
             try:
@@ -1890,6 +2300,9 @@ def library_projects(request):
                 messages.error(request, "当前角色无权删除项目")
                 return redirect(reverse("library_projects"))
             label = f"{proj.code} · {proj.name}"
+            from apps.core.instrument_inventory_service import auto_checkin_on_commission_end
+
+            auto_checkin_on_commission_end(proj, user=request.user)
             try:
                 proj.delete()
             except ProtectedError:
@@ -1944,6 +2357,14 @@ def library_projects(request):
         ):
             fq = fq.filter(created_by=request.user)
         project_file_rows = list(fq[:600])
+        project_file_rows, _pw_pruned = keep_library_files_on_disk(
+            project_file_rows, prune_missing=True
+        )
+        if _pw_pruned:
+            messages.info(
+                request,
+                f"已自动将 {_pw_pruned} 个项目文件记录移入回收站（媒体目录中无对应文件）",
+            )
         project_file_ids = set(
             selected_project.library_files.filter(category=project_file_cat).values_list("id", flat=True)
         )
@@ -2168,6 +2589,35 @@ def library_projects(request):
             explorer_org_child_levels.append((lv, label))
 
     can_assign_tasks = library_user_can_assign_tasks_to_participants(request.user)
+    can_create_library_project = can_assign_tasks or role_has(
+        request.user, "perm_create_library_project"
+    )
+    picker_org_for_create = explorer_org if explorer_project is None else None
+    create_project_picker_initial = {
+        "orgId": picker_org_for_create.pk if picker_org_for_create else None,
+        "path": org_picker_initial_path(picker_org_for_create),
+    }
+    create_wizard_assign_users: list[dict] = []
+    if can_create_library_project and library_user_can_assign_tasks_to_participants(
+        request.user
+    ):
+        create_wizard_assign_users = [
+            {
+                "id": u.pk,
+                "label": u.username
+                + (f"（{u.get_full_name()}）" if u.get_full_name() else ""),
+            }
+            for u in User.objects.filter(
+                profile__role__code__in=APP_SIDE_ROLE_CODES, is_active=True
+            )
+            .select_related("profile__role")
+            .order_by("username")[:200]
+        ]
+    create_wizard_config = {
+        "initial": create_project_picker_initial,
+        "optionsUrl": reverse("library_project_create_wizard_options"),
+        "assignUsers": create_wizard_assign_users,
+    }
     can_edit_project_workbench = bool(
         selected_project and library_user_may_mutate_project_workbench(request.user, selected_project)
     )
@@ -2190,8 +2640,9 @@ def library_projects(request):
             can_delete_selected_project = True
 
     project_commission_equipment_cards: list[dict] = []
-    project_available_equipments: list[CommissionOrgEquipment] = []
+    project_available_equipment_rows: list[dict] = []
     project_report_task_options: list[dict] = []
+    report_task_picker_catalog: dict = {}
     project_equipment_scope_label = ""
     project_has_hospital = False
     if selected_project:
@@ -2207,14 +2658,15 @@ def library_projects(request):
         )
         if equipment_scope_org is not None:
             project_equipment_scope_label = equipment_scope_label(equipment_scope_org)
-        project_available_equipments = list(
-            available_equipments_for_project(
-                selected_project,
-                scope_org=equipment_scope_org,
-                fl_path=fl_path,
-            )[:500]
-        )
+        project_available_equipment_rows = available_equipment_rows_for_project(
+            selected_project,
+            scope_org=equipment_scope_org,
+            fl_path=fl_path,
+        )[:500]
         project_report_task_options = report_task_options_for_project()
+        report_task_picker_catalog = build_report_task_picker_catalog(
+            has_report_source_relation=_librarytask_has_report_source_relation(),
+        )
 
     workbench_tabs = [
         ("overview", "概览"),
@@ -2308,8 +2760,12 @@ def library_projects(request):
             },
             "file_library_tabs": list(_FILE_LIBRARY_TAB_DEFS),
             "project_commission_equipment_cards": project_commission_equipment_cards,
-            "project_available_equipments": project_available_equipments,
+            "project_available_equipment_rows": project_available_equipment_rows,
+            "can_create_library_project": can_create_library_project,
+            "create_project_picker_initial": create_project_picker_initial,
+            "create_wizard_config": create_wizard_config,
             "project_report_task_options": project_report_task_options,
+            "report_task_picker_catalog": report_task_picker_catalog,
             "project_has_hospital": project_has_hospital,
             "project_equipment_scope_label": project_equipment_scope_label,
             "workbench_pipeline_status": workbench_pipeline_status,
@@ -2319,6 +2775,40 @@ def library_projects(request):
             "project_equipment_count": project_equipment_count,
             "project_instrument_dispatch_panel": project_instrument_dispatch_panel,
         },
+    )
+
+
+@login_required
+def library_project_create_wizard_options(request):
+    """新建项目向导：按委托单位返回可选设备及检测类型。"""
+    gx = _require_perm(request, "perm_file_library")
+    if gx:
+        return gx
+    if not (
+        library_user_can_assign_tasks_to_participants(request.user)
+        or role_has(request.user, "perm_create_library_project")
+    ):
+        return JsonResponse({"ok": False, "message": "无权创建项目"}, status=403)
+    raw = (request.GET.get("org_id") or "").strip()
+    try:
+        org_id = int(raw)
+    except ValueError:
+        return JsonResponse({"ok": False, "message": "无效的委托单位"}, status=400)
+    org = CommissionOrganization.objects.filter(pk=org_id, is_active=True).first()
+    if org is None:
+        return JsonResponse({"ok": False, "message": "委托单位不存在"}, status=404)
+    folders = preview_equipment_folder_tree_for_org(org)
+    return JsonResponse(
+        {
+            "ok": True,
+            "org": {
+                "id": org.pk,
+                "full_display_name": org.full_display_name,
+                "scope_label": equipment_scope_label(org),
+            },
+            "equipment_folders": folders,
+            "equipment_rows": [eq for folder in folders for eq in folder.get("equipments", [])],
+        }
     )
 
 
@@ -2409,41 +2899,27 @@ def commission_manage(request):
                 messages.error(request, "该项目尚未关联任务模板，请先在项目工作台绑定设备或任务")
             else:
                 from apps.core.instrument_inventory_service import (
-                    ensure_instruments_for_project_dispatch,
+                    auto_checkout_on_detection_phase,
                 )
 
-                inv = ensure_instruments_for_project_dispatch(project, user=request.user)
-                if not inv.ok:
-                    messages.error(request, inv.message)
-                else:
-                    if inv.checked_out_count:
-                        messages.info(request, inv.message)
-                    created_count, file_n = _sync_library_project_tasks_to_user(
-                        project, assignee, request.user
+                inv = auto_checkout_on_detection_phase(project, user=request.user)
+                if inv.checked_out_count and inv.ok and not inv.warning_only:
+                    messages.info(request, f"仪器已自动出库：{inv.message}")
+                elif inv.message and (inv.warning_only or not inv.ok):
+                    messages.warning(
+                        request,
+                        f"仪器自动分配提示（不影响任务同步）：{inv.message}",
                     )
-                    if created_count:
-                        messages.success(
-                            request,
-                            f"已向 {assignee.username} 分配 {created_count} 个任务模板",
-                        )
-                    else:
-                        messages.info(request, f"{assignee.username} 已拥有该项目全部任务模板")
-        elif action == "instrument_checkin_project":
-            from apps.core.instrument_inventory_service import checkin_instruments_from_project
-
-            if not library_user_may_mutate_project_workbench(request.user, project):
-                messages.error(request, "无权操作本项目仪器入库")
-            else:
-                n = checkin_instruments_from_project(
-                    project, None, user=request.user, note="委托管理/项目仪器入库"
+                created_count, file_n = _sync_library_project_tasks_to_user(
+                    project, assignee, request.user
                 )
-                messages.success(
-                    request,
-                    f"已入库 {n} 台仪器（解除与项目「{project.name}」的出库绑定）",
-                )
-            return redirect(
-                reverse("library_projects") + f"?project_id={project.pk}&tab=dispatch"
-            )
+                if created_count:
+                    messages.success(
+                        request,
+                        f"已向 {assignee.username} 分配 {created_count} 个任务模板",
+                    )
+                else:
+                    messages.info(request, f"{assignee.username} 已拥有该项目全部任务模板")
         elif action == "unassign":
             if not library_user_may_assign_on_project(request.user, project):
                 try:
@@ -2729,6 +3205,9 @@ def _file_library_content_label(f: LibraryFile, case) -> str:
             prefix = on.split("__task__", 1)[0].strip(" _")
             if prefix and len(prefix) < 120:
                 return f"现场记录（{prefix}）"
+        stem = on[:-4] if low.endswith(".pdf") else on
+        if stem and len(stem) <= 100:
+            return f"现场记录（{stem}）"
         return "现场记录（PDF）"
     if cat == LibraryFile.CATEGORY_REPORT and low.endswith(".pdf"):
         if "合并报告" in on:
@@ -3378,21 +3857,48 @@ def file_library(request):
             )
         commission_org = request.POST.get("commission_organization", "").strip()
         name = request.POST.get("project_name", "").strip()
-        code = _gen_project_code()
         if not commission_org or not name:
             messages.error(request, "委托单位名称与项目名称不能为空")
-        elif LibraryProject.objects.filter(code=code).exists():
-            messages.error(request, "项目编码生成冲突，请重试")
         else:
-            row = LibraryProject.objects.create(
-                code=code,
-                name=name,
-                commission_organization=commission_org,
-                created_by=request.user,
-            )
-            register_tour_project(request, row.pk)
-            messages.success(request, f"已创建项目：{commission_org} · {name}")
-            commission_org_raw = _commission_org_url_slug(commission_org)
+            try:
+                code = _gen_project_code()
+            except ValueError as exc:
+                messages.error(request, str(exc))
+                return redirect(
+                    reverse("file_library")
+                    + _file_library_query_string(tab, "", "", "", project_selected, commission_org_raw)
+                )
+            from django.db import IntegrityError
+
+            row = None
+            for _attempt in range(4):
+                try:
+                    row = LibraryProject.objects.create(
+                        code=code,
+                        name=name,
+                        commission_organization=commission_org,
+                        created_by=request.user,
+                    )
+                    break
+                except IntegrityError:
+                    try:
+                        code = _gen_project_code()
+                    except ValueError as exc:
+                        messages.error(request, str(exc))
+                        return redirect(
+                            reverse("file_library")
+                            + _file_library_query_string(
+                                tab, "", "", "", project_selected, commission_org_raw
+                            )
+                        )
+            if row is None:
+                messages.error(request, "委托编号生成冲突，请重试")
+            else:
+                register_tour_project(request, row.pk)
+                messages.success(
+                    request, f"已创建项目：{commission_org} · {name}（委托编号 {row.code}）"
+                )
+                commission_org_raw = _commission_org_url_slug(commission_org)
         return redirect(
             reverse("file_library")
             + _file_library_query_string(tab, "", "", "", project_selected, commission_org_raw)
@@ -3410,9 +3916,18 @@ def file_library(request):
         if not row:
             messages.error(request, "项目不存在或已停用")
         else:
+            from apps.core.instrument_inventory_service import auto_checkin_on_commission_end
+
+            n_in = auto_checkin_on_commission_end(row, user=request.user)
             row.is_active = False
             row.save(update_fields=["is_active", "updated_at"])
-            messages.success(request, f"已停用项目：{row.name}")
+            if n_in:
+                messages.success(
+                    request,
+                    f"已停用项目：{row.name}；已自动入库 {n_in} 台仪器",
+                )
+            else:
+                messages.success(request, f"已停用项目：{row.name}")
         return redirect(reverse("file_library") + _file_library_query_string(tab, "", "", "", project_selected))
 
     post_project_ids = parse_project_ids(request.POST.getlist("project_ids"))
@@ -3441,6 +3956,12 @@ def file_library(request):
             return redirect(redir)
         if not library_user_may_delete_library_file(request.user, lf):
             messages.error(request, "只能恢复本人删除的文件")
+            return redirect(redir)
+        if not library_file_exists_on_disk(lf):
+            messages.error(
+                request,
+                "媒体目录中不存在该文件，无法恢复；请先将文件放回 media 或重新上传",
+            )
             return redirect(redir)
         lf.deleted_at = None
         lf.save(update_fields=["deleted_at"])
@@ -3500,12 +4021,18 @@ def file_library(request):
             if not library_user_may_delete_library_file(request.user, lf):
                 skipped += 1
                 continue
+            if not library_file_exists_on_disk(lf):
+                skipped += 1
+                continue
             lf.deleted_at = None
             lf.save(update_fields=["deleted_at"])
             restored += 1
         if restored and skipped:
             messages.success(request, f"已从回收站恢复 {restored} 个文件")
-            messages.warning(request, f"另有 {skipped} 条未处理（不存在、不在回收站或无权操作）。")
+            messages.warning(
+                request,
+                f"另有 {skipped} 条未处理（不存在、不在回收站、媒体文件缺失或无权操作）。",
+            )
         elif restored:
             messages.success(request, f"已从回收站恢复 {restored} 个文件")
         else:
@@ -4408,6 +4935,14 @@ def file_library(request):
         )
 
     cat = _library_category_for_tab(tab)
+    if getattr(settings, "LIBRARY_MEDIA_RECONCILE_ON_BROWSE", True):
+        rec_stats = reconcile_library_files_missing_on_disk(category=cat)
+        n_pruned = int(rec_stats.get("files_soft_deleted") or 0)
+        if n_pruned:
+            messages.info(
+                request,
+                f"已自动将 {n_pruned} 个媒体目录中已不存在的文件记录移入回收站",
+            )
     restricted = library_scope_own_files_only(request.user)
 
     uploader_selected = ""
@@ -4495,6 +5030,7 @@ def file_library(request):
 
     files = files.order_by("-created_at", "-id")
     files = list(files)
+    files, _disk_pruned = keep_library_files_on_disk(files, prune_missing=True)
     _annotate_file_library_display(request.user, files)
     if tab == "template":
         file_library_nested_groups = _nest_file_library_by_library_task(files)
@@ -4836,6 +5372,7 @@ def file_preview(request, pk):
         raise PermissionDenied("无权预览该文件")
     if not library_file_access_allowed(request.user, lf):
         raise PermissionDenied("无权预览该文件")
+    require_library_file_on_disk(lf)
     kind = lf.preview_kind
     if kind == "unsupported":
         return render(
@@ -5084,7 +5621,24 @@ def htmlpdf_editor_open(request, pk: int):
     )
     if return_manage_raw:
         try:
-            inject += f"window.HTMLPDF_INITIAL_LIBRARY_TASK_ID={json_std.dumps(str(int(return_manage_raw)))};"
+            mid = int(return_manage_raw)
+            inject += f"window.HTMLPDF_INITIAL_LIBRARY_TASK_ID={json_std.dumps(str(mid))};"
+            from apps.core.models import LibraryTask, LibraryTaskAssignment
+            from apps.core.project_numbering import project_task_no_for_library_task, project_tasks_ordered
+
+            lt = LibraryTask.objects.filter(pk=mid).first()
+            ass = (
+                LibraryTaskAssignment.objects.filter(library_task_id=mid, project_id__isnull=False)
+                .select_related("project")
+                .order_by("-id")
+                .first()
+            )
+            if ass and ass.project and lt:
+                inject += f"window.HTMLPDF_PROJECT_ID={json_std.dumps(str(ass.project.code))};"
+                ordered = project_tasks_ordered(ass.project)
+                disp = project_task_no_for_library_task(lt, ass.project, ordered_tasks=ordered)
+                if disp:
+                    inject += f"window.HTMLPDF_DISPLAY_TASK_NO={json_std.dumps(disp)};"
         except ValueError:
             pass
     inject += "</script>"
@@ -5150,6 +5704,45 @@ def htmlpdf_api_template_jsons(request):
     gx = _require_htmlpdf(request)
     if gx:
         return JsonResponse({"error": "forbidden"}, status=403)
+    from apps.core.library_task_template_binding_service import (
+        list_task_editor_template_json_options,
+        resolve_default_json_template_id,
+    )
+    from apps.core.htmlpdf_report_mapping_service import (
+        resolve_library_task_for_template_pdf,
+    )
+
+    task = None
+    lt_raw = request.GET.get("library_task_id") or request.GET.get("libraryTaskId")
+    if lt_raw is not None and str(lt_raw).strip() != "":
+        try:
+            task = LibraryTask.objects.filter(pk=int(lt_raw)).first()
+        except (TypeError, ValueError):
+            task = None
+    pdf_raw = request.GET.get("template_pdf_id") or request.GET.get("library_template_file_id")
+    pdf_tid: int | None = None
+    if pdf_raw is not None and str(pdf_raw).strip() != "":
+        try:
+            pdf_tid = int(pdf_raw)
+        except (TypeError, ValueError):
+            pdf_tid = None
+    if task is None and pdf_tid is not None:
+        task = resolve_library_task_for_template_pdf(pdf_tid, preferred_task=None)
+
+    if task is not None:
+        rows = list_task_editor_template_json_options(
+            task, user=request.user, pdf_template_id=pdf_tid
+        )
+        default_id = resolve_default_json_template_id(task, pdf_template_id=pdf_tid)
+        return JsonResponse(
+            {
+                "templates": rows,
+                "scoped": True,
+                "library_task_id": task.pk,
+                "default_json_template_id": default_id,
+            }
+        )
+
     rows = []
     qs = (
         LibraryFile.objects.filter(category=LibraryFile.CATEGORY_TEMPLATE)
@@ -5160,15 +5753,22 @@ def htmlpdf_api_template_jsons(request):
         is_auxiliary_template_json_filename,
     )
 
-    for lf in qs[:500]:
+    for lf in qs[:80]:
         if not library_file_access_allowed(request.user, lf):
             continue
         if not lf.original_name.lower().endswith(".json"):
             continue
         if is_auxiliary_template_json_filename(lf.original_name or ""):
             continue
-        rows.append({"id": lf.pk, "name": lf.original_name})
-    return JsonResponse({"templates": rows})
+        rows.append({"id": lf.pk, "name": lf.original_name, "kind": "library", "label": ""})
+    return JsonResponse(
+        {
+            "templates": rows,
+            "scoped": False,
+            "default_json_template_id": None,
+            "hint": "未关联任务时仅显示最近模板 JSON；请从任务模板库进入编辑器以查看主模板与历史版本",
+        }
+    )
 
 
 @csrf_exempt
@@ -5211,6 +5811,11 @@ def htmlpdf_api_import_json_from_library(request):
             fields,
             skip_for_report=skip_sections,
         )
+    layout_only = str(
+        data.get("layout_only") or data.get("layoutOnly") or ""
+    ).strip().lower() in ("1", "true", "yes")
+    if layout_only:
+        return JsonResponse(htmlpdf_service.slim_parsed_template_for_editor_layout(parsed))
     return JsonResponse(parsed)
 
 
@@ -5362,6 +5967,9 @@ def htmlpdf_api_export_json(request):
         return JsonResponse({"error": "请求体不是合法JSON"}, status=400)
     fields = _sanitize_pdf_field_texts(data.get("fields", []))
     form_schema = data.get("form_schema") if isinstance(data.get("form_schema"), dict) else {}
+    if not form_schema:
+        form_schema = data.get("formSchema") if isinstance(data.get("formSchema"), dict) else {}
+    schema_extras = _form_schema_extra_payload(data, form_schema)
     bindings = data.get("bindings") if isinstance(data.get("bindings"), dict) else {}
     raw_map = data.get("report_site_field_map") or data.get("reportSiteFieldMap")
     if isinstance(raw_map, list):
@@ -5407,6 +6015,7 @@ def htmlpdf_api_export_json(request):
         "pdf": {"fields": normalized_fields},
         "meta": template_meta,
     }
+    _merge_form_schema_extras(rule_template_obj, schema_extras)
     if _ff_raw_export is not None:
         rule_template_obj["fieldFormulas"] = _ff_raw_export
     try:
@@ -5435,6 +6044,7 @@ def htmlpdf_api_export_json(request):
         steps=steps,
         bindings=bindings if isinstance(bindings, dict) else None,
         field_formulas=_ff_raw_export,
+        form_schema_extras=schema_extras,
     )
     payload = _sanitize_json_payload_text(payload)
     try:
@@ -5469,6 +6079,12 @@ def htmlpdf_api_export_json(request):
     }
     if binding_rotation:
         resp["binding_rotation"] = binding_rotation
+    try:
+        resp["template_compat"] = _build_template_compat_report(
+            build_frontend_schema_by_rules(payload, merge_split_dates=False)
+        )
+    except Exception:
+        resp["template_compat"] = _build_template_compat_report(payload.get("formSchema", {}))
     return JsonResponse(resp)
 
 
@@ -5548,30 +6164,13 @@ def _normalize_pdf_fields_for_unified_template(fields, form_schema: dict, bindin
                 or field_id
             ).strip()
         )
-        row["pdfFieldId"] = old_pdf_id
         row["id"] = normalize_field_text_by_underscore_rules(field_id) or field_id
         row["title"] = title or field_id
         # Keep legacy key for compatibility with old pipeline readers.
         row["placeholder"] = normalize_field_text_by_underscore_rules(field_id) or field_id
         out.append(row)
-    # 保证 f 号唯一且与导出时 fields 数组顺序（即侧栏序号）一致：重复时按下标收编为 f{idx+1} 并顺延。
-    used_pdf = set()
-
-    def _next_free_f_num(start: int) -> str:
-        n = max(1, int(start))
-        while f"f{n}" in used_pdf:
-            n += 1
-        return f"f{n}"
-
-    for idx, row in enumerate(out):
-        pid = str(row.get("pdfFieldId") or "").strip()
-        if not re.match(r"^f\d+$", pid):
-            pid = _next_free_f_num(idx + 1)
-        if pid in used_pdf:
-            pid = _next_free_f_num(idx + 1)
-        used_pdf.add(pid)
-        row["pdfFieldId"] = pid
-    return out
+    # pdfFieldId 与 HTMLPDF 侧栏/画板列表顺序一致：第 idx+1 项 = f{idx+1}（不按坐标重排）。
+    return reindex_pdf_field_ids_by_list_order(out)
 
 
 def _htmlpdf_is_report_template_context(
@@ -5598,7 +6197,7 @@ def _assign_htmlpdf_template_sections_to_fields(
         )
         return
     try:
-        pdf_path = htmlpdf_service.user_original_pdf_path(int(user_id))
+        pdf_path = htmlpdf_service.htmlpdf_source_pdf_path(int(user_id))
     except Exception:
         return
     if not pdf_path.is_file():
@@ -5642,6 +6241,7 @@ def _slim_unified_v2_template_library_payload(
     steps: list,
     bindings: dict | None = None,
     field_formulas: dict | list | None = None,
+    form_schema_extras: dict | None = None,
 ) -> dict:
     """On-disk unified template: single ``formSchema``, compact ``pdf.fields``, no duplicate root blocks."""
     orphans = {}
@@ -5666,6 +6266,7 @@ def _slim_unified_v2_template_library_payload(
         "enums": enums if isinstance(enums, dict) else {},
         "steps": steps if isinstance(steps, list) else [],
     }
+    _merge_form_schema_extras(out, form_schema_extras or {})
     if isinstance(bindings, dict) and bindings:
         out["bindings"] = bindings
     return out
@@ -6351,6 +6952,7 @@ def htmlpdf_api_export_frontend_json(request):
     form_schema = data.get("form_schema") if isinstance(data.get("form_schema"), dict) else {}
     if not form_schema:
         form_schema = data.get("formSchema") if isinstance(data.get("formSchema"), dict) else {}
+    schema_extras = _form_schema_extra_payload(data, form_schema)
     constants = data.get("constants") if isinstance(data.get("constants"), dict) else {}
     if not constants:
         constants = form_schema.get("constants") if isinstance(form_schema.get("constants"), dict) else {}
@@ -6366,9 +6968,6 @@ def htmlpdf_api_export_frontend_json(request):
     is_report_fe = _htmlpdf_is_report_template_context(
         request, data, meta if isinstance(meta, dict) else {}
     )
-    _assign_htmlpdf_template_sections_to_fields(
-        request.user.id, input_fields, skip_for_report=is_report_fe
-    )
     payload = {
         "templateId": template_id or name.rsplit(".", 1)[0],
         "templateName": template_name or name,
@@ -6381,6 +6980,7 @@ def htmlpdf_api_export_frontend_json(request):
         "enums": enums,
         "steps": steps,
     }
+    _merge_form_schema_extras(payload, schema_extras)
     has_matrix_layout = False
     for st in payload.get("steps") if isinstance(payload.get("steps"), list) else []:
         if not isinstance(st, dict):
@@ -6393,165 +6993,80 @@ def htmlpdf_api_export_frontend_json(request):
                 break
         if has_matrix_layout:
             break
-    # 先以规则引擎生成标准结构（分桶 + 坐标排序），再按模式决定是否被 LLM 覆盖。
-    base_rule_payload = {}
-    if not has_matrix_layout:
-        try:
-            base_rule_payload = build_frontend_schema_by_rules(
-                {
-                    "templateId": payload["templateId"],
-                    "templateName": payload["templateName"],
-                    "version": payload["version"],
-                    "reportType": payload["reportType"],
-                    "standard": payload["standard"],
-                    "pdfUrl": payload["pdfUrl"],
-                    "locale": payload["locale"],
-                    "constants": payload["constants"],
-                    "enums": payload["enums"],
-                    "steps": payload["steps"],
-                    "pdf": {"fields": input_fields},
-                    "meta": meta,
-                }
-            )
-        except Exception:
-            base_rule_payload = {}
-        if isinstance(base_rule_payload, dict) and isinstance(base_rule_payload.get("steps"), list) and base_rule_payload.get("steps"):
-            payload = {
-                "templateId": str(base_rule_payload.get("templateId") or payload["templateId"]),
-                "templateName": str(base_rule_payload.get("templateName") or payload["templateName"]),
-                "version": str(base_rule_payload.get("version") or payload["version"]),
-                "reportType": str(base_rule_payload.get("reportType") or payload["reportType"]),
-                "standard": str(base_rule_payload.get("standard") or payload["standard"]),
-                "pdfUrl": str(base_rule_payload.get("pdfUrl") or payload["pdfUrl"]),
-                "locale": str(base_rule_payload.get("locale") or payload["locale"]),
-                "constants": base_rule_payload.get("constants") if isinstance(base_rule_payload.get("constants"), dict) else payload["constants"],
-                "enums": base_rule_payload.get("enums") if isinstance(base_rule_payload.get("enums"), dict) else payload["enums"],
-                "steps": base_rule_payload.get("steps") or payload["steps"],
-            }
-
-    # 保存前端 JSON 支持三种导出模式：
-    # - rule: 纯规则引擎（不经过大模型）
-    # - llm: 强制大模型（失败回退规则引擎）
-    # - auto: 自动模式（默认）
-    export_mode = str(data.get("export_mode") or "auto").strip().lower()
-    if export_mode not in {"auto", "llm", "rule"}:
-        export_mode = "auto"
-    llm_auto = str(os.environ.get("ENABLE_LLM_FRONTEND_EXPORT", "1")).strip().lower() in {"1", "true", "yes", "on"}
-    llm_force = str(data.get("force_llm_steps") or "").strip().lower() in {"1", "true", "yes", "on"}
-    need_llm = (not has_matrix_layout) and (
-        export_mode == "llm" or (export_mode == "auto" and llm_auto and (llm_force or not payload.get("steps")))
-    )
-    need_rule = (export_mode == "rule") and (not has_matrix_layout)
-    rule_template_obj = {
-        "templateId": payload["templateId"],
-        "templateName": payload["templateName"],
-        "version": payload["version"],
-        "reportType": payload["reportType"],
-        "standard": payload["standard"],
-        "pdfUrl": payload["pdfUrl"],
-        "locale": payload["locale"],
-        "constants": payload["constants"],
-        "enums": payload["enums"],
-        "steps": payload["steps"],
-        "pdf": {"fields": input_fields},
-        "meta": meta,
-    }
-    if need_llm:
-        sample_template_obj = {}
-        sample_path = Path(
-            os.environ.get(
-                "FRONTEND_TEMPLATE_SAMPLE_PATH",
-                str(settings.BASE_DIR / "media" / "file_library" / "templates" / "365af054b1d14cf9938440cd8c62f1f8_template_frontend.json"),
-            )
-        )
-        try:
-            if sample_path.is_file():
-                sample_template_obj = json_std.loads(sample_path.read_text(encoding="utf-8"))
-        except Exception:
-            sample_template_obj = {}
-        llm_template_obj = {
-            "schema": "unified_form_template/v2",
-            "templateId": payload["templateId"],
-            "templateName": payload["templateName"],
-            "version": payload["version"],
-            "reportType": payload["reportType"],
-            "standard": payload["standard"],
-            "pdfUrl": payload["pdfUrl"],
-            "locale": payload["locale"],
-            "constants": payload["constants"],
-            "enums": payload["enums"],
-            "steps": payload["steps"],
-            "pdf": {"fields": input_fields},
-            "formSchema": {
-                "constants": payload["constants"],
-                "enums": payload["enums"],
-                "steps": payload["steps"],
-            },
-            "bindings": data.get("bindings") if isinstance(data.get("bindings"), dict) else {},
-        }
-        llm_payload = generate_frontend_template_with_ollama(
-            llm_template_obj,
-            source_file_hint=1,
-            sample_template_obj=sample_template_obj,
-        )
-        if isinstance(llm_payload, dict) and isinstance(llm_payload.get("steps"), list) and llm_payload.get("steps"):
-            payload = {
-                "templateId": str(llm_payload.get("templateId") or payload["templateId"]),
-                "templateName": str(llm_payload.get("templateName") or payload["templateName"]),
-                "version": str(llm_payload.get("version") or payload["version"]),
-                "reportType": str(llm_payload.get("reportType") or payload["reportType"]),
-                "standard": str(llm_payload.get("standard") or payload["standard"]),
-                "pdfUrl": str(llm_payload.get("pdfUrl") or payload["pdfUrl"]),
-                "locale": str(llm_payload.get("locale") or payload["locale"]),
-                "constants": llm_payload.get("constants") if isinstance(llm_payload.get("constants"), dict) else payload["constants"],
-                "enums": llm_payload.get("enums") if isinstance(llm_payload.get("enums"), dict) else payload["enums"],
-                "steps": llm_payload.get("steps"),
-            }
-        else:
-            need_rule = True
-
-    if need_rule or (export_mode == "auto" and not payload.get("steps")):
-        rule_payload = build_frontend_schema_by_rules(rule_template_obj)
-        if isinstance(rule_payload, dict) and isinstance(rule_payload.get("steps"), list):
-            payload = {
-                "templateId": str(rule_payload.get("templateId") or payload["templateId"]),
-                "templateName": str(rule_payload.get("templateName") or payload["templateName"]),
-                "version": str(rule_payload.get("version") or payload["version"]),
-                "reportType": str(rule_payload.get("reportType") or payload["reportType"]),
-                "standard": str(rule_payload.get("standard") or payload["standard"]),
-                "pdfUrl": str(rule_payload.get("pdfUrl") or payload["pdfUrl"]),
-                "locale": str(rule_payload.get("locale") or payload["locale"]),
-                "constants": rule_payload.get("constants") if isinstance(rule_payload.get("constants"), dict) else payload["constants"],
-                "enums": rule_payload.get("enums") if isinstance(rule_payload.get("enums"), dict) else payload["enums"],
-                "steps": rule_payload.get("steps") or payload["steps"],
-            }
-
-    # 根级 instruments：无 submit 时用任务模板 bound_instrument_ids 预填；有 submit 时由导出/提交链路传入 payload（以前端为准）
-    from apps.api.inspection_report_make import build_instruments_root_for_frontend_export
 
     lib_task_for_inst = _resolve_library_task_for_htmlpdf_frontend_export(
         request, data, meta if isinstance(meta, dict) else {}
     )
-    _ff_src: dict = {"pdf": {"fields": input_fields}}
+    from utils.frontend_export_pipeline import (
+        build_editor_saved_frontend_json,
+        resolve_task_template_pdf_path,
+    )
+    from utils.pdf_field_formulas import build_pdf_field_formula_merge_source
+
+    template_blob = _try_read_library_template_blob_for_formulas(
+        request, data, meta if isinstance(meta, dict) else {}
+    ) or {}
+    template_obj = dict(payload)
+    for key in (
+        "templateId",
+        "templateName",
+        "version",
+        "reportType",
+        "standard",
+        "pdfUrl",
+        "locale",
+    ):
+        val = template_blob.get(key)
+        if val not in (None, ""):
+            template_obj[key] = val
+    if isinstance(template_blob.get("constants"), dict) and template_blob.get("constants"):
+        template_obj["constants"] = template_blob["constants"]
+    if isinstance(template_blob.get("enums"), dict) and template_blob.get("enums"):
+        template_obj["enums"] = template_blob["enums"]
+    _merge_form_schema_extras(template_obj, schema_extras)
+
     _ff_raw_fe = _export_request_field_formulas_raw(data, form_schema)
-    if _ff_raw_fe is not None:
-        _ff_src["fieldFormulas"] = _ff_raw_fe
+    _ff_src = build_pdf_field_formula_merge_source(
+        input_fields,
+        template_blob if isinstance(template_blob, dict) else None,
+        root_field_formulas=_ff_raw_fe,
+    )
+
+    pdf_path = resolve_task_template_pdf_path(lib_task_for_inst)
+    fields_for_export = list(input_fields)
+    if not pdf_path:
+        fields_for_export = _assign_htmlpdf_template_sections_to_fields(
+            request.user.id, fields_for_export, skip_for_report=is_report_fe
+        )
+
+    if has_matrix_layout:
+        from apps.api.inspection_report_make import build_instruments_root_for_frontend_export
+        from utils.pdf_field_formulas import merge_field_formulas_into_frontend
+        from utils.frontend_runtime_export import finalize_runtime_frontend_export
+
+        payload = merge_field_formulas_into_frontend(template_obj, _ff_src)
+        payload["steps"] = steps
+        payload.update(build_instruments_root_for_frontend_export(task_obj=lib_task_for_inst, payload={}))
+        payload.pop("instrumentCatalogOptions", None)
+        payload.pop("bindings", None)
+        payload.pop("pdfBindings", None)
+        payload = finalize_runtime_frontend_export(payload)
     else:
-        _blob = _try_read_library_template_blob_for_formulas(request, data, meta if isinstance(meta, dict) else {})
-        if isinstance(_blob, dict):
-            _ff_src = _blob
-    payload = merge_field_formulas_into_frontend(payload, _ff_src)
-    payload.update(build_instruments_root_for_frontend_export(task_obj=lib_task_for_inst, payload={}))
-    payload.pop("instrumentCatalogOptions", None)
-    raw_map_fe = data.get("report_site_field_map") or data.get("reportSiteFieldMap")
-    if isinstance(raw_map_fe, list):
-        from apps.core.htmlpdf_report_mapping_service import merge_report_site_map_into_bindings
+        project_obj = None
+        if lib_task_for_inst is not None:
+            from apps.api.inspection_frontend_export_service import resolve_project_for_library_task_export
 
-        existing_b = payload.get("bindings") if isinstance(payload.get("bindings"), dict) else {}
-        payload["bindings"] = merge_report_site_map_into_bindings(existing_b, raw_map_fe)
-    from utils.frontend_schema_rule_engine import _compact_form_schema_payload
-
-    payload = _compact_form_schema_payload(payload)
+            project_obj = resolve_project_for_library_task_export(
+                request, lib_task_for_inst, data, meta
+            )
+        payload = build_editor_saved_frontend_json(
+            template_obj,
+            fields_for_export,
+            pdf_path=pdf_path,
+            extra_formula_source=_ff_src,
+            task_obj=lib_task_for_inst,
+            project_obj=project_obj,
+        )
 
     try:
         raw = json_std.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
@@ -6581,6 +7096,7 @@ def htmlpdf_api_export_frontend_json(request):
         "ok": True,
         "saved_to": "template",
         "auxiliary_json": True,
+        "runtimeFormat": True,
         "task_template_binding": False,
         "file": {
             "id": row["id"],
@@ -6592,6 +7108,7 @@ def htmlpdf_api_export_frontend_json(request):
     }
     if detached_aux_ids:
         resp["detached_auxiliary_from_task"] = detached_aux_ids
+    resp["template_compat"] = _build_template_compat_report(payload)
     return JsonResponse(resp)
 
 
@@ -6932,7 +7449,12 @@ def _unique_library_task_code(name: str, explicit_code: str = "") -> str:
 def _library_task_management_redirect_url(request) -> str:
     u = reverse("library_task_management")
     q = []
-    mt = (request.POST.get("manage_task_id") or request.GET.get("manage_task") or "").strip()
+    mt = (
+        request.POST.get("manage_task_id")
+        or request.POST.get("task_id")
+        or request.GET.get("manage_task")
+        or ""
+    ).strip()
     if mt:
         try:
             int(mt)
@@ -7523,7 +8045,7 @@ def library_task_management(request):
                 file_id = int(request.POST.get("file_id", "") or 0)
             except ValueError:
                 file_id = 0
-            include_paired = (request.POST.get("include_paired") or "1").strip().lower() in (
+            include_paired = (request.POST.get("include_paired") or "0").strip().lower() in (
                 "1",
                 "true",
                 "yes",
@@ -7534,6 +8056,8 @@ def library_task_management(request):
                 messages.error(request, "请选择有效任务模板")
             elif file_id <= 0:
                 messages.error(request, "无效的文件")
+            elif not library_user_may_edit_library_task(request.user, task_obj):
+                messages.error(request, "无权维护该任务模板，无法解除绑定")
             else:
                 from apps.core.library_task_template_binding_service import (
                     unbind_template_files_from_task,
@@ -7559,11 +8083,24 @@ def library_task_management(request):
             if t_obj is None:
                 messages.error(request, "任务模板不存在")
             elif not library_user_may_edit_library_task(request.user, t_obj):
-                messages.error(request, "无权删除由他人创建的任务模板")
+                if library_user_is_test_peer(request.user):
+                    messages.error(
+                        request,
+                        "无权删除该任务模板：仅可删除 test 同组创建、或已挂到您可见项目上的模板。",
+                    )
+                else:
+                    messages.error(request, "无权删除由他人创建的任务模板")
             else:
                 label = f"{t_obj.code} · {t_obj.name}"
-                t_obj.delete()
-                messages.success(request, f"已删除任务模板：{label}")
+                try:
+                    t_obj.delete()
+                except ProtectedError:
+                    messages.error(
+                        request,
+                        f"无法删除「{label}」：该模板仍被检测记录或其它业务数据引用，请先解除项目关联或清理相关数据。",
+                    )
+                else:
+                    messages.success(request, f"已删除任务模板：{label}")
             return redirect(_library_task_management_redirect_url(request))
         elif action == "restore_task_template_history":
             try:
@@ -7650,35 +8187,23 @@ def library_task_management(request):
             messages.error(request, "未知操作")
         return redirect(_library_task_management_redirect_url(request))
 
-    tasks = LibraryTask.objects.prefetch_related(
-        "library_files", "report_source_tasks", "task_folder"
-    ).order_by("code")
-    if can_assign_tasks and library_user_is_template_editor(request.user):
-        tasks = tasks.filter(created_by=request.user)
-    elif not can_assign_tasks:
-        _assign_ids = list(
-            LibraryTaskAssignment.objects.filter(assignee=request.user).values_list(
-                "library_task_id", flat=True
-            )
-        )
-        if can_participant_task_library and can_write_task_templates:
-            tasks = tasks.filter(Q(pk__in=_assign_ids) | Q(created_by=request.user))
-        elif can_participant_task_library:
-            tasks = tasks.filter(pk__in=_assign_ids)
-        elif can_write_task_templates:
-            tasks = tasks.filter(created_by=request.user)
+    tasks = library_filter_tasks_for_template_management(
+        LibraryTask.objects.prefetch_related(
+            "library_files", "report_source_tasks", "task_folder"
+        ).order_by("code"),
+        request.user,
+    )
 
     tasks_list = list(tasks)
     fl_path = (request.GET.get("fl_path") or "").strip()
     mt_from_fl_path: int | None = None
     if fl_path:
         for part in fl_path.split("/"):
-            if part.startswith("t-"):
+            if part.startswith(("r-", "s-", "t-")):
                 try:
                     mt_from_fl_path = int(part[2:])
                 except ValueError:
-                    mt_from_fl_path = None
-                break
+                    pass
 
     manage_task = None
     manage_task_id_val = None
@@ -7739,6 +8264,14 @@ def library_task_management(request):
                         .order_by("original_name")
                         if library_file_access_allowed(request.user, f)
                     ]
+                    task_linked_files, _tpl_pruned = keep_library_files_on_disk(
+                        task_linked_files, prune_missing=True
+                    )
+                    if _tpl_pruned:
+                        messages.info(
+                            request,
+                            f"已自动将 {_tpl_pruned} 个模板文件记录移入回收站（媒体目录中无对应文件）",
+                        )
                     linked_ids = {int(f.pk) for f in task_linked_files}
                     task_linked_file_pairs = group_template_files_by_stem(
                         task_linked_files, linked_ids
@@ -7772,25 +8305,34 @@ def library_task_management(request):
     instrument_catalog_for_task: list = []
     task_bound_qc_kind_values: set = set()
     task_bound_rp_kind_values: set = set()
+    task_bound_qc_kind_list: list = []
+    task_bound_rp_kind_list: list = []
     instrument_kind_groups: list = []
+    task_sheet_open = (request.GET.get("sheet") or "").strip().lower()
+    if task_sheet_open not in ("instruments", "files"):
+        task_sheet_open = ""
     if manage_task and task_show_instrument_binding:
         from utils.task_bound_instruments import (
-            KIND_SEP,
             build_instrument_kind_groups,
+            kind_form_value,
             normalize_task_bound_kinds,
         )
 
         instrument_catalog_for_task = list(
-            InstrumentCatalog.objects.filter(is_active=True).order_by("code", "id")
+            InstrumentCatalog.objects.filter(is_active=True)
+            .select_related("checkout_project")
+            .order_by("code", "id")
         )
         instrument_kind_groups = build_instrument_kind_groups(instrument_catalog_for_task)
         bound_kinds = normalize_task_bound_kinds(
             getattr(manage_task, "bound_instrument_ids", None) or []
         )
-        for spec in bound_kinds.get("qualityControl") or []:
-            task_bound_qc_kind_values.add(f"{spec.name}{KIND_SEP}{spec.model}")
-        for spec in bound_kinds.get("radiationProtection") or []:
-            task_bound_rp_kind_values.add(f"{spec.name}{KIND_SEP}{spec.model}")
+        task_bound_qc_kind_list = list(bound_kinds.get("qualityControl") or [])
+        task_bound_rp_kind_list = list(bound_kinds.get("radiationProtection") or [])
+        for spec in task_bound_qc_kind_list:
+            task_bound_qc_kind_values.add(kind_form_value(spec.name, spec.model))
+        for spec in task_bound_rp_kind_list:
+            task_bound_rp_kind_values.add(kind_form_value(spec.name, spec.model))
 
     has_report_source_task_relation = _librarytask_has_report_source_relation()
 
@@ -7820,6 +8362,8 @@ def library_task_management(request):
         for lf in manage_task.library_files.filter(
             category=LibraryFile.CATEGORY_TEMPLATE
         ).order_by("-created_at", "-id"):
+            if not library_file_exists_on_disk(lf):
+                continue
             if not (lf.original_name or "").lower().endswith(".json"):
                 continue
             if is_auxiliary_template_json_file(lf):
@@ -7890,13 +8434,20 @@ def library_task_management(request):
         base_q.append("edit=1")
     if base_q:
         task_explorer_base += "?" + "&".join(base_q)
-    explorer_nav_suffix = "&edit=1" if task_library_edit else ""
+    explorer_nav_suffix = ""
+    if task_library_edit and "edit=1" not in task_explorer_base:
+        explorer_nav_suffix = "&edit=1"
+    task_may_edit = (
+        manage_task is not None
+        and library_user_may_edit_library_task(request.user, manage_task)
+    )
 
     return render(
         request,
         "core/library_task_management.html",
         {
             "can_manage_templates": can_manage_in_task_library,
+            "task_may_edit": task_may_edit,
             "can_assign": can_assign_tasks,
             "can_participant_task_library": can_participant_task_library,
             "projects": projects,
@@ -7937,7 +8488,10 @@ def library_task_management(request):
             "instrument_catalog_for_task": instrument_catalog_for_task,
             "task_bound_qc_kind_values": task_bound_qc_kind_values,
             "task_bound_rp_kind_values": task_bound_rp_kind_values,
+            "task_bound_qc_kind_list": task_bound_qc_kind_list,
+            "task_bound_rp_kind_list": task_bound_rp_kind_list,
             "instrument_kind_groups": instrument_kind_groups,
+            "task_sheet_open": task_sheet_open,
             "workbench_back_url": workbench_back_url,
             "return_project_id": return_project_id,
             "file_library_tabs": [
@@ -8167,10 +8721,34 @@ def hospital_info_manage(request):
             if raw_task and parsed_task is None:
                 messages.error(request, "所选检测任务模板无效")
                 return _redir(edit=True)
+            is_new_equipment = eid is None
+            parsed_bindings = None
+            if "report_task_bindings" in request.POST:
+                bindings_raw = (request.POST.get("report_task_bindings") or "[]").strip()
+                try:
+                    loaded = json_std.loads(bindings_raw or "[]")
+                except json.JSONDecodeError:
+                    messages.error(request, "检测类型与模板绑定格式无效")
+                    return _redir(edit=True)
+                if not isinstance(loaded, list):
+                    messages.error(request, "检测类型与模板绑定格式无效")
+                    return _redir(edit=True)
+                parsed_bindings = normalize_equipment_report_task_bindings(loaded)
+                # 添加设备时表单可能带上空的 report_task_bindings=[]，应走自动绑定而非报错
+                if not parsed_bindings and is_new_equipment:
+                    parsed_bindings = None
+                elif not parsed_report_f and not parsed_bindings:
+                    messages.error(
+                        request,
+                        "请至少添加一种检测类型并选择报告任务模板",
+                    )
+                    return _redir(edit=True)
+            auto_bind = is_new_equipment and parsed_bindings is None
             row, err = upsert_department_equipment(
                 dept,
                 equipment_id=eid,
                 name=request.POST.get("equipment_name", ""),
+                device_type=request.POST.get("equipment_device_type", ""),
                 model=request.POST.get("equipment_model", ""),
                 serial_no=request.POST.get("equipment_serial_no", ""),
                 manufacturer=request.POST.get("equipment_manufacturer", ""),
@@ -8178,6 +8756,8 @@ def hospital_info_manage(request):
                 notes=request.POST.get("equipment_notes", ""),
                 report_file_id=parsed_report_f,
                 report_task_id=parsed_task,
+                report_task_bindings=parsed_bindings,
+                auto_bind_templates=auto_bind,
                 user=request.user,
                 bind_org_for_report=org_ctx if org_ctx.pk != dept.pk else None,
             )
@@ -8223,8 +8803,14 @@ def hospital_info_manage(request):
             if row is None:
                 messages.error(request, "设备不存在")
             else:
+                from apps.core.hospital_info_service import renumber_equipment_instances_for_type
+
                 fl_path = row.department.folder_path()
+                dept_id = row.department_id
+                dt = (row.device_type or "").strip()
                 row.delete()
+                if dt:
+                    renumber_equipment_instances_for_type(dept_id, dt)
                 messages.success(request, "已删除设备")
             return _redir(edit=False)
 
@@ -8319,6 +8905,7 @@ def hospital_info_manage(request):
     org_equipments_editable = False
     org_equipment_pick_department = False
     equipment_cards: list[dict] = []
+    equipment_groups: list[dict] = []
     equipment_dept_picker: dict = {"mode": "none"}
     report_task_options: list[dict] = []
     project_options: list[dict] = []
@@ -8339,33 +8926,43 @@ def hospital_info_manage(request):
             hospital_info_edit
             and explorer_org.level != CommissionOrganization.LEVEL_DEPARTMENT
         )
-        try:
-            backfill_equipment_histories_from_reports(explorer_org)
-        except Exception:
-            pass
+        if hospital_info_edit:
+            try:
+                backfill_equipment_histories_from_reports(explorer_org)
+            except Exception:
+                pass
+        equipment_groups = build_equipment_groups_for_org_view(
+            org_equipments, explorer_org
+        )
         equipment_cards = [
-            {
-                "equipment": eq,
-                "status": equipment_display_status(eq),
-                "can_bind_project": equipment_can_bind_to_project(eq),
-            }
-            for eq in org_equipments
+            inst
+            for grp in equipment_groups
+            for inst in grp.get("instances") or []
         ]
         equipment_dept_picker = build_equipment_department_picker(explorer_org)
-        report_task_options = [
-            {"id": t.pk, "label": f"{t.code} · {t.name}"}
-            for t in library_tasks_for_equipment_binding()[:200]
-        ]
         project_options = [
             {"id": p.pk, "label": f"{p.code} · {p.name}"}
             for p in projects_for_org_binding(explorer_org)[:100]
         ]
     else:
         equipment_cards = []
+        equipment_groups = []
         equipment_dept_picker = {"mode": "none"}
-        report_task_options = []
         project_options = []
         org_equipment_pick_department = False
+
+    report_task_picker_catalog: dict = {}
+    equipment_binding_type_suggestions: list[str] = []
+    if hospital_info_edit:
+        report_task_picker_catalog = build_report_task_picker_catalog(
+            has_report_source_relation=_librarytask_has_report_source_relation(),
+        )
+        equipment_binding_type_suggestions = inspection_type_suggestions_from_picker_catalog(
+            report_task_picker_catalog
+        )
+    from apps.core.equipment_device_type_service import EQUIPMENT_DEVICE_TYPE_CHOICES
+
+    equipment_device_type_choices = list(EQUIPMENT_DEVICE_TYPE_CHOICES)
 
     hospital_info_explorer_base = base_url + ("?edit=1" if hospital_info_edit else "")
 
@@ -8393,10 +8990,13 @@ def hospital_info_manage(request):
             "org_contacts": org_contacts,
             "org_equipments": org_equipments,
             "equipment_cards": equipment_cards,
+            "equipment_groups": equipment_groups,
             "org_equipments_editable": org_equipments_editable,
             "org_equipment_pick_department": org_equipment_pick_department,
             "equipment_dept_picker": equipment_dept_picker,
-            "report_task_options": report_task_options,
+            "report_task_picker_catalog": report_task_picker_catalog,
+            "equipment_binding_type_suggestions": equipment_binding_type_suggestions,
+            "equipment_device_type_choices": equipment_device_type_choices,
             "project_options": project_options,
             "report_file_options": report_file_options,
             "org_project_count": org_project_count,
@@ -8460,6 +9060,9 @@ def hospital_info_equipment_api(request):
                     "department_id": eq.department_id,
                     "campus_picker_key": campus_key,
                     "name": eq.name,
+                    "device_type": eq.device_type or "",
+                    "instance_no": eq.instance_no or 1,
+                    "instance_label": eq.instance_label,
                     "model": eq.model,
                     "serial_no": eq.serial_no,
                     "manufacturer": eq.manufacturer,
@@ -8467,6 +9070,7 @@ def hospital_info_equipment_api(request):
                     "notes": eq.notes,
                     "report_file_id": eq.report_file_id,
                     "report_task_id": eq.report_task_id,
+                    "report_task_bindings": equipment_report_bindings_for_api(eq),
                 },
                 "status": st,
                 "history": equipment_history_rows(eq, request.user),
@@ -8483,13 +9087,27 @@ def hospital_info_equipment_api(request):
             org_ctx = CommissionOrganization.objects.filter(pk=oid, is_active=True).first()
     if org_ctx is None:
         return JsonResponse({"ok": False, "message": "请先选择机构"}, status=400)
-    return JsonResponse(
-        {
-            "ok": True,
-            "equipment": None,
-            "department_picker": build_equipment_department_picker(org_ctx),
-        }
-    )
+    payload: dict = {
+        "ok": True,
+        "equipment": None,
+        "department_picker": build_equipment_department_picker(org_ctx),
+    }
+    dtype = (request.GET.get("device_type") or "").strip()
+    dept_raw = (request.GET.get("department_id") or "").strip()
+    dept_id_hint: int | None = None
+    if org_ctx.level == CommissionOrganization.LEVEL_DEPARTMENT:
+        dept_id_hint = org_ctx.pk
+    elif dept_raw:
+        try:
+            dept_id_hint = int(dept_raw)
+        except ValueError:
+            dept_id_hint = None
+    if dtype and dept_id_hint:
+        n = next_equipment_instance_no(dept_id_hint, dtype)
+        payload["next_instance_no"] = n
+        payload["next_instance_label"] = f"设备{n}"
+        payload["suggested_name"] = equipment_default_display_name(dtype, n)
+    return JsonResponse(payload)
 
 
 @login_required

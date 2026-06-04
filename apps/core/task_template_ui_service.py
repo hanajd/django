@@ -175,26 +175,13 @@ def append_edit_mode_to_explorer_links(
     *,
     edit: bool,
 ) -> None:
-    """导航树/文件夹卡片链接追加 edit=1，避免点选后退出编辑。"""
-    if not edit:
-        return
-    suffix = "&edit=1"
+    """
+    侧栏树节点 link_suffix 已含 ``manage_task``（见 library_task_folder_service）。
 
-    def _walk(nodes: list[TreeNode]) -> None:
-        for n in nodes:
-            if n.link_suffix and suffix not in n.link_suffix:
-                n.link_suffix = str(n.link_suffix) + suffix
-            elif not n.link_suffix:
-                n.link_suffix = suffix
-            if n.children:
-                _walk(n.children)
-
-    _walk(tree)
-    for ent in entries:
-        if ent.link_suffix and suffix not in ent.link_suffix:
-            ent.link_suffix = str(ent.link_suffix) + suffix
-        elif not ent.link_suffix:
-            ent.link_suffix = suffix
+    ``edit=1`` 由 ``task_explorer_base`` / ``explorer_nav_suffix`` 统一附加，
+    勿在此再拼 ``&edit=1``，否则会出现 ``?edit=1&…&edit=1``。
+    """
+    return
 
 
 def suggested_template_json_save_name(pdf_original_name: str) -> str:
@@ -448,12 +435,24 @@ def build_htmlpdf_task_catalog(
     def _folder_section(folder: LibraryTaskFolder | None, folder_path: str, label: str) -> dict:
         fid = folder.pk if folder else None
         reports = [_report_block(r) for r in report_tasks_for_folder(tasks, fid)]
+        report_count = len(reports)
+        if folder is not None:
+            report_by_folder: dict[int | None, list] = {}
+            for t in tasks:
+                if t.output_target != LibraryTask.OUTPUT_REPORT:
+                    continue
+                report_by_folder.setdefault(getattr(t, "task_folder_id", None), []).append(t)
+            from apps.core.library_task_folder_service import count_reports_in_folder_tree
+
+            report_count = count_reports_in_folder_tree(
+                folder.pk, report_by_folder, children_by_parent
+            )
         return {
             "folder_id": fid,
             "folder_name": label,
             "folder_path": folder_path,
             "reports": reports,
-            "report_count": len(reports),
+            "report_count": report_count,
         }
 
     sections: list[dict] = []

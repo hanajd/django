@@ -14,10 +14,19 @@ from apps.core.hospital_info_service import (
     bind_equipment_tasks_to_project,
     collect_library_tasks_for_project_equipments,
     equipment_display_status,
+    equipment_has_report_template_config,
+    equipment_project_bind_type_options,
     equipments_for_org_view,
     library_tasks_for_equipment_binding,
+    normalize_equipment_report_task,
     resolve_equipment_report_task,
     sync_project_library_tasks_from_equipments,
+)
+from apps.core.library_task_folder_service import (
+    UNCATEGORIZED_LABEL,
+    index_task_folders,
+    site_tasks_for_report,
+    task_folders_active_queryset,
 )
 from apps.core.models import (
     CommissionOrgEquipment,
@@ -26,6 +35,7 @@ from apps.core.models import (
     LibraryProject,
     LibraryProjectEquipment,
     LibraryTask,
+    LibraryTaskFolder,
 )
 
 
@@ -89,7 +99,9 @@ def project_equipment_queryset(project: LibraryProject) -> QuerySet[LibraryProje
             "equipment__department",
             "equipment__department__parent",
             "equipment__report_task",
+            "equipment__report_task__task_folder",
             "report_task",
+            "report_task__task_folder",
         )
         .order_by("sort_order", "id")
     )
@@ -98,34 +110,90 @@ def project_equipment_queryset(project: LibraryProject) -> QuerySet[LibraryProje
 def effective_report_task(link: LibraryProjectEquipment) -> LibraryTask | None:
     if link.report_task_id:
         return link.report_task
-    return resolve_equipment_report_task(link.equipment)
+    itype = (link.inspection_type or "").strip()
+    return resolve_equipment_report_task(
+        link.equipment, inspection_type=itype or None
+    )
+
+
+def report_task_folder_breadcrumb(task: LibraryTask | None) -> str:
+    task = normalize_equipment_report_task(task)
+    if task is None:
+        return ""
+    if not task.task_folder_id:
+        return UNCATEGORIZED_LABEL
+    folder = getattr(task, "task_folder", None)
+    if folder is None:
+        return UNCATEGORIZED_LABEL
+    return " / ".join(f.name for f in folder.ancestors_chain())
+
+
+def library_task_equipment_context_by_task_id(
+    project: LibraryProject,
+) -> dict[int, dict[str, str]]:
+    """
+    项目内库任务 id → 委托设备上下文（App 任务列表展示用）。
+
+    委托单位名称取设备挂载科室（department）的 full_display_name；
+    设备类型、检测类型来自委托设备链接。
+    """
+    ctx: dict[int, dict[str, str]] = {}
+    for link in project_equipment_queryset(project):
+        eq = link.equipment
+        dept = eq.department
+        if dept is not None:
+            commission_name = dept.full_display_name
+        else:
+            commission_name = (project.commission_organization or "").strip()
+            if not commission_name and project.commission_org_id:
+                org = project.commission_org
+                commission_name = org.full_display_name if org else ""
+        device_type = (eq.device_type or "").strip()
+        inspection_type = (link.inspection_type or "").strip()
+        task = normalize_equipment_report_task(effective_report_task(link))
+        if task is None:
+            continue
+        task_ids = {task.pk}
+        for src in task.report_source_tasks.filter(
+            output_target=LibraryTask.OUTPUT_SITE_RECORD
+        ).order_by("code", "id"):
+            task_ids.add(src.pk)
+        payload = {
+            "commissionOrganization": commission_name,
+            "deviceType": device_type,
+            "inspectionType": inspection_type,
+        }
+        for tid in task_ids:
+            ctx[tid] = payload
+    return ctx
 
 
 def project_equipment_cards(project: LibraryProject) -> list[dict]:
     cards: list[dict] = []
     for link in project_equipment_queryset(project):
         eq = link.equipment
-        task = effective_report_task(link)
+        task = normalize_equipment_report_task(effective_report_task(link))
         site_labels: list[str] = []
         report_label = ""
         if task is not None:
-            if task.output_target == LibraryTask.OUTPUT_REPORT:
-                report_label = f"{task.code} · {task.name}"
-                site_labels = [
-                    f"{t.code} · {t.name}" for t in task.report_source_tasks.all().order_by("code")
-                ]
-            else:
-                report_label = "—"
-                site_labels = [f"{task.code} · {task.name}"]
-                for rt in task.report_target_tasks.all().order_by("code"):
-                    report_label = f"{rt.code} · {rt.name}"
+            report_label = f"{task.code} · {task.name}"
+            site_labels = [
+                f"{t.code} · {t.name}"
+                for t in task.report_source_tasks.filter(
+                    output_target=LibraryTask.OUTPUT_SITE_RECORD
+                ).order_by("code")
+            ]
+        itype = (link.inspection_type or "").strip()
         cards.append(
             {
                 "link": link,
                 "equipment": eq,
+                "inspection_type": itype,
+                "inspection_type_label": itype or "—",
                 "status": equipment_display_status(eq),
                 "report_task": task,
                 "report_task_label": report_label or "—",
+                "report_task_folder": report_task_folder_breadcrumb(task),
                 "site_task_labels": site_labels,
                 "department_label": eq.department.full_display_name,
                 "can_sync_tasks": task is not None,
@@ -146,15 +214,101 @@ def available_equipments_for_project(
     )
     if scope is None:
         return CommissionOrgEquipment.objects.none()
-    bound_ids = LibraryProjectEquipment.objects.filter(project=project).values_list(
-        "equipment_id", flat=True
-    )
     return (
         equipments_for_org_view(scope)
-        .exclude(pk__in=bound_ids)
         .select_related("department", "report_task")
         .order_by("department__name", "name", "id")
     )
+
+
+def preview_equipment_folder_tree_for_org(org: CommissionOrganization) -> list[dict]:
+    """新建项目向导：按科室文件夹分组设备（供前端文件夹卡片导航）。"""
+    buckets: dict[str, list[dict]] = {}
+    for row in preview_equipment_rows_for_org(org):
+        folder_name = (row.get("department") or "").strip() or "未分配科室"
+        buckets.setdefault(folder_name, []).append(row)
+    folders: list[dict] = []
+    for name in sorted(buckets.keys(), key=lambda s: (s == "未分配科室", s)):
+        items = buckets[name]
+        folders.append(
+            {
+                "folder_key": name,
+                "name": name,
+                "equipment_count": len(items),
+                "equipments": items,
+            }
+        )
+    return folders
+
+
+def preview_equipment_rows_for_org(org: CommissionOrganization) -> list[dict]:
+    """新建项目向导：按委托单位范围列出可绑定的设备（含检测类型选项）。"""
+    rows: list[dict] = []
+    for eq in equipments_for_org_view(org):
+        if not equipment_has_report_template_config(eq):
+            continue
+        type_options = equipment_project_bind_type_options(eq)
+        if not type_options:
+            continue
+        dept = eq.department
+        rows.append(
+            {
+                "equipment_id": eq.pk,
+                "name": eq.name,
+                "model": (eq.model or "").strip(),
+                "serial_no": (eq.serial_no or "").strip(),
+                "department": dept.full_display_name if dept else "",
+                "type_options": type_options,
+                "default_inspection_type": type_options[0]["inspection_type"],
+            }
+        )
+    return rows
+
+
+def available_equipment_rows_for_project(
+    project: LibraryProject,
+    *,
+    scope_org: CommissionOrganization | None = None,
+    fl_path: str = "",
+) -> list[dict]:
+    """可加入本次委托的设备行（含尚未加入的检测类型选项）。"""
+    bound_pairs = {
+        (eid, (itype or "").strip())
+        for eid, itype in LibraryProjectEquipment.objects.filter(project=project).values_list(
+            "equipment_id", "inspection_type"
+        )
+    }
+    rows: list[dict] = []
+    for eq in available_equipments_for_project(
+        project, scope_org=scope_org, fl_path=fl_path
+    ):
+        if not equipment_has_report_template_config(eq):
+            continue
+        type_options = [
+            o
+            for o in equipment_project_bind_type_options(eq)
+            if (eq.pk, o["inspection_type"]) not in bound_pairs
+        ]
+        if not type_options:
+            continue
+        rows.append(
+            {
+                "equipment": eq,
+                "type_options": type_options,
+                "default_inspection_type": type_options[0]["inspection_type"],
+            }
+        )
+    return rows
+
+
+def _project_equipment_link_exists(
+    project: LibraryProject, equipment_id: int, inspection_type: str
+) -> bool:
+    return LibraryProjectEquipment.objects.filter(
+        project=project,
+        equipment_id=equipment_id,
+        inspection_type=inspection_type,
+    ).exists()
 
 
 def bind_equipments_to_project(
@@ -162,6 +316,7 @@ def bind_equipments_to_project(
     equipment_ids: list[int],
     user: User,
     *,
+    equipment_inspection_types: dict[int, str] | None = None,
     scope_org: CommissionOrganization | None = None,
     fl_path: str = "",
 ) -> tuple[int, list[str]]:
@@ -178,47 +333,65 @@ def bind_equipments_to_project(
         return 0, ["当前浏览范围与项目所属医院不一致，无法绑定设备"]
 
     scope_hint = equipment_scope_label(scope)
-    allowed_ids = set(
-        available_equipments_for_project(project, scope_org=scope, fl_path=fl_path).values_list(
-            "pk", flat=True
+    allowed_rows = {
+        row["equipment"].pk: row
+        for row in available_equipment_rows_for_project(
+            project, scope_org=scope, fl_path=fl_path
         )
-    )
+    }
+    allowed_ids = set(allowed_rows.keys())
+    type_map = equipment_inspection_types or {}
     errors: list[str] = []
     added = 0
     for eid in equipment_ids:
-        if eid not in allowed_ids:
-            eq = CommissionOrgEquipment.objects.filter(pk=eid, is_active=True).first()
-            label = eq.name if eq else str(eid)
-            if LibraryProjectEquipment.objects.filter(project=project, equipment_id=eid).exists():
-                errors.append(f"「{label}」已在本次委托中")
-            else:
-                errors.append(
-                    f"设备「{label}」不可加入（不在{scope_hint}范围内，或已加入本次委托）"
-                )
-            continue
         eq = CommissionOrgEquipment.objects.filter(pk=eid, is_active=True).select_related(
             "department"
         ).first()
+        label = eq.name if eq else str(eid)
+        if eid not in allowed_ids:
+            itype_try = (type_map.get(eid) or "").strip()
+            if eq and itype_try and _project_equipment_link_exists(project, eid, itype_try):
+                errors.append(f"「{label}」（{itype_try}）已在本次委托中")
+            else:
+                errors.append(
+                    f"设备「{label}」不可加入（不在{scope_hint}范围内，或该检测类型已加入）"
+                )
+            continue
         if eq is None:
             continue
-        task = resolve_equipment_report_task(eq)
-        if task is None:
-            errors.append(f"「{eq.name}」未绑定检测任务模板，请先在设备主数据或下方选择模板")
+        itype = (type_map.get(eid) or "").strip()
+        type_options = equipment_project_bind_type_options(eq)
+        valid_types = {o["inspection_type"] for o in type_options}
+        if not itype and len(type_options) == 1:
+            itype = type_options[0]["inspection_type"]
+        if not itype:
+            errors.append(f"「{eq.name}」请选择本次检测类型")
             continue
-        link, created = LibraryProjectEquipment.objects.get_or_create(
+        if valid_types and itype not in valid_types:
+            errors.append(f"「{eq.name}」未配置「{itype}」对应的报告模板")
+            continue
+        if _project_equipment_link_exists(project, eid, itype):
+            errors.append(f"「{eq.name}」（{itype}）已在本次委托中")
+            continue
+        task = resolve_equipment_report_task(eq, inspection_type=itype)
+        if task is None:
+            errors.append(f"「{eq.name}」未绑定「{itype}」对应的报告任务模板")
+            continue
+        link = LibraryProjectEquipment.objects.create(
             project=project,
             equipment=eq,
-            defaults={"report_task": task},
+            inspection_type=itype,
+            report_task=task,
         )
-        if not created and link.report_task_id != task.pk:
-            link.report_task = task
-            link.save(update_fields=["report_task"])
         if not eq.report_task_id:
             eq.report_task = task
             eq.save(update_fields=["report_task_id", "updated_at"])
-        _, err = bind_equipment_tasks_to_project(eq, project, user)
+        _, err = bind_equipment_tasks_to_project(
+            eq, project, user, inspection_type=itype
+        )
         if err:
-            errors.append(f"「{eq.name}」：{err}")
+            link.delete()
+            errors.append(f"「{eq.name}」（{itype}）：{err}")
         else:
             added += 1
     return added, errors
@@ -298,7 +471,10 @@ def update_project_equipment_report_task(
     eq = link.equipment
     eq.report_task = task
     eq.save(update_fields=["report_task_id", "updated_at"])
-    _, err = bind_equipment_tasks_to_project(eq, project, user)
+    itype = (link.inspection_type or "").strip()
+    _, err = bind_equipment_tasks_to_project(
+        eq, project, user, inspection_type=itype or None
+    )
     if err is None:
         sync_project_library_tasks_from_equipments(project, user)
     return err
@@ -309,3 +485,126 @@ def report_task_options_for_project() -> list[dict]:
         {"id": t.pk, "label": f"{t.code} · {t.name}"}
         for t in library_tasks_for_equipment_binding()[:300]
     ]
+
+
+def _report_picker_item(
+    report: LibraryTask,
+    *,
+    has_report_source_relation: bool,
+    folder_breadcrumb: str = "",
+) -> dict:
+    sites: list[dict] = []
+    if has_report_source_relation:
+        for st in site_tasks_for_report(
+            report, {report.pk: report}, has_report_source_relation=True
+        ):
+            sites.append({"code": st.code or "", "name": st.name or ""})
+    return {
+        "id": int(report.pk),
+        "code": report.code or "",
+        "name": report.name or "",
+        "label": f"{report.code} · {report.name}" if report.code else (report.name or ""),
+        "folderBreadcrumb": folder_breadcrumb,
+        "siteTasks": sites,
+    }
+
+
+def _folder_picker_node(
+    folder: LibraryTaskFolder,
+    *,
+    children_by_parent: dict,
+    reports_by_folder: dict,
+    has_report_source_relation: bool,
+    breadcrumb_prefix: str = "",
+) -> dict:
+    from apps.core.library_task_folder_service import count_reports_in_folder_tree
+
+    child_folders = children_by_parent.get(folder.pk, [])
+    reports = reports_by_folder.get(folder.pk, [])
+    n_reports = count_reports_in_folder_tree(
+        folder.pk, reports_by_folder, children_by_parent
+    )
+    breadcrumb = folder.name if not breadcrumb_prefix else f"{breadcrumb_prefix} / {folder.name}"
+    meta = f"{n_reports} 个报告"
+    if child_folders:
+        meta += f" · {len(child_folders)} 个子分类"
+    if n_reports != len(reports) and not reports and child_folders:
+        meta += "（在子分类下）"
+    return {
+        "folderId": folder.pk,
+        "name": folder.name,
+        "type": "folder",
+        "meta": meta,
+        "folders": [
+            _folder_picker_node(
+                sf,
+                children_by_parent=children_by_parent,
+                reports_by_folder=reports_by_folder,
+                has_report_source_relation=has_report_source_relation,
+                breadcrumb_prefix=breadcrumb,
+            )
+            for sf in child_folders
+        ],
+        "reports": [
+            _report_picker_item(
+                r,
+                has_report_source_relation=has_report_source_relation,
+                folder_breadcrumb=breadcrumb,
+            )
+            for r in reports
+        ],
+    }
+
+
+def build_report_task_picker_catalog(*, has_report_source_relation: bool = True) -> dict:
+    """
+    委托立项选报告模板：检测类型 → 设备类型 → 报告（含现场记录摘要），供悬浮窗 JS 导航。
+    """
+    from django.db.models import Prefetch
+
+    folder_rows = list(task_folders_active_queryset())
+    _, children_by_parent = index_task_folders(folder_rows)
+    site_prefetch = Prefetch(
+        "report_source_tasks",
+        queryset=LibraryTask.objects.filter(
+            output_target=LibraryTask.OUTPUT_SITE_RECORD
+        ).order_by("code", "id"),
+    )
+    reports = list(
+        library_tasks_for_equipment_binding()
+        .select_related("task_folder")
+        .prefetch_related(site_prefetch)
+        .order_by("code", "id")
+    )
+    reports_by_folder: dict[int | None, list[LibraryTask]] = {}
+    for report in reports:
+        reports_by_folder.setdefault(getattr(report, "task_folder_id", None), []).append(report)
+
+    root_folders = [
+        _folder_picker_node(
+            f,
+            children_by_parent=children_by_parent,
+            reports_by_folder=reports_by_folder,
+            has_report_source_relation=has_report_source_relation,
+        )
+        for f in children_by_parent.get(None, [])
+    ]
+    uncategorized = reports_by_folder.get(None, [])
+    return {
+        "rootLabel": "全部检测类型",
+        "folders": root_folders,
+        "uncategorized": {
+            "name": UNCATEGORIZED_LABEL,
+            "type": "folder",
+            "meta": f"{len(uncategorized)} 个报告",
+            "folders": [],
+            "reports": [
+                _report_picker_item(
+                    r,
+                    has_report_source_relation=has_report_source_relation,
+                    folder_breadcrumb=UNCATEGORIZED_LABEL,
+                )
+                for r in uncategorized
+            ],
+        },
+    }

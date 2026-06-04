@@ -146,8 +146,120 @@ def equipments_for_org_view(org: CommissionOrganization) -> QuerySet[CommissionO
             department__is_active=True,
         )
         .select_related("department", "report_file", "report_task")
-        .order_by("department_id", "sort_order", "id")
+        .order_by("department_id", "device_type", "instance_no", "sort_order", "id")
     )
+
+
+def equipment_instance_label(instance_no: int) -> str:
+    return f"设备{max(1, int(instance_no or 1))}"
+
+
+def equipment_default_display_name(device_type: str, instance_no: int) -> str:
+    dt = (device_type or "").strip()
+    if not dt:
+        return equipment_instance_label(instance_no)
+    return f"{dt} · {equipment_instance_label(instance_no)}"
+
+
+def next_equipment_instance_no(
+    department_id: int,
+    device_type: str,
+    *,
+    exclude_id: int | None = None,
+) -> int:
+    from django.db.models import Max
+
+    dt = (device_type or "").strip()
+    if not dt:
+        return 1
+    qs = CommissionOrgEquipment.objects.filter(
+        department_id=department_id,
+        device_type=dt,
+        is_active=True,
+    )
+    if exclude_id:
+        qs = qs.exclude(pk=exclude_id)
+    current = qs.aggregate(m=Max("instance_no"))["m"] or 0
+    return int(current) + 1
+
+
+def renumber_equipment_instances_for_type(
+    department_id: int,
+    device_type: str,
+) -> None:
+    """删除或改类型后，将同科室同类型台次重排为 1..n。"""
+    dt = (device_type or "").strip()
+    if not dt:
+        return
+    rows = list(
+        CommissionOrgEquipment.objects.filter(
+            department_id=department_id,
+            device_type=dt,
+            is_active=True,
+        ).order_by("instance_no", "sort_order", "id")
+    )
+    for idx, row in enumerate(rows, start=1):
+        updates: list[str] = []
+        if row.instance_no != idx:
+            row.instance_no = idx
+            updates.append("instance_no")
+        default_name = equipment_default_display_name(dt, idx)
+        if (row.name or "").strip() in ("", dt, default_name) or " · 设备" in (row.name or ""):
+            if row.name != default_name:
+                row.name = default_name
+                updates.append("name")
+        if updates:
+            updates.append("updated_at")
+            row.save(update_fields=updates)
+
+
+def build_equipment_card_dict(eq: CommissionOrgEquipment) -> dict:
+    return {
+        "equipment": eq,
+        "instance_label": eq.instance_label,
+        "status": equipment_display_status(eq),
+        "can_bind_project": equipment_can_bind_to_project(eq),
+        "report_binding_labels": equipment_report_binding_labels(eq),
+    }
+
+
+def build_equipment_groups_for_org_view(
+    equipments: list[CommissionOrgEquipment],
+    explorer_org: CommissionOrganization | None,
+) -> list[dict]:
+    """
+    同设备类型合并展示：科室视图按 (科室, 类型) 分组；医院/院区视图按设备类型跨科室合并。
+    """
+    merge_across_departments = bool(
+        explorer_org
+        and explorer_org.level != CommissionOrganization.LEVEL_DEPARTMENT
+    )
+    buckets: dict[tuple, list[CommissionOrgEquipment]] = {}
+    for eq in equipments:
+        dt = (eq.device_type or "").strip() or "未分类"
+        key = (dt,) if merge_across_departments else (eq.department_id, dt)
+        buckets.setdefault(key, []).append(eq)
+    groups: list[dict] = []
+    for key, rows in buckets.items():
+        rows.sort(key=lambda e: (e.department_id, e.instance_no, e.id))
+        first = rows[0]
+        dt = (first.device_type or "").strip() or "未分类"
+        dept_labels = sorted(
+            {e.department.full_display_name for e in rows if e.department_id}
+        )
+        groups.append(
+            {
+                "device_type": dt,
+                "count": len(rows),
+                "department_labels": dept_labels,
+                "department_label": dept_labels[0] if len(dept_labels) == 1 else "",
+                "merge_across_departments": merge_across_departments,
+                "report_binding_labels": equipment_report_binding_labels(first),
+                "instances": [build_equipment_card_dict(e) for e in rows],
+            }
+        )
+    groups.sort(key=lambda g: (g["device_type"], g.get("department_label") or ""))
+    return groups
 
 
 def library_tasks_for_equipment_binding() -> QuerySet[LibraryTask]:
@@ -188,6 +300,140 @@ def parse_report_task_id(raw: str) -> int | None:
     if library_tasks_for_equipment_binding().filter(pk=tid).exists():
         return tid
     return None
+
+
+def normalize_equipment_report_task_bindings(raw) -> list[dict]:
+    """校验并去重设备按检测类型的报告模板绑定。"""
+    if not isinstance(raw, list):
+        return []
+    out: list[dict] = []
+    seen_types: set[str] = set()
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        itype = str(row.get("inspection_type") or "").strip()
+        if not itype or itype in seen_types:
+            continue
+        try:
+            tid = int(row.get("report_task_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not tid or parse_report_task_id(str(tid)) is None:
+            continue
+        seen_types.add(itype)
+        out.append({"inspection_type": itype, "report_task_id": tid})
+    return out
+
+
+def equipment_report_bindings_for_api(eq: CommissionOrgEquipment) -> list[dict]:
+    """设备编辑/API：按检测类型返回绑定及模板摘要。"""
+    bindings = normalize_equipment_report_task_bindings(
+        eq.report_task_bindings if isinstance(eq.report_task_bindings, list) else []
+    )
+    if not bindings and eq.report_task_id:
+        from apps.core.equipment_device_type_service import infer_inspection_type_for_report_task
+
+        task = LibraryTask.objects.filter(
+            pk=eq.report_task_id, output_target=LibraryTask.OUTPUT_REPORT
+        ).first()
+        itype = infer_inspection_type_for_report_task(task) or "默认"
+        bindings = [{"inspection_type": itype, "report_task_id": eq.report_task_id}]
+    task_ids = {b["report_task_id"] for b in bindings}
+    tasks = {
+        t.pk: t
+        for t in LibraryTask.objects.filter(
+            pk__in=task_ids, output_target=LibraryTask.OUTPUT_REPORT
+        )
+    }
+    rows: list[dict] = []
+    for b in bindings:
+        t = tasks.get(b["report_task_id"])
+        rows.append(
+            {
+                "inspection_type": b["inspection_type"],
+                "report_task_id": b["report_task_id"],
+                "task_code": (t.code if t else "") or "",
+                "task_name": (t.name if t else "") or "",
+                "task_label": f"{t.code} · {t.name}" if t else f"模板 #{b['report_task_id']}",
+            }
+        )
+    return rows
+
+
+def equipment_project_bind_type_options(eq: CommissionOrgEquipment) -> list[dict]:
+    """工作台加入委托时可选的检测类型（来自设备主数据绑定）。"""
+    rows = equipment_report_bindings_for_api(eq)
+    if rows:
+        return [
+            {
+                "inspection_type": r["inspection_type"],
+                "report_task_id": r["report_task_id"],
+                "task_label": r["task_label"],
+            }
+            for r in rows
+        ]
+    task = normalize_equipment_report_task(eq.report_task) if eq.report_task_id else None
+    if task is not None:
+        from apps.core.equipment_device_type_service import infer_inspection_type_for_report_task
+
+        itype = infer_inspection_type_for_report_task(task) or "默认"
+        return [
+            {
+                "inspection_type": itype,
+                "report_task_id": task.pk,
+                "task_label": f"{task.code} · {task.name}",
+            }
+        ]
+    return []
+
+
+def equipment_report_binding_labels(eq: CommissionOrgEquipment) -> list[str]:
+    return [
+        f"{r['inspection_type']}：{r['task_label']}"
+        for r in equipment_report_bindings_for_api(eq)
+    ]
+
+
+def equipment_has_report_template_config(eq: CommissionOrgEquipment) -> bool:
+    if normalize_equipment_report_task_bindings(
+        eq.report_task_bindings if isinstance(eq.report_task_bindings, list) else []
+    ):
+        return True
+    if eq.report_task_id:
+        return True
+    return resolve_equipment_report_task(eq) is not None
+
+
+def all_tasks_for_equipment_project_bind(
+    eq: CommissionOrgEquipment,
+) -> list[LibraryTask]:
+    """加入项目时合并各检测类型绑定的报告及现场记录任务。"""
+    bindings = normalize_equipment_report_task_bindings(
+        eq.report_task_bindings if isinstance(eq.report_task_bindings, list) else []
+    )
+    if bindings:
+        tasks: list[LibraryTask] = []
+        seen: set[int] = set()
+        for row in bindings:
+            for t in tasks_for_equipment_project_bind(
+                eq, inspection_type=row["inspection_type"]
+            ):
+                if t.pk not in seen:
+                    tasks.append(t)
+                    seen.add(t.pk)
+        if tasks:
+            return tasks
+    return tasks_for_equipment_project_bind(eq)
+
+
+def inspection_type_suggestions_from_picker_catalog(catalog: dict) -> list[str]:
+    names: list[str] = []
+    for f in catalog.get("folders") or []:
+        if isinstance(f, dict):
+            name = str(f.get("name") or "").strip()
+            if name:
+                names.append(name)
+    return names
 
 
 def inspection_meta_from_report_file(lf: LibraryFile) -> tuple[str, datetime | None, dict | None]:
@@ -308,11 +554,27 @@ def record_equipment_inspection_from_report(
 
 
 def backfill_equipment_histories_from_reports(org: CommissionOrganization) -> None:
-    """从已绑定报告为设备补建历史（页面加载时轻量同步）。"""
-    for eq in equipments_for_org_view(org).filter(report_file_id__isnull=False):
+    """
+    为已绑定报告但尚无历史行的设备补建检测历史（一次性补数据）。
+    已有 (equipment, report_file) 历史则跳过，避免每次浏览/跳转整页 GET 重复解析报告与写库。
+    """
+    qs = equipments_for_org_view(org).filter(report_file_id__isnull=False).select_related(
+        "report_file"
+    )
+    rows = list(qs)
+    if not rows:
+        return
+    eq_ids = [eq.pk for eq in rows]
+    existing_pairs = set(
+        CommissionOrgEquipmentHistory.objects.filter(equipment_id__in=eq_ids).values_list(
+            "equipment_id", "report_file_id"
+        )
+    )
+    for eq in rows:
         lf = eq.report_file
-        if lf is not None:
-            record_equipment_inspection_from_report(eq, lf)
+        if lf is None or (eq.pk, lf.pk) in existing_pairs:
+            continue
+        record_equipment_inspection_from_report(eq, lf)
 
 
 def equipment_display_status(eq: CommissionOrgEquipment) -> dict:
@@ -326,14 +588,14 @@ def equipment_display_status(eq: CommissionOrgEquipment) -> dict:
             "hint": f"上次检测 {dt_label} · 委托编号 {eq.last_commission_no or '—'}",
             "badge_class": "bg-emerald-50 text-emerald-800 ring-emerald-200/80",
         }
-    task_label = ""
-    if eq.report_task_id:
-        task_label = f"{eq.report_task.code} · {eq.report_task.name}"
-    hint = (
-        f"已绑定报告模板：{task_label}"
-        if task_label
-        else "请绑定报告层级的任务模板（一台设备一份报告），加入项目后开展检测"
-    )
+    labels = equipment_report_binding_labels(eq)
+    if labels:
+        hint = "已绑定报告模板：" + "；".join(labels)
+    else:
+        hint = (
+            "请选择设备类型保存后将自动绑定验收/状态检测模板；"
+            "也可在编辑中手动调整"
+        )
     return {
         "key": "pending",
         "label": "未检测",
@@ -466,7 +728,7 @@ def resolve_equipment_report_task(
 
 
 def equipment_can_bind_to_project(eq: CommissionOrgEquipment) -> bool:
-    return resolve_equipment_report_task(eq) is not None
+    return len(all_tasks_for_equipment_project_bind(eq)) > 0
 
 
 def tasks_for_equipment_project_bind(
@@ -499,7 +761,22 @@ def collect_library_tasks_for_project_equipments(project: LibraryProject) -> lis
         "equipment", "report_task"
     ):
         eq = link.equipment
-        for t in tasks_for_equipment_project_bind(eq):
+        itype = (link.inspection_type or "").strip()
+        if link.report_task_id:
+            root = normalize_equipment_report_task(link.report_task)
+        else:
+            root = resolve_equipment_report_task(eq, inspection_type=itype or None)
+        if root is None:
+            continue
+        chain = [root]
+        chain_seen = {root.pk}
+        for src in root.report_source_tasks.filter(
+            output_target=LibraryTask.OUTPUT_SITE_RECORD
+        ).order_by("code", "id"):
+            if src.pk not in chain_seen:
+                chain.append(src)
+                chain_seen.add(src.pk)
+        for t in chain:
             if t.pk not in seen:
                 seen.add(t.pk)
                 tasks.append(t)
@@ -547,15 +824,30 @@ def bind_equipment_tasks_to_project(
     eq: CommissionOrgEquipment,
     project: LibraryProject,
     user: User,
+    *,
+    inspection_type: str | None = None,
 ) -> tuple[int, str | None]:
     from apps.core.library_file_service import attach_files_to_projects
 
-    root = resolve_equipment_report_task(eq)
-    if root is not None and not eq.report_task_id:
-        eq.report_task_id = root.pk
+    bindings = normalize_equipment_report_task_bindings(
+        eq.report_task_bindings if isinstance(eq.report_task_bindings, list) else []
+    )
+    if bindings and not eq.report_task_id:
+        eq.report_task_id = bindings[0]["report_task_id"]
         eq.save(update_fields=["report_task_id", "updated_at"])
-    tasks = tasks_for_equipment_project_bind(eq)
+    elif not bindings:
+        root = resolve_equipment_report_task(eq)
+        if root is not None and not eq.report_task_id:
+            eq.report_task_id = root.pk
+            eq.save(update_fields=["report_task_id", "updated_at"])
+    key = (inspection_type or "").strip()
+    if key:
+        tasks = tasks_for_equipment_project_bind(eq, inspection_type=key)
+    else:
+        tasks = all_tasks_for_equipment_project_bind(eq)
     if not tasks:
+        if key:
+            return 0, f"该设备未配置「{key}」对应的报告任务模板，请先在医院信息中绑定"
         return 0, "该设备未绑定检测任务模板，请先在设备信息中选择，或确保已关联检测报告"
     eq_hospital = _hospital_for_org(eq.department)
     if not project.commission_org_id:
@@ -852,11 +1144,66 @@ def merge_equipment_post_with_report_fields(
     return out
 
 
+def sync_commission_equipment_from_client_payload(payload: dict) -> None:
+    """App 现场检测草稿/提交时，将 equipmentInfo 回写委托单位设备主数据。"""
+    if not isinstance(payload, dict):
+        return
+    raw = (
+        str(payload.get("commissionOrgEquipmentId") or payload.get("equipmentId") or "")
+        .strip()
+    )
+    if not raw:
+        return
+    try:
+        eq_id = int(raw)
+    except (TypeError, ValueError):
+        return
+    eq = CommissionOrgEquipment.objects.filter(pk=eq_id, is_active=True).first()
+    if eq is None:
+        return
+    ei = payload.get("equipmentInfo")
+    if not isinstance(ei, dict) or not ei:
+        return
+    apply_equipment_fields_from_submit_payload(eq, {"equipmentInfo": ei}, fill_blanks_only=False)
+
+
+def apply_equipment_fields_from_submit_payload(
+    equipment: CommissionOrgEquipment,
+    payload: dict,
+    *,
+    fill_blanks_only: bool = False,
+) -> list[str]:
+    """现场记录/报告提交中的 equipmentInfo 回写设备主数据（仅更新有值的字段）。"""
+    if not isinstance(payload, dict):
+        return []
+    fields = equipment_fields_from_submit_payload(payload)
+    update_fields: list[str] = []
+    for attr, key in (
+        ("name", "name"),
+        ("model", "model"),
+        ("serial_no", "serial_no"),
+        ("manufacturer", "manufacturer"),
+        ("location", "location"),
+    ):
+        val = (fields.get(key) or "").strip()
+        if not val:
+            continue
+        cur = (getattr(equipment, attr) or "").strip()
+        if fill_blanks_only and cur:
+            continue
+        setattr(equipment, attr, val)
+        update_fields.append(attr)
+    if update_fields:
+        equipment.save(update_fields=update_fields + ["updated_at"])
+    return update_fields
+
+
 def upsert_department_equipment(
     dept: CommissionOrganization,
     *,
     equipment_id: int | None,
     name: str,
+    device_type: str = "",
     model: str = "",
     serial_no: str = "",
     manufacturer: str = "",
@@ -864,6 +1211,8 @@ def upsert_department_equipment(
     notes: str = "",
     report_file_id: int | None = None,
     report_task_id: int | None = None,
+    report_task_bindings: list | None = None,
+    auto_bind_templates: bool = False,
     user: User | None = None,
     autofill_from_report: bool = True,
     bind_org_for_report: CommissionOrganization | None = None,
@@ -895,15 +1244,33 @@ def upsert_department_equipment(
                 serial_no = merged["serial_no"]
                 manufacturer = merged["manufacturer"]
                 location = merged["location"]
+    from apps.core.equipment_device_type_service import (
+        auto_report_task_bindings_for_device_type,
+        normalize_device_type,
+    )
+
+    device_type_norm = normalize_device_type(device_type) or ""
+    is_new = equipment_id is None
+
+    normalized_bindings: list[dict] = []
+    if report_task_bindings is not None:
+        normalized_bindings = normalize_equipment_report_task_bindings(report_task_bindings)
+    elif auto_bind_templates and device_type_norm:
+        normalized_bindings, bind_err = auto_report_task_bindings_for_device_type(device_type_norm)
+        if bind_err:
+            return None, bind_err
     if report_task_id is not None:
         if report_task_id and parse_report_task_id(str(report_task_id)) is None:
             return None, "所选任务模板无效，请选择报告层级的模板"
         if report_task_id == 0:
             report_task_id = None
-    if not name:
-        return None, "设备名称不能为空"
-    if equipment_id is None and not report_file_id and not report_task_id:
-        return None, "未检测设备请至少绑定一个报告层级的任务模板"
+    if normalized_bindings:
+        report_task_id = normalized_bindings[0]["report_task_id"]
+    if is_new and not device_type_norm:
+        return None, "请选择设备类型"
+    has_template = bool(normalized_bindings or report_task_id or report_file_id)
+    if is_new and not has_template:
+        return None, "未找到可绑定的报告模板，请检查任务模板库或在编辑时手动绑定"
     if equipment_id:
         row = CommissionOrgEquipment.objects.filter(pk=equipment_id, department_id=dept.pk).first()
         if row is None and bind_org_for_report is not None:
@@ -915,7 +1282,31 @@ def upsert_department_equipment(
             return None, "设备不存在"
     else:
         row = CommissionOrgEquipment(department=dept)
+    prev_type = (row.device_type or "").strip()
+    prev_dept_id = row.department_id
+    if is_new and device_type_norm:
+        row.instance_no = next_equipment_instance_no(dept.pk, device_type_norm)
+    elif device_type_norm and (
+        device_type_norm != prev_type or prev_dept_id != dept.pk
+    ):
+        row.instance_no = next_equipment_instance_no(
+            dept.pk, device_type_norm, exclude_id=row.pk
+        )
+    elif not row.instance_no:
+        row.instance_no = next_equipment_instance_no(
+            dept.pk, device_type_norm or prev_type, exclude_id=row.pk
+        )
+    if device_type_norm:
+        default_name = equipment_default_display_name(device_type_norm, row.instance_no)
+        stripped = (name or "").strip()
+        if is_new and (not stripped or stripped == device_type_norm):
+            name = default_name
+        elif not is_new and stripped in ("", device_type_norm, prev_type):
+            name = default_name
+    if not (name or "").strip():
+        name = device_type_norm or "设备"
     row.name = name
+    row.device_type = device_type_norm
     row.model = (model or "").strip()
     row.serial_no = (serial_no or "").strip()
     row.manufacturer = (manufacturer or "").strip()
@@ -929,6 +1320,11 @@ def upsert_department_equipment(
             return None, "设备只能绑定报告层级的任务模板，现场记录请通过报告模板关联"
         report_task_id = rt.pk
     row.report_task_id = report_task_id if report_task_id else None
+    if report_task_bindings is not None:
+        row.report_task_bindings = normalized_bindings
+    elif normalized_bindings:
+        # 添加设备时 auto_bind_templates：report_task_bindings 参数为 None，也需落库
+        row.report_task_bindings = normalized_bindings
     row.is_active = True
     if report_file_id:
         lf = LibraryFile.objects.filter(pk=report_file_id).first()
@@ -938,4 +1334,8 @@ def upsert_department_equipment(
             return row, None
     row.report_file_id = report_file_id
     row.save()
+    if device_type_norm:
+        renumber_equipment_instances_for_type(dept.pk, device_type_norm)
+    if prev_type and prev_type != device_type_norm and prev_dept_id:
+        renumber_equipment_instances_for_type(prev_dept_id, prev_type)
     return row, None

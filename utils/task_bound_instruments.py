@@ -8,7 +8,13 @@ SCOPE_QC = "qualityControl"
 SCOPE_RP = "radiationProtection"
 BINDING_MODE_KINDS = "kinds"
 BINDING_MODE_IDS = "ids"
-KIND_SEP = "\x1e"  # 表单 kind 键 name+model 分隔符
+SHARE_MODE_PER_TASK = "per_task"
+SHARE_MODE_PROJECT = "project"
+ASSIGNMENT_MODE_AUTO = "auto"
+ASSIGNMENT_MODE_MANUAL = "manual"
+KIND_SEP = "\x1e"  # 历史 JSON / 内部键
+KIND_SEP_FORM = "||"  # 表单 checkbox value（避免控制字符在 POST 中被剥离）
+REQ_SEP = "\x1f"  # 项目手动分配：任务+范围+种类 键分隔符
 
 
 @dataclass(frozen=True)
@@ -18,6 +24,77 @@ class InstrumentKindSpec:
 
     def key(self) -> Tuple[str, str]:
         return ((self.name or "").strip(), (self.model or "").strip())
+
+
+def kind_form_value(name: str, model: str = "") -> str:
+    """HTML 表单提交用种类键（name||model）。"""
+    return f"{(name or '').strip()}{KIND_SEP_FORM}{(model or '').strip()}"
+
+
+def kind_requirement_key(task_id: int, scope: str, name: str, model: str = "") -> str:
+    """项目手动分配：唯一标识「某任务模板 + 范围 + 种类」。"""
+    return REQ_SEP.join(
+        [str(int(task_id)), str(scope or "").strip(), (name or "").strip(), (model or "").strip()]
+    )
+
+
+def parse_kind_requirement_key(raw: str) -> tuple[int, str, str, str] | None:
+    s = str(raw or "").strip()
+    if REQ_SEP not in s:
+        return None
+    parts = s.split(REQ_SEP, 3)
+    if len(parts) < 3:
+        return None
+    try:
+        task_id = int(parts[0])
+    except (TypeError, ValueError):
+        return None
+    scope = parts[1].strip()
+    name = parts[2].strip()
+    model = parts[3].strip() if len(parts) > 3 else ""
+    if task_id <= 0 or scope not in (SCOPE_QC, SCOPE_RP) or not name:
+        return None
+    return task_id, scope, name, model
+
+
+def project_assignment_mode(raw: Any) -> str:
+    if isinstance(raw, dict):
+        mode = str(raw.get("assignmentMode") or "").strip().lower()
+        if mode == ASSIGNMENT_MODE_MANUAL:
+            return ASSIGNMENT_MODE_MANUAL
+    return ASSIGNMENT_MODE_AUTO
+
+
+def _dedupe_int_ids(val: Any) -> list[int]:
+    ids: list[int] = []
+    seen: set[int] = set()
+    if not isinstance(val, (list, tuple)):
+        return ids
+    for item in val:
+        try:
+            pk = int(item)
+        except (TypeError, ValueError):
+            continue
+        if pk > 0 and pk not in seen:
+            seen.add(pk)
+            ids.append(pk)
+    return ids
+
+
+def normalize_project_by_requirement(raw: Any) -> dict[str, list[int]]:
+    """``byRequirement``：旧版「任务+范围+种类」键 → 已选仪器主键列表。"""
+    out: dict[str, list[int]] = {}
+    if not isinstance(raw, dict):
+        return out
+    src = raw.get("byRequirement")
+    if not isinstance(src, dict):
+        return out
+    for key, val in src.items():
+        k = str(key or "").strip()
+        if not k:
+            continue
+        out[k] = _dedupe_int_ids(val)
+    return out
 
 
 def _one_id(v: Any) -> Optional[int]:
@@ -68,13 +145,38 @@ def _kinds_from_scope_value(v: Any) -> List[InstrumentKindSpec]:
     for item in v:
         if isinstance(item, dict):
             spec = _kind_from_dict(item)
-        elif isinstance(item, str) and KIND_SEP in item:
-            name, _, model = item.partition(KIND_SEP)
-            spec = InstrumentKindSpec(name=name.strip(), model=model.strip())
+        elif isinstance(item, str):
+            spec = kind_spec_from_form_value(item)
         else:
             continue
         if spec is None:
             continue
+        k = spec.key()
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(spec)
+    return out
+
+
+def _kinds_from_catalog_ids(ids: Iterable[int]) -> List[InstrumentKindSpec]:
+    """旧版绑编号时，按台账反推种类供展示/编辑。"""
+    from apps.core.models import InstrumentCatalog
+
+    id_list = [int(x) for x in ids if int(x) > 0]
+    if not id_list:
+        return []
+    rows = list(
+        InstrumentCatalog.objects.filter(pk__in=id_list).order_by("code", "id")
+    )
+    by_pk = {r.pk: r for r in rows}
+    out: List[InstrumentKindSpec] = []
+    seen: set[Tuple[str, str]] = set()
+    for pk in id_list:
+        row = by_pk.get(pk)
+        if row is None:
+            continue
+        spec = InstrumentKindSpec(name=row.name, model=str(row.model or "").strip())
         k = spec.key()
         if k in seen:
             continue
@@ -88,14 +190,16 @@ def binding_mode(raw: Any) -> str:
         mode = str(raw.get("bindingMode") or "").strip().lower()
         if mode == BINDING_MODE_KINDS:
             return BINDING_MODE_KINDS
+        if mode == BINDING_MODE_IDS:
+            return BINDING_MODE_IDS
         for scope in (SCOPE_QC, SCOPE_RP):
             val = raw.get(scope)
             if isinstance(val, list) and val and isinstance(val[0], dict) and "name" in val[0]:
                 return BINDING_MODE_KINDS
-        if any(_many_ids(raw.get(scope)) for scope in (SCOPE_QC, SCOPE_RP) if scope in raw):
-            return BINDING_MODE_IDS
         if any(_kinds_from_scope_value(raw.get(scope)) for scope in (SCOPE_QC, SCOPE_RP) if scope in raw):
             return BINDING_MODE_KINDS
+        if any(_many_ids(raw.get(scope)) for scope in (SCOPE_QC, SCOPE_RP) if scope in raw):
+            return BINDING_MODE_IDS
     if isinstance(raw, list) and raw and not isinstance(raw[0], dict):
         return BINDING_MODE_IDS
     return BINDING_MODE_KINDS
@@ -104,7 +208,15 @@ def binding_mode(raw: Any) -> str:
 def normalize_task_bound_kinds(raw: Any) -> Dict[str, List[InstrumentKindSpec]]:
     out: Dict[str, List[InstrumentKindSpec]] = {SCOPE_QC: [], SCOPE_RP: []}
     if not isinstance(raw, dict):
+        if isinstance(raw, list) and binding_mode(raw) == BINDING_MODE_IDS:
+            parsed = _many_ids(raw)
+            if len(parsed) == 2:
+                out[SCOPE_QC] = _kinds_from_catalog_ids([parsed[0]])
+                out[SCOPE_RP] = _kinds_from_catalog_ids([parsed[1]])
+            elif parsed:
+                out[SCOPE_QC] = _kinds_from_catalog_ids(parsed)
         return out
+
     for key, scope in (
         ("qualityControl", SCOPE_QC),
         ("qc", SCOPE_QC),
@@ -122,6 +234,20 @@ def normalize_task_bound_kinds(raw: Any) -> Dict[str, List[InstrumentKindSpec]]:
                     seen.add(k)
                     deduped.append(spec)
             out[scope] = deduped
+
+    if binding_mode(raw) == BINDING_MODE_KINDS:
+        for scope in (SCOPE_QC, SCOPE_RP):
+            if out[scope]:
+                continue
+            id_list = _many_ids(raw.get(scope))
+            if id_list:
+                out[scope] = _kinds_from_catalog_ids(id_list)
+
+    if not (out[SCOPE_QC] or out[SCOPE_RP]) and binding_mode(raw) == BINDING_MODE_IDS:
+        id_binding = normalize_task_bound_instruments(raw)
+        out[SCOPE_QC] = _kinds_from_catalog_ids(id_binding.get(SCOPE_QC) or [])
+        out[SCOPE_RP] = _kinds_from_catalog_ids(id_binding.get(SCOPE_RP) or [])
+
     return out
 
 
@@ -173,10 +299,38 @@ def normalize_task_bound_instruments(raw: Any) -> Dict[str, List[int]]:
 
 
 def normalize_project_assigned_instruments(raw: Any) -> Dict[str, List[int]]:
-    """项目派工后落库的具体编号（质控/防护 id 列表）。"""
+    """项目派工后落库的具体编号（质控/防护 id 列表，不含 byTask 元数据）。"""
+    if isinstance(raw, dict):
+        scope_only = {k: raw.get(k) for k in (SCOPE_QC, SCOPE_RP, "qc", "rp") if k in raw}
+        if scope_only:
+            return normalize_task_bound_instruments(
+                {**{"bindingMode": BINDING_MODE_IDS}, **scope_only}
+            )
     return normalize_task_bound_instruments(
         {**({"bindingMode": BINDING_MODE_IDS} if isinstance(raw, dict) else {}), **(raw if isinstance(raw, dict) else {})}
     )
+
+
+def project_instrument_share_mode(project_or_raw: Any) -> str:
+    if hasattr(project_or_raw, "instrument_share_across_tasks"):
+        return SHARE_MODE_PROJECT if project_or_raw.instrument_share_across_tasks else SHARE_MODE_PER_TASK
+    if isinstance(project_or_raw, dict):
+        mode = str(project_or_raw.get("shareMode") or project_or_raw.get("share_mode") or "").strip()
+        if mode == SHARE_MODE_PROJECT:
+            return SHARE_MODE_PROJECT
+    return SHARE_MODE_PER_TASK
+
+
+def assigned_instruments_for_task(assigned_raw: Any, task_id: int) -> Dict[str, List[int]]:
+    """读取某任务模板已分配编号；无 per-task 记录时回退项目级列表。"""
+    if not isinstance(assigned_raw, dict):
+        return {SCOPE_QC: [], SCOPE_RP: []}
+    by_task = assigned_raw.get("byTask")
+    if isinstance(by_task, dict):
+        entry = by_task.get(str(task_id)) or by_task.get(task_id)
+        if isinstance(entry, dict):
+            return normalize_project_assigned_instruments(entry)
+    return normalize_project_assigned_instruments(assigned_raw)
 
 
 def serialize_task_bound_kinds(
@@ -184,11 +338,13 @@ def serialize_task_bound_kinds(
     quality_control_kinds: List[InstrumentKindSpec] | None = None,
     radiation_protection_kinds: List[InstrumentKindSpec] | None = None,
 ) -> dict:
-    out: dict = {"bindingMode": BINDING_MODE_KINDS}
-    if quality_control_kinds:
-        out[SCOPE_QC] = [{"name": k.name, "model": k.model} for k in quality_control_kinds]
-    if radiation_protection_kinds:
-        out[SCOPE_RP] = [{"name": k.name, "model": k.model} for k in radiation_protection_kinds]
+    qc = list(quality_control_kinds or [])
+    rp = list(radiation_protection_kinds or [])
+    out: dict = {"bindingMode": BINDING_MODE_KINDS, SCOPE_QC: [], SCOPE_RP: []}
+    if qc:
+        out[SCOPE_QC] = [{"name": k.name, "model": k.model} for k in qc]
+    if rp:
+        out[SCOPE_RP] = [{"name": k.name, "model": k.model} for k in rp]
     return out
 
 
@@ -219,12 +375,26 @@ def serialize_project_assigned_instruments(
     *,
     quality_control_ids: List[int] | None = None,
     radiation_protection_ids: List[int] | None = None,
+    share_mode: str = SHARE_MODE_PER_TASK,
+    by_task: Dict[str | int, dict] | None = None,
+    by_requirement: Dict[str, List[int]] | None = None,
+    by_kind: Dict[str, List[int]] | None = None,
+    assignment_mode: str = ASSIGNMENT_MODE_AUTO,
 ) -> dict:
-    out: dict = {}
+    out: dict = {
+        "shareMode": share_mode,
+        "assignmentMode": assignment_mode,
+    }
     if quality_control_ids:
         out[SCOPE_QC] = list(quality_control_ids)
     if radiation_protection_ids:
         out[SCOPE_RP] = list(radiation_protection_ids)
+    if by_task:
+        out["byTask"] = {str(k): v for k, v in by_task.items()}
+    if by_kind:
+        out["byKind"] = {str(k): list(v) for k, v in by_kind.items()}
+    elif by_requirement:
+        out["byRequirement"] = {str(k): list(v) for k, v in by_requirement.items()}
     return out
 
 
@@ -254,13 +424,48 @@ def kind_spec_from_form_value(raw: str) -> InstrumentKindSpec | None:
     s = str(raw or "").strip()
     if not s:
         return None
-    if KIND_SEP in s:
-        name, _, model = s.partition(KIND_SEP)
-        name = name.strip()
-        if not name:
-            return None
-        return InstrumentKindSpec(name=name, model=model.strip())
-    return None
+    for sep in (KIND_SEP_FORM, KIND_SEP):
+        if sep in s:
+            name, _, model = s.partition(sep)
+            name = name.strip()
+            if not name:
+                return None
+            return InstrumentKindSpec(name=name, model=model.strip())
+    if s.isdigit():
+        specs = _kinds_from_catalog_ids([int(s)])
+        return specs[0] if specs else None
+    return InstrumentKindSpec(name=s, model="")
+
+
+def normalize_project_by_kind(raw: Any) -> dict[str, list[int]]:
+    """``byKind``：仪器种类键（name||model）→ 已选仪器主键列表（可多台，按种类出库）。"""
+    out: dict[str, list[int]] = {}
+    if not isinstance(raw, dict):
+        return out
+    src = raw.get("byKind")
+    if isinstance(src, dict):
+        for key, val in src.items():
+            k = str(key or "").strip()
+            if not k:
+                continue
+            out[k] = _dedupe_int_ids(val)
+        if out:
+            return out
+    by_req = normalize_project_by_requirement(raw)
+    if not by_req:
+        return out
+    for key, ids in by_req.items():
+        spec = kind_spec_from_form_value(key)
+        if spec is not None:
+            k = kind_form_value(spec.name, spec.model)
+        else:
+            parsed = parse_kind_requirement_key(key)
+            if parsed is None:
+                continue
+            _task_id, _scope, name, model = parsed
+            k = kind_form_value(name, model)
+        out[k] = _dedupe_int_ids((out.get(k) or []) + ids)
+    return out
 
 
 def build_instrument_kind_groups(catalog_rows: list) -> List[dict]:
@@ -278,7 +483,7 @@ def build_instrument_kind_groups(catalog_rows: list) -> List[dict]:
             buckets[key] = {
                 "name": name,
                 "model": model,
-                "form_value": f"{name}{KIND_SEP}{model}",
+                "form_value": kind_form_value(name, model),
                 "codes": [],
                 "in_stock": 0,
                 "total": 0,

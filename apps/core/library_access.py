@@ -298,14 +298,34 @@ def library_test_peer_user_ids() -> frozenset[int]:
 
 
 def library_user_may_access_instrument_database(user) -> bool:
-    """检测仪器台账：管理员、业务登记权限，或 test 沙箱账号（见 ensure_party_a_demo）。"""
+    """
+    检测仪器台账（Web 页查看）：与 may_edit 相同（本模块无只读访客档）。
+    注：REST ``GET /registry/instruments/`` 仍为只读，增删改请走 Web 台账页。
+    """
+    return library_user_may_edit_instrument_database(user)
+
+
+def library_user_may_edit_instrument_database(user) -> bool:
+    """
+    检测仪器台账资料维护（新增/改编号·名称·证书/有效期/备注等；与出库入库无关）。
+    已出库仪器也可改资料，不改变出库状态。
+    """
     if not getattr(user, "is_authenticated", False):
         return False
     if role_has(user, "perm_manage_users"):
         return True
     if library_user_is_test_peer(user):
         return True
-    return role_has(user, "perm_biz_registry")
+    if role_has(user, "perm_biz_registry"):
+        return True
+    # 项目负责人/派工岗需更正证书、补录登记错误
+    if role_has(user, "perm_assign_tasks"):
+        return True
+    if library_user_is_template_editor(user) and role_has(
+        user, "perm_library_task_templates_write"
+    ):
+        return True
+    return False
 
 
 def library_user_has_party_a_demo_restrictions(user) -> bool:
@@ -361,6 +381,52 @@ def library_user_may_filled_pdf_toolchain(user) -> bool:
     return role_has(user, "perm_process_pipeline") or role_has(user, "perm_htmlpdf")
 
 
+def library_filter_tasks_for_template_management(queryset, user):
+    """
+    任务模板库左侧树 / 列表可见的 LibraryTask 范围。
+
+    test / test-1 … test-5：同组创建 + 可见项目挂载 +（若有）分配给自己的任务；
+    仅有分配权无自建权：仅分配任务；模板编辑岗：仅本人创建。
+    """
+    from apps.core.models import LibraryTaskAssignment
+
+    assign = role_has(user, "perm_assign_tasks")
+    tmpl_write = role_has(user, "perm_library_task_templates_write")
+    participant = bool(
+        library_user_may_filled_pdf_toolchain(user)
+        and LibraryTaskAssignment.objects.filter(assignee=user).exists()
+    )
+    if assign and library_user_is_template_editor(user):
+        return queryset.filter(created_by=user)
+    if assign:
+        return queryset
+    assign_ids = list(
+        LibraryTaskAssignment.objects.filter(assignee=user).values_list(
+            "library_task_id", flat=True
+        )
+    )
+    if tmpl_write and library_user_is_test_peer(user):
+        from django.db.models import Q
+
+        peer_ids = list(library_test_peer_user_ids())
+        scoped = library_user_scoped_project_ids(user)
+        tq = Q(created_by_id__in=peer_ids) | Q(created_by_id__isnull=True)
+        if scoped:
+            tq |= Q(projects__id__in=scoped)
+        if participant and assign_ids:
+            tq |= Q(pk__in=assign_ids)
+        return queryset.filter(tq).distinct()
+    if participant and tmpl_write:
+        from django.db.models import Q
+
+        return queryset.filter(Q(pk__in=assign_ids) | Q(created_by=user))
+    if participant:
+        return queryset.filter(pk__in=assign_ids)
+    if tmpl_write:
+        return queryset.filter(created_by=user)
+    return queryset.none()
+
+
 def library_user_may_access_task_template_library_nav(user) -> bool:
     """
     是否与 ``library_task_management`` 视图一致的准入条件（侧栏、仪表盘、项目工作台链等）。
@@ -414,7 +480,9 @@ def role_has(user, perm: str) -> bool:
     overrides = _user_perm_overrides(user)
     if perm in overrides:
         return overrides[perm]
-    if perm == "perm_library_task_templates_write" and library_user_has_party_a_demo_restrictions(user):
+    if perm == "perm_library_task_templates_write" and (
+        library_user_has_party_a_demo_restrictions(user) or library_user_is_test_peer(user)
+    ):
         return True
     if perm == "perm_biz_registry" and library_user_has_party_a_demo_restrictions(user):
         return True
@@ -536,12 +604,21 @@ def library_template_granted_via_editable_task(user, lf: LibraryFile) -> bool:
     return False
 
 
+def _library_task_linked_to_user_scoped_projects(user, task) -> bool:
+    """任务模板已挂载到当前用户可见的检测项目（分配/自建/主责）。"""
+    pids = library_user_scoped_project_ids(user)
+    if not pids:
+        return False
+    return task.projects.filter(pk__in=pids).exists()
+
+
 def library_user_may_edit_library_task(user, task) -> bool:
     """
     当前用户是否可编辑该 LibraryTask（输出目标、模板绑定、删除等）。
-    模板编辑仅可编辑本人创建的任务模板。
-    具备「分配文件库任务」时可按角色规则维护；仅有覆盖项 perm_library_task_templates_write
-    （如甲方演示）且未开分配权时，仅可维护本人创建的任务模板。
+
+    - test / test-1 … test-5：可维护同组账号创建的无主/同组任务，以及已挂到本人可见项目上的任务模板；
+    - 具备「分配文件库任务」：按角色规则（模板编辑岗仅本人创建）；
+    - 仅有 ``perm_library_task_templates_write``：仅本人创建。
     """
     if task is None:
         return False
@@ -550,8 +627,11 @@ def library_user_may_edit_library_task(user, task) -> bool:
     if not assign and not tmpl_write:
         return False
     creator_id = getattr(task, "created_by_id", None)
-    if library_user_is_test_peer(user) and creator_id in library_test_peer_user_ids():
-        return True
+    if library_user_is_test_peer(user) and tmpl_write:
+        if creator_id is None or creator_id in library_test_peer_user_ids():
+            return True
+        if _library_task_linked_to_user_scoped_projects(user, task):
+            return True
     if assign:
         if not library_user_is_template_editor(user):
             return True
@@ -797,6 +877,7 @@ def library_user_may_delete_library_file(user, lf: LibraryFile) -> bool:
 
     - 须先满足 library_file_access_allowed（与列表/预览一致）。
     - 默认仅允许删除本人上传的记录（created_by 为当前用户）。
+    - test 同组账号可删除同组上传的模板文件。
     - Django 超级用户或角色 super_admin / admin：可删除在可见范围内的任意文件。
     - 无上传者（created_by 为空）的记录：仅上述管理员类账号可删，避免普通用户误删系统数据。
     """
@@ -808,6 +889,8 @@ def library_user_may_delete_library_file(user, lf: LibraryFile) -> bool:
         return True
     if lf.created_by_id is None:
         return False
+    if library_user_is_test_peer(user) and lf.created_by_id in library_test_peer_user_ids():
+        return True
     return lf.created_by_id == user.id
 
 

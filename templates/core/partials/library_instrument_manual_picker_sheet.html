@@ -1,0 +1,220 @@
+{# 人员派工：按仪器种类手动选择出库设备（每种可多选，不区分质控/防护） #}
+<div id="instrument-manual-backdrop"
+     class="fixed inset-0 z-[100] bg-slate-900/45 backdrop-blur-[2px] hidden"
+     aria-hidden="true"></div>
+
+<div id="instrument-manual-sheet"
+     class="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-6 pointer-events-none hidden"
+     role="dialog" aria-modal="true" aria-labelledby="instrument-manual-title">
+    <div class="pointer-events-auto relative w-full max-w-3xl max-h-[min(92vh,40rem)] flex flex-col rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200/80 overflow-hidden">
+        <div class="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 shrink-0 bg-gradient-to-r from-violet-50/90 to-white">
+            <div class="min-w-0">
+                <h3 id="instrument-manual-title" class="text-base font-semibold text-slate-900">手动分配检测仪器</h3>
+                <p class="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                    已按<strong>仪器种类</strong>汇总（不区分质控/防护）；每种可多选一台或多台台账设备，保存后作为本委托按类别出库清单。
+                </p>
+            </div>
+            <button type="button" class="instrument-manual-close rounded-lg p-2 text-slate-500 hover:bg-slate-100 shrink-0" aria-label="关闭">
+                <i class="ri-close-line text-xl"></i>
+            </button>
+        </div>
+
+        <form method="post" id="instrument-manual-form" class="flex flex-col flex-1 min-h-0">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="save_manual_instrument_assignment">
+            <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+            {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
+            <input type="hidden" name="instrument_manual_json" id="instrument-manual-json" value="">
+            <input type="hidden" name="checkout_on_save" id="instrument-manual-checkout" value="1">
+
+            <div class="px-5 py-3 border-b border-slate-100 shrink-0 space-y-2">
+                <div class="relative">
+                    <i class="ri-search-line absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                    <input type="search" id="instrument-manual-filter" placeholder="搜索种类、任务模板、仪器编号…"
+                           class="w-full rounded-xl border border-slate-200 bg-slate-50/80 pl-9 pr-3 py-2 text-sm focus:border-violet-500 focus:bg-white focus:ring-2 focus:ring-violet-500/20"
+                           autocomplete="off">
+                </div>
+                <p id="instrument-manual-summary" class="text-xs text-slate-600"></p>
+            </div>
+
+            <div id="instrument-manual-list" class="flex-1 overflow-y-auto px-5 py-4 space-y-4 min-h-0">
+            </div>
+
+            <div class="shrink-0 border-t border-slate-100 px-5 py-4 flex flex-wrap items-center justify-between gap-3 bg-slate-50/60">
+                <label class="flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
+                    <input type="checkbox" id="instrument-manual-checkout-cb" class="rounded border-slate-300 text-violet-600" checked>
+                    保存时登记出库至本项目
+                </label>
+                <div class="flex flex-wrap gap-2">
+                    <button type="button" class="instrument-manual-close rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">取消</button>
+                    <button type="submit" class="rounded-xl bg-violet-700 px-5 py-2 text-sm font-semibold text-white hover:bg-violet-800">
+                        保存并确定出库清单
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if project_instrument_dispatch_panel.manual_picker_catalog.kinds %}
+{{ project_instrument_dispatch_panel.manual_picker_catalog|json_script:"instrument-manual-catalog-data" }}
+<script>
+(function () {
+    var catalogEl = document.getElementById('instrument-manual-catalog-data');
+    if (!catalogEl) return;
+
+    var catalog = JSON.parse(catalogEl.textContent);
+    var kinds = catalog.kinds || catalog.requirements || [];
+    var backdrop = document.getElementById('instrument-manual-backdrop');
+    var sheet = document.getElementById('instrument-manual-sheet');
+    var listEl = document.getElementById('instrument-manual-list');
+    var filterInput = document.getElementById('instrument-manual-filter');
+    var summaryEl = document.getElementById('instrument-manual-summary');
+    var jsonInput = document.getElementById('instrument-manual-json');
+    var checkoutHidden = document.getElementById('instrument-manual-checkout');
+    var checkoutCb = document.getElementById('instrument-manual-checkout-cb');
+    var form = document.getElementById('instrument-manual-form');
+
+    function esc(s) {
+        return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    }
+
+    function renderList() {
+        var q = (filterInput && filterInput.value || '').toLowerCase().trim();
+        var html = '';
+        kinds.forEach(function (row) {
+            var taskCodes = row.taskCodes || [];
+            if (!taskCodes.length && row.taskCode) taskCodes = [row.taskCode];
+            var hay = [row.name, row.model].concat(taskCodes).join(' ').toLowerCase();
+            (row.instruments || []).forEach(function (inst) {
+                hay += ' ' + (inst.code + ' ' + inst.name + ' ' + inst.model).toLowerCase();
+            });
+            if (q && hay.indexOf(q) < 0) return;
+
+            html += '<section class="instrument-manual-kind rounded-xl border border-slate-200 bg-white overflow-hidden" data-kind-key="' + esc(row.key) + '">';
+            html += '<div class="px-3 py-2.5 bg-slate-50 border-b border-slate-100">';
+            html += '<p class="text-sm font-medium text-slate-900">' + esc(row.name);
+            if (row.model) html += ' <span class="text-slate-400 font-normal">(' + esc(row.model) + ')</span>';
+            html += '</p>';
+            if (taskCodes.length) {
+                html += '<p class="text-[10px] text-slate-500 mt-1">引用模板：<span class="font-mono text-violet-800">' + esc(taskCodes.join('、')) + '</span></p>';
+            }
+            if (row.referencedByMultipleTasks) {
+                html += '<span class="inline-block mt-1 px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 text-[10px]">多模板共用此种类</span>';
+            }
+            html += '<p class="text-[10px] text-slate-500 mt-0.5">台账同种 ' + (row.kindTotal || 0) + ' 台 · 在库 ' + (row.kindInStock || 0) + ' 台</p>';
+            html += '</div>';
+
+            if (!row.instruments || !row.instruments.length) {
+                html += '<p class="px-3 py-4 text-xs text-amber-700">台账中暂无该种类启用的仪器，请先在检测仪器台账登记。</p>';
+            } else {
+                html += '<div class="p-2 grid gap-1 sm:grid-cols-2">';
+                row.instruments.forEach(function (inst) {
+                    var checked = (row.selectedIds || []).indexOf(inst.id) >= 0;
+                    html += '<label class="instrument-manual-inst flex items-start gap-2 rounded-lg border px-2.5 py-2 cursor-pointer transition-colors ' +
+                        (checked ? 'border-violet-400 bg-violet-50/80' : 'border-slate-100 hover:border-violet-200 hover:bg-slate-50') + '">';
+                    html += '<input type="checkbox" class="instrument-manual-cb rounded border-slate-300 text-violet-600 mt-0.5 shrink-0" ' +
+                        'data-kind-key="' + esc(row.key) + '" data-inst-id="' + inst.id + '"' + (checked ? ' checked' : '') + '>';
+                    html += '<span class="min-w-0 text-xs">';
+                    html += '<span class="block font-mono font-medium text-slate-800">' + esc(inst.code) + '</span>';
+                    html += '<span class="block text-slate-600 truncate">' + esc(inst.name) + '</span>';
+                    html += '<span class="block text-[10px] text-slate-400">' + esc(inst.statusLabel) + '</span>';
+                    html += '</span></label>';
+                });
+                html += '</div>';
+            }
+            html += '</section>';
+        });
+        if (!html) {
+            html = '<p class="text-sm text-slate-400 text-center py-8">无匹配的仪器种类</p>';
+        }
+        listEl.innerHTML = html;
+        updateSummary();
+    }
+
+    function collectSelection() {
+        var byKey = {};
+        listEl.querySelectorAll('.instrument-manual-cb:checked').forEach(function (cb) {
+            var key = cb.getAttribute('data-kind-key');
+            var id = parseInt(cb.getAttribute('data-inst-id'), 10);
+            if (!key || !id) return;
+            if (!byKey[key]) byKey[key] = [];
+            if (byKey[key].indexOf(id) < 0) byKey[key].push(id);
+        });
+        return byKey;
+    }
+
+    function updateSummary() {
+        var byKey = collectSelection();
+        var kindCount = kinds.length;
+        var kindWithPick = 0;
+        var totalInst = 0;
+        Object.keys(byKey).forEach(function (k) {
+            if (byKey[k].length) {
+                kindWithPick += 1;
+                totalInst += byKey[k].length;
+            }
+        });
+        summaryEl.textContent = '共 ' + kindCount + ' 种仪器 · 已选 ' + kindWithPick + ' 种 · 合计 ' + totalInst + ' 台将按种类出库';
+    }
+
+    function openSheet() {
+        renderList();
+        backdrop.classList.remove('hidden');
+        sheet.classList.remove('hidden');
+        document.body.classList.add('overflow-hidden');
+        if (filterInput) {
+            try { filterInput.focus({ preventScroll: true }); } catch (e) { filterInput.focus(); }
+        }
+    }
+
+    function closeSheet() {
+        backdrop.classList.add('hidden');
+        sheet.classList.add('hidden');
+        document.body.classList.remove('overflow-hidden');
+    }
+
+    document.querySelectorAll('.instrument-manual-open').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+            e.preventDefault();
+            openSheet();
+        });
+    });
+
+    document.querySelectorAll('.instrument-manual-close').forEach(function (btn) {
+        btn.addEventListener('click', closeSheet);
+    });
+    if (backdrop) backdrop.addEventListener('click', closeSheet);
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && sheet && !sheet.classList.contains('hidden')) closeSheet();
+    });
+
+    if (filterInput) filterInput.addEventListener('input', renderList);
+
+    if (listEl) {
+        listEl.addEventListener('change', function (e) {
+            if (e.target && e.target.classList.contains('instrument-manual-cb')) updateSummary();
+        });
+    }
+
+    if (checkoutCb && checkoutHidden) {
+        checkoutCb.addEventListener('change', function () {
+            checkoutHidden.value = checkoutCb.checked ? '1' : '0';
+        });
+    }
+
+    if (form) {
+        form.addEventListener('submit', function () {
+            var byKey = collectSelection();
+            var payload = {
+                kinds: kinds.map(function (row) {
+                    return { key: row.key, ids: byKey[row.key] || [] };
+                })
+            };
+            jsonInput.value = JSON.stringify(payload);
+        });
+    }
+})();
+</script>
+{% endif %}

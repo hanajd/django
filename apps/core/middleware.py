@@ -1,7 +1,11 @@
 """可选的演示账号加固（见 tablet_backend.settings PARTY_A_DEMO_*）。"""
 import ipaddress
+import logging
+import time
+from pathlib import Path
 
 from django.conf import settings
+from django.db import connection, reset_queries
 from django.contrib.auth import logout
 from django.http import HttpResponseForbidden, JsonResponse
 from django.shortcuts import redirect
@@ -64,6 +68,61 @@ class PartyADemoSecurityMiddleware(MiddlewareMixin):
         return HttpResponseForbidden(
             "演示账号仅允许在指定网络访问；请联系管理员配置 PARTY_A_DEMO_ALLOWED_IPS。"
         )
+
+
+_request_stats_logger = logging.getLogger("apps.core.request_stats")
+
+
+class RequestStatsMiddleware(MiddlewareMixin):
+    """
+    记录 HTML 请求耗时与 SQL 条数（便于定位 /files/ 等重页）。
+    开启：ADMIN_REQUEST_STATS=1，或 DEBUG=True。
+    """
+
+    def __init__(self, get_response):
+        super().__init__(get_response)
+        self.get_response = get_response
+
+    def __call__(self, request):
+        enabled = getattr(settings, "ADMIN_REQUEST_STATS", False) or settings.DEBUG
+        if not enabled:
+            return self.get_response(request)
+
+        track_sql = settings.DEBUG and hasattr(connection, "queries")
+        if track_sql:
+            reset_queries()
+
+        started = time.perf_counter()
+        response = self.get_response(request)
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        query_count = len(connection.queries) if track_sql else None
+
+        path = request.path or ""
+        if request.method == "GET" and (
+            "text/html" in (request.META.get("HTTP_ACCEPT") or "")
+            or path.startswith("/files")
+            or path in ("/", "/login/")
+        ):
+            response["X-Request-Duration-Ms"] = f"{elapsed_ms:.1f}"
+            if query_count is not None:
+                response["X-DB-Query-Count"] = str(query_count)
+            _request_stats_logger.info(
+                "%s %s %.1fms sql=%s",
+                request.method,
+                path,
+                elapsed_ms,
+                query_count if query_count is not None else "-",
+            )
+            log_dir = Path(settings.BASE_DIR) / "logs"
+            try:
+                log_dir.mkdir(parents=True, exist_ok=True)
+                with (log_dir / "request_stats.log").open("a", encoding="utf-8") as fh:
+                    fh.write(
+                        f"{request.method} {path} {elapsed_ms:.1f}ms sql={query_count}\n"
+                    )
+            except OSError:
+                pass
+        return response
 
 
 class WebSessionLeaseMiddleware(MiddlewareMixin):

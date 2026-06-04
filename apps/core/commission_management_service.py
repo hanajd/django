@@ -16,6 +16,7 @@ from apps.core.library_access import (
     role_has,
 )
 from apps.core.models import InspectionSubmission, LibraryProject, LibraryTaskAssignment
+from apps.core.project_numbering import PROJECT_CODE_RE, is_standard_commission_code
 
 # 角色可见性层级：数值越大权限越高，可查看层级更低用户的委托汇总
 ROLE_VISIBILITY_RANK: dict[str, int] = {
@@ -228,7 +229,17 @@ def commission_project_rows(
     qs = commission_projects_queryset(viewer, subject_user=subject_user)
     q = (search or "").strip()
     if q:
-        qs = qs.filter(Q(code__icontains=q) | Q(name__icontains=q) | Q(commission_organization__icontains=q))
+        compact = q.replace(" ", "")
+        if is_standard_commission_code(compact) or PROJECT_CODE_RE.fullmatch(compact):
+            qs = qs.filter(code__iexact=compact)
+        elif compact.isdigit() and len(compact) == 6:
+            qs = qs.filter(code__iexact=compact)
+        else:
+            qs = qs.filter(
+                Q(code__icontains=q)
+                | Q(name__icontains=q)
+                | Q(commission_organization__icontains=q)
+            )
     projects = list(qs[:500])
     pids = [p.pk for p in projects]
     cmap = _completion_map(pids)

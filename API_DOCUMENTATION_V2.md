@@ -81,6 +81,7 @@ GET /api/v2/inspections/projects/260001/tasks
 - 路径里的 `{projectId}` **必须来自第一步** `data.list[].projectId`（如 `260001`）
 - 行为：
   - 返回任务基础信息（`taskNo` / `taskCode` / `taskName` / `outputTarget`）
+  - 每条任务附带 **`commissionOrganization`**（设备挂载科室/单位的完整名称）、**`deviceType`**（11 类设备类型）、**`inspectionType`**（本次检测类型，如验收检测/状态检测）
   - 返回 **前端 JSON** 与 **PDF 版式** 的下载链接（列表内仅 URL，避免大包体）
 
 ### `taskNo` 与 `inspectedNo`（必读）
@@ -128,6 +129,9 @@ GET /api/v2/inspections/projects/260001/tasks
         "taskCode": "js001-site",
         "taskName": "现场记录-CT",
         "outputTarget": "site_record",
+        "commissionOrganization": "张三医院 · 老院区 · 放射科",
+        "deviceType": "CT",
+        "inspectionType": "状态检测",
         "assignedAt": "2026-04-22T16:21:10+08:00",
         "frontendTemplateDownloadUrl": "http://localhost:11223/api/v2/inspections/projects/20260401/tasks/01/export-frontend-json",
         "frontendTemplateMeta": {

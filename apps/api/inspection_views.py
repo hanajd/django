@@ -30,7 +30,11 @@ from apps.core.library_access import (
     role_has,
 )
 from apps.core import pipeline_service
-from apps.api.inspection_submit_payload_service import prepare_submit_payload_for_storage
+from apps.api.inspection_submit_payload_service import (
+    apply_extracted_asset_urls,
+    normalize_floor_plan_dynamic_data,
+    prepare_submit_payload_for_storage,
+)
 from apps.core.library_file_service import (
     attach_files_to_tasks,
     library_file_download_response,
@@ -58,6 +62,11 @@ from apps.core.serializers_inspection import (
     InspectionSubmitSerializer,
     decode_png_data_url,
 )
+from apps.core.site_record_hospital_prefill import (
+    build_site_hospital_info_prefill,
+    hospital_info_semantic_value,
+    merge_hospital_info_prefill,
+)
 from apps.api.api_views import LibraryOCRUploadAPIView
 from apps.api.inspection_pdf_service import (
     _build_filled_template_fields_for_task,
@@ -72,11 +81,15 @@ from apps.api.inspection_pdf_service import (
 )
 from apps.api.inspection_report_make import (
     build_instruments_root_for_frontend_export,
+    apply_submit_instruments_bundle,
+    coerce_submit_instruments,
+    finalize_submit_instruments_in_payload,
     merge_task_template_bound_instruments_into_payload,
 )
-from utils.extract_frontend_template import extract_frontend_template
-from utils.frontend_schema_rule_engine import build_frontend_schema_by_rules
-from utils.unified_template_fields import enrich_frontend_steps_rect_from_pdf_fields
+from apps.api.inspection_frontend_export_service import (
+    InspectionFrontendExportError,
+    build_runtime_frontend_for_inspection_export,
+)
 
 DEFAULT_REPORT_TYPE = "xray_fluoroscopy"
 AUTO_TASK_PREFIX = "ASG-"
@@ -228,6 +241,78 @@ def _inject_frontend_context_defaults(
     return frontend_obj
 
 
+_INSTRUMENT_SCOPED_SUBMIT_PATH_RE = re.compile(
+    r"^instruments\.(qualityControl|radiationProtection)$"
+)
+
+
+def _get_payload_by_dot_path(data: dict, path: str):
+    cur = data
+    for seg in (path or "").split("."):
+        key = str(seg or "").strip()
+        if not key:
+            continue
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(key)
+        if cur is None:
+            return None
+    return cur
+
+
+def _resolve_payload_value_at_path(
+    payload: dict, path: str, *, field: dict | None = None
+):
+    """
+    从提交 payload 解析 submitPath 值。
+    instruments.qualityControl / radiationProtection 在根级 instruments 为数组时，
+    须从 instrumentsByScope、rawPayload.instruments 或 dynamicData[pdfFieldId] 读取。
+    """
+    path_s = str(path or "").strip()
+    if not path_s or not isinstance(payload, dict):
+        return None
+    m = _INSTRUMENT_SCOPED_SUBMIT_PATH_RE.match(path_s)
+    if m:
+        scope = m.group(1)
+        ibs = payload.get("instrumentsByScope")
+        if isinstance(ibs, dict) and ibs.get(scope) not in (None, ""):
+            return ibs.get(scope)
+        raw = payload.get("rawPayload")
+        if isinstance(raw, dict):
+            nested = raw.get("instruments")
+            if isinstance(nested, dict) and nested.get(scope) not in (None, ""):
+                return nested.get(scope)
+        root_inst = payload.get("instruments")
+        if isinstance(root_inst, dict) and root_inst.get(scope) not in (None, ""):
+            return root_inst.get(scope)
+        if isinstance(root_inst, list):
+            for item in root_inst:
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("instrumentScope") or "").strip() == scope:
+                    return item
+        if isinstance(field, dict):
+            pid = str(field.get("pdfFieldId") or field.get("id") or "").strip()
+            dd = payload.get("dynamicData")
+            if pid and isinstance(dd, dict) and dd.get(pid) not in (None, ""):
+                return dd.get(pid)
+        return None
+    val = _get_payload_by_dot_path(payload, path_s)
+    if val not in (None, "", []):
+        return val
+    if path_s.startswith("hospitalInfo.") and isinstance(field, dict):
+        leaf = path_s.split(".", 1)[-1]
+        hi = payload.get("hospitalInfo")
+        sem = hospital_info_semantic_value(
+            hi if isinstance(hi, dict) else {},
+            label=str(field.get("label") or ""),
+            leaf=leaf,
+        )
+        if sem not in (None, ""):
+            return sem
+    return val
+
+
 def _inject_frontend_payload_defaults(frontend_obj: dict, payload: dict) -> dict:
     """
     按字段 source.submitPath 从后端已有 payload 注入 defaultValue。
@@ -238,19 +323,6 @@ def _inject_frontend_payload_defaults(frontend_obj: dict, payload: dict) -> dict
     steps = frontend_obj.get("steps")
     if not isinstance(steps, list):
         return frontend_obj
-
-    def _get_by_path(data: dict, path: str):
-        cur = data
-        for seg in (path or "").split("."):
-            key = str(seg or "").strip()
-            if not key:
-                continue
-            if not isinstance(cur, dict):
-                return None
-            cur = cur.get(key)
-            if cur is None:
-                return None
-        return cur
 
     def _coerce_field_default(field: dict, raw_value):
         field_type = str(field.get("type") or "").strip().lower()
@@ -273,11 +345,29 @@ def _inject_frontend_payload_defaults(frontend_obj: dict, payload: dict) -> dict
                 text = raw_value.strip()
                 if not text:
                     return None
+                if "floorPlanDiagram" in text:
+                    from apps.api.inspection_submit_payload_service import _parse_floor_plan_diagram_json
+
+                    diagram = _parse_floor_plan_diagram_json(text)
+                    if diagram:
+                        data = diagram.get("data") if isinstance(diagram.get("data"), dict) else {}
+                        length = data.get("length")
+                        if length is not None:
+                            try:
+                                return float(length) if "." in str(length) else int(length)
+                            except (TypeError, ValueError):
+                                return length
                 try:
                     return float(text) if "." in text else int(text)
                 except ValueError:
                     return None
             return None
+        if field_type == "floorplan":
+            if isinstance(raw_value, str) and raw_value.strip():
+                if raw_value.strip().startswith(("{", "[")) and "floorPlanDiagram" in raw_value:
+                    return raw_value.strip()
+                return raw_value.strip()
+            return raw_value
         if field_type in {"text", "textarea", "date", "signature"}:
             if isinstance(raw_value, (dict, list)):
                 return None
@@ -344,7 +434,7 @@ def _inject_frontend_payload_defaults(frontend_obj: dict, payload: dict) -> dict
         submit_path = str(source.get("submitPath") or "").strip()
         if not submit_path:
             continue
-        v = _get_by_path(payload, submit_path)
+        v = _resolve_payload_value_at_path(payload, submit_path, field=field)
         if v in (None, "", []):
             continue
         coerced = _coerce_field_default(field, v)
@@ -378,6 +468,8 @@ def _inject_instruments_root_into_frontend_export(
         task_obj=task_obj, project_obj=project_obj, payload=payload
     )
     frontend_obj.update(bundle)
+    for legacy_key in ("instrumentsByScope", "instrumentSetsByScope", "instrumentBindings"):
+        frontend_obj.pop(legacy_key, None)
     return frontend_obj
 
 
@@ -488,10 +580,10 @@ def _persist_submit_section_photos(
     project,
     pending_photos: list[dict],
     batch,
-) -> None:
+) -> list[dict]:
     """将 sectionPhotos 落盘至 inspection_submits/{委托编号}/{时间戳}/photos/。"""
     if not pending_photos:
-        return
+        return []
     wrapped_files = []
     for item in pending_photos:
         raw = item.get("raw_bytes")
@@ -502,7 +594,7 @@ def _persist_submit_section_photos(
             type("UploadLike", (), {"read": lambda self, b=raw: b, "name": name})()
         )
     if not wrapped_files:
-        return
+        return []
     created, _skipped = save_library_binary_uploads(
         user,
         wrapped_files,
@@ -525,6 +617,44 @@ def _persist_submit_section_photos(
         meta = item.get("photo_meta")
         if isinstance(meta, dict) and row.get("relative_path"):
             meta["url"] = library_media_url(row["relative_path"])
+    return created
+
+
+def _persist_submit_binary_assets(
+    user,
+    task_no: str,
+    case: InspectionCase,
+    project,
+    pending_items: list[dict],
+    batch,
+) -> list[dict]:
+    """将 dynamicData/signatures 等提取的二进制落盘，返回与 pending_items 顺序对应的 created 行。"""
+    created_rows: list[dict] = []
+    if not pending_items:
+        return created_rows
+    for item in pending_items:
+        raw = item.get("raw_bytes")
+        name = item.get("filename") or "asset.png"
+        if not raw:
+            created_rows.append({})
+            continue
+        subdir = (item.get("subdir") or "assets").strip() or "assets"
+        wrapped = type("UploadLike", (), {"read": lambda self, b=raw: b, "name": name})()
+        created, _skipped = save_library_binary_uploads(
+            user,
+            [wrapped],
+            LibraryFile.CATEGORY_INSPECTION_SUBMIT,
+            link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
+            link_object_id=case.pk,
+            project_ids=[project.pk],
+            submit_batch=batch,
+            submit_subdir=subdir,
+        )
+        row = created[0] if created else {}
+        created_rows.append(row)
+        if row:
+            _attach_inspection_submit_files_to_site_tasks([row], task_no, project, user)
+    return created_rows
 
 
 def _persist_submit_payload_file(
@@ -562,6 +692,18 @@ def _persist_submit_signature_files(
     batch,
 ):
     """签名 PNG 写入 inspection_submits/{委托编号}/{时间戳}/signatures/。"""
+    raw = submission.raw_payload if isinstance(submission.raw_payload, dict) else {}
+    sig = raw.get("signatures") if isinstance(raw.get("signatures"), dict) else {}
+    from apps.api.inspection_submit_payload_service import CANONICAL_SIGNATURE_ROLES
+
+    roles_with_value = [r for r in CANONICAL_SIGNATURE_ROLES if sig.get(r)]
+    if roles_with_value and all(
+        isinstance(sig.get(role), str)
+        and str(sig.get(role)).strip().startswith(("/media", "media/"))
+        for role in roles_with_value
+    ):
+        return
+
     role_bytes_pairs = [
         ("inspector", submission.sign_author_png),
         ("checker", submission.sign_reviewer_png),
@@ -830,7 +972,12 @@ class _InspectionTaskAccessMixin:
     @staticmethod
     def _resolve_case_project(request, task_no: str):
         case = (
-            InspectionCase.objects.select_related("library_project", "inspected_organization", "primary_contact")
+            InspectionCase.objects.select_related(
+                "library_project",
+                "library_project__commission_org",
+                "inspected_organization",
+                "primary_contact",
+            )
             .filter(case_no=task_no)
             .first()
         )
@@ -886,8 +1033,6 @@ class _InspectionTaskAccessMixin:
         )
 
     def _prefill_dict(self, case: InspectionCase):
-        org: InspectedOrganization = case.inspected_organization
-        contact = case.primary_contact
         dev: BizDevice = self._device_from_case(case)
         report_info = {
             "reportNo": case.case_no,
@@ -898,12 +1043,7 @@ class _InspectionTaskAccessMixin:
             "deviceCount": case.devices.count(),
             "inspectors": "",
         }
-        hospital_info = {
-            "name": org.name if org else "",
-            "address": (org.address if org else "") or "",
-            "contactPerson": (contact.name if contact else "") or "",
-            "contactPhone": (contact.phone if contact else "") or "",
-        }
+        hospital_info = build_site_hospital_info_prefill(case)
         equipment_info = {
             "deviceName": (dev.name if dev else "") or "",
             "model": (dev.model if dev else "") or "",
@@ -929,19 +1069,66 @@ class _InspectionTaskAccessMixin:
             for x in obj.instruments.all().order_by("id")
         ]
 
-    def _serialize_task_detail(self, case: InspectionCase, obj: InspectionSubmission):
+    def _instruments_for_task_response(
+        self, obj: InspectionSubmission, project, task_obj=None
+    ) -> tuple[list, dict]:
+        """返回 (instruments[] 校验形态, instrumentsByScope 两栏表单形态)。"""
+        raw = obj.raw_payload if isinstance(obj.raw_payload, dict) else {}
+        raw_rp = raw.get("rawPayload") if isinstance(raw.get("rawPayload"), dict) else None
+        bundle = coerce_submit_instruments(
+            raw.get("instruments"),
+            raw_payload=raw_rp,
+            project_obj=project,
+            task_obj=task_obj,
+        )
+        if bundle.array_for_api:
+            return bundle.array_for_api, bundle.scoped
+        return self._serialize_instruments(obj), bundle.scoped
+
+    def _serialize_task_detail(
+        self,
+        case: InspectionCase,
+        obj: InspectionSubmission,
+        *,
+        project=None,
+        task_obj=None,
+    ):
         prefill_report, prefill_hospital, prefill_equipment = self._prefill_dict(case)
         has_payload = bool(obj.pk)
-        return {
+        proj = project or case.library_project
+        if has_payload:
+            inst_list, inst_scoped = self._instruments_for_task_response(obj, proj, task_obj)
+            payload_for_inst = obj.raw_payload if isinstance(obj.raw_payload, dict) else {}
+        else:
+            bundle = coerce_submit_instruments(
+                None, project_obj=proj, task_obj=task_obj
+            )
+            inst_list = bundle.array_for_api
+            inst_scoped = bundle.scoped
+            payload_for_inst = {}
+        inst_export = build_instruments_root_for_frontend_export(
+            task_obj=task_obj,
+            project_obj=proj,
+            payload=payload_for_inst,
+        )
+        if isinstance(inst_export.get("instruments"), list) and inst_export["instruments"]:
+            inst_list = inst_export["instruments"]
+        if isinstance(inst_export.get("instrumentsByScope"), dict) and inst_export["instrumentsByScope"]:
+            inst_scoped = inst_export["instrumentsByScope"]
+        body = {
             "taskNo": case.case_no,
             "reportType": obj.report_type or DEFAULT_REPORT_TYPE,
             "status": obj.status or InspectionSubmission.STATUS_PENDING,
             "createdAt": (obj.created_at_remote or case.created_at).isoformat(),
             "updatedAt": (obj.updated_at_remote or case.updated_at).isoformat(),
             "reportInfo": (obj.report_info or prefill_report) if has_payload else prefill_report,
-            "hospitalInfo": (obj.hospital_info or prefill_hospital) if has_payload else prefill_hospital,
+            "hospitalInfo": (
+                merge_hospital_info_prefill(obj.hospital_info, prefill_hospital)
+                if has_payload
+                else prefill_hospital
+            ),
             "equipmentInfo": (obj.equipment_info or prefill_equipment) if has_payload else prefill_equipment,
-            "instruments": self._serialize_instruments(obj) if has_payload else [],
+            "instruments": inst_list,
             "testResult": obj.test_result if (obj.test_result and has_payload) else None,
             "signatures": (
                 {
@@ -955,6 +1142,19 @@ class _InspectionTaskAccessMixin:
             ),
             "conclusion": obj.conclusion if (obj.conclusion and has_payload) else None,
         }
+        if inst_scoped:
+            body["instrumentsByScope"] = inst_scoped
+            raw_rp = {"instruments": inst_scoped}
+            if has_payload and isinstance(obj.raw_payload, dict):
+                prev_rp = obj.raw_payload.get("rawPayload")
+                if isinstance(prev_rp, dict):
+                    raw_rp = {**prev_rp, **raw_rp}
+            body["rawPayload"] = raw_rp
+        if isinstance(inst_export.get("instrumentSetsByScope"), dict):
+            body["instrumentSetsByScope"] = inst_export["instrumentSetsByScope"]
+        if isinstance(inst_export.get("instrumentBindings"), list):
+            body["instrumentBindings"] = inst_export["instrumentBindings"]
+        return body
 
     def _ensure_task_under_project(self, request, project_id: str, task_no: str):
         project = self._resolve_project(project_id)
@@ -1040,11 +1240,12 @@ class InspectionPendingAPIView(_InspectionTaskAccessMixin, APIView):
                 continue
             if device_type and device_type != DEFAULT_REPORT_TYPE:
                 continue
-            report_info, hospital_info, equipment_info = self._prefill_dict(case)
+            report_info, hospital_prefill, equipment_info = self._prefill_dict(case)
+            hospital_info = hospital_prefill
             if sub and sub.report_info:
                 report_info = sub.report_info
             if sub and sub.hospital_info:
-                hospital_info = sub.hospital_info
+                hospital_info = merge_hospital_info_prefill(sub.hospital_info, hospital_prefill)
             if sub and sub.equipment_info:
                 equipment_info = sub.equipment_info
             rows.append(
@@ -1141,8 +1342,13 @@ class InspectionDetailAPIView(_InspectionTaskAccessMixin, APIView):
         case, _project, err_resp = self._resolve_case_project(request, task_no)
         if err_resp is not None:
             return err_resp
-        obj = self._submission_or_init(case, case.library_project)
-        data = self._serialize_task_detail(case, obj)
+        project = case.library_project
+        obj = self._submission_or_init(case, project)
+        gen_tasks = list(_pick_submit_generation_tasks(task_no, project))
+        task_obj = gen_tasks[0] if gen_tasks else None
+        data = self._serialize_task_detail(
+            case, obj, project=project, task_obj=task_obj
+        )
         data = self._merge_commission_org_equipment_previous(request, case, obj, data)
         return _ok("获取成功", data)
 
@@ -1246,14 +1452,21 @@ class InspectionDraftAPIView(_InspectionTaskAccessMixin, APIView):
             obj.sign_approver_png = payload.get("_approver_png")
             obj.sign_date = sign_date
             fields.extend(["sign_author_png", "sign_reviewer_png", "sign_approver_png", "sign_date"])
-        obj.raw_payload = request.data
-        fields.append("raw_payload")
-        obj.save(update_fields=list(dict.fromkeys(fields)))
-
-        if "instruments" in payload:
+        req_data = dict(request.data or {})
+        if "instruments" in req_data or (
+            isinstance(req_data.get("rawPayload"), dict)
+            and req_data["rawPayload"].get("instruments")
+        ):
+            gen_tasks = list(_pick_submit_generation_tasks(task_no, project))
+            draft_task = gen_tasks[0] if gen_tasks else None
+            req_data, draft_bundle = finalize_submit_instruments_in_payload(
+                req_data,
+                project_obj=project,
+                task_obj=draft_task,
+            )
             InspectionSubmissionInstrument.objects.filter(submission=obj).delete()
             ins_rows = []
-            for item in (payload.get("instruments") or []):
+            for item in draft_bundle.ledger_rows:
                 raw_valid_until = item.get("validUntil")
                 valid_until = _parse_client_datetime(raw_valid_until) if raw_valid_until else None
                 ins_rows.append(
@@ -1268,6 +1481,12 @@ class InspectionDraftAPIView(_InspectionTaskAccessMixin, APIView):
                 )
             if ins_rows:
                 InspectionSubmissionInstrument.objects.bulk_create(ins_rows)
+        obj.raw_payload = req_data
+        fields.append("raw_payload")
+        obj.save(update_fields=list(dict.fromkeys(fields)))
+        from apps.core.hospital_info_service import sync_commission_equipment_from_client_payload
+
+        sync_commission_equipment_from_client_payload(dict(request.data or {}))
         return _ok(
             "草稿已保存",
             {
@@ -1295,6 +1514,14 @@ class InspectionSubmitByTaskAPIView(_InspectionTaskAccessMixin, APIView):
         payload["createdAt"] = payload.get("createdAt") or now_iso
         payload["updatedAt"] = payload.get("updatedAt") or now_iso
 
+        gen_tasks = list(_pick_submit_generation_tasks(task_no, project))
+        submit_task_obj = gen_tasks[0] if gen_tasks else None
+        payload, inst_bundle = finalize_submit_instruments_in_payload(
+            payload,
+            project_obj=project,
+            task_obj=submit_task_obj,
+        )
+
         serializer = InspectionSubmitSerializer(data=payload)
         if not serializer.is_valid():
             logger.warning(
@@ -1321,9 +1548,10 @@ class InspectionSubmitByTaskAPIView(_InspectionTaskAccessMixin, APIView):
                 return _fail("提交失败：signatures.signDate 不是合法 ISO8601 时间", status.HTTP_422_UNPROCESSABLE_ENTITY)
 
         submit_batch = make_inspection_submit_batch_storage(project)
-        storage_payload, pending_photos = prepare_submit_payload_for_storage(
-            dict(request.data or {})
+        storage_payload, pending_photos, pending_binaries = prepare_submit_payload_for_storage(
+            payload
         )
+        storage_payload = apply_submit_instruments_bundle(storage_payload, inst_bundle)
 
         obj, _ = InspectionSubmission.objects.update_or_create(
             task_no=task_no,
@@ -1349,10 +1577,15 @@ class InspectionSubmitByTaskAPIView(_InspectionTaskAccessMixin, APIView):
                 "created_by": request.user,
             },
         )
+        from apps.core.hospital_info_service import sync_commission_equipment_from_client_payload
+
+        sync_body = dict(request.data or {})
+        sync_body.setdefault("equipmentInfo", data.get("equipmentInfo"))
+        sync_commission_equipment_from_client_payload(sync_body)
 
         InspectionSubmissionInstrument.objects.filter(submission=obj).delete()
         ins_rows = []
-        for item in (data.get("instruments") or []):
+        for item in inst_bundle.ledger_rows:
             raw_valid_until = item.get("validUntil")
             valid_until = _parse_client_datetime(raw_valid_until) if raw_valid_until else None
             if raw_valid_until and valid_until is None:
@@ -1375,9 +1608,16 @@ class InspectionSubmitByTaskAPIView(_InspectionTaskAccessMixin, APIView):
             )
         if ins_rows:
             InspectionSubmissionInstrument.objects.bulk_create(ins_rows)
-        _persist_submit_section_photos(
+        photo_created = _persist_submit_section_photos(
             request.user, task_no, case, project, pending_photos, submit_batch
         )
+        binary_created = _persist_submit_binary_assets(
+            request.user, task_no, case, project, pending_binaries, submit_batch
+        )
+        apply_extracted_asset_urls(storage_payload, pending_photos, photo_created)
+        apply_extracted_asset_urls(storage_payload, pending_binaries, binary_created)
+        obj.raw_payload = storage_payload
+        obj.save(update_fields=["raw_payload"])
         _persist_submit_payload_file(
             request.user, task_no, case, project, storage_payload, submit_batch
         )
@@ -1463,10 +1703,23 @@ class InspectionProjectTaskListAPIView(APIView):
         if not _InspectionTaskAccessMixin._has_project_membership(request.user, project):
             return _fail("当前用户无权访问该项目任务", status.HTTP_403_FORBIDDEN)
         from apps.core.project_numbering import build_project_task_api_fields
+        from apps.core.project_equipment_service import (
+            library_task_equipment_context_by_task_id,
+        )
 
         tasks = list(project.library_tasks.order_by("code", "id"))
         if not tasks:
             return _ok("获取成功", {"projectId": project.code, "count": 0, "list": []})
+        equipment_ctx = library_task_equipment_context_by_task_id(project)
+        project_commission = (project.commission_organization or "").strip()
+        if not project_commission and project.commission_org_id:
+            org = project.commission_org
+            project_commission = org.full_display_name if org else ""
+        empty_equipment_ctx = {
+            "commissionOrganization": project_commission,
+            "deviceType": "",
+            "inspectionType": "",
+        }
         rows = []
         template_cache = {}
         overseer = library_user_can_assign_tasks_to_participants(request.user)
@@ -1490,6 +1743,7 @@ class InspectionProjectTaskListAPIView(APIView):
                     _resolve_task_template_pdf(library_task),
                 )
             (tpl_id, tpl_name, tpl_error), (pdf_id, pdf_name, pdf_error) = template_cache[library_task.id]
+            eq_fields = equipment_ctx.get(library_task.id) or empty_equipment_ctx
             rows.append(
                 {
                     "assignmentId": assignment.pk if assignment else None,
@@ -1500,6 +1754,7 @@ class InspectionProjectTaskListAPIView(APIView):
                         task_no=task_no,
                         ordered_tasks=tasks,
                     ),
+                    **eq_fields,
                     "projectId": _InspectionTaskAccessMixin._project_public_id(project),
                     "taskId": library_task.id,
                     "taskCode": library_task.code,
@@ -1547,7 +1802,7 @@ class InspectionTaskFrontendJsonExportAPIView(_InspectionTaskAccessMixin, APIVie
 
     permission_classes = [IsAuthenticated]
 
-    def get(self, request, task_no: str):
+    def get(self, request, task_no: str, *, display_task_no: str | None = None):
         case, project, err_resp = self._resolve_case_project(request, task_no)
         if err_resp is not None:
             return err_resp
@@ -1556,115 +1811,15 @@ class InspectionTaskFrontendJsonExportAPIView(_InspectionTaskAccessMixin, APIVie
         if task_obj is None:
             return _fail("未找到任务关联模板", status.HTTP_404_NOT_FOUND)
 
-        submission = (
-            InspectionSubmission.objects.filter(task_no=task_no, case=case, project=project)
-            .order_by("-updated_at", "-id")
-            .first()
-        )
-        now_iso = timezone.now().isoformat()
-        if submission is None:
-            # 导出前端空模板：无提交时也允许导出，只提供结构化空 payload + 任务上下文。
-            payload = {
-                "taskNo": task_no,
-                "projectId": self._project_public_id(project),
-                "reportType": DEFAULT_REPORT_TYPE,
-                "createdAt": now_iso,
-                "updatedAt": now_iso,
-                "reportInfo": {},
-                "hospitalInfo": {},
-                "equipmentInfo": {},
-                "testResult": {},
-                "conclusion": {},
-                "signatures": {},
-                "instruments": [],
-            }
-        else:
-            payload = submission.raw_payload if isinstance(submission.raw_payload, dict) else {}
-            if not payload:
-                payload = {
-                    "reportInfo": submission.report_info or {},
-                    "hospitalInfo": submission.hospital_info or {},
-                    "equipmentInfo": submission.equipment_info or {},
-                    "testResult": submission.test_result or {},
-                    "conclusion": submission.conclusion or {},
-                    "signatures": {},
-                    "instruments": [],
-                }
-            # 兼容旧提交：补齐填充映射依赖的任务/项目/更新时间根字段。
-            payload["taskNo"] = payload.get("taskNo") or task_no
-            payload["projectId"] = payload.get("projectId") or self._project_public_id(project)
-            payload["updatedAt"] = payload.get("updatedAt") or (
-                submission.updated_at_remote.isoformat() if submission.updated_at_remote else now_iso
+        try:
+            frontend_obj = build_runtime_frontend_for_inspection_export(
+                request,
+                project=project,
+                library_task=task_obj,
+                display_task_no=display_task_no,
             )
-
-        payload = merge_task_template_bound_instruments_into_payload(
-            payload, task_obj, project_obj=project
-        )
-
-        ph_map_id = (
-            (request.GET.get("placeholderMapId") or request.GET.get("placeholder_map_id") or "").strip() or None
-        )
-        filled_fields, _template_pdf_id, fill_reason, _template_json_name = _build_filled_template_fields_for_task(
-            task_obj,
-            payload,
-            map_id=ph_map_id,
-            project=project,
-            task_no=task_no,
-            inspection_case=case,
-        )
-        if not filled_fields:
-            return _fail(fill_reason or "模板字段填充失败", status.HTTP_409_CONFLICT)
-
-        template_json_id, _template_json_name, template_err = _resolve_task_template_json(task_obj)
-        if template_json_id is None:
-            return _fail(template_err or "任务下缺少 JSON 模板", status.HTTP_404_NOT_FOUND)
-        template_json_lf = LibraryFile.objects.filter(pk=template_json_id).first()
-        if template_json_lf is None:
-            return _fail("任务下缺少 JSON 模板", status.HTTP_404_NOT_FOUND)
-
-        try:
-            template_path = pipeline_service.library_absolute_path(template_json_lf.relative_path)
-            template_raw = template_path.read_text(encoding="utf-8", errors="replace")
-            template_obj = json_std.loads(template_raw)
-        except Exception as exc:
-            return _fail(f"读取任务模板失败: {exc}", status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        pdf_block = template_obj.get("pdf") if isinstance(template_obj.get("pdf"), dict) else {}
-        if not isinstance(pdf_block, dict):
-            pdf_block = {}
-        pdf_block["fields"] = filled_fields
-        template_obj["pdf"] = pdf_block
-
-        template_pdf_id, _template_pdf_name, template_pdf_err = _resolve_task_template_pdf(task_obj)
-        if not template_pdf_err and template_pdf_id:
-            template_pdf_lf = LibraryFile.objects.filter(pk=template_pdf_id).first()
-            if template_pdf_lf is not None:
-                try:
-                    pdf_path = pipeline_service.library_absolute_path(template_pdf_lf.relative_path)
-                    from htmlpdf.full_text_coordinate_boxing import assign_template_sections_to_fields
-
-                    assign_template_sections_to_fields(str(pdf_path), pdf_block["fields"])
-                except Exception:
-                    pass
-
-        # 任务接口默认使用规则引擎导出前端模板；失败时回退旧提取逻辑保证可用性。
-        try:
-            frontend_obj = build_frontend_schema_by_rules(template_obj)
-        except Exception as exc:
-            logger.warning("rule frontend export failed, fallback to extract_frontend_template: %s", exc)
-            frontend_obj = extract_frontend_template(template_obj)
-        frontend_obj = _inject_frontend_context_defaults(
-            frontend_obj,
-            project_id=self._project_public_id(project),
-            task_no=task_no,
-            inspected_display_no=display_inspected_no_for_fill(case, project, task_no),
-        )
-        frontend_obj = _inject_frontend_payload_defaults(frontend_obj, payload)
-        frontend_obj = _inject_instruments_root_into_frontend_export(
-            frontend_obj, payload, task_obj=task_obj, project_obj=project
-        )
-        # 剥坐标与编辑器元数据；移动端默认再压成运行态 compact JSON
-        frontend_obj = enrich_frontend_steps_rect_from_pdf_fields(frontend_obj, filled_fields)
+        except InspectionFrontendExportError as exc:
+            return _fail(str(exc), status.HTTP_409_CONFLICT)
 
         export_mode = str(request.GET.get("mode") or request.GET.get("export_mode") or "runtime").strip().lower()
         if export_mode == "editor":
@@ -1680,13 +1835,9 @@ class InspectionTaskFrontendJsonExportAPIView(_InspectionTaskAccessMixin, APIVie
             resp["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
             return resp
 
-        from utils.frontend_runtime_export import (
-            build_runtime_json_http_response,
-            finalize_runtime_frontend_export,
-        )
+        from utils.frontend_runtime_export import build_runtime_json_http_response
 
-        runtime_obj = finalize_runtime_frontend_export(frontend_obj)
-        return build_runtime_json_http_response(runtime_obj, request=request, task_no=task_no)
+        return build_runtime_json_http_response(frontend_obj, request=request, task_no=task_no)
 
 
 class InspectionTaskManualExportReportAPIView(_InspectionTaskAccessMixin, APIView):
@@ -2432,10 +2583,17 @@ class InspectionProjectTaskSubmitAPIView(InspectionSubmitByTaskAPIView):
 
 class InspectionProjectTaskFrontendJsonExportAPIView(InspectionTaskFrontendJsonExportAPIView):
     def get(self, request, project_id: str, task_no: str):
-        case, _project, err_resp = self._ensure_task_under_project(request, project_id, task_no)
+        case, project, err_resp = self._ensure_task_under_project(request, project_id, task_no)
         if err_resp is not None:
             return err_resp
-        return super().get(request, task_no=case.case_no)
+        library_task = self._resolve_project_task_by_no(project, task_no)
+        if library_task is None:
+            return _fail("taskNo 无效", status.HTTP_404_NOT_FOUND)
+        return super().get(
+            request,
+            case.case_no,
+            display_task_no=task_no,
+        )
 
 
 class InspectionProjectTaskManualExportReportAPIView(InspectionTaskManualExportReportAPIView):

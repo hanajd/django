@@ -40,6 +40,11 @@ urlpatterns = [
     # 文件库与处理流程
     path('files/', views.file_library, name='file_library'),
     path('files/projects/', views.library_projects, name='library_projects'),
+    path(
+        'files/projects/create-wizard-options/',
+        views.library_project_create_wizard_options,
+        name='library_project_create_wizard_options',
+    ),
     path('files/commission-manage/', views.commission_manage, name='commission_manage'),
     path('files/hospital-info/', views.hospital_info_manage, name='hospital_info_manage'),
     path(

@@ -643,6 +643,138 @@
             font-size: 12px;
             text-align: center;
         }
+        #formulaPickPdfContainer {
+            position: relative;
+            margin: 0 auto;
+        }
+        #formulaPickPdfContainer .pdf-page {
+            margin: 0 auto 16px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+        }
+        .formula-pick-field-wrap {
+            position: absolute;
+            border: 2px solid transparent;
+            box-sizing: border-box;
+            cursor: pointer;
+            z-index: 5;
+        }
+        .formula-pick-field-wrap:hover,
+        .formula-pick-field-wrap.formula-pick-field-wrap--hover {
+            border-color: #165dff;
+            background: rgba(22, 93, 255, 0.14);
+            box-shadow: 0 0 0 2px rgba(22, 93, 255, 0.25);
+        }
+        .formula-pick-field-wrap.formula-pick-field-wrap--current {
+            border-color: #ff7d00;
+            background: rgba(255, 125, 0, 0.22);
+            box-shadow: 0 0 0 2px rgba(255, 125, 0, 0.35);
+            cursor: not-allowed;
+        }
+        .formula-pick-field-wrap.formula-pick-field-wrap--disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+        }
+        .formula-pick-side {
+            width: 340px;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        .formula-pick-side .map-report-preview-scroll {
+            flex: 0 1 auto;
+            max-height: 38vh;
+        }
+        .formula-pick-compose {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            border-top: 1px solid #e5e6eb;
+            background: #fafbfc;
+            padding: 10px 12px 12px;
+        }
+        .formula-pick-compose h4 {
+            margin: 0 0 6px;
+            font-size: 13px;
+            color: #1d2129;
+        }
+        .formula-pick-expr-label {
+            font-size: 12px;
+            color: #4e5969;
+            margin-bottom: 6px;
+        }
+        .formula-pick-expr-label code {
+            color: #165dff;
+            font-family: Consolas, monospace;
+        }
+        .formula-pick-formula-input {
+            width: 100%;
+            min-height: 88px;
+            max-height: 160px;
+            box-sizing: border-box;
+            padding: 8px 10px;
+            border: 1px solid #dcdfe6;
+            border-radius: 8px;
+            font-size: 13px;
+            font-family: Consolas, "Microsoft YaHei", monospace;
+            line-height: 1.45;
+            resize: vertical;
+        }
+        .formula-pick-formula-input:focus {
+            border-color: #165dff;
+            box-shadow: 0 0 0 2px rgba(22, 93, 255, 0.12);
+            outline: none;
+        }
+        .formula-pick-formula-preview {
+            margin-top: 8px;
+            padding: 6px 8px;
+            background: #f7f8fa;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #4e5969;
+            word-break: break-all;
+        }
+        .formula-pick-formula-preview code {
+            color: #165dff;
+            font-family: Consolas, monospace;
+        }
+        .formula-pick-op-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .formula-pick-op-row button {
+            padding: 4px 10px;
+            border: 1px solid #e5e6eb;
+            border-radius: 6px;
+            background: #fff;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .formula-pick-op-row button:hover {
+            border-color: #165dff;
+            color: #165dff;
+        }
+        .field-wrap.field-wrap--formula-pick-current {
+            outline: 2px solid #ff7d00;
+            outline-offset: 2px;
+            z-index: 6;
+        }
+        .formula-judgment-hint {
+            font-size: 12px;
+            color: #86909c;
+            line-height: 1.5;
+            margin: 0 0 8px;
+        }
+        .formula-fn-toggle {
+            margin-top: 8px;
+            font-size: 12px;
+            color: #165dff;
+            cursor: pointer;
+            user-select: none;
+        }
+        .formula-fn-toggle:hover { text-decoration: underline; }
         .formula-panel textarea,
         .formula-panel input[type="text"],
         .formula-panel select,
@@ -1422,6 +1554,35 @@
             color: #4e5969;
             white-space: pre-wrap;
         }
+        .map-template-requirement {
+            margin: 0 0 8px;
+            padding: 8px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            line-height: 1.45;
+            border: 1px solid #e5e6eb;
+            background: #f7f8fa;
+            color: #4e5969;
+        }
+        .map-template-requirement.ok {
+            border-color: #b7ebc5;
+            background: #f6ffed;
+            color: #247a35;
+        }
+        .map-template-requirement.warn {
+            border-color: #ffe1a8;
+            background: #fffaf0;
+            color: #ad6800;
+        }
+        .map-template-requirement.neutral {
+            border-color: #e5e6eb;
+            background: #f7f8fa;
+            color: #86909c;
+        }
+        .map-value-template-input.map-template-input--required {
+            border-color: #ff7d00;
+            box-shadow: 0 0 0 2px rgba(255, 125, 0, 0.15);
+        }
         .map-compose-actions {
             display: flex;
             flex-wrap: wrap;
@@ -1495,7 +1656,7 @@
         <div class="toolbar-group">
         <strong>模板编辑器</strong>
         <input type="file" id="imageFilePicker" accept="image/*" style="display:none;">
-        <select id="templateJsonSelect" title="从文件库模板分类选择已保存的 JSON">
+        <select id="templateJsonSelect" title="当前任务的主模板 JSON 与绑定历史版本（非全库列表）">
             <option value="">选择模板 JSON</option>
         </select>
         <button id="btnImportTemplate" type="button" title="把下拉框中选中的 JSON 版式套到当前 PDF 上">从文件库载入版式</button>
@@ -1527,7 +1688,7 @@
     <div class="main">
         <aside class="sidebar">
             <h3>填写区列表</h3>
-            <p class="sidebar-hint">点击列表或 PDF 上的填写框即可定位栏位；标签可直接修改。需要自动计算或合格判断时，点击行内「规则」打开编辑弹窗。</p>
+            <p class="sidebar-hint">点击列表或 PDF 上的填写框即可定位栏位；标签可直接修改。需要自动计算或合格判断时，点击行内「规则」打开编辑弹窗。侧栏序号、画板角标与 <code>pdfFieldId</code>（如 f42）一致：第 N 项即为 <code>fN</code>，保存模板时按当前列表顺序重排。</p>
             <div id="reportMappingPanel">
                 <div style="font-size:13px;font-weight:600;color:#1d2129;">报告 ← 现场记录映射</div>
                 <p class="sidebar-hint" style="margin:6px 0 0;">与回填一致：医院/设备等相同 submitPath 会自动标为「规则映射」（蓝框/规）；检测数据等点「映」或双击报告栏位，在<strong>悬浮映射窗口</strong>的现场记录 PDF 上点选单元格；文本模板支持换行与缩进。保存坐标模板时仅写入手动映射。</p>
@@ -1577,23 +1738,59 @@
                     </div>
                 </aside>
                 <main class="map-site-main">
-                    <p class="map-site-hint" id="siteMapHint">在下方现场记录 PDF 上<strong>直接点击</strong>输入框加入来源（可多个）；绿框=已映射到当前报告栏位，紫框=其它栏位，橙框=当前草稿。</p>
+                    <p class="map-site-hint" id="siteMapHint">在下方现场记录 PDF 上<strong>直接点击</strong>输入框加入来源；<strong>单个来源</strong>可不填模板直接回填，<strong>多个来源</strong>须填写映射模板。绿框=已映射，紫框=其它栏位，橙框=当前草稿。</p>
                     <div class="map-site-scroll" id="siteMapScrollMain">
                         <div id="siteMapPdfContainer"></div>
                     </div>
                     <div class="map-compose-panel" id="mapComposePanel">
                         <h4>映射来源与文本模板</h4>
-                        <p class="sidebar-hint" style="margin:0 0 6px;">占位符 <code>{1}</code>、<code>{2}</code> 或现场 <code>pdfFieldId</code>；留空则多来源按行拼接。模板中的<strong>换行与行首空格</strong>会原样保存并在回填时使用。</p>
+                        <p class="sidebar-hint" style="margin:0 0 6px;"><strong>单个来源</strong>可不填模板，直接回填该栏位值；<strong>多个来源</strong>必须填写下方模板（占位符 <code>{1}</code>、<code>{2}</code> 或现场 <code>pdfFieldId</code>）。换行与行首空格会原样保留。</p>
                         <p class="map-cache-hint" id="mapCacheHint">映射草稿会自动保存到本浏览器；导出坐标模板 JSON 成功后会清除对应草稿。</p>
                         <div class="map-source-list" id="mapSourceList"></div>
+                        <p class="map-template-requirement neutral" id="mapTemplateRequirementHint">添加来源后，将提示是否需要填写映射模板。</p>
                         <label class="sr-only" for="mapValueTemplateInput">回填文本模板</label>
-                        <textarea id="mapValueTemplateInput" class="map-value-template-input" spellcheck="false" placeholder="例如：&#10;  检测条件：{1}&#10;  结果：{2}"></textarea>
+                        <textarea id="mapValueTemplateInput" class="map-value-template-input" spellcheck="false" placeholder="多个来源时必填，例如：&#10;  检测条件：{1}&#10;  结果：{2}"></textarea>
                         <div class="map-template-preview" id="mapTemplatePreview">预览：（添加来源后显示）</div>
                         <div class="map-compose-actions">
                             <button type="button" id="mapBtnInsertSlot1">插入 {1}</button>
                             <button type="button" id="mapBtnApplyPreview" class="primary">预览填入报告栏位</button>
                             <button type="button" id="mapBtnSaveConfig" class="primary">保存映射</button>
                         </div>
+                    </div>
+                </main>
+            </div>
+        </div>
+    </div>
+
+    <div class="map-mode-overlay" id="formulaFieldPickOverlay" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="formulaPickTitle">
+        <div class="map-mode-dialog">
+            <header class="map-mode-header">
+                <div class="map-mode-header-title" id="formulaPickTitle">在 PDF 上选择栏位插入公式</div>
+                <div class="map-mode-field-label" id="formulaPickFieldLabel">当前编辑栏位：—</div>
+                <div class="map-mode-header-actions">
+                    <button type="button" id="formulaPickCancel">关闭</button>
+                </div>
+            </header>
+            <div class="map-mode-body">
+                <aside class="map-report-preview formula-pick-side">
+                    <div class="map-report-preview-title">当前栏位位置</div>
+                    <p class="map-report-preview-hint">橙色为正在编辑公式的栏位。</p>
+                    <div class="map-report-preview-scroll" id="formulaPickPreviewScroll">
+                        <div id="formulaPickPreviewContainer"></div>
+                    </div>
+                    <div class="formula-pick-compose">
+                        <h4>当前公式（可编辑）</h4>
+                        <div class="formula-pick-expr-label"><code id="formulaPickPidLabel">f?</code> =</div>
+                        <label class="sr-only" for="formulaPickFormulaInput">公式内容</label>
+                        <textarea id="formulaPickFormulaInput" class="formula-pick-formula-input" spellcheck="false" placeholder="例：avg(f1,f2,f3)、std(f1,f2,f3)、var(f1,f2,f3)"></textarea>
+                        <div class="formula-pick-formula-preview" id="formulaPickFormulaPreview">保存为：<code>—</code></div>
+                        <div class="formula-pick-op-row" id="formulaPickOpRow"></div>
+                    </div>
+                </aside>
+                <main class="map-site-main">
+                    <p class="map-site-hint" id="formulaPickHint">鼠标移到输入框上会<strong>高亮</strong>；点击可插入栏位编号（如 f12）。灰色不可选为当前栏位自身。</p>
+                    <div class="map-site-scroll" id="formulaPickScroll">
+                        <div id="formulaPickPdfContainer"></div>
                     </div>
                 </main>
             </div>
@@ -1689,7 +1886,8 @@
             enums: {},
             steps: [],
             libraryTaskId: '',
-            libraryTemplateFileId: ''
+            libraryTemplateFileId: '',
+            defaultJsonTemplateId: ''
         };
 
         let reportTaskContext = {
@@ -2113,6 +2311,7 @@
         const mapSourceList = document.getElementById('mapSourceList');
         const mapValueTemplateInput = document.getElementById('mapValueTemplateInput');
         const mapTemplatePreview = document.getElementById('mapTemplatePreview');
+        const mapTemplateRequirementHint = document.getElementById('mapTemplateRequirementHint');
         const mapBtnInsertSlot1 = document.getElementById('mapBtnInsertSlot1');
         const mapBtnApplyPreview = document.getElementById('mapBtnApplyPreview');
         const mapBtnSaveConfig = document.getElementById('mapBtnSaveConfig');
@@ -2275,6 +2474,60 @@
             return text;
         }
 
+        function getMapTemplateRequirement(sources, valueTemplate) {
+            const n = (sources || []).length;
+            const tpl = String(valueTemplate || '').trim();
+            if (n === 0) {
+                return {
+                    level: 'neutral',
+                    message: '请先在 PDF 上点击现场记录输入框添加来源。'
+                };
+            }
+            if (n === 1) {
+                if (tpl) {
+                    return {
+                        level: 'ok',
+                        message: '当前为单个来源：已填写映射模板，将按模板回填。'
+                    };
+                }
+                return {
+                    level: 'ok',
+                    message: '当前为单个来源：可不填模板，保存后将直接回填该现场栏位的值。'
+                };
+            }
+            if (!tpl) {
+                return {
+                    level: 'warn',
+                    message: '已绑定 ' + n + ' 个来源：请填写下方「回填文本模板」（如 {1}、{2}），填写后才能保存映射。'
+                };
+            }
+            return {
+                level: 'ok',
+                message: '当前为 ' + n + ' 个来源：已填写映射模板，将按模板拼合后回填。'
+            };
+        }
+
+        function updateMapTemplateRequirementUi() {
+            if (!mapSession) return;
+            const draft = mapSession.draftConfig;
+            const tpl = normalizeValueTemplateText(
+                (mapValueTemplateInput && mapValueTemplateInput.value) || draft.valueTemplate || ''
+            );
+            const req = getMapTemplateRequirement(draft.sources, tpl);
+            if (mapTemplateRequirementHint) {
+                mapTemplateRequirementHint.className = 'map-template-requirement ' + req.level;
+                mapTemplateRequirementHint.textContent = req.message;
+            }
+            const multiNeedTpl = (draft.sources || []).length > 1 && !tpl;
+            if (mapValueTemplateInput) {
+                mapValueTemplateInput.classList.toggle('map-template-input--required', multiNeedTpl);
+            }
+            if (mapBtnSaveConfig) {
+                mapBtnSaveConfig.disabled = multiNeedTpl;
+                mapBtnSaveConfig.title = multiNeedTpl ? '多个来源须先填写映射模板' : '';
+            }
+        }
+
         function renderMapComposePanel() {
             if (!mapSession || !mapSourceList) return;
             const draft = mapSession.draftConfig;
@@ -2302,18 +2555,31 @@
             if (mapValueTemplateInput && mapValueTemplateInput.value !== tplNorm) {
                 mapValueTemplateInput.value = tplNorm;
             }
+            draft.valueTemplate = tplNorm;
             refreshMapTemplatePreview();
+            updateMapTemplateRequirementUi();
             schedulePersistMapCache();
         }
 
         function refreshMapTemplatePreview() {
             if (!mapTemplatePreview || !mapSession) return;
             const draft = mapSession.draftConfig;
+            const tpl = String(draft.valueTemplate || '').trim();
             if (!draft.sources.length) {
                 mapTemplatePreview.textContent = '预览：（请先点击现场记录输入框添加来源）';
+                updateMapTemplateRequirementUi();
                 return;
             }
-            mapTemplatePreview.textContent = '预览：\n' + renderValueTemplatePreview(draft.valueTemplate, draft.sources);
+            const body = renderValueTemplatePreview(draft.valueTemplate, draft.sources);
+            if (draft.sources.length === 1 && !tpl) {
+                mapTemplatePreview.textContent = '预览（单来源，直接回填）：\n' + body;
+            } else if (draft.sources.length > 1 && !tpl) {
+                mapTemplatePreview.textContent =
+                    '参考预览（未填模板，仅作参考；保存前须填写模板）：\n' + body;
+            } else {
+                mapTemplatePreview.textContent = '预览：\n' + body;
+            }
+            updateMapTemplateRequirementUi();
         }
 
         function updateStructurePanelVisibility() {
@@ -2455,7 +2721,7 @@
                 }
                 updateReportMappingUi();
                 refreshFieldList();
-                fields.forEach(f => mountField(f));
+                mountAllFields();
             } catch (err) {
                 console.warn(err);
             }
@@ -2478,8 +2744,16 @@
             const srcHint = f.reportSourceMap && f.reportSourceMap.sources
                 ? f.reportSourceMap.sources.map(s => (s.label || s.sitePdfFieldId)).join('、')
                 : '';
+            const srcCount = (f.reportSourceMap && f.reportSourceMap.sources) ? f.reportSourceMap.sources.length : 0;
+            const tplSet = !!(f.reportSourceMap && String(f.reportSourceMap.valueTemplate || '').trim());
+            let tplHint = '';
+            if (f.reportSourceMap) {
+                if (srcCount > 1 && !tplSet) tplHint = ' · 多来源缺模板';
+                else if (tplSet) tplHint = ' · 模板已设';
+                else if (srcCount === 1) tplHint = ' · 单来源直接回填';
+            }
             chip.title = f.reportSourceMap
-                ? (ruleHint + '来源：' + srcHint + (f.reportSourceMap.valueTemplate ? ' · 模板已设' : ''))
+                ? (ruleHint + '来源：' + srcHint + tplHint)
                 : (reportTaskContext.mappingHint || '映射到现场记录输入框');
             chip.addEventListener('mousedown', ev => {
                 ev.stopPropagation();
@@ -2690,7 +2964,7 @@
             renderMapComposePanel();
             updateMapCacheUiHint(restoredFromCache);
             updateReportMappingUi();
-            fields.forEach(ff => mountField(ff));
+            mountAllFields();
             renderReportMapPreview(reportFieldId).catch(err => console.warn(err));
             loadSiteMapBundle(Number(siteMapTaskSelect.value)).catch(err => alert(err.message));
         }
@@ -2733,12 +3007,26 @@
                 alert('请至少选择一个现场记录来源');
                 return;
             }
+            const valueTemplate = normalizeValueTemplateText(
+                (mapValueTemplateInput && mapValueTemplateInput.value) || draft.valueTemplate || ''
+            );
+            if (draft.sources.length > 1 && !valueTemplate) {
+                alert(
+                    '已选择 ' + draft.sources.length + ' 个现场记录来源，请填写「回填文本模板」后再保存。\n\n'
+                    + '单个来源可不填模板（直接回填该栏位）；多个来源必须用 {1}、{2} 等占位符组合，例如：\n'
+                    + '检测条件：{1}\n结果：{2}'
+                );
+                if (mapValueTemplateInput) {
+                    mapValueTemplateInput.focus();
+                    mapValueTemplateInput.classList.add('map-template-input--required');
+                }
+                updateMapTemplateRequirementUi();
+                return;
+            }
             const cfg = {
                 reportPdfFieldId: reportPdfFieldId,
                 sources: draft.sources.slice(),
-                valueTemplate: normalizeValueTemplateText(
-                    (mapValueTemplateInput && mapValueTemplateInput.value) || draft.valueTemplate || ''
-                ),
+                valueTemplate: valueTemplate,
                 mapSource: 'explicit',
                 mapRuleLabel: ''
             };
@@ -2756,7 +3044,7 @@
             clearFieldMapDraft(reportPdfFieldId);
             persistMapCacheNow();
             refreshFieldList();
-            fields.forEach(ff => mountField(ff));
+            mountAllFields();
             if (closeAfter) exitMapMode();
             else {
                 applySiteMapHighlights();
@@ -2838,7 +3126,9 @@
         }
         if (mapValueTemplateInput) {
             mapValueTemplateInput.addEventListener('input', () => {
-                if (mapSession) mapSession.draftConfig.valueTemplate = mapValueTemplateInput.value;
+                if (mapSession) {
+                    mapSession.draftConfig.valueTemplate = mapValueTemplateInput.value;
+                }
                 refreshMapTemplatePreview();
                 schedulePersistMapCache();
             });
@@ -2862,7 +3152,12 @@
             });
         }
         document.addEventListener('keydown', e => {
-            if (e.key === 'Escape' && mapSession) exitMapMode();
+            if (e.key !== 'Escape') return;
+            if (formulaPickSession) {
+                closeFormulaFieldPicker();
+                return;
+            }
+            if (mapSession) exitMapMode();
         });
         if (siteMapTaskSelect) {
             siteMapTaskSelect.addEventListener('change', () => {
@@ -2881,34 +3176,103 @@
             return 'f' + (fallbackIndex + 1);
         }
 
-        /** 仅保证 pdfFieldId（PDF 回填键）唯一；标签 placeholder 可重名，编辑器 DOM 键与 id 均用 pdfFieldId。 */
-        function ensurePdfFieldIds(fieldList) {
-            const usedPdf = new Set();
-            let maxN = 0;
-            (fieldList || []).forEach((f, idx) => {
+        function sortFieldsReadingOrder(list) {
+            return [...(list || [])].sort((a, b) => {
+                const ap = Number(a.page) || 0;
+                const bp = Number(b.page) || 0;
+                if (ap !== bp) return ap - bp;
+                const ay = Number(a.y) || 0;
+                const by = Number(b.y) || 0;
+                if (Math.abs(ay - by) > 1e-6) return ay - by;
+                const ax = Number(a.x) || 0;
+                const bx = Number(b.x) || 0;
+                if (Math.abs(ax - bx) > 1e-6) return ax - bx;
+                return String(a.id).localeCompare(String(b.id));
+            });
+        }
+
+        /** 画板/侧栏序号：与 fields 数组下标一致（第 N 项 = 下标 N-1），不按坐标重排。 */
+        function fieldCanvasOrdinal(f) {
+            if (!f) return 0;
+            const idx = fields.indexOf(f);
+            return idx >= 0 ? idx + 1 : 0;
+        }
+
+        /**
+         * 按 fields 列表顺序将 pdfFieldId 定为 f1、f2…（与侧栏、画板角标严格一致，不按 page/y/x 排序）。
+         * 返回旧 f 号 → 新 f 号映射，供公式/命名标记等重绑。
+         */
+        function reindexPdfFieldIds(fieldList, opts) {
+            const list = fieldList || fields;
+            const remap = new Map();
+            let changed = false;
+            list.forEach((f, idx) => {
                 if (!f) return;
-                let pid = String(f.pdfFieldId || '').trim();
-                if (!/^f\d+$/i.test(pid)) {
-                    const fromId = normalizeFieldId(f.id, idx);
-                    pid = /^f\d+$/i.test(fromId) ? fromId.toLowerCase() : '';
-                } else {
-                    pid = pid.toLowerCase();
-                }
-                if (!pid) pid = 'f' + (idx + 1);
-                const base = pid;
-                let seq = 2;
-                while (usedPdf.has(pid)) {
-                    const m = /^f(\d+)$/.exec(base);
-                    pid = m ? ('f' + (parseInt(m[1], 10) + seq - 1)) : (`${base}__${seq}`);
-                    seq += 1;
+                const pid = 'f' + (idx + 1);
+                const olds = [
+                    String(f.pdfFieldId || '').trim().toLowerCase(),
+                    String(f.id || '').trim().toLowerCase()
+                ].filter(Boolean);
+                olds.forEach(old => {
+                    if (old !== pid) remap.set(old, pid);
+                });
+                if (String(f.pdfFieldId || '').trim().toLowerCase() !== pid) {
+                    changed = true;
                 }
                 f.pdfFieldId = pid;
-                f.id = pid;
-                usedPdf.add(pid);
-                const n = parseInt(String(pid).slice(1), 10);
-                if (!isNaN(n)) maxN = Math.max(maxN, n);
+                const curId = String(f.id || '').trim();
+                if (/^f\d+$/i.test(curId) && curId.toLowerCase() !== pid) {
+                    f.id = pid;
+                }
             });
-            if (maxN > 0) fieldIdSeq = maxN + 1;
+            fieldIdSeq = list.length + 1;
+            if (opts && opts.remapExpressions) {
+                list.forEach(f => {
+                    if (!f || !String(f.fieldExpression || '').trim()) return;
+                    f.fieldExpression = remapFormulaPdfFieldRefs(f.fieldExpression, remap);
+                });
+            }
+            return { remap, changed };
+        }
+
+        function remapFormulaPdfFieldRefs(expr, remap) {
+            let s = String(expr || '');
+            if (!remap || !remap.size) return s;
+            const keys = [...remap.keys()].sort((a, b) => b.length - a.length);
+            keys.forEach(oldK => {
+                const neu = remap.get(oldK);
+                if (!oldK || !neu) return;
+                const esc = oldK.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                s = s.replace(new RegExp('\\b' + esc + '\\b', 'gi'), neu);
+            });
+            return s;
+        }
+
+        /** 重排 pdfFieldId 并同步画板 DOM / 选中态 / 命名标记引用。 */
+        function applyPdfFieldIdRenumber(remountCanvas) {
+            const { remap, changed } = reindexPdfFieldIds(fields, { remapExpressions: true });
+            if (!changed) {
+                updateFieldBadges();
+                return;
+            }
+            const sel = String(selectedFieldId || '').trim().toLowerCase();
+            if (sel && remap.has(sel)) selectedFieldId = remap.get(sel);
+            marks.forEach(m => {
+                const tid = String(m.targetFieldId || '').trim().toLowerCase();
+                if (tid && remap.has(tid)) m.targetFieldId = remap.get(tid);
+            });
+            if (remountCanvas) mountAllFields();
+            else updateFieldBadges();
+        }
+
+        /** 批量挂载画板栏位（避免在 mountField 内重复全表 updateFieldBadges，约 O(n²)）。 */
+        function mountAllFields() {
+            fields.forEach((f, idx) => mountField(f, idx + 1));
+            updateFieldBadges();
+        }
+
+        function ensurePdfFieldIds(fieldList) {
+            reindexPdfFieldIds(fieldList || fields, { remapExpressions: true });
             return fieldList;
         }
 
@@ -2933,8 +3297,8 @@
         }
 
         function updateFieldBadges() {
-            fields.forEach((f, idx) => {
-                if (f.badgeEl) f.badgeEl.textContent = String(idx + 1);
+            fields.forEach((f) => {
+                if (f.badgeEl) f.badgeEl.textContent = String(fieldCanvasOrdinal(f) || '');
             });
         }
 
@@ -3022,6 +3386,7 @@
 
         function closeFormulaModal() {
             formulaModalOpen = false;
+            closeFormulaFieldPicker();
             if (formulaModalBackdrop) {
                 formulaModalBackdrop.classList.remove('open');
                 formulaModalBackdrop.setAttribute('aria-hidden', 'true');
@@ -3229,19 +3594,43 @@
             return { level: 'ok', message: '公式格式看起来可以保存（与动态表单、导出计算使用同一套规则）。' };
         }
 
+        function describeJudgmentCriterion(s) {
+            const t = String(s || '').trim();
+            if (!t) return '';
+            let m = t.match(/^<=(.+)$/i);
+            if (m) return '不超过 ' + m[1];
+            m = t.match(/^>=(.+)$/i);
+            if (m) return '不低于 ' + m[1];
+            m = t.match(/^([f\d]+|\d+(?:\.\d+)?)±(\d+(?:\.\d+)?)$/i);
+            if (m) return '以 ' + m[1] + ' 为中心，允差 ±' + m[2];
+            m = t.match(/^±(\d+(?:\.\d+)?)$/i);
+            if (m) return '允差 ±' + m[1] + '（以 0 为中心）';
+            m = t.match(/^(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)$/);
+            if (m) return '范围 ' + m[1] + '～' + m[2];
+            return t;
+        }
+
         function validateJudgmentText(raw) {
             const s = normalizeJudgmentCriteriaInput(raw);
             if (!s) return { level: 'warn', message: '未填写判定标准。没有合格判定的栏位可以留空。' };
             const ok = /^(<=|>=|<|>|=)(f\d+|\d+(?:\.\d+)?)$/i.test(s)
                 || /^(f\d+|\d+(?:\.\d+)?)±\d+(?:\.\d+)?$/i.test(s)
+                || /^±\d+(?:\.\d+)?$/i.test(s)
                 || /^\d+(?:\.\d+)?-\d+(?:\.\d+)?$/.test(s);
-            if (ok) return { level: 'ok', message: '判定写法可识别。' };
-            return { level: 'warn', message: '系统会原样保存。建议使用 <=20、<=f23、>=f12、f23±10 或 10-20 这类写法。' };
+            if (ok) {
+                const desc = describeJudgmentCriterion(s);
+                return { level: 'ok', message: '已识别：' + (desc || s) + '。' };
+            }
+            return {
+                level: 'warn',
+                message: '暂未完全识别。可手写：不超过/<=25、不低于/>=10、±2 或 +-2、100±5、10-20（也支持 10~20、10到20）。'
+            };
         }
 
         function normalizeJudgmentCriteriaInput(raw) {
-            return String(raw || '')
-                .trim()
+            let s = String(raw || '').trim();
+            if (!s) return '';
+            s = s
                 .replace(/[，]/g, ',')
                 .replace(/[＜]/g, '<')
                 .replace(/[＞]/g, '>')
@@ -3249,13 +3638,339 @@
                 .replace(/[≤]/g, '<=')
                 .replace(/[≥]/g, '>=')
                 .replace(/[＋]/g, '+')
-                .replace(/[－]/g, '-')
-                .replace(/\+\/-/g, '±')
-                .replace(/\+-/g, '±')
-                .replace(/\s+/g, '')
-                .replace(/f(\d+)/gi, (_, n) => 'f' + n);
+                .replace(/[－−－]/g, '-');
+            s = s.replace(/不超过\s*([0-9.f]+)/gi, '<=$1');
+            s = s.replace(/不小于\s*([0-9.f]+)/gi, '>=$1');
+            s = s.replace(/不低于\s*([0-9.f]+)/gi, '>=$1');
+            s = s.replace(/小于等于\s*([0-9.f]+)/gi, '<=$1');
+            s = s.replace(/大于等于\s*([0-9.f]+)/gi, '>=$1');
+            s = s.replace(/(\d+(?:\.\d+)?|f\d+)\s*[~～到至]\s*(\d+(?:\.\d+)?|f\d+)/gi, '$1-$2');
+            s = s.replace(/\s+/g, '');
+            s = s.replace(/\+\s*\/\s*-\s*/gi, '±');
+            s = s.replace(/\+\/-/gi, '±');
+            s = s.replace(/([0-9.]+|f\d+)\+-/gi, '$1±');
+            s = s.replace(/([0-9.]+|f\d+)\+\-/gi, '$1±');
+            s = s.replace(/^\+-(\d+(?:\.\d+)?)$/i, '±$1');
+            s = s.replace(/f(\d+)/gi, (_, n) => 'f' + n);
+            return s;
         }
 
+        let formulaPickSession = null;
+        let formulaPickRenderToken = 0;
+        let formulaPickResizeObserver = null;
+        let formulaPickResizeTimer = null;
+        const formulaFieldPickOverlay = document.getElementById('formulaFieldPickOverlay');
+        const formulaPickFieldLabel = document.getElementById('formulaPickFieldLabel');
+        const formulaPickHint = document.getElementById('formulaPickHint');
+        const formulaPickScroll = document.getElementById('formulaPickScroll');
+        const formulaPickPdfContainer = document.getElementById('formulaPickPdfContainer');
+        const formulaPickPreviewContainer = document.getElementById('formulaPickPreviewContainer');
+        const formulaPickPreviewScroll = document.getElementById('formulaPickPreviewScroll');
+        const formulaPickCancel = document.getElementById('formulaPickCancel');
+        const formulaPickFormulaInput = document.getElementById('formulaPickFormulaInput');
+        const formulaPickFormulaPreview = document.getElementById('formulaPickFormulaPreview');
+        const formulaPickPidLabel = document.getElementById('formulaPickPidLabel');
+        const formulaPickOpRow = document.getElementById('formulaPickOpRow');
+        let formulaPickEditorBound = false;
+
+        function getFormulaPickActiveInput() {
+            if (!formulaPickSession) return null;
+            if (formulaPickFormulaInput) return formulaPickFormulaInput;
+            return formulaPickSession.targetInput || null;
+        }
+
+        function syncFormulaPickEditorPreview() {
+            if (!formulaPickSession || !formulaPickFormulaPreview) return;
+            const pid = formulaPickSession.formulaPid || 'f?';
+            const input = getFormulaPickActiveInput();
+            const raw = input ? String(input.value || '') : '';
+            const normalized = normalizeFieldExpressionInput(raw, pid);
+            const code = formulaPickFormulaPreview.querySelector('code');
+            if (code) code.textContent = pid + ' = ' + (normalized || '空');
+        }
+
+        function pushFormulaPickEditorToModal() {
+            if (!formulaPickSession || !formulaPickSession.targetInput) return;
+            const overlayVal = formulaPickFormulaInput
+                ? String(formulaPickFormulaInput.value || '')
+                : '';
+            formulaPickSession.targetInput.value = overlayVal;
+            formulaPickSession.targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+            if (typeof formulaPickSession.syncFormulaUi === 'function') {
+                formulaPickSession.syncFormulaUi();
+            }
+            syncFormulaPickEditorPreview();
+        }
+
+        function pullFormulaPickEditorFromModal() {
+            if (!formulaPickSession || !formulaPickFormulaInput || !formulaPickSession.targetInput) return;
+            formulaPickFormulaInput.value = String(formulaPickSession.targetInput.value || '');
+            if (formulaPickPidLabel) {
+                formulaPickPidLabel.textContent = formulaPickSession.formulaPid || 'f?';
+            }
+            syncFormulaPickEditorPreview();
+        }
+
+        function insertIntoFormulaPickEditor(text, options) {
+            const input = getFormulaPickActiveInput();
+            if (!input) return;
+            input.focus();
+            insertTextAtCursor(input, text, options || {});
+            pushFormulaPickEditorToModal();
+        }
+
+        function bindFormulaPickEditorUi() {
+            if (formulaPickEditorBound) return;
+            formulaPickEditorBound = true;
+            if (formulaPickFormulaInput) {
+                formulaPickFormulaInput.addEventListener('input', () => {
+                    pushFormulaPickEditorToModal();
+                });
+                formulaPickFormulaInput.addEventListener('blur', () => {
+                    if (!formulaPickSession) return;
+                    const pid = formulaPickSession.formulaPid || '';
+                    formulaPickFormulaInput.value = normalizeFieldExpressionInput(
+                        formulaPickFormulaInput.value,
+                        pid
+                    );
+                    pushFormulaPickEditorToModal();
+                });
+            }
+            if (formulaPickOpRow) {
+                [
+                    ['+', '+'],
+                    ['-', '-'],
+                    ['×', '*'],
+                    ['÷', '/'],
+                    ['( )', '()', -1]
+                ].forEach(([label, value, offset]) => {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.textContent = label;
+                    btn.addEventListener('click', () => {
+                        insertIntoFormulaPickEditor(value, {
+                            cursorOffset: offset == null ? String(value).length : offset
+                        });
+                    });
+                    formulaPickOpRow.appendChild(btn);
+                });
+            }
+        }
+
+        function setFormulaPickCanvasHighlight(fieldId, on) {
+            const f = fieldId ? getFieldById(fieldId) : null;
+            if (f && f.wrap) {
+                f.wrap.classList.toggle('field-wrap--formula-pick-current', !!on);
+            }
+        }
+
+        function setFormulaPickOverlayOpen(open) {
+            if (!formulaFieldPickOverlay) return;
+            formulaFieldPickOverlay.classList.toggle('is-open', !!open);
+            formulaFieldPickOverlay.setAttribute('aria-hidden', open ? 'false' : 'true');
+            document.body.classList.toggle('map-mode-open', !!open);
+        }
+
+        function closeFormulaFieldPicker() {
+            if (formulaPickSession) {
+                pushFormulaPickEditorToModal();
+                setFormulaPickCanvasHighlight(formulaPickSession.excludeFieldId, false);
+            }
+            formulaPickSession = null;
+            formulaPickRenderToken += 1;
+            if (formulaPickResizeTimer) {
+                clearTimeout(formulaPickResizeTimer);
+                formulaPickResizeTimer = null;
+            }
+            if (formulaPickResizeObserver) {
+                formulaPickResizeObserver.disconnect();
+                formulaPickResizeObserver = null;
+            }
+            setFormulaPickOverlayOpen(false);
+            if (formulaPickPdfContainer) formulaPickPdfContainer.innerHTML = '';
+            if (formulaPickPreviewContainer) formulaPickPreviewContainer.innerHTML = '';
+        }
+
+        function getFormulaPickAvailableWidth() {
+            const scrollEl = formulaPickScroll || formulaPickPdfContainer;
+            if (scrollEl && scrollEl.clientWidth > 120) {
+                return Math.max(480, scrollEl.clientWidth - 48);
+            }
+            return Math.max(720, Math.min(1400, window.innerWidth - 380));
+        }
+
+        function attachFormulaPickResizeObserver() {
+            if (!formulaPickScroll || typeof ResizeObserver === 'undefined') return;
+            if (formulaPickResizeObserver) formulaPickResizeObserver.disconnect();
+            formulaPickResizeObserver = new ResizeObserver(() => {
+                if (!formulaPickSession) return;
+                if (formulaPickResizeTimer) clearTimeout(formulaPickResizeTimer);
+                formulaPickResizeTimer = setTimeout(() => {
+                    renderFormulaPickPdf().catch(err => console.warn('formula pick pdf resize', err));
+                }, 120);
+            });
+            formulaPickResizeObserver.observe(formulaPickScroll);
+        }
+
+        async function renderFormulaPickPreview(excludeFieldId) {
+            if (!formulaPickPreviewContainer || !pdfDoc) return;
+            formulaPickPreviewContainer.innerHTML = '';
+            const previewMaxW = 268;
+            const activeField = getFieldById(excludeFieldId);
+            for (let p = 1; p <= pdfDoc.numPages; p++) {
+                const page = await pdfDoc.getPage(p);
+                const base = page.getViewport({ scale: 1 });
+                const scale = previewMaxW / base.width;
+                const vp = page.getViewport({ scale });
+                const wrap = document.createElement('div');
+                wrap.className = 'pdf-page';
+                wrap.dataset.page = String(p);
+                wrap.style.width = vp.width + 'px';
+                wrap.style.height = vp.height + 'px';
+                const canvas = document.createElement('canvas');
+                canvas.width = vp.width;
+                canvas.height = vp.height;
+                wrap.appendChild(canvas);
+                formulaPickPreviewContainer.appendChild(wrap);
+                await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+                fields.filter(ff => Number(ff.page) === p).forEach(ff => {
+                    const gidx = fields.indexOf(ff);
+                    const el = document.createElement('div');
+                    el.className = 'map-preview-field';
+                    if (ff.id === excludeFieldId) el.classList.add('map-preview-field--active');
+                    const ph = getFieldShortName(ff) + ' · ' + getFieldFormulaId(ff, gidx);
+                    el.title = ph;
+                    el.style.left = (Number(ff.x) * scale) + 'px';
+                    el.style.top = (Number(ff.y) * scale) + 'px';
+                    el.style.width = (Number(ff.w) * scale) + 'px';
+                    el.style.height = (Number(ff.h) * scale) + 'px';
+                    wrap.appendChild(el);
+                });
+            }
+            requestAnimationFrame(() => {
+                const active = formulaPickPreviewContainer.querySelector('.map-preview-field--active');
+                if (active && formulaPickPreviewScroll) {
+                    const pageEl = active.closest('.pdf-page');
+                    if (pageEl) pageEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            });
+        }
+
+        async function renderFormulaPickPdf() {
+            if (!formulaPickPdfContainer || !pdfDoc || !pdfReady || !formulaPickSession) return;
+            const token = ++formulaPickRenderToken;
+            const excludeFieldId = formulaPickSession.excludeFieldId;
+            const targetInput = formulaPickSession.targetInput;
+            const availW = getFormulaPickAvailableWidth();
+            formulaPickPdfContainer.innerHTML = '';
+            for (let p = 1; p <= pdfDoc.numPages; p++) {
+                if (token !== formulaPickRenderToken) return;
+                const page = await pdfDoc.getPage(p);
+                if (token !== formulaPickRenderToken) return;
+                const base = page.getViewport({ scale: 1 });
+                const scale = Math.min(1.65, availW / base.width);
+                const vp = page.getViewport({ scale });
+                const wrap = document.createElement('div');
+                wrap.className = 'pdf-page';
+                wrap.dataset.page = String(p);
+                wrap.style.width = vp.width + 'px';
+                wrap.style.height = vp.height + 'px';
+                const canvas = document.createElement('canvas');
+                canvas.width = vp.width;
+                canvas.height = vp.height;
+                wrap.appendChild(canvas);
+                formulaPickPdfContainer.appendChild(wrap);
+                await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+                if (token !== formulaPickRenderToken) return;
+                fields.filter(ff => Number(ff.page) === p).forEach(ff => {
+                    if ((ff.fieldType || 'text') !== 'text') return;
+                    const gidx = fields.indexOf(ff);
+                    const fid = getFieldFormulaId(ff, gidx);
+                    const el = document.createElement('div');
+                    el.className = 'formula-pick-field-wrap';
+                    el.dataset.fieldId = ff.id;
+                    el.dataset.formulaId = fid;
+                    const label = getFieldShortName(ff);
+                    el.title = fid + ' · ' + label;
+                    el.style.left = (Number(ff.x) * scale) + 'px';
+                    el.style.top = (Number(ff.y) * scale) + 'px';
+                    el.style.width = (Number(ff.w) * scale) + 'px';
+                    el.style.height = (Number(ff.h) * scale) + 'px';
+                    if (ff.id === excludeFieldId) {
+                        el.classList.add('formula-pick-field-wrap--current');
+                        wrap.appendChild(el);
+                        return;
+                    }
+                    el.addEventListener('mouseenter', () => {
+                        el.classList.add('formula-pick-field-wrap--hover');
+                    });
+                    el.addEventListener('mouseleave', () => {
+                        el.classList.remove('formula-pick-field-wrap--hover');
+                    });
+                    el.addEventListener('click', ev => {
+                        ev.stopPropagation();
+                        if (!targetInput || ff.id === excludeFieldId) return;
+                        insertIntoFormulaPickEditor(fid);
+                        if (formulaPickHint) {
+                            formulaPickHint.innerHTML = '已插入 <strong>' + fid + '</strong>（' + label + '）。左侧公式框已同步，可继续编辑或点选。';
+                        }
+                    });
+                    wrap.appendChild(el);
+                });
+            }
+            if (token !== formulaPickRenderToken) return;
+            requestAnimationFrame(() => {
+                if (!excludeFieldId || !formulaPickScroll) return;
+                const cur = formulaPickPdfContainer.querySelector('[data-field-id="' + excludeFieldId + '"]');
+                if (cur) {
+                    const pageEl = cur.closest('.pdf-page');
+                    if (pageEl) pageEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            });
+        }
+
+        function openFormulaFieldPicker(_anchorEl, targetInput, excludeFieldId, opts) {
+            if (!targetInput) return;
+            if (!pdfDoc || !pdfReady) {
+                alert('PDF 尚未加载完成，请稍后再试');
+                return;
+            }
+            const options = opts || {};
+            const f = getFieldById(excludeFieldId);
+            const idx = f ? fields.indexOf(f) : -1;
+            const pid = options.pid || (f ? (getFieldFormulaId(f, idx) || 'f?') : 'f?');
+            bindFormulaPickEditorUi();
+            formulaPickSession = {
+                targetInput: targetInput,
+                excludeFieldId: excludeFieldId,
+                formulaPid: pid,
+                syncFormulaUi: typeof options.syncFormulaUi === 'function' ? options.syncFormulaUi : null
+            };
+            pullFormulaPickEditorFromModal();
+            setFormulaPickCanvasHighlight(excludeFieldId, true);
+            if (formulaPickFieldLabel && f) {
+                const name = getFieldShortName(f);
+                formulaPickFieldLabel.innerHTML = '当前编辑栏位：<strong>' + name + '</strong> <span style="color:#86909c;">(' + pid + ')</span>';
+            }
+            if (formulaPickHint) {
+                formulaPickHint.innerHTML = '左侧可<strong>直接改公式</strong>；右侧 PDF 悬停高亮、点击插入栏位编号。橙色为当前栏位（不可插入自身）。';
+            }
+            setFormulaPickOverlayOpen(true);
+            attachFormulaPickResizeObserver();
+            const runPickRender = () => {
+                if (formulaPickFormulaInput) formulaPickFormulaInput.focus();
+                renderFormulaPickPdf().catch(err => console.warn('formula pick pdf', err));
+                renderFormulaPickPreview(excludeFieldId).catch(err => console.warn('formula pick preview', err));
+            };
+            requestAnimationFrame(() => requestAnimationFrame(runPickRender));
+        }
+
+        if (formulaPickCancel) formulaPickCancel.addEventListener('click', closeFormulaFieldPicker);
+        if (formulaFieldPickOverlay) {
+            formulaFieldPickOverlay.addEventListener('click', e => {
+                if (e.target === formulaFieldPickOverlay) closeFormulaFieldPicker();
+            });
+        }
         function setFormulaStatus(el, result) {
             if (!el || !result) return;
             el.className = 'formula-status ' + result.level;
@@ -3347,7 +4062,7 @@
             summary.appendChild(metaEl);
             host.appendChild(summary);
 
-            const formulaSection = createFormulaSection(1, '计算公式', '需要自动算结果时在这里写规则；可直接加减乘除，也可用下面「常用函数」插入（与 App 动态表单、导出计算一致）。不计算的栏位请留空。');
+            const formulaSection = createFormulaSection(1, '计算公式', '只需自动计算的栏位才填写；可手写加减乘除，或点「从表格选栏位」插入编号。不计算的栏位请留空。');
             const formulaLabel = document.createElement('div');
             formulaLabel.className = 'formula-input-label';
             const formulaLabelText = document.createElement('span');
@@ -3358,7 +4073,7 @@
             formulaLabel.appendChild(formulaLabelHint);
             const t1 = document.createElement('textarea');
             t1.spellcheck = false;
-            t1.placeholder = '例：f34+f35、max(f1,f2)、if(f10>0, f11, 0)、round(avg(f1,f2,f3), 2)';
+            t1.placeholder = '例：avg(f1,f2,f3)、std(f1,f2,f3)、var(f1,f2,f3)、round(avg(f1,f2,f3), 2)';
             t1.value = String(f.fieldExpression || '');
             const preview = document.createElement('div');
             preview.className = 'formula-preview';
@@ -3410,6 +4125,10 @@
                 ['min', 'min()', -1],
                 ['sum', 'sum()', -1],
                 ['avg', 'avg()', -1],
+                ['std', 'std()', -1],
+                ['var', 'var()', -1],
+                ['median', 'median()', -1],
+                ['count', 'count()', -1],
                 ['abs', 'abs()', -1],
                 ['round', 'round(, 2)', 6],
                 ['parseNum', 'parseNum()', -1],
@@ -3428,112 +4147,53 @@
             });
             formulaSection.appendChild(fnRow);
 
+            const fnToggle = document.createElement('div');
+            fnToggle.className = 'formula-fn-toggle';
+            fnToggle.textContent = '▸ 查看常用函数说明';
             const fnHelp = document.createElement('div');
             fnHelp.className = 'formula-fn-help';
+            fnHelp.style.display = 'none';
             fnHelp.innerHTML = ''
-                + '<h5>可以用的函数（白话说明）</h5>'
+                + '<h5>常用函数</h5>'
                 + '<ul>'
-                + '<li><code>max(…)</code> / <code>min(…)</code>：在一串数字或栏位里取<strong>最大</strong>或<strong>最小</strong>。例：<code>max(f1,f2,f3)</code>。</li>'
-                + '<li><code>sum(…)</code> / <code>avg(…)</code>：<strong>求和</strong>与<strong>平均值</strong>。例：<code>avg(f1,f2)</code>。</li>'
-                + '<li><code>abs(…)</code>：取绝对值，把负数变成正数。</li>'
-                + '<li><code>round(数值, 小数位)</code>：四舍五入保留几位小数。例：<code>round(f1, 2)</code>。</li>'
-                + '<li><code>if(条件, 成立时, 不成立时)</code>：按条件二选一。条件里可用 <code>&gt;</code> <code>&lt;</code> <code>&gt;=</code> <code>&lt;=</code> <code>==</code> <code>!=</code>，多个条件可用 <code>&&</code>（并且）或 <code>||</code>（或者）。</li>'
-                + '<li><code>parseNum(栏位或文字)</code>：从带单位的文字里<strong>抠出第一个数字</strong>再参与计算。</li>'
-                + '<li><code>lookup(表名, {列名: 栏位…})</code>：在<strong>对照表</strong>里按多列匹配，取出对应结果（表名、列名由模板配置决定）。</li>'
-                + '<li><code>unitFactor(当前选项, "枚举名")</code>：按<strong>单位/选项</strong>换成统一倍数再算（枚举名与模板里配置一致）。</li>'
+                + '<li><code>max(f1,f2)</code> / <code>min</code> / <code>sum</code> / <code>avg</code>：最大、最小、求和、平均</li>'
+                + '<li><code>std(f1,f2,f3)</code> / <code>stdev</code> / <code>stddev</code>：样本标准差（n-1）；<code>var</code> / <code>variance</code>：样本方差</li>'
+                + '<li><code>median(f1,f2,f3)</code>：中位数；<code>count(f1,f2)</code>：有效数值个数</li>'
+                + '<li><code>round(f1, 2)</code>：保留小数；<code>if(条件, 真, 假)</code>：按条件取值</li>'
+                + '<li><code>parseNum(f1)</code>：从带单位文字取数字</li>'
                 + '</ul>'
-                + '<p class="formula-fn-note">栏位一律用 <code>f数字</code>（如 f12）。除法用 <code>/</code>；与写 Excel 类似，但函数名请用上面英文。若公式较复杂，可先点按钮插入骨架再改。</p>'
-                + '<p class="formula-fn-note">进阶：还可使用 <code>coalesce</code>（依次取第一个有值的）、<code>len</code>、<code>toBool</code>、<code>isEmpty</code> 等；CT 剂量类模板可能提供 <code>ctdiw</code>。条件里可写 <code>&&</code>（并且）、<code>||</code>（或者）。</p>';
+                + '<p class="formula-fn-note">栏位用 <code>f数字</code>；只写等号右边，例如 <code>f34+f35</code>。</p>';
+            fnToggle.addEventListener('click', () => {
+                const open = fnHelp.style.display !== 'none';
+                fnHelp.style.display = open ? 'none' : 'block';
+                fnToggle.textContent = open ? '▸ 查看常用函数说明' : '▾ 收起函数说明';
+            });
+            formulaSection.appendChild(fnToggle);
             formulaSection.appendChild(fnHelp);
 
-            const fieldTools = document.createElement('div');
-            fieldTools.className = 'formula-field-tools';
-            const quickTitle = document.createElement('div');
-            quickTitle.className = 'formula-quick-title';
-            quickTitle.textContent = '点击栏位插入到公式';
-            const search = document.createElement('input');
-            search.type = 'text';
-            search.className = 'formula-search';
-            search.placeholder = '搜索编号或标签';
-            const grid = document.createElement('div');
-            grid.className = 'formula-field-grid';
-            const renderFieldChips = () => {
-                grid.innerHTML = '';
-                const q = String(search.value || '').trim().toLowerCase();
-                const candidates = fields
-                    .filter(o => o.id !== f.id && (o.fieldType || 'text') === 'text')
-                    .filter(o => {
-                        if (!q) return true;
-                        const blob = (getFieldFormulaId(o) + ' ' + getFieldShortName(o)).toLowerCase();
-                        return blob.includes(q);
-                    })
-                    .slice(0, 40);
-                if (!candidates.length) {
-                    const empty = document.createElement('div');
-                    empty.className = 'formula-field-empty';
-                    empty.textContent = q ? '没有匹配的文本栏位' : '暂无可引用的文本栏位';
-                    grid.appendChild(empty);
-                    return;
-                }
-                candidates.forEach(o => {
-                    const fid = getFieldFormulaId(o);
-                    const chip = document.createElement('button');
-                    chip.type = 'button';
-                    chip.className = 'formula-field-chip';
-                    const code = document.createElement('code');
-                    code.textContent = fid;
-                    const label = document.createElement('span');
-                    label.textContent = getFieldShortName(o);
-                    chip.appendChild(code);
-                    chip.appendChild(label);
-                    chip.title = fid + ' · ' + getFieldShortName(o);
-                    chip.addEventListener('click', () => insertTextAtCursor(t1, fid));
-                    grid.appendChild(chip);
-                });
-            };
-            search.addEventListener('input', renderFieldChips);
-            fieldTools.appendChild(quickTitle);
-            fieldTools.appendChild(search);
-            fieldTools.appendChild(grid);
-            formulaSection.appendChild(fieldTools);
+            const fieldPickRow = document.createElement('div');
+            fieldPickRow.className = 'formula-actions';
+            const fieldPickBtn = document.createElement('button');
+            fieldPickBtn.type = 'button';
+            fieldPickBtn.className = 'primary';
+            fieldPickBtn.textContent = '在 PDF 上选栏位';
+            fieldPickBtn.title = '打开与「映射现场」类似的窗口：预览 PDF，鼠标悬停高亮，点击插入栏位编号';
+            fieldPickBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openFormulaFieldPicker(fieldPickBtn, t1, f.id, { pid: pid, syncFormulaUi: syncFormulaUi });
+            });
+            fieldPickRow.appendChild(fieldPickBtn);
+            formulaSection.appendChild(fieldPickRow);
             formulaSection.appendChild(preview);
             formulaSection.appendChild(formulaStatus);
             host.appendChild(formulaSection);
-            renderFieldChips();
             syncFormulaUi();
 
-            const judgmentSection = createFormulaSection(2, '合格判定', '填写验收和状态两个检测类型的规则；多数情况下可以让两项相同。');
-            const quickTemplates = document.createElement('div');
-            quickTemplates.className = 'formula-chip-row';
-            const applyJudgmentTemplate = (template) => {
-                const base = (f.judgmentCriteriaByTestType.acceptance || f.fieldExpression || pid || 'f1').trim();
-                let next = '';
-                if (template === '<=') next = '<=';
-                if (template === '>=') next = '>=';
-                if (template === 'range') next = '0-100';
-                if (template === 'tol') next = (base && !/^[<>≤≥=]/.test(base)) ? (base + '±10') : (pid + '±10');
-                acceptanceInput.value = next;
-                statusInput.value = next;
-                f.judgmentCriteriaByTestType.acceptance = next;
-                f.judgmentCriteriaByTestType.status = next;
-                f.judgmentCriteriaManual = true;
-                cbMan.checked = true;
-                syncJudgmentUi();
-            };
-            [
-                ['≤ 上限', '<='],
-                ['≥ 下限', '>='],
-                ['范围', 'range'],
-                ['± 允差', 'tol']
-            ].forEach(([label, value]) => {
-                const btn = document.createElement('button');
-                btn.type = 'button';
-                btn.className = 'formula-chip';
-                btn.textContent = label;
-                btn.addEventListener('click', () => applyJudgmentTemplate(value));
-                quickTemplates.appendChild(btn);
-            });
-            judgmentSection.appendChild(quickTemplates);
+            const judgmentSection = createFormulaSection(2, '合格判定', '按检测类型填写是否合格；多数栏位验收与状态相同即可。');
+            const judgmentHint = document.createElement('p');
+            judgmentHint.className = 'formula-judgment-hint';
+            judgmentHint.textContent = '支持常见写法：不超过/<=25、不低于/>=10、±2 或 +-2、100±5、10-20（也认 10~20、10到20）。失焦时自动规范符号。';
+            judgmentSection.appendChild(judgmentHint);
 
             const row2 = document.createElement('div');
             row2.className = 'row2';
@@ -3541,81 +4201,36 @@
             const la = document.createElement('div');
             la.className = 'formula-input-label';
             const laText = document.createElement('span');
-            laText.textContent = '验收 acceptance';
+            laText.textContent = '验收检测';
             la.appendChild(laText);
             const acceptanceInput = document.createElement('input');
             acceptanceInput.type = 'text';
             acceptanceInput.value = f.judgmentCriteriaByTestType.acceptance;
-            acceptanceInput.placeholder = '<=25.0';
+            acceptanceInput.placeholder = '例：不超过25、>=10、+-2、100±5';
             accWrap.appendChild(la);
             accWrap.appendChild(acceptanceInput);
             const stWrap = document.createElement('div');
             const ls = document.createElement('div');
             ls.className = 'formula-input-label';
             const lsText = document.createElement('span');
-            lsText.textContent = '状态 status';
+            lsText.textContent = '状态检测';
             ls.appendChild(lsText);
             const statusInput = document.createElement('input');
             statusInput.type = 'text';
             statusInput.value = f.judgmentCriteriaByTestType.status;
-            statusInput.placeholder = '默认可与验收相同';
+            statusInput.placeholder = '可与验收相同';
             stWrap.appendChild(ls);
             stWrap.appendChild(statusInput);
             row2.appendChild(accWrap);
             row2.appendChild(stWrap);
             judgmentSection.appendChild(row2);
 
-            const copyRow = document.createElement('div');
-            copyRow.className = 'formula-actions';
-            const copyBtn = document.createElement('button');
-            copyBtn.type = 'button';
-            copyBtn.className = 'primary';
-            copyBtn.textContent = '状态同验收';
-            copyBtn.addEventListener('click', () => {
-                statusInput.value = acceptanceInput.value;
-                statusInput.dispatchEvent(new Event('input', { bubbles: true }));
-            });
-            const autoBtn = document.createElement('button');
-            autoBtn.type = 'button';
-            autoBtn.textContent = '从标签识别';
-            autoBtn.addEventListener('click', () => {
-                if (f.judgmentCriteriaManual) {
-                    alert('已开启人工锁定。请先取消「人工锁定」再从标签识别。');
-                    return;
-                }
-                const g = inferJudgmentCriteriaStrings(f);
-                if (!g.acceptance && !g.status) {
-                    alert('未从当前标签中识别到判定标准。可以把「≤25.0」「f23±10」等写进侧栏标签后再试。');
-                    return;
-                }
-                acceptanceInput.value = g.acceptance;
-                statusInput.value = g.status || g.acceptance;
-                f.judgmentCriteriaByTestType.acceptance = acceptanceInput.value;
-                f.judgmentCriteriaByTestType.status = statusInput.value;
-                syncJudgmentUi();
-            });
-            copyRow.appendChild(copyBtn);
-            copyRow.appendChild(autoBtn);
-            judgmentSection.appendChild(copyRow);
-
-            const cbMan = document.createElement('input');
-            cbMan.type = 'checkbox';
-            cbMan.id = 'judgmentCriteriaManualCb';
-            cbMan.checked = !!f.judgmentCriteriaManual;
-            cbMan.addEventListener('change', () => {
-                f.judgmentCriteriaManual = !!cbMan.checked;
-            });
-            const manRow = document.createElement('div');
-            manRow.className = 'formula-manual-row';
-            const lbMan = document.createElement('label');
-            lbMan.htmlFor = 'judgmentCriteriaManualCb';
-            lbMan.textContent = '人工锁定：开启后，从标签识别不会覆盖上面的判定。';
-            manRow.appendChild(cbMan);
-            manRow.appendChild(lbMan);
-            judgmentSection.appendChild(manRow);
-
             const judgmentStatus = document.createElement('div');
             judgmentStatus.className = 'formula-status warn';
+            let lastFocusedJudgmentInput = acceptanceInput;
+            acceptanceInput.addEventListener('focus', () => { lastFocusedJudgmentInput = acceptanceInput; });
+            statusInput.addEventListener('focus', () => { lastFocusedJudgmentInput = statusInput; });
+
             const syncJudgmentUi = () => {
                 const acceptanceValue = normalizeJudgmentCriteriaInput(acceptanceInput.value);
                 const statusValue = normalizeJudgmentCriteriaInput(statusInput.value);
@@ -3634,24 +4249,54 @@
                 }
                 updateFieldRowIndicators(f.id);
             };
-            acceptanceInput.addEventListener('input', () => {
-                f.judgmentCriteriaManual = true;
-                cbMan.checked = true;
+
+            const copyRow = document.createElement('div');
+            copyRow.className = 'formula-actions';
+            const copyBtn = document.createElement('button');
+            copyBtn.type = 'button';
+            copyBtn.className = 'primary';
+            copyBtn.textContent = '状态同验收';
+            copyBtn.addEventListener('click', () => {
+                const v = normalizeJudgmentCriteriaInput(acceptanceInput.value);
+                statusInput.value = v;
+                acceptanceInput.value = v;
                 syncJudgmentUi();
             });
-            acceptanceInput.addEventListener('blur', () => {
+            copyRow.appendChild(copyBtn);
+            judgmentSection.appendChild(copyRow);
+
+            const quickTemplates = document.createElement('div');
+            quickTemplates.className = 'formula-chip-row';
+            const insertJudgmentSnippet = (snippet) => {
+                const input = lastFocusedJudgmentInput || acceptanceInput;
+                input.focus();
+                insertTextAtCursor(input, snippet, { cursorOffset: String(snippet).length });
+                syncJudgmentUi();
+            };
+            [
+                ['插入「不超过」', '<='],
+                ['插入「不低于」', '>='],
+                ['插入「±」', '±']
+            ].forEach(([label, snippet]) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'formula-chip';
+                btn.textContent = label;
+                btn.title = '在光标处插入 ' + snippet + '，后面可继续输入数字或栏位编号';
+                btn.addEventListener('click', () => insertJudgmentSnippet(snippet));
+                quickTemplates.appendChild(btn);
+            });
+            judgmentSection.appendChild(quickTemplates);
+
+            const normalizeJudgmentInputsOnBlur = () => {
                 acceptanceInput.value = normalizeJudgmentCriteriaInput(acceptanceInput.value);
-                syncJudgmentUi();
-            });
-            statusInput.addEventListener('input', () => {
-                f.judgmentCriteriaManual = true;
-                cbMan.checked = true;
-                syncJudgmentUi();
-            });
-            statusInput.addEventListener('blur', () => {
                 statusInput.value = normalizeJudgmentCriteriaInput(statusInput.value);
                 syncJudgmentUi();
-            });
+            };
+            acceptanceInput.addEventListener('input', syncJudgmentUi);
+            acceptanceInput.addEventListener('blur', normalizeJudgmentInputsOnBlur);
+            statusInput.addEventListener('input', syncJudgmentUi);
+            statusInput.addEventListener('blur', normalizeJudgmentInputsOnBlur);
             judgmentSection.appendChild(judgmentStatus);
             host.appendChild(judgmentSection);
             syncJudgmentUi();
@@ -3833,7 +4478,7 @@
                 main.className = 'field-row-main';
                 const badge = document.createElement('span');
                 badge.className = 'field-row-badge type-' + tk;
-                badge.textContent = String(idx + 1);
+                badge.textContent = String(fieldCanvasOrdinal(f) || (idx + 1));
                 const textCol = document.createElement('div');
                 textCol.className = 'field-row-text';
                 const title = document.createElement('span');
@@ -4079,6 +4724,7 @@
                 selectedFieldId = null;
                 closeFormulaModal();
             }
+            applyPdfFieldIdRenumber(true);
             refreshFieldList();
             applyAllNamingMarks();
         }
@@ -4122,7 +4768,7 @@
             input.style.paddingBottom = bottomPad + 'px';
         }
 
-        function mountField(f) {
+        function mountField(f, displayOrdinal) {
             f.wrap?.remove();
             f.el?.remove();
             f.wrap = null;
@@ -4149,7 +4795,10 @@
 
             const badge = document.createElement('span');
             badge.className = 'field-badge';
-            badge.textContent = String(fields.indexOf(f) + 1);
+            const ord = (displayOrdinal != null && Number(displayOrdinal) > 0)
+                ? Number(displayOrdinal)
+                : fieldCanvasOrdinal(f);
+            badge.textContent = String(ord > 0 ? ord : '');
             f.badgeEl = badge;
             attachFieldHoverSync(wrap, f.id);
 
@@ -4176,7 +4825,6 @@
                 meta.pageDiv.appendChild(wrap);
                 f.wrap = wrap;
                 f.el = box;
-                updateFieldBadges();
                 syncFieldLabelToCanvas(f);
                 return;
             }
@@ -4210,7 +4858,6 @@
                 meta.pageDiv.appendChild(wrap);
                 f.wrap = wrap;
                 f.el = box;
-                updateFieldBadges();
                 syncFieldLabelToCanvas(f);
                 return;
             }
@@ -4246,7 +4893,6 @@
             meta.pageDiv.appendChild(wrap);
             f.wrap = wrap;
             f.el = i;
-            updateFieldBadges();
             syncFieldLabelToCanvas(f);
             requestAnimationFrame(() => fitInputStyle(i, f));
         }
@@ -4282,9 +4928,8 @@
                 if (normalized.title == null) normalized.title = '';
                 return normalized;
             });
-            ensurePdfFieldIds(fields);
-            if (!fieldIdSeq || fieldIdSeq < 2) {
-                fieldIdSeq = fields.length ? Math.max(...fields.map(f => parseInt(String(f.id || '').slice(1)) || 0)) + 1 : 1;
+            if (fields.length) {
+                reindexPdfFieldIds(fields, { remapExpressions: true });
             }
             marks = [];
             markerSeq = 1;
@@ -4344,7 +4989,7 @@
                     pageMeta[p].textItems = textItems;
                     div.addEventListener('mousedown', e => startDraw(e, p));
                 }
-                fields.forEach(f => mountField(f));
+                mountAllFields();
                 renderMarks();
                 refreshFieldList();
                 applyFieldsVisibility();
@@ -4356,11 +5001,20 @@
             });
         }
 
+        function fieldsAlreadyHaveTemplateSections(fieldList) {
+            if (!shouldUseSiteRecordSections() || !fieldList || !fieldList.length) return true;
+            let keyed = 0;
+            fieldList.forEach(f => {
+                if (String(f.templateSectionKey || f.sectionKey || '').trim()) keyed += 1;
+            });
+            return keyed >= Math.max(1, Math.floor(fieldList.length * 0.5));
+        }
+
         async function autoImportLibraryJson(jsonTemplateId) {
             const jid = Number(jsonTemplateId);
             if (!jid) return;
             try {
-                const impBody = { template_id: jid };
+                const impBody = { template_id: jid, layout_only: true };
                 const lt = resolvedLibraryTaskIdStr();
                 if (lt) impBody.library_task_id = Number(lt);
                 const res = await fetch('/files/htmlpdf/api/import-json-from-library/', {
@@ -4374,7 +5028,7 @@
                 if (templateJsonSelect) {
                     templateJsonSelect.value = String(jid);
                 }
-                await loadReportTaskContext(jid);
+                loadReportTaskContext(jid).catch(err => console.warn(err));
             } catch (err) {
                 console.warn('自动载入任务模板 JSON 失败:', err);
             }
@@ -4452,26 +5106,13 @@
         }
 
         function getFieldsInReadingOrder() {
-            return [...fields].sort((a, b) => {
-                const ap = Number(a.page) || 0;
-                const bp = Number(b.page) || 0;
-                if (ap !== bp) return ap - bp;
-                const ay = Number(a.y) || 0;
-                const by = Number(b.y) || 0;
-                if (Math.abs(ay - by) > 1e-6) return ay - by;
-                const ax = Number(a.x) || 0;
-                const bx = Number(b.x) || 0;
-                if (Math.abs(ax - bx) > 1e-6) return ax - bx;
-                return String(a.id).localeCompare(String(b.id));
-            });
+            return sortFieldsReadingOrder(fields);
         }
 
         function getFieldByOrdinal(ordinal) {
             const idx = Number(ordinal) - 1;
-            if (!Number.isInteger(idx) || idx < 0) return null;
-            const ordered = getFieldsInReadingOrder();
-            if (idx >= ordered.length) return null;
-            return ordered[idx] || null;
+            if (!Number.isInteger(idx) || idx < 0 || idx >= fields.length) return null;
+            return fields[idx] || null;
         }
 
         function getFieldCenter(f) {
@@ -4856,6 +5497,70 @@
         btnAddImage.onclick = () => setDrawMode(!(drawMode && currentFieldType === 'image'), 'image');
         if (btnClearWorkspace) btnClearWorkspace.onclick = () => clearEditorWorkspace();
 
+        function fieldRectKey(f, tol = 0.5) {
+            const page = Number(f.page) || 1;
+            const r = (v) => Math.round((Number(v) || 0) / tol) * tol;
+            return page + '|' + r(f.x) + '|' + r(f.y) + '|' + r(f.w) + '|' + r(f.h);
+        }
+
+        function autoBoxOverlapsRect(raw, other) {
+            if (Number(raw.page) !== Number(other.page)) return false;
+            if (fieldRectKey(raw) === fieldRectKey(other)) return true;
+            return rectIoU(raw, other) >= 0.72;
+        }
+
+        function autoBoxOverlapsAny(raw, rectList) {
+            for (let i = 0; i < rectList.length; i++) {
+                if (autoBoxOverlapsRect(raw, rectList[i])) return true;
+            }
+            return false;
+        }
+
+        function appendAutoRedBoxCandidates(list) {
+            const accepted = [];
+            let skipped = 0;
+            (list || []).forEach(raw => {
+                if (!raw || raw.page == null) return;
+                if (autoBoxOverlapsAny(raw, fields) || autoBoxOverlapsAny(raw, accepted)) {
+                    skipped += 1;
+                    return;
+                }
+                const rawType = String(raw.fieldType || 'text').toLowerCase();
+                const isCheck = rawType === 'check';
+                const isImage = rawType === 'image';
+                const pid = nextId();
+                const f = normalizeFieldSize({
+                    id: pid,
+                    pdfFieldId: pid,
+                    page: raw.page,
+                    x: raw.x,
+                    y: raw.y,
+                    w: raw.w,
+                    h: raw.h,
+                    placeholder: raw.placeholder || (isCheck ? '勾选' : (isImage ? '图片' : '红字')),
+                    originalPlaceholder: raw.originalPlaceholder != null ? raw.originalPlaceholder : (raw.placeholder || ''),
+                    fieldType: isCheck ? 'check' : (isImage ? 'image' : 'text'),
+                    redText: (isCheck || isImage) ? false : true,
+                    value: '',
+                    checked: false,
+                    imageData: '',
+                    checkboxPair: raw.checkboxPair && typeof raw.checkboxPair === 'object' ? raw.checkboxPair : null,
+                    autoSemantic: raw.autoSemantic && typeof raw.autoSemantic === 'object' ? raw.autoSemantic : null,
+                    templateSectionKey: shouldUseSiteRecordSections() ? (raw.templateSectionKey || '') : '',
+                    templateSectionTitle: shouldUseSiteRecordSections() ? (raw.templateSectionTitle || '') : '',
+                    judgmentCriterionText: raw.judgmentCriterionText || '',
+                    fieldExpression: '',
+                    judgmentCriteriaByTestType: { acceptance: '', status: '' },
+                    judgmentCriteriaManual: false,
+                    title: ''
+                });
+                fields.push(f);
+                mountField(f);
+                accepted.push(raw);
+            });
+            return { added: accepted.length, skipped: skipped, accepted: accepted };
+        }
+
         btnAutoRedBoxes.onclick = async () => {
             if (!pdfDoc || !pdfReady) {
                 alert('模板 PDF 尚未加载完成，请稍后重试。');
@@ -4875,48 +5580,24 @@
                     alert('未检测到红色文本区域。请确认 PDF 中待填项为红色字体，或改用「框选文字填写区」手动划框。');
                     return;
                 }
-                list.forEach(raw => {
-                    const rawType = String(raw.fieldType || 'text').toLowerCase();
-                    const isCheck = rawType === 'check';
-                    const isImage = rawType === 'image';
-                    const pid = nextId();
-                    const f = normalizeFieldSize({
-                        id: pid,
-                        pdfFieldId: pid,
-                        page: raw.page,
-                        x: raw.x,
-                        y: raw.y,
-                        w: raw.w,
-                        h: raw.h,
-                        placeholder: raw.placeholder || (isCheck ? '勾选' : (isImage ? '图片' : '红字')),
-                        originalPlaceholder: raw.originalPlaceholder != null ? raw.originalPlaceholder : (raw.placeholder || ''),
-                        fieldType: isCheck ? 'check' : (isImage ? 'image' : 'text'),
-                        redText: (isCheck || isImage) ? false : true,
-                        value: '',
-                        checked: false,
-                        imageData: '',
-                        checkboxPair: raw.checkboxPair && typeof raw.checkboxPair === 'object' ? raw.checkboxPair : null,
-                        autoSemantic: raw.autoSemantic && typeof raw.autoSemantic === 'object' ? raw.autoSemantic : null,
-                        templateSectionKey: shouldUseSiteRecordSections() ? (raw.templateSectionKey || '') : '',
-                        templateSectionTitle: shouldUseSiteRecordSections() ? (raw.templateSectionTitle || '') : '',
-                        judgmentCriterionText: raw.judgmentCriterionText || '',
-                        fieldExpression: '',
-                        judgmentCriteriaByTestType: { acceptance: '', status: '' },
-                        judgmentCriteriaManual: false,
-                        title: ''
-                    });
-                    fields.push(f);
-                    mountField(f);
-                });
+                const { added, skipped, accepted } = appendAutoRedBoxCandidates(list);
+                if (!added) {
+                    alert(skipped > 0
+                        ? '自动识别到的区域与现有框重叠，未新增框（跳过 ' + skipped + ' 处重复）。'
+                        : '未检测到可添加的区域。');
+                    return;
+                }
                 refreshFieldList();
                 applyAllNamingMarks();
                 if (shouldUseSiteRecordSections()) {
                     await assignTemplateSectionsFromPdf(true);
                 }
-                const checkCount = list.filter(x => String(x.fieldType || '').toLowerCase() === 'check').length;
-                const imageCount = list.filter(x => String(x.fieldType || '').toLowerCase() === 'image').length;
-                const textCount = list.length - checkCount - imageCount;
-                alert('已添加 ' + list.length + ' 个自动框（红字文本框 ' + textCount + '，勾选框 ' + checkCount + '，图片框 ' + imageCount + '）');
+                const checkCount = accepted.filter(x => String(x.fieldType || '').toLowerCase() === 'check').length;
+                const imageCount = accepted.filter(x => String(x.fieldType || '').toLowerCase() === 'image').length;
+                const textCount = added - checkCount - imageCount;
+                let msg = '已添加 ' + added + ' 个自动框（红字文本框 ' + textCount + '，勾选框 ' + checkCount + '，图片框 ' + imageCount + '）';
+                if (skipped > 0) msg += '；跳过 ' + skipped + ' 处与现有框或本次结果重复的位置';
+                alert(msg);
             } catch (err) {
                 alert(err.message);
             }
@@ -4978,18 +5659,15 @@
                 title: f.title != null ? String(f.title) : ''
                 };
             }).map(item => normalizeFieldSize(item));
-            ensurePdfFieldIds(loadedFields);
             fields.forEach(item => {
                 if (item.wrap) item.wrap.remove();
                 else item.el?.remove();
             });
             fields = loadedFields;
-            if (!fieldIdSeq || fieldIdSeq < 2) {
-                fieldIdSeq = fields.length ? Math.max(...fields.map(f => parseInt(String(f.id || '').slice(1)) || 0)) + 1 : 1;
-            }
+            reindexPdfFieldIds(fields, { remapExpressions: true });
+            mountAllFields();
             selectedFieldId = null;
             closeFormulaModal();
-            fields.forEach(f => mountField(f));
             refreshFieldList();
             const tm = (d && d.template_meta && typeof d.template_meta === 'object') ? d.template_meta : {};
             const fs = (d && d.form_schema && typeof d.form_schema === 'object') ? d.form_schema : {};
@@ -5009,11 +5687,11 @@
             };
             const b = (d && d.bindings && typeof d.bindings === 'object') ? d.bindings : {};
             setSuppressAutoImport(false);
-            loadReportTaskContext(keepLf || templateJsonSelect.value || null);
+            loadReportTaskContext(keepLf || templateJsonSelect.value || null).catch(() => {});
             refreshSectionNav();
             if (isReportTemplateEditor()) {
                 clearAllFieldsSiteRecordSectionMeta();
-            } else {
+            } else if (!fieldsAlreadyHaveTemplateSections(fields)) {
                 assignTemplateSectionsFromPdf(true).catch(() => {});
             }
         }
@@ -5072,10 +5750,12 @@
             });
         }
 
-        async function requestLibraryJsonPayload() {
+        async function requestLibraryJsonPayload(opts) {
+            const options = opts && typeof opts === 'object' ? opts : {};
             const selected = templateJsonSelect.value;
             if (!selected) throw new Error('请先选择模板 JSON');
             const body = { template_id: Number(selected) };
+            if (options.layoutOnly) body.layout_only = true;
             const lt = resolvedLibraryTaskIdStr();
             if (lt) body.library_task_id = Number(lt);
             const res = await fetch('/files/htmlpdf/api/import-json-from-library/', {
@@ -5088,28 +5768,54 @@
             return data;
         }
 
+        function templateJsonOptionLabel(t) {
+            const base = String(t.name || '').trim() || ('#' + t.id);
+            const tag = String(t.label || '').trim();
+            if (t.isPrimary || t.kind === 'primary') return base + ' 【主模板】';
+            if (t.kind === 'history' && tag) return base + ' 【' + tag + '】';
+            if (t.kind === 'bound' && tag) return base + ' 【' + tag + '】';
+            return base;
+        }
+
         async function refreshTemplateJsonOptions(preferredId) {
-            const res = await fetch('/files/htmlpdf/api/template-jsons/');
+            const params = new URLSearchParams();
+            const lt = resolvedLibraryTaskIdStr();
+            const pdf = resolvedLibraryTemplateFileIdStr();
+            if (lt) params.set('library_task_id', lt);
+            if (pdf) params.set('template_pdf_id', pdf);
+            const qs = params.toString();
+            const res = await fetch('/files/htmlpdf/api/template-jsons/' + (qs ? ('?' + qs) : ''));
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || '读取模板 JSON 列表失败');
-            const prefer = String(preferredId || templateJsonSelect.value || '').trim();
+            const prefer = String(
+                preferredId
+                || templateContext.defaultJsonTemplateId
+                || data.default_json_template_id
+                || templateJsonSelect.value
+                || ''
+            ).trim();
             templateJsonSelect.innerHTML = '<option value="">选择模板 JSON</option>';
             (data.templates || []).forEach(t => {
                 const opt = document.createElement('option');
                 opt.value = String(t.id);
-                opt.textContent = t.name;
+                opt.textContent = templateJsonOptionLabel(t);
                 templateJsonSelect.appendChild(opt);
             });
             if (prefer && Array.from(templateJsonSelect.options).some(o => o.value === prefer)) {
                 templateJsonSelect.value = prefer;
+            } else if (data.default_json_template_id) {
+                templateJsonSelect.value = String(data.default_json_template_id);
             } else if ((data.templates || []).length) {
                 templateJsonSelect.value = String(data.templates[0].id);
+            }
+            if (data.scoped === false && (data.templates || []).length > 15) {
+                console.warn(data.hint || '模板 JSON 列表未按任务筛选');
             }
         }
         document.getElementById('btnImportTemplate').onclick = () => {
             const sel = templateJsonSelect.value || '';
             setSuppressAutoImport(false);
-            requestLibraryJsonPayload()
+            requestLibraryJsonPayload({ layoutOnly: true })
                 .then(d => importTemplatePayload(d, sel))
                 .catch(err => alert(err.message));
         };
@@ -5163,6 +5869,7 @@
         });
 
         function buildFieldsPayload() {
+            applyPdfFieldIdRenumber(false);
             return fields.map(i => {
                 const row = {
                     id: i.id,
@@ -5344,6 +6051,7 @@
 
         document.getElementById('saveTemplate').onclick = async () => {
             await syncAutoRedNamesBeforeSave();
+            applyPdfFieldIdRenumber(false);
             exportJsonMerged();
         };
         function saveFrontendTemplate() {
@@ -5352,6 +6060,8 @@
             const libTpl = resolvedLibraryTemplateFileIdStr()
                 || (templateJsonSelect && templateJsonSelect.value ? String(templateJsonSelect.value).trim() : '');
             const libTask = resolvedLibraryTaskIdStr();
+            const projectId = String(window.HTMLPDF_PROJECT_ID || '').trim();
+            const displayTaskNo = String(window.HTMLPDF_DISPLAY_TASK_NO || '').trim();
             fetch('/files/htmlpdf/api/export-frontend-json/', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -5372,6 +6082,9 @@
                     steps: templateContext.steps || [],
                     libraryTaskId: libTask,
                     libraryTemplateFileId: libTpl,
+                    projectId: projectId,
+                    taskNo: displayTaskNo,
+                    displayTaskNo: displayTaskNo,
                     formSchema: {
                         constants: templateContext.constants || {},
                         enums: templateContext.enums || {},
@@ -5379,7 +6092,10 @@
                     },
                     meta: {
                         libraryTaskId: libTask,
-                        libraryTemplateFileId: libTpl
+                        libraryTemplateFileId: libTpl,
+                        projectId: projectId,
+                        taskNo: displayTaskNo,
+                        displayTaskNo: displayTaskNo
                     },
                     bindings: buildBindingsForExport(),
                     report_site_field_map: reportTaskContext.reportSiteFieldMap || []
@@ -5387,6 +6103,9 @@
             }).then(async r => {
                 const d = await parseJsonResponseOrThrow(r, '保存前端规则 JSON 失败');
                 let msg = '前端规则 JSON 已保存到文件库「模板」分类（不绑定任务主模板；请用「保存坐标模板 JSON」维护任务绑定）';
+                if (libTask) {
+                    msg += '；已写入运行态结构（与现场 JSON 章节一致；含任务绑定仪器列表，不含提交 defaultValue）';
+                }
                 if (d.detached_auxiliary_from_task && d.detached_auxiliary_from_task.length) {
                     msg += '；已从任务模板移除误关联的辅助 JSON';
                 }
@@ -5516,6 +6235,10 @@
                         reportTaskContext.isReport = reportTaskContext.outputTarget === 'report';
                     }
                     templateContext.libraryTemplateFileId = String(initialTemplatePdfId);
+                    if (d.default_json_template_id) {
+                        templateContext.defaultJsonTemplateId = String(d.default_json_template_id);
+                    }
+                    refreshTemplateJsonOptions(d.default_json_template_id || null).catch(err => console.warn(err));
                     if (d.suggested_json_save_name) {
                         const tn = document.getElementById('templateName');
                         if (tn) tn.value = d.suggested_json_save_name;
@@ -5533,7 +6256,6 @@
                 })
                 .catch(err => alert(err.message));
         }
-        refreshTemplateJsonOptions().catch(err => console.warn(err));
     </script>
 </body>
 </html>

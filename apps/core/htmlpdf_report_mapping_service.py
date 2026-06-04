@@ -586,6 +586,10 @@ def apply_report_site_field_map_to_value_mapping(
         return site_parsed_cache[site_task_id]
 
     def _pick_site_field_value(site_parsed: dict, site_pid: str) -> str | None:
+        dd = source_data.get("dynamicData") if isinstance(source_data.get("dynamicData"), dict) else {}
+        raw_dd = dd.get(site_pid)
+        if raw_dd not in (None, "") and not isinstance(raw_dd, (dict, list)):
+            return str(raw_dd).strip()
         site_field = None
         for sf in site_parsed.get("fields") or []:
             if isinstance(sf, dict) and str(sf.get("pdfFieldId") or "").strip() == site_pid:
@@ -594,15 +598,11 @@ def apply_report_site_field_map_to_value_mapping(
         if site_field is None:
             return None
         site_slice: dict = {}
-        _apply_template_field_sources_to_mapping(site_slice, source_data, [site_field])
-        if not site_slice:
-            return None
-        for sk in _field_semantic_candidate_keys(site_field):
-            if sk in site_slice and site_slice[sk] not in (None, ""):
-                return str(site_slice[sk])
-        for v in site_slice.values():
-            if v not in (None, ""):
-                return str(v)
+        _apply_template_field_sources_to_mapping(
+            site_slice, source_data, [site_field], pdf_field_id_only=True
+        )
+        if site_pid in site_slice and site_slice[site_pid] not in (None, ""):
+            return str(site_slice[site_pid]).strip()
         return None
 
     for cfg in configs:
@@ -650,5 +650,4 @@ def apply_report_site_field_map_to_value_mapping(
         else:
             final_value = "\n".join(picked_parts)
 
-        for rk in _field_semantic_candidate_keys(report_field):
-            value_mapping[rk] = final_value
+        value_mapping[report_pid] = final_value

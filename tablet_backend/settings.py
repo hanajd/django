@@ -51,6 +51,7 @@ MIDDLEWARE = [
     'apps.core.middleware.WebSessionLeaseMiddleware',
     'apps.core.middleware.PartyADemoSecurityMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
+    'apps.core.middleware.RequestStatsMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
@@ -116,6 +117,17 @@ TIME_ZONE = 'Asia/Shanghai'
 USE_I18N = True
 USE_TZ = True
 
+# 菜单/权限上下文缓存（LocMem，按用户+角色；菜单树仍每请求 prefetch 一次）
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'tablet-admin-menu',
+    }
+}
+MENU_CONTEXT_CACHE_TIMEOUT = int(os.environ.get('MENU_CONTEXT_CACHE_TIMEOUT', '300'))
+# 请求耗时/SQL 统计：ADMIN_REQUEST_STATS=1 时写入 logs/request_stats.log 与响应头
+ADMIN_REQUEST_STATS = os.environ.get('ADMIN_REQUEST_STATS', '').lower() in ('1', 'true', 'yes')
+
 # 静态文件配置
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [
@@ -150,6 +162,10 @@ PIPELINE_MINERU_MD = FILE_LIBRARY_TEMP_ROOT / 'mineru_md'
 LIBRARY_MEDIA_INTEGRITY_ON_STARTUP = os.environ.get(
     'LIBRARY_MEDIA_INTEGRITY_ON_STARTUP', '1'
 ).lower() not in ('0', 'false', 'no')
+
+# 检测提交 → PDF/HTMLPDF 回填：已固定为仅 pdfFieldId + submitPath（见 inspection_report_make._backfill_fuzzy_match_enabled）。
+# 环境变量 INSPECTION_FILL_FUZZY_MATCH 保留兼容但不再生效。
+INSPECTION_FILL_FUZZY_MATCH = False
 
 # MinerU / Ollama：管线启动前由 apps.core.pipeline_service 同步到 os.environ
 # MINERU_BACKEND：未在环境中设置时 Django 默认 pipeline（避免 hybrid+vLLM 依赖 Triton/gcc 失败）。

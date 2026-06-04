@@ -55,7 +55,7 @@ WORKBENCH_PIPELINE: List[Dict[str, Any]] = [
         "title": "委托立项",
         "subtitle": "医院 · 项目 · 受检设备",
         "tab": "commission",
-        "hint": "委托由医院派发；在本项目勾选受检设备并绑定检测模板，系统自动挂载报告与现场记录任务。",
+        "hint": "左侧进入医院/院区/科室；勾选设备并选择本次检测类型，系统自动挂载对应报告与现场记录任务。",
     },
     {
         "key": "dispatch",

@@ -311,7 +311,7 @@
             <div>
                 <h3 class="text-base font-semibold text-slate-900">单位设备</h3>
                 <p class="text-xs text-slate-500 max-w-xl">
-                    汇总本单位及下级科室设备。未检测需绑定任务模板；报告编制完成后自动更新。支持查看历史、将任务加入新项目，供复测时对比上次结果。
+                    同设备类型多台合并展示（设备1、设备2…），共享类型与报告模板配置；每台仍可单独编辑、检测与加入项目。
                 </p>
             </div>
         </div>
@@ -323,68 +323,94 @@
         {% endif %}
     </header>
 
-    {% if equipment_cards %}
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {% for card in equipment_cards %}
-        {% with eq=card.equipment st=card.status %}
-        <div class="rounded-2xl ring-1 ring-slate-200/80 overflow-hidden bg-slate-50/50 flex flex-col">
-            <div class="px-4 py-3 bg-white border-b border-slate-100">
-                <div class="flex items-start justify-between gap-2">
-                    <div class="min-w-0">
-                        {% if org_equipment_pick_department or not hospital_info_edit %}
-                        <p class="text-[10px] font-medium text-violet-700 truncate mb-1" title="{{ eq.department.full_display_name }}">
-                            <i class="ri-stethoscope-line"></i> {{ eq.department.full_display_name }}
-                        </p>
+    {% if equipment_groups %}
+    <div class="grid grid-cols-1 gap-4">
+        {% for group in equipment_groups %}
+        <div class="rounded-2xl ring-1 ring-violet-200/70 overflow-hidden bg-gradient-to-b from-violet-50/40 to-slate-50/50">
+            <div class="px-4 py-3 bg-white/90 border-b border-violet-100 flex flex-wrap items-start justify-between gap-2">
+                <div class="min-w-0">
+                    <p class="text-base font-semibold text-slate-900">{{ group.device_type }}
+                        <span class="text-sm font-normal text-violet-700">· 共 {{ group.count }} 台</span>
+                    </p>
+                    {% if group.merge_across_departments and group.department_labels|length > 1 %}
+                    <p class="text-[10px] text-slate-500 mt-0.5">分布在：{{ group.department_labels|join:"；" }}</p>
+                    {% elif group.department_label %}
+                    <p class="text-[10px] font-medium text-violet-700 mt-0.5"><i class="ri-stethoscope-line"></i> {{ group.department_label }}</p>
+                    {% endif %}
+                    {% if group.report_binding_labels %}
+                    <div class="mt-2 text-[11px] text-slate-600 space-y-0.5">
+                        {% for line in group.report_binding_labels %}
+                        <div class="truncate">{{ line }}</div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+                {% if hospital_info_edit %}
+                <button type="button" data-eq-add data-eq-preset-type="{{ group.device_type|escape }}"
+                        class="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-medium text-violet-800 bg-violet-100 hover:bg-violet-200">
+                    <i class="ri-add-line"></i> 添加{{ group.device_type }}
+                </button>
+                {% endif %}
+            </div>
+            <div class="divide-y divide-violet-100/80">
+                {% for card in group.instances %}
+                {% with eq=card.equipment st=card.status %}
+                <div class="px-4 py-3 bg-white/60">
+                    <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+                        <div class="min-w-0">
+                            <p class="text-sm font-semibold text-slate-900">
+                                <span class="inline-flex px-1.5 py-0.5 rounded-md bg-violet-100 text-violet-900 text-[10px] font-bold mr-1.5">{{ card.instance_label }}</span>
+                                {{ eq.name }}
+                            </p>
+                            {% if group.merge_across_departments %}
+                            <p class="text-[10px] text-violet-700 mt-0.5">{{ eq.department.full_display_name }}</p>
+                            {% endif %}
+                            {% if eq.model or eq.serial_no %}
+                            <p class="text-xs text-slate-500 mt-0.5">{{ eq.model }}{% if eq.serial_no %} · {{ eq.serial_no }}{% endif %}</p>
+                            {% endif %}
+                        </div>
+                        <span class="shrink-0 inline-flex px-2 py-0.5 rounded-lg text-[10px] font-semibold ring-1 {{ st.badge_class }}">{{ st.label }}</span>
+                    </div>
+                    <p class="text-[11px] text-slate-600 mb-2">{{ st.hint }}</p>
+                    <dl class="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-1 text-[11px] mb-2">
+                        <div><dt class="text-slate-400">厂家</dt><dd class="text-slate-800">{% if eq.manufacturer %}{{ eq.manufacturer }}{% else %}—{% endif %}</dd></div>
+                        <div><dt class="text-slate-400">位置</dt><dd class="text-slate-800">{% if eq.location %}{{ eq.location }}{% else %}—{% endif %}</dd></div>
+                    </dl>
+                    <div class="flex flex-wrap gap-1.5">
+                        <button type="button" data-eq-history="{{ eq.id }}" data-eq-name="{{ eq.name|escape }}"
+                                class="px-2.5 py-1 rounded-lg text-[11px] font-medium text-slate-700 bg-slate-100 hover:bg-slate-200">
+                            <i class="ri-history-line"></i> 历史
+                        </button>
+                        {% if eq.report_file %}
+                        <a href="{% url 'file_preview' eq.report_file_id %}" target="_blank" rel="noopener"
+                           class="px-2.5 py-1 rounded-lg text-[11px] font-medium text-violet-800 bg-violet-50 hover:bg-violet-100">
+                            <i class="ri-file-pdf-line"></i> 报告
+                        </a>
                         {% endif %}
-                        <p class="font-semibold text-slate-900">{{ eq.name }}</p>
-                        {% if eq.model or eq.serial_no %}
-                        <p class="text-xs text-slate-500 mt-0.5">{{ eq.model }}{% if eq.serial_no %} · {{ eq.serial_no }}{% endif %}</p>
+                        {% if hospital_info_edit %}
+                        <button type="button" data-eq-project="{{ eq.id }}" data-eq-can-bind="{% if card.can_bind_project %}1{% else %}0{% endif %}"
+                                class="px-2.5 py-1 rounded-lg text-[11px] font-medium text-indigo-800 bg-indigo-50 hover:bg-indigo-100{% if not card.can_bind_project %} opacity-50{% endif %}">
+                            <i class="ri-folder-add-line"></i> 加入项目
+                        </button>
+                        <button type="button" data-eq-edit="{{ eq.id }}"
+                                class="px-2.5 py-1 rounded-lg text-[11px] font-medium text-violet-800 bg-violet-50 hover:bg-violet-100">
+                            <i class="ri-edit-line"></i> 编辑
+                        </button>
+                        <form method="post" class="inline" onsubmit="return confirm('确定删除{{ card.instance_label }}？');">
+                            {% csrf_token %}
+                            <input type="hidden" name="edit" value="1">
+                            <input type="hidden" name="action" value="delete_equipment">
+                            <input type="hidden" name="equipment_id" value="{{ eq.id }}">
+                            <input type="hidden" name="fl_path" value="{{ fl_path }}">
+                            <button type="submit" class="px-2.5 py-1 rounded-lg text-[11px] font-medium text-red-600 hover:bg-red-50">删除</button>
+                        </form>
                         {% endif %}
                     </div>
-                    <span class="shrink-0 inline-flex px-2 py-0.5 rounded-lg text-[10px] font-semibold ring-1 {{ st.badge_class }}">{{ st.label }}</span>
                 </div>
-                <p class="mt-2 text-[11px] text-slate-600 leading-snug">{{ st.hint }}</p>
-            </div>
-            <dl class="px-4 py-3 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs flex-1">
-                <div><dt class="text-slate-400">厂家</dt><dd class="text-slate-800">{% if eq.manufacturer %}{{ eq.manufacturer }}{% else %}—{% endif %}</dd></div>
-                <div><dt class="text-slate-400">位置</dt><dd class="text-slate-800">{% if eq.location %}{{ eq.location }}{% else %}—{% endif %}</dd></div>
-                {% if eq.report_task %}
-                <div class="col-span-2"><dt class="text-slate-400">报告模板</dt><dd class="text-slate-800 truncate">{{ eq.report_task.code }} · {{ eq.report_task.name }}</dd></div>
-                {% endif %}
-            </dl>
-            <div class="px-3 py-3 bg-white border-t border-slate-100 flex flex-wrap gap-1.5">
-                <button type="button" data-eq-history="{{ eq.id }}" data-eq-name="{{ eq.name|escape }}"
-                        class="px-2.5 py-1 rounded-lg text-[11px] font-medium text-slate-700 bg-slate-100 hover:bg-slate-200">
-                    <i class="ri-history-line"></i> 历史记录
-                </button>
-                {% if eq.report_file %}
-                <a href="{% url 'file_preview' eq.report_file_id %}" target="_blank" rel="noopener"
-                   class="px-2.5 py-1 rounded-lg text-[11px] font-medium text-violet-800 bg-violet-50 hover:bg-violet-100">
-                    <i class="ri-file-pdf-line"></i> 最新报告
-                </a>
-                {% endif %}
-                {% if hospital_info_edit %}
-                <button type="button" data-eq-project="{{ eq.id }}" data-eq-can-bind="{% if card.can_bind_project %}1{% else %}0{% endif %}"
-                        class="px-2.5 py-1 rounded-lg text-[11px] font-medium text-indigo-800 bg-indigo-50 hover:bg-indigo-100{% if not card.can_bind_project %} opacity-50{% endif %}"
-                        title="{% if card.can_bind_project %}将检测任务加入项目{% else %}请先编辑设备并绑定检测任务模板；已检测设备需已关联报告{% endif %}">
-                    <i class="ri-folder-add-line"></i> 加入项目
-                </button>
-                <button type="button" data-eq-edit="{{ eq.id }}"
-                        class="px-2.5 py-1 rounded-lg text-[11px] font-medium text-violet-800 bg-violet-50 hover:bg-violet-100">
-                    <i class="ri-edit-line"></i> 编辑
-                </button>
-                <form method="post" class="inline" onsubmit="return confirm('确定删除该设备？');">
-                    {% csrf_token %}
-                    <input type="hidden" name="edit" value="1">
-                    <input type="hidden" name="action" value="delete_equipment">
-                    <input type="hidden" name="equipment_id" value="{{ eq.id }}">
-                    <input type="hidden" name="fl_path" value="{{ fl_path }}">
-                    <button type="submit" class="px-2.5 py-1 rounded-lg text-[11px] font-medium text-red-600 hover:bg-red-50">删除</button>
-                </form>
-                {% endif %}
+                {% endwith %}
+                {% endfor %}
             </div>
         </div>
-        {% endwith %}
         {% endfor %}
     </div>
     {% else %}
