@@ -102,7 +102,7 @@ def _unique_task_code(name: str) -> str:
     return code
 
 
-def _upload_leaf_to_library(user, leaf: _UploadLeaf) -> LibraryFile | None:
+def _upload_leaf_to_library(user, leaf: _UploadLeaf, *, library_task: LibraryTask | None = None) -> LibraryFile | None:
     raw = leaf.read()
     if not raw:
         return None
@@ -112,6 +112,7 @@ def _upload_leaf_to_library(user, leaf: _UploadLeaf) -> LibraryFile | None:
         [buf],
         LibraryFile.CATEGORY_TEMPLATE,
         enforce_storage_quota=False,
+        template_library_task=library_task,
     )
     if skipped and not created:
         return None
@@ -126,12 +127,12 @@ def _bind_pair_to_task(user, task: LibraryTask, pair: dict[str, _UploadLeaf | No
     pdf_leaf = pair.get("pdf")
     json_leaf = pair.get("json")
     if pdf_leaf is not None:
-        lf = _upload_leaf_to_library(user, pdf_leaf)
+        lf = _upload_leaf_to_library(user, pdf_leaf, library_task=task)
         if lf:
             ids.append(lf.pk)
             stats.files_uploaded += 1
     if json_leaf is not None:
-        lf = _upload_leaf_to_library(user, json_leaf)
+        lf = _upload_leaf_to_library(user, json_leaf, library_task=task)
         if lf:
             ids.append(lf.pk)
             stats.files_uploaded += 1

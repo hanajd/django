@@ -1,6 +1,8 @@
 """任务模板库与模板编辑器共用的 UI 辅助（编辑模式 URL、文件分组、层级目录）。"""
 from __future__ import annotations
 
+import re
+import re
 from collections import defaultdict
 from pathlib import Path
 from urllib.parse import quote
@@ -117,16 +119,29 @@ def group_template_files_for_bind(files: list) -> dict[str, list]:
     return grouped
 
 
+def _normalize_template_pair_stem(stem: str) -> str:
+    """去掉验收/状态等前后缀，便于 PDF 与 JSON 主文件名不一致时仍能配成一行。"""
+    s = (stem or "").strip()
+    if not s:
+        return ""
+    s = re.sub(r"\.json(?:[-_.][^-_.]*)?$", "", s, flags=re.I)
+    s = re.sub(r"^[（(]?(?:验收|状态)[）)]?", "", s)
+    s = re.sub(r"^(?:验收|状态)", "", s)
+    s = re.sub(r"[-_.]?(?:验收|状态)(?:检测)?(?:终|版)?$", "", s, flags=re.I)
+    return s.strip()
+
+
 def group_template_files_by_stem(
     files: list,
     linked_ids: set[int] | None = None,
 ) -> list[dict]:
     """
     按主文件名（stem）将 PDF 与 JSON 配成一行，便于绑定面板展示「谁对应谁」。
+    文件名含「验收」「状态」等前后缀时先归一化再配对。
     """
     linked = linked_ids or set()
     buckets: dict[str, dict] = defaultdict(
-        lambda: {"pdf": None, "json": None, "other": []}
+        lambda: {"pdf": None, "json": None, "other": [], "display_stem": ""}
     )
     order: list[str] = []
     for f in files or []:
@@ -134,10 +149,12 @@ def group_template_files_by_stem(
         if not name:
             continue
         low = name.lower()
-        stem = Path(name).stem
-        if stem not in buckets:
-            order.append(stem)
-        row = buckets[stem]
+        raw_stem = Path(name).stem
+        pair_key = _normalize_template_pair_stem(raw_stem) or raw_stem
+        if pair_key not in buckets:
+            order.append(pair_key)
+            buckets[pair_key]["display_stem"] = raw_stem
+        row = buckets[pair_key]
         fid = int(getattr(f, "pk", None) or getattr(f, "id", 0) or 0)
         entry = {
             "file": f,
@@ -146,19 +163,21 @@ def group_template_files_by_stem(
             "linked": fid in linked,
         }
         if low.endswith(".pdf"):
-            row["pdf"] = entry
+            if row["pdf"] is None:
+                row["pdf"] = entry
         elif low.endswith(".json"):
-            row["json"] = entry
+            if row["json"] is None:
+                row["json"] = entry
         else:
             row["other"].append(entry)
     out: list[dict] = []
-    for stem in order:
-        row = buckets[stem]
+    for pair_key in order:
+        row = buckets[pair_key]
         if not row["pdf"] and not row["json"] and not row["other"]:
             continue
         out.append(
             {
-                "stem": stem,
+                "stem": row["display_stem"] or pair_key,
                 "pdf": row["pdf"],
                 "json": row["json"],
                 "other": row["other"],

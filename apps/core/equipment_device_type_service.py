@@ -11,7 +11,7 @@ EQUIPMENT_DEVICE_TYPE_CHOICES: tuple[str, ...] = (
     "CT",
     "DR",
     "DSA",
-    "C型臂",
+    "C形臂",
     "胃肠机",
     "动态DR",
     "乳腺DR",
@@ -32,6 +32,8 @@ def normalize_device_type(raw: str) -> str | None:
     val = (raw or "").strip()
     if not val:
         return None
+    if val == "C型臂":
+        val = "C形臂"
     if val in EQUIPMENT_DEVICE_TYPE_CHOICES:
         return val
     return None

@@ -242,8 +242,15 @@ def replace_task_template_file_binding(
         if project_ids:
             detach_files_from_projects([old.pk], project_ids)
         replaced_ids.append(old.pk)
+        if not old.library_tasks.exists():
+            from apps.core.template_storage_service import archive_template_file_for_task
+
+            archive_template_file_for_task(old, task)
 
     attach_files_to_tasks([new_file.pk], [task.pk], user)
+    from apps.core.template_storage_service import _write_manifest_for_task
+
+    _write_manifest_for_task(task)
     project_ids = list(task.projects.values_list("id", flat=True))
     if project_ids:
         attach_files_to_projects([new_file.pk], project_ids, user)

@@ -247,3 +247,13 @@ AUTH_SINGLE_WEB_SESSION_SKIP_SUPERUSER = os.environ.get(
 AUTH_REVOKE_PRIOR_REFRESH_TOKENS_ON_LOGIN = os.environ.get(
     "AUTH_REVOKE_PRIOR_REFRESH_TOKENS_ON_LOGIN", "1"
 ).strip().lower() not in ("0", "false", "no", "off")
+
+# SQLite 备份（backups/db/）；开发环境默认启动时按间隔自动备份，避免 git restore 等操作误覆盖库
+DATABASE_BACKUP_DIR = BASE_DIR / "backups" / "db"
+DATABASE_BACKUP_KEEP = int(os.environ.get("DATABASE_BACKUP_KEEP", "48"))
+DATABASE_AUTO_BACKUP_ON_STARTUP = os.environ.get(
+    "DATABASE_AUTO_BACKUP_ON_STARTUP", "1" if DEBUG else "0"
+).strip().lower() in ("1", "true", "yes")
+DATABASE_AUTO_BACKUP_INTERVAL_HOURS = float(
+    os.environ.get("DATABASE_AUTO_BACKUP_INTERVAL_HOURS", "12")
+)

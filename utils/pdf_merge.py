@@ -36,7 +36,7 @@ MERGED_REPORT_DEVICE_TYPE_LABELS: Tuple[str, ...] = (
     "CT",
     "DR",
     "DSA",
-    "C型臂",
+    "C形臂",
     "胃肠机",
     "动态DR",
     "乳腺DR",

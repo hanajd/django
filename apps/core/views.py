@@ -6053,16 +6053,20 @@ def htmlpdf_api_export_json(request):
         payload = _sanitize_json_payload_text(payload)
         raw = json_std.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     wrapped = type("UploadLike", (), {"read": lambda self: raw, "name": name})()
+    binding_meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+    lib_task_for_save = _resolve_library_task_for_htmlpdf_frontend_export(
+        request, data, binding_meta
+    )
     created, skipped = save_library_binary_uploads(
         request.user,
         [wrapped],
         LibraryFile.CATEGORY_TEMPLATE,
+        template_library_task=lib_task_for_save,
     )
     if skipped and not created:
         return JsonResponse({"error": "模板保存失败"}, status=500)
     row = created[0]
     register_tour_library_file(request, int(row["id"]))
-    binding_meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
     binding_rotation = _maybe_rotate_task_json_binding_after_export(
         request, data, binding_meta, row, source="editor_export_json"
     )
@@ -7078,6 +7082,8 @@ def htmlpdf_api_export_frontend_json(request):
         request.user,
         [wrapped],
         LibraryFile.CATEGORY_TEMPLATE,
+        template_library_task=lib_task_for_inst,
+        template_storage_slot="auxiliary",
     )
     if skipped and not created:
         return JsonResponse({"error": "前端JSON保存失败"}, status=500)
@@ -7883,13 +7889,12 @@ def library_task_management(request):
                         request.user,
                         to_save,
                         LibraryFile.CATEGORY_TEMPLATE,
+                        template_library_task=task_obj,
                     )
                     bound = 0
                     if created:
                         ids = [int(row["id"]) for row in created if row.get("id")]
-                        task_obj.library_files.add(
-                            *LibraryFile.objects.filter(pk__in=ids)
-                        )
+                        attach_files_to_tasks(ids, [task_obj.pk], request.user)
                         bound = len(ids)
                     for s in skipped:
                         fn = s.get("filename") or "(无名)"

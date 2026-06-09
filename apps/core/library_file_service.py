@@ -217,6 +217,8 @@ def save_library_binary_uploads(
     enforce_storage_quota: bool = True,
     submit_batch: Optional[InspectionSubmitBatchStorage] = None,
     submit_subdir: str = "",
+    template_library_task=None,
+    template_storage_slot: str = "current",
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
     """
     将上传的文件写入磁盘并创建 LibraryFile。
@@ -363,8 +365,19 @@ def save_library_binary_uploads(
             abs_p = Path(settings.FILE_LIBRARY_ROOT) / rel
             abs_p.parent.mkdir(parents=True, exist_ok=True)
         else:
-            rel = f"{rel_prefix}/{disk_name}"
-            abs_p = dest_dir / disk_name
+            if category == LibraryFile.CATEGORY_TEMPLATE:
+                from apps.core.template_storage_service import build_template_relative_path
+
+                rel = build_template_relative_path(
+                    disk_name=disk_name,
+                    task=template_library_task,
+                    slot=template_storage_slot,
+                )
+                abs_p = pipeline_service.library_absolute_path(rel)
+                abs_p.parent.mkdir(parents=True, exist_ok=True)
+            else:
+                rel = f"{rel_prefix}/{disk_name}"
+                abs_p = dest_dir / disk_name
         if not abs_p.exists():
             abs_p.write_bytes(raw)
         lf = LibraryFile.objects.create(
@@ -398,6 +411,10 @@ def save_library_binary_uploads(
                 "created_at": lf.created_at.isoformat(),
             }
         )
+        if category == LibraryFile.CATEGORY_TEMPLATE and template_library_task is not None:
+            from apps.core.template_storage_service import _write_manifest_for_task
+
+            _write_manifest_for_task(template_library_task)
     return created, skipped
 
 
@@ -458,16 +475,28 @@ def attach_files_to_tasks(file_ids: List[int], task_ids: List[int], user=None) -
     """将文件关联到任务模板（业务上仅应关联「模板」分类；其它分类请使用 attach_files_to_projects）。"""
     if not file_ids or not task_ids:
         return
-    valid_tasks = list(LibraryTask.objects.filter(pk__in=task_ids).values_list("id", flat=True))
+    valid_tasks = list(
+        LibraryTask.objects.filter(pk__in=task_ids).select_related("task_folder")
+    )
     if not valid_tasks:
         return
     for fid in file_ids:
-        for tid in valid_tasks:
+        for task in valid_tasks:
             LibraryFileTask.objects.get_or_create(
                 library_file_id=fid,
-                library_task_id=tid,
+                library_task_id=task.pk,
                 defaults={"created_by": user},
             )
+    if len(valid_tasks) == 1:
+        task = valid_tasks[0]
+        from apps.core.template_storage_service import relocate_library_template_file
+
+        for fid in file_ids:
+            lf = LibraryFile.objects.filter(
+                pk=fid, category=LibraryFile.CATEGORY_TEMPLATE, deleted_at__isnull=True
+            ).first()
+            if lf is not None:
+                relocate_library_template_file(lf, task=task, slot="current")
 
 
 def detach_files_from_tasks(file_ids: List[int], task_ids: List[int]) -> None:
