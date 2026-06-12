@@ -1,0 +1,48 @@
+{
+  "condition": "检测条件：CT 螺旋扫描，120kV，200mA，9.7s；散射模体：CT 体部剂量模体",
+  "points": [
+    {
+      "type": "simple",
+      "id": "1",
+      "location": "工作人员操作位",
+      "result": "0.15",
+      "standard": "≤2.5",
+      "evaluation": "合格"
+    },
+    {
+      "type": "simple",
+      "id": "2",
+      "location": "观察室业务下地沟入口处",
+      "result": "0.16",
+      "standard": "≤2.5",
+      "evaluation": "合格"
+    },
+    {
+      "type": "complex",
+      "location": "铅玻璃观察窗C外表面30cm",
+      "sub_rows": [
+        { "id": "3", "location_sub": "中部", "result": "0.15", "standard": "≤2.5", "evaluation": "合格" },
+        { "id": "4", "location_sub": "上端", "result": "0.16", "standard": "≤2.5", "evaluation": "合格" },
+        { "id": "5", "location_sub": "下端", "result": "0.16", "standard": "≤2.5", "evaluation": "合格" },
+        { "id": "6", "location_sub": "左侧", "result": "0.16", "standard": "≤2.5", "evaluation": "合格" },
+        { "id": "7", "location_sub": "右侧", "result": "0.16", "standard": "≤2.5", "evaluation": "合格" }
+      ]
+    },
+    {
+      "type": "simple",
+      "id": "4",
+      "location": "新增检测点示例（单行）",
+      "result": "0.18",
+      "standard": "≤2.5",
+      "evaluation": "合格"
+    }
+  ],
+  "background": {
+    "label": "本底值（μSv/h）",
+    "value": "0.14～0.15"
+  },
+  "notes": [
+    "注：1.上表中检测结果未扣除本底值；检测时间按仪器响应时间，并按约定值折算时间对应剂量率。",
+    "2.检测点下方无建筑物，人员无法到达处不参与评价。"
+  ]
+}

@@ -31,11 +31,25 @@ def pdf_field_reading_order_key(field: Dict[str, Any]) -> tuple:
 
 
 def reindex_pdf_field_ids_by_list_order(fields: List[Any]) -> List[Dict[str, Any]]:
-    """按模板/编辑器 fields 数组顺序赋 f1..fN，与 HTMLPDF 侧栏、画板角标一致（不按坐标排序）。"""
+    """按模板/编辑器 fields 数组顺序赋 f1..fN，与 HTMLPDF 侧栏、画板角标一致（不按坐标排序）。
+
+    若 f 号发生变化，会同步 remap 各栏 ``fieldExpression`` / 条件公式 / 判定中的 f 引用。
+    """
+    from utils.pdf_field_formulas import normalize_pdf_field_id, remap_pdf_field_row_formula_metadata
+
     rows: List[Dict[str, Any]] = []
     for raw in fields or []:
         if isinstance(raw, dict):
             rows.append(dict(raw))
+    id_map: Dict[str, str] = {}
+    for idx, f in enumerate(rows, start=1):
+        new_id = f"f{idx}"
+        old_id = normalize_pdf_field_id(str(f.get("pdfFieldId") or ""))
+        if old_id and old_id != new_id:
+            id_map[old_id] = new_id
+    if id_map:
+        for f in rows:
+            remap_pdf_field_row_formula_metadata(f, id_map)
     for idx, f in enumerate(rows, start=1):
         f["pdfFieldId"] = f"f{idx}"
     return rows
@@ -46,7 +60,11 @@ def reindex_pdf_field_ids_by_reading_order(fields: List[Any]) -> List[Dict[str, 
     return reindex_pdf_field_ids_by_list_order(fields)
 
 
-def materialize_unified_pdf_fields(fields: List[Any]) -> List[Dict[str, Any]]:
+def materialize_unified_pdf_fields(
+    fields: List[Any],
+    *,
+    reindex_pdf_field_ids: bool = True,
+) -> List[Dict[str, Any]]:
     """Expand ``rect`` shorthands and apply safe defaults. Idempotent for full rows."""
     out: List[Dict[str, Any]] = []
     for idx, raw in enumerate(fields or []):
@@ -99,7 +117,9 @@ def materialize_unified_pdf_fields(fields: List[Any]) -> List[Dict[str, Any]]:
             else:
                 f["pdfFieldId"] = f"f{idx + 1}"
         out.append(f)
-    return reindex_pdf_field_ids_by_list_order(out)
+    if reindex_pdf_field_ids:
+        return reindex_pdf_field_ids_by_list_order(out)
+    return out
 
 
 def compact_unified_pdf_fields_for_storage(fields: List[Any]) -> List[Dict[str, Any]]:
@@ -288,6 +308,11 @@ def _field_dict_to_compact_row(mf: Dict[str, Any]) -> Dict[str, Any]:
     fe = str(mf.get("fieldExpression") or mf.get("pdfFieldExpression") or "").strip()
     if fe:
         out["fieldExpression"] = fe
+    rules = mf.get("formulaRules")
+    if not isinstance(rules, list) or not rules:
+        rules = mf.get("fieldExpressionRules")
+    if isinstance(rules, list) and rules:
+        out["formulaRules"] = rules
     jct = mf.get("judgmentCriteriaByTestType")
     if isinstance(jct, dict) and jct:
         out["judgmentCriteriaByTestType"] = jct
@@ -299,4 +324,14 @@ def _field_dict_to_compact_row(mf: Dict[str, Any]) -> Dict[str, Any]:
     sk = str(mf.get("templateSectionKey") or mf.get("sectionKey") or "").strip()
     if sk:
         out["templateSectionKey"] = sk
+    ts_title = str(mf.get("templateSectionTitle") or "").strip()
+    if ts_title:
+        out["templateSectionTitle"] = ts_title
+    sem = mf.get("autoSemantic")
+    if isinstance(sem, dict) and sem:
+        out["autoSemantic"] = {
+            str(k): v
+            for k, v in sem.items()
+            if isinstance(k, str) and v is not None and v != ""
+        }
     return out

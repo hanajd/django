@@ -1119,12 +1119,22 @@ def _merge_dynamic_data_pdf_field_ids_into_value_mapping(
     if not isinstance(dd, dict):
         return
     dd = _normalize_dynamic_data_f_slots(dd)
+    from apps.api.inspection_submit_payload_service import (
+        _SIGNATURE_PDF_FIELD_IDS,
+        _is_stored_media_path,
+        _looks_like_inline_image,
+    )
+
     for k, v in dd.items():
         pid = str(k or "").strip()
         if not pid or not re.match(r"^f\d+$", pid, re.I):
             continue
         if v in (None, "") or isinstance(v, (dict, list)):
             continue
+        if pid not in _SIGNATURE_PDF_FIELD_IDS and isinstance(v, str):
+            s = v.strip()
+            if s and (_is_stored_media_path(s) or _looks_like_inline_image(s)):
+                continue
         if not overwrite and value_mapping.get(pid) not in (None, ""):
             continue
         value_mapping[pid] = v
@@ -1637,16 +1647,28 @@ def _apply_computed_fields_from_steps_to_mapping(
     const = template_constants if isinstance(template_constants, dict) else {}
     enums = template_enums if isinstance(template_enums, dict) else {}
     lts = template_lookup_tables if isinstance(template_lookup_tables, dict) else {}
+    try:
+        from utils.conditional_field_rules import resolve_field_formula_for_eval
+    except ImportError:
+        resolve_field_formula_for_eval = None  # type: ignore[assignment]
+
     for _ in range(32):
         changed = 0
         for f in _iter_schema_fields_from_steps(steps):
-            if str(f.get("type") or "").lower() != "computed":
+            fid = str(f.get("id") or f.get("pdfFieldId") or "").strip()
+            if not fid:
                 continue
-            fid = str(f.get("id") or "").strip()
-            formula = str(f.get("formula") or "").strip()
-            if not fid or not formula:
-                continue
-            if "row." in formula:
+            if resolve_field_formula_for_eval is not None:
+                formula = resolve_field_formula_for_eval(
+                    f,
+                    value_mapping,
+                    constants=const,
+                    enums=enums,
+                    lookup_tables=lts,
+                )
+            else:
+                formula = str(f.get("formula") or f.get("fieldExpression") or "").strip()
+            if not formula or "row." in formula:
                 continue
             if value_mapping.get(fid) not in (None, ""):
                 continue
@@ -1765,29 +1787,111 @@ _INSTRUMENT_SCOPES = (_INSTRUMENT_SCOPE_QC, _INSTRUMENT_SCOPE_RP)
 
 
 def dedupe_instrument_payload_items(items: list | None) -> list:
-    """按 instrumentId/id 去重（仅用于清理前端重复拼接的扁平原数组，不用于质控/防护两栏互斥）。"""
+    """
+    原样返回 instruments[]（不去重）。
+    同一仪器在同一项目内可同时出现在质控、防护 scope，须完整保留。
+    """
     if not isinstance(items, list):
         return []
-    out: list = []
-    seen: set[str] = set()
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        sid = str(item.get("instrumentId") or item.get("id") or "").strip()
-        if not sid:
-            out.append(item)
-            continue
-        if sid in seen:
-            continue
-        seen.add(sid)
-        out.append(item)
-    return out
+    return [item for item in items if isinstance(item, dict)]
 
 
 def _instrument_item_with_scope(item: dict, scope: str) -> dict:
     out = dict(item)
     out["instrumentScope"] = scope
     out["registrySlot"] = 1 if scope == _INSTRUMENT_SCOPE_QC else 2
+    return out
+
+
+def _normalize_task_bound_kinds_export(task_obj) -> dict[str, list]:
+    """任务模板 bindingMode=kinds 时解析质控/防护种类列表。"""
+    from utils.task_bound_instruments import (
+        BINDING_MODE_KINDS,
+        binding_mode,
+        normalize_task_bound_kinds,
+    )
+
+    if task_obj is None:
+        return {_INSTRUMENT_SCOPE_QC: [], _INSTRUMENT_SCOPE_RP: []}
+    raw = getattr(task_obj, "bound_instrument_ids", None) or []
+    if binding_mode(raw) != BINDING_MODE_KINDS:
+        return {_INSTRUMENT_SCOPE_QC: [], _INSTRUMENT_SCOPE_RP: []}
+    kinds = normalize_task_bound_kinds(raw)
+    return {
+        _INSTRUMENT_SCOPE_QC: list(kinds.get(_INSTRUMENT_SCOPE_QC) or []),
+        _INSTRUMENT_SCOPE_RP: list(kinds.get(_INSTRUMENT_SCOPE_RP) or []),
+    }
+
+
+def instrument_kind_to_payload_dict(name: str, model: str = "", *, scope: str = "") -> dict:
+    """种类绑定条目（无台账编号；出库分配前仅记录 name/model）。"""
+    row = {
+        "id": "",
+        "instrumentId": "",
+        "identifier": "",
+        "name": (name or "").strip(),
+        "model": (model or "").strip(),
+        "certificateNo": "",
+        "validUntil": "",
+        "enabled": True,
+        "bindingSource": "templateKind",
+    }
+    if scope in _INSTRUMENT_SCOPES:
+        return _instrument_item_with_scope(row, scope)
+    return row
+
+
+def instrument_kinds_bundle_for_export(task_obj) -> dict[str, list[dict]]:
+    """根级 instrumentKinds：与任务模板库种类绑定一致。"""
+    kinds = _normalize_task_bound_kinds_export(task_obj)
+    out: dict[str, list[dict]] = {}
+    for scope in _INSTRUMENT_SCOPES:
+        rows = [
+            {"name": spec.name, "model": spec.model or ""}
+            for spec in kinds.get(scope) or []
+            if (spec.name or "").strip()
+        ]
+        if rows:
+            out[scope] = rows
+    return out
+
+
+def instruments_full_set_rows_from_task_kinds(task_obj) -> list[dict]:
+    """根级 instruments[]：质控种类全套在前、防护全套在后。"""
+    kinds = _normalize_task_bound_kinds_export(task_obj)
+    out: list[dict] = []
+    for scope in _INSTRUMENT_SCOPES:
+        for spec in kinds.get(scope) or []:
+            if not (spec.name or "").strip():
+                continue
+            out.append(
+                instrument_kind_to_payload_dict(spec.name, spec.model or "", scope=scope)
+            )
+    return out
+
+
+def _scoped_primary_from_task_kinds(task_obj) -> dict[str, dict]:
+    """两栏 instrument_select 主选：各 scope 取模板绑定的第一种类。"""
+    kinds = _normalize_task_bound_kinds_export(task_obj)
+    out: dict[str, dict] = {}
+    for scope in _INSTRUMENT_SCOPES:
+        specs = kinds.get(scope) or []
+        if not specs:
+            continue
+        spec = specs[0]
+        if (spec.name or "").strip():
+            out[scope] = instrument_kind_to_payload_dict(
+                spec.name, spec.model or "", scope=scope
+            )
+    return out
+
+
+def _attach_instrument_kinds_metadata(out: dict, task_obj) -> dict:
+    kinds_export = instrument_kinds_bundle_for_export(task_obj)
+    if kinds_export:
+        out["instrumentKinds"] = kinds_export
+    else:
+        out.pop("instrumentKinds", None)
     return out
 
 
@@ -1862,18 +1966,11 @@ def _root_instruments_list_from_submit(source_data: dict | None) -> list:
     return []
 
 
-def _collect_instrument_scope_merged_lines_from_submit_list(
-    source_data: dict, raw_list: list | None = None
-) -> dict[int, str]:
-    """
-    从 instruments[] 按 instrumentScope 分组，质控→槽位1、防护→槽位2；
-    同 scope 多台仪器用中文分号拼接（供「主要检测仪器_*」与 instrument_select 回填）。
-    """
-    items = raw_list if isinstance(raw_list, list) else _root_instruments_list_from_submit(source_data)
+def _scoped_instrument_lists_from_items(items: list | None) -> dict[str, list[dict]]:
+    """按 scope 分组的全套仪器（供 rawPayload.instruments 存档，非主选单行）。"""
+    out: dict[str, list[dict]] = {s: [] for s in _INSTRUMENT_SCOPES}
     if not isinstance(items, list):
-        return {}
-    by_scope: dict[str, list[str]] = {s: [] for s in _INSTRUMENT_SCOPES}
-    seen: dict[str, set[str]] = {s: set() for s in _INSTRUMENT_SCOPES}
+        return out
     for it in items:
         if not isinstance(it, dict) or it.get("enabled") is False:
             continue
@@ -1882,23 +1979,136 @@ def _collect_instrument_scope_merged_lines_from_submit_list(
         scope = _scope_for_instrument_item(it)
         if not scope:
             continue
-        dedupe_key = str(it.get("instrumentId") or it.get("id") or it.get("identifier") or "").strip()
-        if dedupe_key and dedupe_key in seen[scope]:
+        out[scope].append(dict(it))
+    return out
+
+
+def _estimate_chars_per_line_for_field(field: dict | None) -> int:
+    """按 PDF 文本域宽度估算每行可容纳字符数（中文约 5.5pt/字）。"""
+    if not isinstance(field, dict):
+        return 96
+    rect = None
+    anchor = field.get("pdfAnchor") if isinstance(field.get("pdfAnchor"), dict) else {}
+    if isinstance(anchor.get("rect"), (list, tuple)) and len(anchor["rect"]) >= 4:
+        rect = anchor["rect"]
+    elif isinstance(field.get("rect"), (list, tuple)) and len(field["rect"]) >= 4:
+        rect = field["rect"]
+    if rect is not None:
+        try:
+            width = abs(float(rect[2]) - float(rect[0]))
+            return max(28, int(width / 5.5))
+        except (TypeError, ValueError):
+            pass
+    return 96
+
+
+def _pack_instrument_display_lines(
+    lines: list[str],
+    *,
+    max_chars_per_line: int = 96,
+    separator: str = "；",
+) -> str:
+    """多台仪器尽量挤在同一行，仅当单行放不下时再换行。"""
+    cleaned = [str(x or "").strip() for x in lines if str(x or "").strip()]
+    if not cleaned:
+        return ""
+    if len(cleaned) == 1:
+        return cleaned[0]
+    rows: list[str] = []
+    current = ""
+    for line in cleaned:
+        if not current:
+            current = line
             continue
-        if dedupe_key:
-            seen[scope].add(dedupe_key)
+        candidate = f"{current}{separator}{line}"
+        if len(candidate) <= max_chars_per_line:
+            current = candidate
+        else:
+            rows.append(current)
+            current = line
+    if current:
+        rows.append(current)
+    return "\n".join(rows)
+
+
+def _collect_instrument_display_lines_for_scope(
+    source_data: dict,
+    scope: str,
+    *,
+    raw_list: list | None = None,
+) -> list[str]:
+    """从根级 instruments[] 收集某 scope 下各台仪器的展示行。"""
+    if scope not in _INSTRUMENT_SCOPES:
+        return []
+    items = raw_list if isinstance(raw_list, list) else instruments_effective_list(source_data)
+    if not isinstance(items, list):
+        return []
+    lines: list[str] = []
+    for it in items:
+        if not isinstance(it, dict) or it.get("enabled") is False:
+            continue
+        if _instrument_submit_dict_is_empty(it):
+            continue
+        item_scope = _scope_for_instrument_item(it)
+        if item_scope != scope:
+            continue
         line = format_instrument_display_from_submit_item(it)
         if not (line or "").strip():
             sid0 = str(it.get("id") or it.get("instrumentId") or "").strip()
             if sid0:
                 line = (_resolve_instrument_id_display(source_data, sid0) or "").strip()
         if (line or "").strip():
-            by_scope[scope].append(line.strip())
+            lines.append(line.strip())
+    return lines
+
+
+def _instrument_packed_text_for_scope(
+    source_data: dict,
+    scope: str,
+    *,
+    field: dict | None = None,
+    raw_list: list | None = None,
+) -> str:
+    """现场记录仪器栏：按 scope 全套拼接，尽量单行多机，必要时换行。"""
+    lines = _collect_instrument_display_lines_for_scope(
+        source_data, scope, raw_list=raw_list
+    )
+    if not lines:
+        return ""
+    return _pack_instrument_display_lines(
+        lines,
+        max_chars_per_line=_estimate_chars_per_line_for_field(field),
+    )
+
+
+def _collect_instrument_scope_merged_lines_from_submit_list(
+    source_data: dict,
+    raw_list: list | None = None,
+    *,
+    field_by_slot: dict[int, dict] | None = None,
+) -> dict[int, str]:
+    """
+    从 instruments[] 按 instrumentScope 分组，质控→槽位1、防护→槽位2；
+    同 scope 全套仪器紧凑排版（；分隔，必要时 \\n 换行）。
+    """
     out: dict[int, str] = {}
-    if by_scope[_INSTRUMENT_SCOPE_QC]:
-        out[1] = "；".join(by_scope[_INSTRUMENT_SCOPE_QC])
-    if by_scope[_INSTRUMENT_SCOPE_RP]:
-        out[2] = "；".join(by_scope[_INSTRUMENT_SCOPE_RP])
+    field_by_slot = field_by_slot if isinstance(field_by_slot, dict) else {}
+    qc_text = _instrument_packed_text_for_scope(
+        source_data,
+        _INSTRUMENT_SCOPE_QC,
+        field=field_by_slot.get(1),
+        raw_list=raw_list,
+    )
+    if qc_text:
+        out[1] = qc_text
+    rp_text = _instrument_packed_text_for_scope(
+        source_data,
+        _INSTRUMENT_SCOPE_RP,
+        field=field_by_slot.get(2),
+        raw_list=raw_list,
+    )
+    if rp_text:
+        out[2] = rp_text
     return out
 
 
@@ -1907,16 +2117,9 @@ def _inject_instrument_scope_pdf_field_ids(
     source_data: dict,
     site_steps_merged: list | None,
 ) -> None:
-    """严格 pdfFieldId 回填：将 instruments[] 按 scope 拼合后写入 instrument_select 对应 f 号。"""
+    """严格 pdfFieldId 回填：根级 instruments[] 全套按 scope 紧凑写入 instrument_select 对应 f 号。"""
     if not isinstance(value_mapping, dict) or not isinstance(source_data, dict):
         return
-    scope_slots = _collect_instrument_scope_merged_lines_from_submit_list(source_data)
-    if not scope_slots:
-        return
-    scope_text = {
-        _INSTRUMENT_SCOPE_QC: (scope_slots.get(1) or "").strip(),
-        _INSTRUMENT_SCOPE_RP: (scope_slots.get(2) or "").strip(),
-    }
     if not site_steps_merged:
         return
     for fld in _flatten_unified_form_steps_to_fields_deep(site_steps_merged):
@@ -1925,7 +2128,7 @@ def _inject_instrument_scope_pdf_field_ids(
         if str(fld.get("type") or "").lower() != "instrument_select":
             continue
         scope = str(fld.get("instrumentScope") or "").strip()
-        if scope not in scope_text:
+        if scope not in _INSTRUMENT_SCOPES:
             slot = _instrument_slot_index_for_instrument_select_field(str(fld.get("id") or ""), fld)
             if slot == 1:
                 scope = _INSTRUMENT_SCOPE_QC
@@ -1933,7 +2136,7 @@ def _inject_instrument_scope_pdf_field_ids(
                 scope = _INSTRUMENT_SCOPE_RP
             else:
                 continue
-        text = scope_text.get(scope, "").strip()
+        text = _instrument_packed_text_for_scope(source_data, scope, field=fld).strip()
         if not text:
             continue
         pid = _field_pdf_id(fld)
@@ -2075,8 +2278,8 @@ def coerce_submit_instruments(
     task_obj=None,
 ) -> SubmitInstrumentsBundle:
     """
-    质控/防护两栏独立回填（允许同一编号同时出现在两栏）；台账 ``ledger_rows`` 按 id 去重。
-    优先顺序：raw_payload.instruments 嵌套 → 提交体嵌套 → 扁平原数组（按 scope）→ 项目派工分配。
+    以根级 instruments[] 全套为准；台账 ``ledger_rows`` 按 id 去重。
+    优先顺序：根级列表 → raw_payload.instruments 嵌套 → 项目/模板绑定兜底。
     """
     binding = _project_instrument_binding(project_obj, task_obj)
     scoped: dict[str, dict] = {}
@@ -2108,26 +2311,38 @@ def coerce_submit_instruments(
         if row:
             scoped[scope] = _instrument_item_with_scope(row, scope)
 
+    if task_obj is not None:
+        for scope, entry in _scoped_primary_from_task_kinds(task_obj).items():
+            scoped.setdefault(scope, entry)
+
     array_for_api: list[dict] = []
-    for scope in _INSTRUMENT_SCOPES:
-        entry = scoped.get(scope)
-        if entry:
-            array_for_api.append(entry)
+    if isinstance(instruments_raw, list) and instruments_raw:
+        for it in instruments_raw:
+            if isinstance(it, dict) and not _instrument_submit_dict_is_empty(it):
+                array_for_api.append(it)
+    if not array_for_api:
+        for scope in _INSTRUMENT_SCOPES:
+            entry = scoped.get(scope)
+            if entry:
+                array_for_api.append(entry)
 
     ledger_rows = dedupe_instrument_payload_items(array_for_api)
     return SubmitInstrumentsBundle(scoped, array_for_api, ledger_rows)
 
 
 def apply_submit_instruments_bundle(payload: dict | None, bundle: SubmitInstrumentsBundle) -> dict:
-    """写入 instruments[]（校验用）与 rawPayload.instruments（两栏表单用）。"""
+    """写入根级 instruments[] 全套；rawPayload.instruments 按 scope 存数组副本。"""
     out = dict(payload or {})
-    out["instruments"] = list(bundle.array_for_api)
+    full_list = out.get("instruments")
+    if not isinstance(full_list, list) or not full_list:
+        full_list = list(bundle.array_for_api)
+    out["instruments"] = list(full_list)
     raw = out.get("rawPayload")
     if not isinstance(raw, dict):
         raw = {}
     else:
         raw = dict(raw)
-    raw["instruments"] = dict(bundle.scoped)
+    raw["instruments"] = _scoped_instrument_lists_from_items(full_list)
     out["rawPayload"] = raw
     return out
 
@@ -2249,8 +2464,8 @@ def finalize_submit_instruments_in_payload(
 ) -> tuple[dict, SubmitInstrumentsBundle]:
     """
     提交落库前统一仪器块：
-    - rawPayload.instruments / instrumentsByScope：质控+防护两栏主选；
-    - instruments[]：任务绑定全套（质控+防护去重）；
+    - instruments[]：现场记录所需全套仪器（质控+防护，按 scope 标记）；
+    - rawPayload.instruments：与根级同内容的 scope 分组数组（非主选单行）；
     - 清理 dynamicData/testResult 中非 instrument_select 槽位上的仪器列表误写。
     """
     out = merge_task_template_bound_instruments_into_payload(
@@ -2265,8 +2480,11 @@ def finalize_submit_instruments_in_payload(
     )
     out = apply_submit_instruments_bundle(out, bundle)
     full_rows = instruments_full_set_rows_from_binding(project_obj, task_obj)
+    if not full_rows and task_obj is not None:
+        full_rows = instruments_full_set_rows_from_task_kinds(task_obj)
     if full_rows:
         out["instruments"] = full_rows
+    out = _attach_instrument_kinds_metadata(out, task_obj)
     steps = template_steps
     if steps is None and task_obj is not None:
         steps = load_task_frontend_schema_steps(task_obj)
@@ -2292,15 +2510,15 @@ def instruments_effective_list(
     if not isinstance(source_data, dict):
         return []
     ins = _root_instruments_list_from_submit(source_data)
-    if ins and _submit_instruments_list_has_scope_tags(ins):
-        return dedupe_instrument_payload_items(ins)
+    if ins:
+        return list(ins)
     full = instruments_full_set_rows_from_binding(project_obj, task_obj)
     if full:
         return full
-    if ins:
-        deduped = dedupe_instrument_payload_items(ins)
-        if deduped:
-            return deduped
+    if task_obj is not None:
+        kind_rows = instruments_full_set_rows_from_task_kinds(task_obj)
+        if kind_rows:
+            return kind_rows
     raw_payload = source_data.get("rawPayload") if isinstance(source_data.get("rawPayload"), dict) else None
     bundle = coerce_submit_instruments(
         source_data.get("instruments"),
@@ -2327,8 +2545,8 @@ def merge_task_template_bound_instruments_into_payload(
     """
     检测仪器优先级：
     1）项目 ``assigned_instrument_ids``（质控/防护各一套，与两栏输入框一致）；
-    2）前端已提交：按 scope 合并质控/防护，写入 ``instruments[]`` 与 ``rawPayload.instruments``。
-    任务模板 ``bindingMode=kinds`` 时无项目分配则不预填编号。
+    2）前端已提交：按 scope 合并质控/防护，写入 ``instruments[]`` 与 ``rawPayload.instruments``；
+    3）任务模板 ``bindingMode=kinds``：写入 ``instrumentKinds`` 与种类行（无台账编号，不出库）。
     """
     out = dict(payload or {})
     if task_obj is None:
@@ -2349,30 +2567,39 @@ def merge_task_template_bound_instruments_into_payload(
         out = apply_submit_instruments_bundle(out, bundle)
         submit_list = out.get("instruments")
         if isinstance(submit_list, list) and _submit_instruments_list_has_scope_tags(submit_list):
-            return out
+            return _attach_instrument_kinds_metadata(out, task_obj)
         full_rows = instruments_full_set_rows_from_binding(
             project_obj, task_obj, binding=binding
         )
+        if not full_rows:
+            full_rows = instruments_full_set_rows_from_task_kinds(task_obj)
         if full_rows:
             out["instruments"] = full_rows
-        return out
+        return _attach_instrument_kinds_metadata(out, task_obj)
 
     scoped = _scoped_from_project_binding(binding)
+    full_rows = (
+        instruments_full_set_rows_from_binding(project_obj, task_obj, binding=binding)
+        if scoped
+        else []
+    )
     if not scoped:
+        scoped = _scoped_primary_from_task_kinds(task_obj)
+    if not full_rows:
+        full_rows = instruments_full_set_rows_from_task_kinds(task_obj)
+    if not scoped and not full_rows:
         out["instruments"] = []
         raw = dict(raw_payload or {})
         raw["instruments"] = {}
         out["rawPayload"] = raw
-        return out
-    full_rows = instruments_full_set_rows_from_binding(
-        project_obj, task_obj, binding=binding
-    )
+        return _attach_instrument_kinds_metadata(out, task_obj)
     bundle = SubmitInstrumentsBundle(
         scoped,
         full_rows,
         dedupe_instrument_payload_items(full_rows),
     )
-    return apply_submit_instruments_bundle(out, bundle)
+    out = apply_submit_instruments_bundle(out, bundle)
+    return _attach_instrument_kinds_metadata(out, task_obj)
 
 
 def build_instrument_catalog_options_for_frontend() -> list[dict]:
@@ -2848,14 +3075,17 @@ def build_instruments_root_for_frontend_export(
     *, task_obj=None, project_obj=None, payload: dict | None = None
 ) -> dict:
     """
-    前端导出 JSON 根级仅 ``instruments[]``：
-    项目/任务委托绑定的质控、防护全套（``instrumentScope`` 正确，质控在前、防护在后）。
+    前端导出 JSON 根级 ``instruments[]`` + ``instrumentKinds``：
+    项目派工编号优先；否则回退任务模板种类绑定（无出库）。
     下拉全库请前端走登记/台账 API；不再写 instrumentsByScope / instrumentSetsByScope / instrumentBindings。
     """
     binding = _resolve_instrument_binding_dict(project_obj, task_obj)
     instruments = instruments_full_set_rows_from_binding(
         project_obj, task_obj, binding=binding
     )
+    kind_bundle = instrument_kinds_bundle_for_export(task_obj)
+    if not instruments and task_obj is not None:
+        instruments = instruments_full_set_rows_from_task_kinds(task_obj)
     if not instruments:
         merged = merge_task_template_bound_instruments_into_payload(
             dict(payload or {}), task_obj, project_obj=project_obj
@@ -2863,7 +3093,12 @@ def build_instruments_root_for_frontend_export(
         instruments = instruments_effective_list(
             merged, project_obj=project_obj, task_obj=task_obj
         )
-    return {"instruments": list(instruments or [])}
+        if not kind_bundle and isinstance(merged.get("instrumentKinds"), dict):
+            kind_bundle = merged["instrumentKinds"]
+    result: dict = {"instruments": list(instruments or [])}
+    if kind_bundle:
+        result["instrumentKinds"] = kind_bundle
+    return result
 
 
 def _instrument_guard_scalar_tokens(source_data: dict) -> frozenset[str]:
@@ -2979,12 +3214,23 @@ def _resolve_instrument_id_display(source_data: dict, iid: str) -> str:
 
 
 def _maybe_instrument_select_display(field: dict, source_data: dict, picked: str) -> str:
-    """instrument_select：提交值为仪器 id 时，在报告中替换为仪器名称（若 instruments 列表可解析）。"""
+    """instrument_select：已是全套拼接串则原样；单 id 时解析为展示行。"""
     if str(field.get("type") or "").lower() != "instrument_select":
         return picked
     if not isinstance(picked, str) or not picked.strip():
         return picked
     ps = picked.strip()
+    if "；" in ps or "\n" in ps or len(ps) > 40:
+        return ps
+    src = field.get("source") if isinstance(field.get("source"), dict) else {}
+    sp = str(src.get("submitPath") or field.get("submitPath") or "").strip()
+    if sp in ("instruments.qualityControl", "instruments.radiationProtection"):
+        scope = (
+            _INSTRUMENT_SCOPE_QC if sp.endswith("qualityControl") else _INSTRUMENT_SCOPE_RP
+        )
+        packed = _instrument_packed_text_for_scope(source_data, scope, field=field).strip()
+        if packed:
+            return packed
     resolved = _resolve_instrument_id_display(source_data, ps)
     if resolved:
         return resolved
@@ -5721,39 +5967,44 @@ def _collect_signature_values(source_data: dict) -> dict[str, str]:
                     # 以便模板回填阶段命中每个 image 字段。
                     src_pdf_id = str(src.get("pdfFieldId") or "").strip()
                     if src_pdf_id:
-                        out[src_pdf_id] = val
+                        from apps.api.inspection_submit_payload_service import (
+                            _DYNAMIC_SIGNATURE_FIELD_IDS,
+                        )
+
+                        if src_pdf_id in _DYNAMIC_SIGNATURE_FIELD_IDS:
+                            out[src_pdf_id] = val
                     src_pdf_ids = src.get("pdfFieldIds")
                     if isinstance(src_pdf_ids, list):
+                        from apps.api.inspection_submit_payload_service import (
+                            _DYNAMIC_SIGNATURE_FIELD_IDS,
+                        )
+
                         for pid in src_pdf_ids:
                             p = str(pid or "").strip()
-                            if p:
+                            if p and p in _DYNAMIC_SIGNATURE_FIELD_IDS:
                                 out[p] = val
 
-    # 3) dynamicData 直连签名（JS009 V3: f36/f35/f34；旧版 f76/f78/f77）
+    # 3) dynamicData：仅现行 f625/f632/f633 及旧版签名 f 槽（禁止把质控数值栏当签名扩散）
     dynamic_data = source_data.get("dynamicData")
     if isinstance(dynamic_data, dict):
         from apps.api.inspection_submit_payload_service import (
-            CANONICAL_SIGNATURE_ROLES,
+            _DYNAMIC_SIGNATURE_FIELD_IDS,
+            _LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE,
             _PDF_FIELD_TO_SIGNATURE_ROLE,
         )
 
         for k, v in dynamic_data.items():
             key = str(k or "").strip()
-            if not key:
+            if not key or key not in _DYNAMIC_SIGNATURE_FIELD_IDS:
                 continue
             if not _is_signature_image_text(v):
                 continue
             out[key] = v
-            role = _PDF_FIELD_TO_SIGNATURE_ROLE.get(key)
+            role = _PDF_FIELD_TO_SIGNATURE_ROLE.get(key) or _LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE.get(
+                key
+            )
             if role:
                 out[role] = v
-        for role in CANONICAL_SIGNATURE_ROLES:
-            if role in out and out.get(role):
-                pid = {"inspector": "f36", "checker": "f35", "accompanyingPerson": "f34"}.get(
-                    role
-                )
-                if pid:
-                    out[pid] = out[role]
 
     # 常见角色别名兜底
     if "author" not in out and "inspector" in out:
@@ -5868,9 +6119,14 @@ def _fill_template_fields_with_submit_enhanced(
         sp_direct = str(src_pf.get("submitPath") or "").strip()
         if sp_direct:
             if sp_direct in ("instruments.qualityControl", "instruments.radiationProtection"):
-                scope_slots = _collect_instrument_scope_merged_lines_from_submit_list(source_data)
-                slot_ix = 1 if sp_direct.endswith("qualityControl") else 2
-                scoped_line = (scope_slots.get(slot_ix) or "").strip()
+                scope = (
+                    _INSTRUMENT_SCOPE_QC
+                    if sp_direct.endswith("qualityControl")
+                    else _INSTRUMENT_SCOPE_RP
+                )
+                scoped_line = _instrument_packed_text_for_scope(
+                    source_data, scope, field=field
+                ).strip()
                 if scoped_line:
                     if ft == "check":
                         return _coerce_picked_value_for_pdf_checkbox(field, scoped_line)
@@ -6323,84 +6579,28 @@ def _fill_template_fields_with_submit_enhanced(
         return picked
 
     def _pick_signature_for_field(field: dict):
-        candidates = _field_candidate_keys(field)
-        if isinstance(signature_map, dict):
-            for key in candidates:
-                if not key:
-                    continue
-                mapped = signature_map.get(key)
-                if isinstance(mapped, str) and mapped:
-                    picked = signature_values.get(mapped) or ""
-                    if picked:
-                        return picked
+        """仅 f625/f632/f633 三个签名 image 域：严格按 pdfFieldId 取值。"""
+        from apps.api.inspection_submit_payload_service import (
+            _PDF_FIELD_TO_SIGNATURE_ROLE,
+            _SIGNATURE_PDF_FIELD_IDS,
+        )
 
-        if isinstance(signature_map, dict):
-            for _, row in signature_map.items():
-                if not isinstance(row, dict):
-                    continue
-                image_path = str(row.get("image") or "").strip()
-                name_path = str(row.get("name") or "").strip()
-                if not image_path:
-                    continue
-                # 仅在字段名命中 role/name 关键词时采用该映射
-                hit = False
-                for key in candidates:
-                    if not key:
-                        continue
-                    if key in ("author", "reviewer", "approver"):
-                        hit = True
-                    if "检测员" in key and ("preparedBy" in name_path or "author" in image_path):
-                        hit = True
-                    if "校核" in key and ("reviewedBy" in name_path or "reviewer" in image_path):
-                        hit = True
-                    if "批准" in key and ("approvedBy" in name_path or "approver" in image_path):
-                        hit = True
-                if not hit:
-                    continue
-                if image_path.startswith("signatures."):
-                    sig_key = image_path.split(".", 1)[1]
-                else:
-                    sig_key = image_path
-                if sig_key:
-                    picked = signature_values.get(sig_key) or ""
-                    if picked:
-                        return picked
-
-        # 优先按模板字段候选键直接命中签名池（支持 f76/f77/f78、中文 id、语义 id）
-        for key in candidates:
-            if not key:
-                continue
-            picked = signature_values.get(key) or ""
+        pid = _field_pdf_id(field)
+        if not pid or pid not in _SIGNATURE_PDF_FIELD_IDS:
+            return ""
+        picked = signature_values.get(pid)
+        if picked:
+            return picked
+        role = _PDF_FIELD_TO_SIGNATURE_ROLE.get(pid)
+        if role:
+            picked = signature_values.get(role)
             if picked:
                 return picked
-
-        for key in candidates:
-            if key in (
-                "author",
-                "reviewer",
-                "approver",
-                "inspector",
-                "mainInspector",
-                "checker",
-                "authorizedSignatory",
-                "accompanyingPerson",
-            ):
-                return signature_values.get(key) or ""
-
-        # 无显式映射时按中文语义兜底，确保多页同类签名框都能命中。
-        joined = " ".join([k for k in candidates if k]).strip()
-        if joined:
-            if ("校核" in joined) or ("复核" in joined):
-                return signature_values.get("checker") or signature_values.get("reviewer") or ""
-            if ("检测员" in joined) or ("检验员" in joined):
-                return (
-                    signature_values.get("inspector")
-                    or signature_values.get("author")
-                    or signature_values.get("mainInspector")
-                    or ""
-                )
-            if ("陪同" in joined) or ("受检单位" in joined):
-                return signature_values.get("accompanyingPerson") or ""
+        dd = source_data.get("dynamicData")
+        if isinstance(dd, dict):
+            val = dd.get(pid)
+            if _is_signature_image_text(val):
+                return val
         return ""
 
     for field in flat_report_fields:
@@ -6432,8 +6632,12 @@ def _fill_template_fields_with_submit_enhanced(
             )
             continue
         if field_type == "image":
-            picked_img = _pick_signature_for_field(field)
-            if not picked_img:
+            from apps.api.inspection_submit_payload_service import _SIGNATURE_PDF_FIELD_IDS
+
+            pid_img = _field_pdf_id(field)
+            if pid_img in _SIGNATURE_PDF_FIELD_IDS:
+                picked_img = _pick_signature_for_field(field)
+            else:
                 picked_img = _pick_dynamic_image_for_pdf_field(field, source_data)
             field["imageData"] = picked_img
     for field in flat_report_fields:

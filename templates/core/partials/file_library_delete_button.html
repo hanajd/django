@@ -1,0 +1,9 @@
+{# 单文件删除：共用页顶 #file-lib-delete-form，避免为全库每条记录生成隐藏 form #}
+{% if role_perm.perm_file_delete and f.file_library_may_delete %}
+<button type="button"
+        class="file-lib-delete-btn inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50/80 px-2.5 py-1.5 text-xs font-medium text-red-800 transition hover:border-red-300 hover:bg-red-100"
+        data-delete-url="{% url 'file_library_delete' f.pk %}"
+        data-delete-label="{{ f.file_library_primary_title|default:f.original_name|escape }}">
+    <i class="ri-delete-bin-line"></i>删除
+</button>
+{% endif %}

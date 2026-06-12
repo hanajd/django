@@ -1,0 +1,130 @@
+{
+  "schema": "workplace_radiation_js009/v1",
+  "template_id": "JXFS/JS-009",
+  "source_pdf": "tabletest.pdf",
+  "reference_page": 5,
+  "orientation": "landscape",
+  "page_size": {
+    "width": 841.9000244140625,
+    "height": 595.2999877929688
+  },
+  "section_title": {
+    "text": "五、工作场所放射防护检测结果",
+    "x_left": 42.6,
+    "x_right": 190.08,
+    "y_top": 60.19,
+    "first_page_only": true
+  },
+  "preface_blocks": {
+    "instrument_info": {
+      "label": "（1）、使用的检测仪器相关信息",
+      "y_top": 75.79,
+      "x_left": 42.6,
+      "x_right": 810.82,
+      "first_page_only": true
+    },
+    "condition": {
+      "label": "（2）、检测条件",
+      "y_top": 91.06,
+      "x_left": 42.6,
+      "x_right": 810.82,
+      "first_page_only": true
+    }
+  },
+  "table": {
+    "x_left": 31.08,
+    "x_right": 810.82,
+    "y_top": 101.6,
+    "columns": {
+      "point_id": {
+        "x0": 31.08,
+        "x1": 65.0
+      },
+      "location_main": {
+        "x0": 65.0,
+        "x1": 147.8
+      },
+      "location_sub": {
+        "x0": 147.75,
+        "x1": 232.0
+      },
+      "location_full": {
+        "x0": 65.0,
+        "x1": 232.0
+      },
+      "reading_1": {
+        "x0": 232.0,
+        "x1": 328.35
+      },
+      "reading_2": {
+        "x0": 328.35,
+        "x1": 444.9
+      },
+      "reading_3": {
+        "x0": 444.9,
+        "x1": 552.4
+      },
+      "readings_merged": {
+        "x0": 232.0,
+        "x1": 552.4
+      },
+      "mean_m": {
+        "x0": 552.4,
+        "x1": 668.5
+      },
+      "report_d": {
+        "x0": 668.5,
+        "x1": 810.82
+      }
+    },
+    "header_labels": {
+      "point_id": "序号",
+      "location": "检测点位置",
+      "readings": "测量读数M，μSv/h",
+      "mean_m": "测量均值M̄，μSv/h",
+      "report_d": "报出值D，μSv/h"
+    },
+    "header_row_count": 2,
+    "row_heights": {
+      "header": 20.69,
+      "simple": 18.9,
+      "complex_sub": 19.1
+    },
+    "complex_location_main_right": 147.8,
+    "background_row": {
+      "label": "本底水平（μSv/h）及范围",
+      "reading_slots": 10,
+      "slot_labels": [
+        "①",
+        "②",
+        "③",
+        "④",
+        "⑤",
+        "⑥",
+        "⑦",
+        "⑧",
+        "⑨",
+        "⑩"
+      ]
+    },
+    "notes": {
+      "below_table": true,
+      "full_width": true
+    }
+  },
+  "pagination": {
+    "table_y_top_no_preface": 74.6,
+    "table_y_top_first_page": 74.6,
+    "continuation_header_y": 61.39,
+    "content_bottom": 535.91,
+    "footer_margin_below_table": 59.39,
+    "repeat_header_on_new_page": true,
+    "repeat_section_title_on_new_page": false,
+    "include_preface_on_first_page_only": true
+  },
+  "point_patterns": {
+    "simple": "单行：序号 + 检测点位置（跨 location_main~location_sub）+ 3次读数 + 均值 + 报出值",
+    "complex": "复杂：序号与 location_main 纵向合并；location_sub 为中部/上端等；右侧同简单行",
+    "location_format": "名称与距离连写，如「观察窗C外表面30cm」「防护门M（）外表面30cm」"
+  }
+}

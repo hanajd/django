@@ -78,8 +78,17 @@ ROLE_PERMISSION_MATRIX: List[Tuple[str, str, str, str]] = [
 USER_PROFILE_ONLY_PERM_OVERRIDE_KEYS: FrozenSet[str] = frozenset(
     {
         "perm_library_task_templates_write",
+        "perm_mock_inspection_submit",
     }
 )
+
+# 用户编辑页「权限个性化」中展示、但 Role 表无对应列的补充项
+PERM_OVERRIDE_EXTRA_META: Dict[str, Tuple[str, str]] = {
+    "perm_mock_inspection_submit": (
+        "现场记录模拟提交",
+        "在项目工作台委托立项设备行使用「模拟提交」：生成模拟数据并按 App 流程写入 submit 库、自动回填现场记录 PDF",
+    ),
+}
 
 # 可参与「项目任务分配 / 检测 App 侧」的角色（含旧版 app_user）
 APP_SIDE_ROLE_CODES: FrozenSet[str] = frozenset(
@@ -364,6 +373,20 @@ def library_user_may_use_htmlpdf_matrix_beta_controls(user) -> bool:
     if getattr(user, "is_superuser", False):
         return True
     return _role_code(user) == "super_admin"
+
+
+def library_user_may_mock_inspection_submit(user) -> bool:
+    """
+    项目工作台「现场记录模拟提交 JSON」：默认仅 Django 超级用户或 super_admin 角色；
+    其他账号须由超管在用户编辑页通过 perm_overrides 显式授权。
+    """
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+    if _role_code(user) == "super_admin":
+        return True
+    return role_has(user, "perm_mock_inspection_submit")
 
 
 def role_has_htmlpdf(user) -> bool:

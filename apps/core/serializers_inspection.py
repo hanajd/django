@@ -3,6 +3,8 @@ import base64
 
 from rest_framework import serializers
 
+from apps.core.inspection_report_type import normalize_submit_report_type
+
 
 def decode_png_data_url(data_url: str):
     if not data_url:
@@ -67,12 +69,14 @@ class InspectionSubmitSerializer(serializers.Serializer):
     conclusion = serializers.DictField(required=False, allow_null=True, default=dict)
 
     def validate(self, attrs):
-        allowed_report_types = {"xray_fluoroscopy", "ct_qc"}
-        report_type = str(attrs.get("reportType") or "").strip()
-        if report_type not in allowed_report_types:
-            raise serializers.ValidationError(
-                {"reportType": "reportType 必须为 xray_fluoroscopy 或 ct_qc"}
+        try:
+            report_type = normalize_submit_report_type(
+                attrs.get("reportType"),
+                template_id=str(attrs.get("templateId") or "").strip(),
             )
+        except ValueError as exc:
+            raise serializers.ValidationError({"reportType": str(exc)}) from exc
+        attrs["reportType"] = report_type
         # 兼容前端传 null：提交阶段按空对象处理，避免 422 中断流程。
         for key in ("reportInfo", "hospitalInfo", "equipmentInfo", "testResult", "conclusion"):
             if attrs.get(key) is None:

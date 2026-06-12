@@ -6,12 +6,17 @@ import json
 from pathlib import Path
 from typing import Any
 
-from apps.core.library_access import library_user_may_edit_library_task
+from apps.core.library_access import (
+    library_file_access_allowed,
+    library_user_may_access_assigned_library_task,
+    library_user_may_edit_library_task,
+)
 from apps.core.library_file_service import (
     attach_files_to_projects,
     attach_files_to_tasks,
     detach_files_from_projects,
     detach_files_from_tasks,
+    library_file_exists_on_disk,
 )
 from apps.core.models import (
     LibraryFile,
@@ -183,6 +188,37 @@ def detach_auxiliary_template_json_from_task(
     return aux_ids
 
 
+def _list_task_storage_slot_json_files(task: LibraryTask, slot: str) -> list[LibraryFile]:
+    from apps.core.library_file_service import library_file_exists_on_disk
+    from apps.core.template_storage_service import task_storage_base_segments
+
+    prefix = "/".join(["templates", *task_storage_base_segments(task), slot]) + "/"
+    out: list[LibraryFile] = []
+    for lf in LibraryFile.objects.filter(
+        category=LibraryFile.CATEGORY_TEMPLATE,
+        relative_path__startswith=prefix,
+        deleted_at__isnull=True,
+    ).order_by("-created_at", "-id"):
+        if not (lf.original_name or "").lower().endswith(".json"):
+            continue
+        if is_auxiliary_template_json_file(lf):
+            continue
+        if not library_file_exists_on_disk(lf):
+            continue
+        out.append(lf)
+    return out
+
+
+def list_task_storage_current_json_files(task: LibraryTask) -> list[LibraryFile]:
+    """任务分层目录 current/ 下的主 JSON 模板（含仅落盘、尚未 M2M 绑定的文件）。"""
+    return _list_task_storage_slot_json_files(task, "current")
+
+
+def list_task_storage_history_json_files(task: LibraryTask) -> list[LibraryFile]:
+    """任务分层目录 history/ 下已归档的 JSON 模板。"""
+    return _list_task_storage_slot_json_files(task, "history")
+
+
 def list_task_template_files_by_role(task: LibraryTask, role: str) -> list[LibraryFile]:
     out: list[LibraryFile] = []
     for lf in task.library_files.filter(category=LibraryFile.CATEGORY_TEMPLATE).order_by(
@@ -223,6 +259,13 @@ def replace_task_template_file_binding(
         return {"ok": False, "error": "无权维护该任务模板绑定"}
 
     old_files = list_task_template_files_by_role(task, role)
+    if role == LibraryTaskTemplateBindingHistory.ROLE_JSON:
+        seen_ids = {int(f.pk) for f in old_files}
+        for lf in list_task_storage_current_json_files(task):
+            if int(lf.pk) == int(new_file.pk) or int(lf.pk) in seen_ids:
+                continue
+            old_files.append(lf)
+            seen_ids.add(int(lf.pk))
     replaced_ids: list[int] = []
     for old in old_files:
         if old.pk == new_file.pk:
@@ -247,9 +290,10 @@ def replace_task_template_file_binding(
 
             archive_template_file_for_task(old, task)
 
-    attach_files_to_tasks([new_file.pk], [task.pk], user)
-    from apps.core.template_storage_service import _write_manifest_for_task
+    from apps.core.template_storage_service import relocate_library_template_file, _write_manifest_for_task
 
+    relocate_library_template_file(new_file, task=task, slot="current", write_manifest=False)
+    attach_files_to_tasks([new_file.pk], [task.pk], user)
     _write_manifest_for_task(task)
     project_ids = list(task.projects.values_list("id", flat=True))
     if project_ids:
@@ -381,6 +425,22 @@ def restore_task_template_from_history(*, history_id: int, user) -> dict[str, An
     )
 
 
+def _editor_json_file_accessible(user, task: LibraryTask, lf: LibraryFile) -> bool:
+    """
+    编辑器下拉是否可列出该 JSON。
+
+    轮换进历史的文件会从任务 M2M 解绑，``library_file_access_allowed``  alone 会误判；
+    任务模板库历史表仍可见，故对仍可读的磁盘文件放宽为「可维护/可打开该任务」即可选。
+    """
+    if library_file_access_allowed(user, lf):
+        return True
+    if not library_file_exists_on_disk(lf):
+        return False
+    return library_user_may_edit_library_task(user, task) or library_user_may_access_assigned_library_task(
+        user, task
+    )
+
+
 def list_task_editor_template_json_options(
     task: LibraryTask,
     *,
@@ -390,8 +450,6 @@ def list_task_editor_template_json_options(
     """
     模板编辑器下拉：仅当前任务的主 JSON、其它已绑定 JSON、绑定历史中的 JSON（不含全库 500 条）。
     """
-    from apps.core.library_access import library_file_access_allowed
-
     primary = pick_task_primary_json_template(task)
     if pdf_template_id is not None:
         on_task = LibraryFile.objects.filter(
@@ -412,7 +470,7 @@ def list_task_editor_template_json_options(
             return
         if is_auxiliary_template_json_file(lf):
             return
-        if not library_file_access_allowed(user, lf):
+        if not _editor_json_file_accessible(user, task, lf):
             return
         seen.add(int(lf.pk))
         rows.append(
@@ -425,28 +483,58 @@ def list_task_editor_template_json_options(
             }
         )
 
-    if primary is not None:
-        _append(primary, kind="primary", label="主模板")
-
-    for lf in list_task_template_files_by_role(task, LibraryTaskTemplateBindingHistory.ROLE_JSON):
-        if primary is not None and lf.pk == primary.pk:
-            continue
-        _append(lf, kind="bound", label="当前绑定")
-
     history_qs = (
         LibraryTaskTemplateBindingHistory.objects.filter(
             library_task=task,
             file_role=LibraryTaskTemplateBindingHistory.ROLE_JSON,
         )
-        .select_related("library_file")
+        .select_related("library_file", "replaced_by_file")
         .order_by("-replaced_at", "-id")
     )
+    history_label_by_id: dict[int, str] = {}
+    history_ids: set[int] = set()
     for hist in history_qs:
         lf = hist.library_file
-        if lf is None or not hist.file_still_available:
+        if lf is None and hist.file_id_snapshot:
+            lf = LibraryFile.objects.filter(
+                pk=int(hist.file_id_snapshot), deleted_at__isnull=True
+            ).first()
+        if lf is None:
+            continue
+        if not hist.file_still_available:
             continue
         ts = hist.replaced_at.strftime("%Y-%m-%d %H:%M") if hist.replaced_at else ""
-        _append(lf, kind="history", label=f"历史 {ts}".strip())
+        history_label_by_id[int(lf.pk)] = f"历史 {ts}".strip() if ts else "历史"
+        history_ids.add(int(lf.pk))
+
+    if primary is not None:
+        _append(primary, kind="primary", label="主模板")
+
+    def _is_archived_path(lf: LibraryFile) -> bool:
+        return "/history/" in str(lf.relative_path or "").replace("\\", "/")
+
+    for lf in list_task_template_files_by_role(task, LibraryTaskTemplateBindingHistory.ROLE_JSON):
+        if primary is not None and lf.pk == primary.pk:
+            continue
+        if int(lf.pk) in history_ids or _is_archived_path(lf):
+            continue
+        _append(lf, kind="bound", label="当前绑定")
+
+    for hist in history_qs:
+        lf = hist.library_file
+        if lf is None and hist.file_id_snapshot:
+            lf = LibraryFile.objects.filter(
+                pk=int(hist.file_id_snapshot), deleted_at__isnull=True
+            ).first()
+        if lf is None or not hist.file_still_available:
+            continue
+        label = history_label_by_id.get(int(lf.pk), "历史")
+        _append(lf, kind="history", label=label)
+
+    for lf in list_task_storage_history_json_files(task):
+        if int(lf.pk) in seen:
+            continue
+        _append(lf, kind="history", label="历史·归档")
 
     return rows
 

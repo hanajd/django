@@ -1,0 +1,88 @@
+{
+  "schema": "radiation_detection_table_layout/v1",
+  "source_pdf": "fhtest.pdf",
+  "reference_page": 6,
+  "page_size": {
+    "width": 595.2999877929688,
+    "height": 841.9000244140625
+  },
+  "section_title": {
+    "text": "1.1工作场所放射防护检测结果",
+    "x_left": 79.44,
+    "x_right": 244.44,
+    "y_top": 75.76
+  },
+  "table": {
+    "x_left": 70.73,
+    "x_right": 524.57,
+    "y_top": 90.12,
+    "columns": {
+      "point_id": {
+        "x0": 70.73,
+        "x1": 120.6
+      },
+      "location_main": {
+        "x0": 120.6,
+        "x1": 198.45
+      },
+      "complex_location_main_right": 198.45,
+      "location_sub": {
+        "x0": 198.45,
+        "x1": 326.0
+      },
+      "result": {
+        "x0": 326.0,
+        "x1": 410.8
+      },
+      "standard": {
+        "x0": 410.8,
+        "x1": 489.1
+      },
+      "evaluation": {
+        "x0": 489.1,
+        "x1": 524.57
+      }
+    },
+    "row_heights": {
+      "condition": 33.57,
+      "header": 40.5,
+      "simple": 21.75,
+      "complex_sub": 22.0
+    },
+    "complex_location_main_width": 205.4,
+    "complex_location_sub_width": 127.55,
+    "header_labels": {
+      "point_id": "检测点\n编号",
+      "location": "检测点位置",
+      "result": "检测结果\n(μSv/h)",
+      "standard": "标准要求\n(μSv/h)",
+      "evaluation": "结果\n评价"
+    },
+    "background_row": {
+      "label": "本底值（μSv/h）",
+      "merge_columns": [
+        "point_id",
+        "location_main",
+        "location_sub"
+      ],
+      "value_columns": [
+        "result",
+        "standard",
+        "evaluation"
+      ]
+    },
+    "notes_row": {
+      "full_width": true,
+      "prefix": "注："
+    }
+  },
+  "pagination": {
+    "content_top": 91.76,
+    "continuation_y_top": 72.0,
+    "table_max_bottom": 749.88,
+    "footer_margin_below_table": 92.02,
+    "content_bottom": 749.88,
+    "repeat_header_on_new_page": true,
+    "include_condition_on_first_page_only": true
+  }
+}

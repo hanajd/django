@@ -8,7 +8,7 @@ import hashlib
 import json
 import logging
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from django.http import HttpResponse
 
@@ -758,10 +758,67 @@ def prepare_library_frontend_json_payload(payload: Dict[str, Any]) -> Dict[str, 
     return finalize_runtime_frontend_export(out)
 
 
-def finalize_runtime_frontend_export(payload: Dict[str, Any]) -> Dict[str, Any]:
+def _strip_radiation_protection_field_units(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """防护表：单位由 matrix 表头展示，各单元格/平铺栏位不写 unit。"""
+    if not isinstance(payload, dict):
+        return payload
+
+    def _clear_unit(field: Dict[str, Any]) -> None:
+        field.pop("unit", None)
+        src = field.get("source")
+        if isinstance(src, dict):
+            src.pop("unit", None)
+
+    for step in payload.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        for sec in step.get("sections") or []:
+            if not isinstance(sec, dict):
+                continue
+            ch = _section_chapter_key(sec)
+            title = str(sec.get("title") or "")
+            is_protection = (
+                ch == "site_radiation_protection"
+                or "放射防护" in title
+                or "工作场所" in title
+                or str(sec.get("sectionType") or "") == "radiationProtection"
+            )
+            if not is_protection:
+                continue
+            for fld in sec.get("fields") or []:
+                if isinstance(fld, dict):
+                    _clear_unit(fld)
+            matrix = sec.get("matrix")
+            if not isinstance(matrix, dict):
+                continue
+            for hf in matrix.get("headerFields") or []:
+                if isinstance(hf, dict):
+                    _clear_unit(hf)
+            for row in matrix.get("rows") or []:
+                if not isinstance(row, dict):
+                    continue
+                cells = row.get("cells")
+                if isinstance(cells, dict):
+                    for cell in cells.values():
+                        if isinstance(cell, dict):
+                            _clear_unit(cell)
+    return payload
+
+
+def finalize_runtime_frontend_export(
+    payload: Dict[str, Any],
+    *,
+    pdf_fields: Optional[List[Any]] = None,
+    radiation_chapter_state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """移动端运行态 JSON：剥编辑器元数据，补齐六大章节、防护 matrixTable、sectionType。"""
     if not isinstance(payload, dict):
         return payload
+    chapter_state = (
+        radiation_chapter_state
+        if isinstance(radiation_chapter_state, dict)
+        else payload.get("radiationProtectionChapter")
+    )
     result = copy.deepcopy(payload)
     for key in _RUNTIME_STRIP_ROOT_KEYS:
         result.pop(key, None)
@@ -773,7 +830,18 @@ def finalize_runtime_frontend_export(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     result = _ensure_site_record_sections(result)
     result = _apply_floor_plan_runtime_types(result)
+    try:
+        from radiation_detection_report.chapter5_field_sync import apply_chapter_formulas_to_export_payload
+
+        result = apply_chapter_formulas_to_export_payload(
+            result,
+            chapter_state,
+            pdf_fields=pdf_fields,
+        )
+    except Exception as exc:
+        logger.debug("apply_chapter_formulas_to_export_payload skipped: %s", exc)
     result = _compact_runtime_payload(result)
+    result = _strip_radiation_protection_field_units(result)
     if isinstance(result, dict):
         result.setdefault("schema", "frontend_form_schema/v1")
     return result

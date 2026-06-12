@@ -22,13 +22,7 @@
                 <i class="ri-download-2-line"></i>下载
             </a>
             {% endif %}
-            {% if role_perm.perm_file_delete and f.file_library_may_delete %}
-            <button type="submit" form="del-form-{{ f.pk }}"
-                    class="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50/80 px-2.5 py-1.5 text-xs font-medium text-red-800 transition hover:border-red-300 hover:bg-red-100"
-                    onclick="return confirm('确定删除该文件？');">
-                <i class="ri-delete-bin-line"></i>删除
-            </button>
-            {% endif %}
+            {% include "core/partials/file_library_delete_button.html" %}
         </div>
     </td>
 </tr>

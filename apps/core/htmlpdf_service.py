@@ -625,9 +625,18 @@ def slim_parsed_template_for_editor_layout(parsed: Dict[str, Any]) -> Dict[str, 
         ),
         "schema": parsed.get("schema") or "",
     }
-    for key in ("fieldFormulas", "fieldVerdictPlan", "lookupTables", "pdfFieldFormulas"):
+    for key in ("fieldFormulas", "fieldVerdictPlan", "lookupTables", "pdfFieldFormulas", "radiationProtectionChapter"):
         if key in parsed and parsed[key] not in (None, "", [], {}):
             out[key] = parsed[key]
+        elif isinstance(fs.get(key), (dict, list)) and fs.get(key) not in (None, "", [], {}):
+            out[key] = fs[key]
+    if isinstance(fs, dict) and fs.get("radiationProtectionChapter") and "radiationProtectionChapter" not in out:
+        out["radiationProtectionChapter"] = fs["radiationProtectionChapter"]
+        out["form_schema"] = {
+            "constants": fs.get("constants") if isinstance(fs.get("constants"), dict) else {},
+            "enums": fs.get("enums") if isinstance(fs.get("enums"), dict) else {},
+            "radiationProtectionChapter": fs.get("radiationProtectionChapter"),
+        }
     return out
 
 
@@ -711,7 +720,7 @@ def parse_template_json(raw_text: str) -> Dict[str, Any]:
                 "steps": form_schema.get("steps", []) if isinstance(form_schema.get("steps"), list) else [],
                 "schema": data.get("schema") or "",
             }
-            for key in ("lookupTables", "fieldVerdictPlan", "fieldFormulas", "pdfFieldFormulas"):
+            for key in ("lookupTables", "fieldVerdictPlan", "fieldFormulas", "pdfFieldFormulas", "radiationProtectionChapter"):
                 val = form_schema.get(key) if isinstance(form_schema, dict) else None
                 if val in (None, "", [], {}) and isinstance(data, dict):
                     val = data.get(key)
@@ -743,6 +752,30 @@ def parse_template_json(raw_text: str) -> Dict[str, Any]:
             "schema": data.get("schema") or "",
         }
     raise ValueError("JSON structure unsupported")
+
+
+def _pdf_text_color_for_field(field: Dict[str, Any], text: str) -> tuple[float, float, float]:
+    """回填 PDF 文字颜色：默认红；单项判定合格为绿、不合格为蓝。"""
+    parts: list[str] = []
+    for k in ("id", "placeholder", "originalPlaceholder", "title", "label", "fieldId", "pdfFieldId"):
+        v = field.get(k)
+        if isinstance(v, str) and v.strip():
+            parts.append(v.strip())
+    blob = " ".join(parts)
+    t = str(text or "").strip()
+    verdict_slot = "单项判定" in blob or blob.strip() in ("判定", "合格", "不合格")
+    if not verdict_slot and t:
+        if t in ("不合格", "不符合", "未通过") or "不合格" in t:
+            verdict_slot = True
+        elif t in ("合格", "符合", "通过") or ("合格" in t and "不合格" not in t):
+            verdict_slot = True
+    if not verdict_slot:
+        return (1, 0, 0)
+    if t in ("不合格", "不符合", "未通过") or "不合格" in t:
+        return (0, 0, 1)
+    if t in ("合格", "符合", "通过") or "合格" in t:
+        return (0, 0.55, 0)
+    return (1, 0, 0)
 
 
 def _pdf_text_field_wants_justify_for_instrument_line(field: Dict[str, Any]) -> bool:
@@ -857,7 +890,7 @@ def build_filled_pdf(fields: List[Dict[str, Any]], source_pdf: Path) -> bytes:
                 wrapped_text,
                 fontname=font_name,
                 fontsize=fs,
-                color=(1, 0, 0),
+                color=_pdf_text_color_for_field(f, text),
                 align=align,
                 overlay=True,
             )

@@ -12,6 +12,7 @@ _FORM_SCHEMA_EXTRA_KEYS = (
     "fieldVerdictPlan",
     "fieldFormulas",
     "pdfFieldFormulas",
+    "radiationProtectionChapter",
 )
 
 
@@ -26,7 +27,15 @@ def _schema_extras_from_template(template_obj: Dict[str, Any], form_schema_top: 
             if val in (None, "", [], {}):
                 continue
             if isinstance(val, (dict, list)):
-                out[key] = copy.deepcopy(val)
+                if key == "radiationProtectionChapter" and isinstance(val, dict):
+                    try:
+                        from radiation_detection_report.chapter5_field_sync import export_chapter_config_for_frontend
+
+                        out[key] = export_chapter_config_for_frontend(val)
+                    except Exception:
+                        out[key] = copy.deepcopy(val)
+                else:
+                    out[key] = copy.deepcopy(val)
                 break
     return out
 
@@ -475,10 +484,16 @@ def _assign_submit_bucket(field_obj: Dict[str, Any]) -> Dict[str, str]:
     if fid == "environmentHumidity":
         return {"bucket": "testResult", "path": "testResult.humidity"}
 
-    # signatures: 仅模板规定的三个签字栏位
+    pdf_fid = str(src0.get("pdfFieldId") or fid or "").strip()
+    sig_role = _resolve_canonical_signature_role(label, pdf_fid, field_type=ft)
+    if sig_role:
+        return {"bucket": "signatures", "path": f"signatures.{sig_role[0]}"}
+    if fid in CANONICAL_SIGNATURE_ROLE_IDS:
+        return {"bucket": "signatures", "path": f"signatures.{fid}"}
+    # signatures: 仅模板规定的三个签字栏位（兜底）
     if _contains_any(
         haystack,
-        ("参与主要检测人员名单", "校核员及校核日期", "受检单位陪同人"),
+        ("参与主要检测人员", "参与主要检测人员名单", "校核员及校核日期", "受检单位陪同人"),
     ) or ft == "signature":
         return {"bucket": "signatures", "path": f"signatures.{fid}"}
 
@@ -555,6 +570,15 @@ SEMANTIC_ROLE_MAPPINGS = {
     "陪同人": {"id_prefix": "accompanyingPerson", "type": "signature"},
     "受检单位陪同人": {"id_prefix": "accompanyingPerson", "type": "signature"},
 }
+
+# JS009 V3 等现场记录：仪器及检测人员章内三个 image 签名框（与旧版 f34/f35/f36 不同）
+CANONICAL_SIGNATURE_PDF_FIELD_ROLES: Dict[str, Tuple[str, str]] = {
+    "f625": ("inspector", "参与主要检测人员（签字）"),
+    "f632": ("checker", "校核员及校核日期（签字）"),
+    "f633": ("accompanyingPerson", "受检单位陪同人（签字）"),
+}
+
+CANONICAL_SIGNATURE_ROLE_IDS = frozenset({"inspector", "checker", "accompanyingPerson"})
 
 
 def infer_field_properties(label_text: str) -> Tuple[str, str]:
@@ -750,17 +774,50 @@ def _infer_type(raw_type: str, label: str) -> str:
     return "text"
 
 
+def _signature_role_from_pdf_field_id(pdf_field_id: str) -> Tuple[str, str] | None:
+    pid = str(pdf_field_id or "").strip().lower()
+    if not pid:
+        return None
+    return CANONICAL_SIGNATURE_PDF_FIELD_ROLES.get(pid)
+
+
 def _signature_role_from_label(label: str) -> Tuple[str, str] | None:
     """仅识别现场记录模板规定的三个签字栏位，不做宽泛「检测员/校核」归并。"""
     text = str(label or "").strip()
     if not text:
         return None
-    if text in ("参与主要检测人员名单（签字）", "参与主要检测人员名单"):
-        return ("inspector", "参与主要检测人员名单")
-    if text in ("校核员及校核日期（签字）", "校核员及校核日期"):
-        return ("checker", "校核员及校核日期")
-    if text in ("受检单位陪同人（签字）", "受检单位陪同人"):
-        return ("accompanyingPerson", "受检单位陪同人")
+    if text in (
+        "参与主要检测人员名单（签字）",
+        "参与主要检测人员名单",
+        "参与主要检测人员（签字）",
+        "参与主要检测人员",
+    ) or ("参与主要检测人员" in text and ("签字" in text or "签名" in text)):
+        display = "参与主要检测人员（签字）" if "签字" in text else "参与主要检测人员"
+        return ("inspector", display)
+    if text in ("校核员及校核日期（签字）", "校核员及校核日期") or (
+        "校核" in text and ("签字" in text or "签名" in text)
+    ):
+        return ("checker", text if "签字" in text else "校核员及校核日期（签字）")
+    if text in ("受检单位陪同人（签字）", "受检单位陪同人") or (
+        "陪同" in text and ("签字" in text or "签名" in text)
+    ):
+        return ("accompanyingPerson", text if "签字" in text else "受检单位陪同人（签字）")
+    return None
+
+
+def _resolve_canonical_signature_role(
+    label: str,
+    pdf_field_id: str,
+    *,
+    field_type: str = "",
+) -> Tuple[str, str] | None:
+    """标签 + pdfFieldId 解析三角色签名；供导出 steps 与 submitPath 使用。"""
+    role = _signature_role_from_label(label) or _signature_role_from_pdf_field_id(pdf_field_id)
+    if role:
+        return role
+    ft = str(field_type or "").lower()
+    if ft == "signature" or _field_is_signature_image({"label": label, "type": field_type or "text"}):
+        return _signature_role_from_pdf_field_id(pdf_field_id)
     return None
 
 
@@ -1104,7 +1161,12 @@ def _classify_by_pdf_template_section(
     ft = str(field_type or item.get("fieldType") or "").lower()
     is_signature = ft == "signature" or signature_role is not None or any(
         k in label
-        for k in ("参与主要检测人员名单", "校核员及校核日期", "受检单位陪同人")
+        for k in (
+            "参与主要检测人员",
+            "参与主要检测人员名单",
+            "校核员及校核日期",
+            "受检单位陪同人",
+        )
     )
     if is_signature:
         return ("step_signature", "综合结论与签字", "sec_signature", "签字与结论", "form")
@@ -1431,6 +1493,7 @@ def _normalize_pdf_field(item: Dict[str, Any], idx: int) -> Dict[str, Any]:
         "y": y,
         "w": w,
         "h": h,
+        "listIndex": idx,
         "order": (page, y, x, idx),
     }
     cp = item.get("checkboxPair")
@@ -1699,6 +1762,7 @@ def _strip_pdf_coords_from_form_schema(payload: Dict[str, Any]) -> Dict[str, Any
         field.pop("h", None)
         field.pop("__order", None)
         field.pop("__bbox", None)
+        field.pop("__editorOrder", None)
         src = field.get("source")
         if isinstance(src, dict):
             for key in ("page", "x", "y", "w", "h", "pages", "pdfBinding", "anchorType"):
@@ -1851,7 +1915,12 @@ def _compact_single_form_field(
             if v:
                 compact_jct[k] = v
         if compact_jct:
-            out["judgmentCriteriaByTestType"] = compact_jct
+            from utils.conditional_field_rules import normalize_logic_connectors_for_frontend_export
+
+            out["judgmentCriteriaByTestType"] = {
+                k: normalize_logic_connectors_for_frontend_export(v)
+                for k, v in compact_jct.items()
+            }
     if field.get("judgmentCriteriaManual") or src.get("judgmentCriteriaManual"):
         out["judgmentCriteriaManual"] = True
     fv = field.get("fieldVerdict")
@@ -1897,6 +1966,13 @@ def _compact_single_form_field(
         out["fieldExpression"] = pfx
         if ftype_l in ("computed", "number") or field.get("formula") or src.get("pdfFieldExpression"):
             out["formula"] = pfx
+    rules_val = field.get("formulaRules")
+    if not isinstance(rules_val, list) or not rules_val:
+        rules_val = src.get("formulaRules")
+    if not isinstance(rules_val, list) or not rules_val:
+        rules_val = field.get("fieldExpressionRules") or src.get("fieldExpressionRules")
+    if isinstance(rules_val, list) and rules_val:
+        out["formulaRules"] = copy.deepcopy(rules_val)
     for key in (
         "unit",
         "precision",
@@ -1914,10 +1990,33 @@ def _compact_single_form_field(
     ):
         val = field.get(key)
         if val is None or val == "" or val == []:
+            val = src.get(key)
+        if val is None or val == "" or val == []:
             continue
         if key in ("precision", "unit") and ftype_l not in ("number", "computed"):
             continue
-        out[key] = val
+        if key == "unit" and section_key == "site_radiation_protection":
+            continue
+        out[key] = copy.deepcopy(val) if isinstance(val, (dict, list)) else val
+
+    try:
+        from utils.conditional_field_rules import enrich_frontend_field_with_conditional_rules
+
+        merged = dict(out)
+        if isinstance(out.get("formulaRules"), list):
+            merged["formulaRules"] = out["formulaRules"]
+        elif isinstance(field.get("formulaRules"), list):
+            merged["formulaRules"] = field["formulaRules"]
+        elif isinstance(src.get("formulaRules"), list):
+            merged["formulaRules"] = src["formulaRules"]
+        elif isinstance(field.get("fieldExpressionRules"), list):
+            merged["formulaRules"] = field["fieldExpressionRules"]
+        elif isinstance(src.get("fieldExpressionRules"), list):
+            merged["formulaRules"] = src["fieldExpressionRules"]
+        out = enrich_frontend_field_with_conditional_rules(merged)
+        out.pop("fieldExpressionRules", None)
+    except Exception:
+        pass
     return out
 
 
@@ -2098,6 +2197,61 @@ def _coerce_radio_select_defaults_to_string(payload: Dict[str, Any]) -> Dict[str
     return payload
 
 
+def _field_editor_list_order(field: Dict[str, Any]) -> int:
+    """HTMLPDF 侧栏列表顺序（第 N 项），导出时用于恢复栏位顺序而非坐标/f 号排序。"""
+    if not isinstance(field, dict):
+        return 999999
+    try:
+        return int(field.get("__editorOrder"))
+    except (TypeError, ValueError):
+        pass
+    src = field.get("source") if isinstance(field.get("source"), dict) else {}
+    try:
+        return int(src.get("editorOrder"))
+    except (TypeError, ValueError):
+        return 999999
+
+
+def _sort_field_list_by_editor_order(fields: List[Any]) -> List[Any]:
+    indexed = [(i, f) for i, f in enumerate(fields or []) if isinstance(f, dict)]
+    indexed.sort(key=lambda it: (_field_editor_list_order(it[1]), it[0]))
+    return [f for _, f in indexed]
+
+
+def _sort_fields_by_editor_list_order(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """导出收尾：各 section 内按编辑器侧栏列表顺序排列（__editorOrder），不按坐标或 f 号升序。"""
+    steps = payload.get("steps")
+    if not isinstance(steps, list):
+        return payload
+
+    def _walk_sort(field_list: List[Any]) -> None:
+        if not isinstance(field_list, list):
+            return
+        field_list[:] = _sort_field_list_by_editor_order(field_list)
+        for f in field_list:
+            if not isinstance(f, dict):
+                continue
+            nested = f.get("fields")
+            if isinstance(nested, list):
+                _walk_sort(nested)
+
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        for sec in step.get("sections") or []:
+            if not isinstance(sec, dict):
+                continue
+            flds = sec.get("fields")
+            if isinstance(flds, list):
+                _walk_sort(flds)
+            matrix = sec.get("matrix")
+            if isinstance(matrix, dict):
+                hf = matrix.get("headerFields")
+                if isinstance(hf, list):
+                    matrix["headerFields"] = _sort_field_list_by_editor_order(hf)
+    return payload
+
+
 def _field_order_pyx(field: Dict[str, Any]) -> Tuple[int, float, float]:
     """字段在 PDF 上的阅读序键：页码、y（上→下）、x（左→右）。"""
     o = field.get("__order") if isinstance(field.get("__order"), tuple) else (999, 999999.0, 999999.0, 999999)
@@ -2134,34 +2288,11 @@ def _section_min_pyx_for_sort(section: Dict[str, Any]) -> Tuple[int, float, floa
 
 
 def _sort_fields_by_coordinate_order(payload: Dict[str, Any]) -> Dict[str, Any]:
-    y_tolerance = 10.0
+    """按 PDF 坐标调整 **section / step** 顺序，便于规则引擎合并区块。
 
-    def _build_row_index_map(section_fields: List[Dict[str, Any]]) -> Dict[int, int]:
-        """同页内按 y 分行；相邻 y 误差 <= 10 视为同一行。"""
-        by_page: Dict[int, List[Tuple[float, float, int]]] = {}
-        for i, f in enumerate(section_fields):
-            if not isinstance(f, dict):
-                continue
-            page, y, x, _ = f.get("__order") or (999, 999999, 999999, 999999)
-            try:
-                p = int(page)
-                yy = float(y)
-                xx = float(x)
-            except (TypeError, ValueError):
-                continue
-            by_page.setdefault(p, []).append((yy, xx, i))
-
-        row_map: Dict[int, int] = {}
-        for p, rows in by_page.items():
-            rows.sort(key=lambda t: (t[0], t[1]))  # 先按 y 扫描形成“行”
-            row_idx = -1
-            anchor_y = None
-            for yy, xx, i in rows:
-                if anchor_y is None or abs(yy - anchor_y) > y_tolerance:
-                    row_idx += 1
-                    anchor_y = yy
-                row_map[i] = row_idx
-        return row_map
+    不重排 ``section.fields``：栏位顺序与 ``pdfFieldId`` 以 HTMLPDF 编辑器侧栏为准，
+    由 ``_sort_fields_by_editor_list_order`` 在 finalize 末尾恢复。
+    """
 
     steps = payload.get("steps")
     if not isinstance(steps, list):
@@ -2184,20 +2315,7 @@ def _sort_fields_by_coordinate_order(payload: Dict[str, Any]) -> Dict[str, Any]:
             fields = section.get("fields")
             if not isinstance(fields, list):
                 continue
-            row_index_map = _build_row_index_map(fields)
-            ordered_with_idx = sorted(
-                enumerate(fields),
-                key=lambda fi: (
-                    # 坐标排序：页码 -> 行(y 容差) -> 精细 y -> x -> 稳定序
-                    (_field_order_pyx(fi[1])[0] if isinstance(fi[1], dict) else 999),
-                    row_index_map.get(fi[0], 999999),
-                    (_field_order_pyx(fi[1])[1] if isinstance(fi[1], dict) else 999999.0),
-                    (_field_order_pyx(fi[1])[2] if isinstance(fi[1], dict) else 999999.0),
-                    fi[0],
-                ),
-            )
-            section["fields"] = [x[1] for x in ordered_with_idx]
-            pyx_list = [_field_order_pyx(f) for f in section["fields"] if isinstance(f, dict)]
+            pyx_list = [_field_order_pyx(f) for f in fields if isinstance(f, dict)]
             if pyx_list:
                 section_min_order[sec_idx] = min(pyx_list)
 
@@ -4386,6 +4504,7 @@ def _finalize_frontend_schema_result(result: Dict[str, Any], *, merge_split_date
     result = _force_signature_semantics(result)
     if merge_split_dates:
         result = _merge_split_date_fields(result)
+    # 以下坐标排序仅调整 section/step 区块顺序；栏位数组顺序不在此改动。
     result = _sort_fields_by_coordinate_order(result)
     result = _rehome_mutex_pair_widgets_by_visual_row(result)
     result = _sort_fields_by_coordinate_order(result)
@@ -4409,12 +4528,65 @@ def _finalize_frontend_schema_result(result: Dict[str, Any], *, merge_split_date
     result = _apply_floor_plan_field_types(result)
     result = _strip_pdf_coords_from_form_schema(result)
     result = _coerce_radio_select_defaults_to_string(result)
-    result = _apply_radiation_protection_mean_formulas(result)
+    result = _apply_radiation_protection_chapter_formulas(result)
+    result = _apply_conditional_field_rules_globally(result)
     result = _inject_template_section_metadata(result)
+    result = _sort_fields_by_editor_list_order(result)
     result = _compact_form_schema_payload(result)
     if isinstance(result, dict):
         result.setdefault("schema", "frontend_form_schema/v1")
     return result
+
+
+def _apply_conditional_field_rules_globally(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """将栏位级条件公式/判定规则写入前端 steps。"""
+    try:
+        from utils.conditional_field_rules import enrich_frontend_field_with_conditional_rules
+    except Exception:
+        return payload
+    steps = payload.get("steps")
+    if not isinstance(steps, list):
+        return payload
+
+    def _walk(field: Dict[str, Any]) -> None:
+        if not isinstance(field, dict):
+            return
+        enrich_frontend_field_with_conditional_rules(field)
+        for nested in field.get("fields") or []:
+            _walk(nested)
+        for cell in (field.get("cells") or {}).values():
+            if isinstance(cell, dict):
+                _walk(cell)
+
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        for sec in step.get("sections") or []:
+            if not isinstance(sec, dict):
+                continue
+            for fld in sec.get("fields") or []:
+                _walk(fld)
+            matrix = sec.get("matrix")
+            if isinstance(matrix, dict):
+                for row in matrix.get("rows") or []:
+                    if not isinstance(row, dict):
+                        continue
+                    for cell in (row.get("cells") or {}).values():
+                        if isinstance(cell, dict):
+                            _walk(cell)
+    return payload
+
+
+def _apply_radiation_protection_chapter_formulas(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    规则引擎阶段仅保留轻量均值兜底；完整章节公式（含 reportValueRules 编译、pdf.fields 绑定）
+    在 ``finalize_runtime_frontend_export`` 中执行（此时 pdf.fields 可用且不会覆盖根级章节配置）。
+    """
+    if not isinstance(payload, dict):
+        return payload
+    if isinstance(payload.get("radiationProtectionChapter"), dict):
+        return payload
+    return _apply_radiation_protection_mean_formulas(payload)
 
 
 def _apply_radiation_protection_mean_formulas(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -4469,13 +4641,8 @@ def _apply_radiation_protection_mean_formulas(payload: Dict[str, Any]) -> Dict[s
                         (rf.get("pdfFieldId") or (rf.get("source") or {}).get("pdfFieldId") or "")
                     ).strip()
                 ]
-                if len(pids) >= 2:
-                    mf["type"] = "computed"
-                    mf["dependsOn"] = pids[:]
-                    mf["formula"] = f"avg({','.join(pids[:3])})"
-                    mf["fieldExpression"] = mf["formula"]
-                    mf["precision"] = 2
-                    mf["unit"] = "μSv/h"
+                if len(pids) >= 2 and not str(mf.get("fieldExpression") or "").strip():
+                    mf["fieldExpression"] = f"avg({','.join(pids[:3])})"
     return payload
 
 
@@ -4524,7 +4691,8 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
     fields_raw = pdf.get("fields") if isinstance(pdf.get("fields"), list) else []
     if not fields_raw:
         fields_raw = template_obj.get("fields") if isinstance(template_obj.get("fields"), list) else []
-    fields_raw = materialize_unified_pdf_fields(fields_raw)
+    # 编辑器传入的 pdf.fields 已按侧栏顺序编号，勿在此按数组下标再次整体重排 f 号
+    fields_raw = materialize_unified_pdf_fields(fields_raw, reindex_pdf_field_ids=False)
 
     # 保留模板中的每一条栏位；同 section 内仅按 pdfFieldId 跳过重复槽位。label 可重名，导出 id=pdfFieldId。
     normalized_items: List[Dict[str, Any]] = []
@@ -4545,7 +4713,8 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
     found_test_type_checks: Dict[str, str] = {}
     instrument_check_labels: List[str] = []
 
-    sorted_items = sorted(normalized_items, key=lambda it: it.get("order", (999, 999999, 999999, 999999)))
+    # 与 HTMLPDF 侧栏一致：保持 pdf.fields 传入顺序，不按 PDF 坐标重排后再编号
+    sorted_items = sorted(normalized_items, key=lambda it: (it.get("listIndex") or 999999,))
     section_catalog = _site_record_template_section_catalog()
     for idx, item in enumerate(sorted_items, start=1):
         # 规则1：第一页勾选项归位（状态检测/验收检测）
@@ -4558,7 +4727,13 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
                 continue
 
         ft = _infer_type(item["fieldType"], item["label"])
-        signature_role = _signature_role_from_label(item["label"]) if ft == "signature" else None
+        signature_role = _resolve_canonical_signature_role(
+            item["label"],
+            str(item.get("pdfFieldId") or ""),
+            field_type=ft,
+        )
+        if signature_role:
+            ft = "signature"
         pdf_section_key = str(item.get("templateSectionKey") or "").strip()
         # 规则1：新版 PDF 章节锚点（纵坐标区间）优先
         pdf_hierarchy = None
@@ -4676,6 +4851,7 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
                 "anchorType": item["fieldType"],
             },
             "__order": item.get("order", (999, 999999, 999999, idx)),
+            "__editorOrder": int(item.get("listIndex") or idx),
             "__bbox": (item.get("x", 0.0), item.get("y", 0.0), item.get("w", 0.0), item.get("h", 0.0)),
         }
         icp = item.get("checkboxPair")
@@ -4721,10 +4897,11 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
             field_obj["precision"] = 1
         if field_obj.get("type") == "number":
             field_obj["precision"] = 1
-            # 用展示标签推断单位：全路径 label 常同时含「温度/湿度」，会误判（如 %RH 栏被标成 ℃）。
-            unit = _pick_unit(field_label)
-            if unit:
-                field_obj["unit"] = unit
+            # 防护表单位在 matrix valueColumns 表头展示，单元格不写 unit。
+            if pdf_section_key != "site_radiation_protection":
+                unit = _pick_unit(field_label)
+                if unit:
+                    field_obj["unit"] = unit
         if str(field_obj.get("source", {}).get("anchorType") or "").lower() == "check":
             field_obj["type"] = "boolean"
             field_obj["defaultValue"] = bool(field_obj.get("defaultValue", False))

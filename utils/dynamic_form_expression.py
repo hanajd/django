@@ -82,10 +82,65 @@ def _validate_ast(node: ast.AST, depth: int = 0) -> None:
         _validate_ast(ch, depth + 1)
 
 
+def _format_range_part(val: Any) -> str:
+    if val is None:
+        return ""
+    if isinstance(val, bool):
+        return "1" if val else "0"
+    if isinstance(val, float):
+        if math.isnan(val) or math.isinf(val):
+            return ""
+        if val == int(val):
+            return str(int(val))
+        text = f"{val:.10f}".rstrip("0").rstrip(".")
+        return text or "0"
+    if isinstance(val, int):
+        return str(val)
+    return str(val).strip()
+
+
+def _split_top_level_range_token(expr: str) -> Optional[Tuple[str, str]]:
+    """顶层 a~b：输出范围字符串，左右各自求值后用 ~ 连接（非 ~/ 整除）。"""
+    s = str(expr or "").strip()
+    if not s:
+        return None
+    depth = 0
+    in_str: Optional[str] = None
+    escape = False
+    for i, ch in enumerate(s):
+        if in_str:
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == in_str:
+                in_str = None
+            continue
+        if ch in ("'", '"'):
+            in_str = ch
+            continue
+        if ch == "(":
+            depth += 1
+            continue
+        if ch == ")":
+            depth = max(0, depth - 1)
+            continue
+        if depth == 0 and ch in ("~", "～") and (i + 1 >= len(s) or s[i + 1] != "/"):
+            left = s[:i].strip()
+            right = s[i + 1 :].strip()
+            if left and right:
+                return left, right
+            return None
+    return None
+
+
 def _frontend_expr_to_python(expr: str) -> str:
     s = str(expr or "").strip()
     if not s:
         return ""
+    s = s.replace("～", "~")
     s = re.sub(r"\btrue\b", "True", s, flags=re.IGNORECASE)
     s = re.sub(r"\bfalse\b", "False", s, flags=re.IGNORECASE)
     s = re.sub(r"\bnull\b", "None", s, flags=re.IGNORECASE)
@@ -496,8 +551,8 @@ class _DictProxy:
         raise AttributeError(name)
 
 
-def evaluate_expression(
-    expr: str,
+def _evaluate_python_expr(
+    py: str,
     value_mapping: Mapping[str, Any],
     *,
     constants: Optional[Mapping[str, Any]] = None,
@@ -505,7 +560,6 @@ def evaluate_expression(
     lookup_tables: Optional[Mapping[str, Any]] = None,
     row: Optional[Mapping[str, Any]] = None,
 ) -> Any:
-    py = _frontend_expr_to_python(expr)
     if not py:
         return None
     tree = ast.parse(py, mode="eval")
@@ -518,6 +572,54 @@ def evaluate_expression(
         row=row,
     )
     return _SafeEval(ns).visit(tree)
+
+
+def evaluate_expression(
+    expr: str,
+    value_mapping: Mapping[str, Any],
+    *,
+    constants: Optional[Mapping[str, Any]] = None,
+    enums: Optional[Mapping[str, Any]] = None,
+    lookup_tables: Optional[Mapping[str, Any]] = None,
+    row: Optional[Mapping[str, Any]] = None,
+) -> Any:
+    range_parts = _split_top_level_range_token(expr)
+    if range_parts:
+        left_py = _frontend_expr_to_python(range_parts[0])
+        right_py = _frontend_expr_to_python(range_parts[1])
+        left_val = _evaluate_python_expr(
+            left_py,
+            value_mapping,
+            constants=constants,
+            enums=enums,
+            lookup_tables=lookup_tables,
+            row=row,
+        )
+        right_val = _evaluate_python_expr(
+            right_py,
+            value_mapping,
+            constants=constants,
+            enums=enums,
+            lookup_tables=lookup_tables,
+            row=row,
+        )
+        left_txt = _format_range_part(left_val)
+        right_txt = _format_range_part(right_val)
+        if not left_txt and not right_txt:
+            return ""
+        return f"{left_txt}~{right_txt}"
+
+    py = _frontend_expr_to_python(expr)
+    if not py:
+        return None
+    return _evaluate_python_expr(
+        py,
+        value_mapping,
+        constants=constants,
+        enums=enums,
+        lookup_tables=lookup_tables,
+        row=row,
+    )
 
 
 def evaluate_verdict_rule(

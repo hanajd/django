@@ -56,6 +56,8 @@ from apps.core.library_access import (
     APP_SIDE_ROLE_CODES,
     ROLE_DEFAULT_PERMS_BY_CODE,
     ROLE_PERMISSION_MATRIX,
+    PERM_OVERRIDE_EXTRA_META,
+    USER_PROFILE_ONLY_PERM_OVERRIDE_KEYS,
     library_export_merge_allowed_under_own_files_scope,
     library_file_access_allowed,
     library_user_may_delete_library_file,
@@ -76,6 +78,7 @@ from apps.core.library_access import (
     library_user_may_export_task_template_pdf_for_project,
     library_user_may_filled_pdf_toolchain,
     library_user_may_use_htmlpdf_matrix_beta_controls,
+    library_user_may_mock_inspection_submit,
     library_user_has_party_a_demo_restrictions,
     library_user_may_access_instrument_database,
     library_user_may_edit_instrument_database,
@@ -307,6 +310,7 @@ _FORM_SCHEMA_EXTRA_KEYS = (
     "fieldVerdictPlan",
     "fieldFormulas",
     "pdfFieldFormulas",
+    "radiationProtectionChapter",
 )
 
 
@@ -324,6 +328,50 @@ def _form_schema_extra_payload(data: dict, form_schema: dict) -> dict:
                 out[key] = val
                 break
     return out
+
+
+def _sync_radiation_protection_chapter_state(
+    normalized_fields: list,
+    schema_extras: dict,
+    data: dict,
+) -> dict:
+    """从编辑器栏位同步第五章 field_bindings，并写入 formSchema 扩展。"""
+    if not isinstance(schema_extras, dict):
+        schema_extras = {}
+    try:
+        from radiation_detection_report.chapter5_field_sync import (
+            SCHEMA_KEY,
+            build_chapter_state,
+            update_reference_layout_file,
+        )
+    except Exception:
+        return schema_extras
+
+    existing = schema_extras.get(SCHEMA_KEY)
+    if not isinstance(existing, dict):
+        for container in (data, data.get("formSchema"), data.get("form_schema")):
+            if isinstance(container, dict) and isinstance(container.get(SCHEMA_KEY), dict):
+                existing = container.get(SCHEMA_KEY)
+                break
+    chapter = build_chapter_state(normalized_fields, existing if isinstance(existing, dict) else None)
+    if isinstance(existing, dict) and isinstance(existing.get("reportValueRules"), list):
+        chapter["reportValueRules"] = existing.get("reportValueRules")
+    try:
+        from radiation_detection_report.chapter5_field_sync import (
+            apply_mean_formulas_to_pdf_fields,
+            apply_report_formulas_to_pdf_fields,
+        )
+
+        apply_mean_formulas_to_pdf_fields(normalized_fields, chapter=chapter)
+        apply_report_formulas_to_pdf_fields(normalized_fields, chapter=chapter)
+    except Exception:
+        pass
+    schema_extras[SCHEMA_KEY] = chapter
+    try:
+        update_reference_layout_file(chapter)
+    except Exception:
+        pass
+    return schema_extras
 
 
 def _merge_form_schema_extras(payload: dict, extras: dict) -> dict:
@@ -484,6 +532,12 @@ def _parse_perm_overrides_from_post(request) -> dict:
             overrides[key] = True
         elif v == "deny":
             overrides[key] = False
+    for key in USER_PROFILE_ONLY_PERM_OVERRIDE_KEYS:
+        v = (request.POST.get(f"po_{key}") or "inherit").strip().lower()
+        if v == "allow":
+            overrides[key] = True
+        elif v == "deny":
+            overrides[key] = False
     return overrides
 
 
@@ -492,10 +546,22 @@ def _perm_override_rows_for_profile(profile) -> list:
     if profile is not None:
         raw = getattr(profile, "perm_overrides", None)
         if isinstance(raw, dict):
-            valid = {x for x, _, _, _ in ROLE_PERMISSION_MATRIX}
+            valid = {x for x, _, _, _ in ROLE_PERMISSION_MATRIX} | USER_PROFILE_ONLY_PERM_OVERRIDE_KEYS
             o = {k: bool(v) for k, v in raw.items() if k in valid}
     rows = []
     for key, title, help_text, _cat in ROLE_PERMISSION_MATRIX:
+        if key in o:
+            state = "allow" if o[key] else "deny"
+        else:
+            state = "inherit"
+        rows.append({"field": key, "title": title, "help": help_text, "state": state})
+    for key in sorted(USER_PROFILE_ONLY_PERM_OVERRIDE_KEYS):
+        if key in {r["field"] for r in rows}:
+            continue
+        meta = PERM_OVERRIDE_EXTRA_META.get(key)
+        if not meta:
+            continue
+        title, help_text = meta
         if key in o:
             state = "allow" if o[key] else "deny"
         else:
@@ -2694,6 +2760,8 @@ def library_projects(request):
         submission_count=len(project_submissions),
     )
 
+    can_mock_inspection_submit = library_user_may_mock_inspection_submit(request.user)
+
     return render(
         request,
         "core/library_projects.html",
@@ -2774,8 +2842,65 @@ def library_projects(request):
             "process_steps_reference": PROCESS_STEPS_REFERENCE,
             "project_equipment_count": project_equipment_count,
             "project_instrument_dispatch_panel": project_instrument_dispatch_panel,
+            "can_mock_inspection_submit": can_mock_inspection_submit,
+            "mock_inspection_submit_api_url": reverse("library_project_mock_inspection_submit"),
         },
     )
+
+
+@login_required
+def library_project_mock_inspection_submit(request):
+    """项目工作台：按设备模拟提交现场记录（与 App 提交流程一致：submit 库 + 回填 PDF）。"""
+    if request.method not in ("GET", "POST"):
+        return JsonResponse({"ok": False, "message": "不支持的请求方法"}, status=405)
+    if not library_user_may_mock_inspection_submit(request.user):
+        return JsonResponse({"ok": False, "message": "无权使用现场记录模拟提交"}, status=403)
+
+    gx = _require_perm(request, "perm_file_library")
+    if gx:
+        return gx
+
+    raw_pid = (request.GET.get("project_id") or request.POST.get("project_id") or "").strip()
+    link_raw = (request.GET.get("link_id") or request.POST.get("link_id") or "").strip()
+    if not raw_pid or not link_raw:
+        return JsonResponse({"ok": False, "message": "缺少 project_id 或 link_id"}, status=400)
+    try:
+        link_id = int(link_raw)
+    except ValueError:
+        return JsonResponse({"ok": False, "message": "link_id 无效"}, status=400)
+
+    try:
+        project_pk = int(raw_pid)
+    except ValueError:
+        project = LibraryProject.objects.filter(code=raw_pid).first()
+    else:
+        project = LibraryProject.objects.filter(pk=project_pk).first()
+    if project is None:
+        return JsonResponse({"ok": False, "message": "项目不存在"}, status=404)
+
+    fill_ratio_raw = request.GET.get("fill_ratio") or request.POST.get("fill_ratio") or "1"
+    try:
+        fill_ratio = float(fill_ratio_raw)
+    except (TypeError, ValueError):
+        fill_ratio = 1.0
+    fill_ratio = max(0.0, min(1.0, fill_ratio))
+
+    from apps.api.mock_inspection_submit_generator import execute_mock_submit_for_equipment_link
+
+    try:
+        result = execute_mock_submit_for_equipment_link(
+            project=project,
+            link_id=link_id,
+            user=request.user,
+            request=request,
+            fill_ratio=fill_ratio,
+        )
+    except ValueError as exc:
+        return JsonResponse({"ok": False, "message": str(exc)}, status=400)
+    except Exception as exc:
+        return JsonResponse({"ok": False, "message": f"模拟提交失败: {exc}"}, status=500)
+
+    return JsonResponse(result)
 
 
 @login_required
@@ -5740,6 +5865,7 @@ def htmlpdf_api_template_jsons(request):
                 "scoped": True,
                 "library_task_id": task.pk,
                 "default_json_template_id": default_id,
+                "history_count": sum(1 for r in rows if r.get("kind") == "history"),
             }
         )
 
@@ -5995,6 +6121,7 @@ def htmlpdf_api_export_json(request):
     _assign_htmlpdf_template_sections_to_fields(
         request.user.id, normalized_fields, skip_for_report=is_report_tpl
     )
+    schema_extras = _sync_radiation_protection_chapter_state(normalized_fields, schema_extras, data)
     constants = form_schema.get("constants") if isinstance(form_schema.get("constants"), dict) else {}
     enums = form_schema.get("enums") if isinstance(form_schema.get("enums"), dict) else {}
     steps = form_schema.get("steps") if isinstance(form_schema.get("steps"), list) else []
@@ -6081,8 +6208,46 @@ def htmlpdf_api_export_json(request):
             "download_url": reverse("file_library_download", kwargs={"pk": row["id"]}),
         },
     }
+    if lib_task_for_save is not None:
+        resp["library_task_id"] = int(lib_task_for_save.pk)
     if binding_rotation:
         resp["binding_rotation"] = binding_rotation
+        if binding_rotation.get("ok") and binding_rotation.get("library_task_id"):
+            resp["library_task_id"] = int(binding_rotation["library_task_id"])
+            task_for_options = lib_task_for_save
+            if task_for_options is None:
+                task_for_options = LibraryTask.objects.filter(
+                    pk=int(binding_rotation["library_task_id"])
+                ).first()
+            if task_for_options is not None:
+                try:
+                    from apps.core.library_task_template_binding_service import (
+                        list_task_editor_template_json_options,
+                        resolve_default_json_template_id,
+                    )
+
+                    pdf_tid = None
+                    tf_raw = (
+                        data.get("library_template_file_id")
+                        or data.get("libraryTemplateFileId")
+                        or binding_meta.get("library_template_file_id")
+                    )
+                    if tf_raw is not None and str(tf_raw).strip() != "":
+                        try:
+                            pdf_tid = int(tf_raw)
+                        except (TypeError, ValueError):
+                            pdf_tid = None
+                    resp["template_json_options"] = list_task_editor_template_json_options(
+                        task_for_options,
+                        user=request.user,
+                        pdf_template_id=pdf_tid,
+                    )
+                    resp["default_json_template_id"] = resolve_default_json_template_id(
+                        task_for_options,
+                        pdf_template_id=pdf_tid,
+                    )
+                except Exception:
+                    pass
     try:
         resp["template_compat"] = _build_template_compat_report(
             build_frontend_schema_by_rules(payload, merge_split_dates=False)
@@ -6173,8 +6338,8 @@ def _normalize_pdf_fields_for_unified_template(fields, form_schema: dict, bindin
         # Keep legacy key for compatibility with old pipeline readers.
         row["placeholder"] = normalize_field_text_by_underscore_rules(field_id) or field_id
         out.append(row)
-    # pdfFieldId 与 HTMLPDF 侧栏/画板列表顺序一致：第 idx+1 项 = f{idx+1}（不按坐标重排）。
-    return reindex_pdf_field_ids_by_list_order(out)
+    # pdfFieldId 以编辑器提交为准（侧栏已 reindex 且公式/判定已 remap）；导出侧不再二次改号。
+    return out
 
 
 def _htmlpdf_is_report_template_context(
@@ -6953,124 +7118,70 @@ def htmlpdf_api_export_frontend_json(request):
     template_version = str(data.get("version") or meta.get("version") or "1.0.0").strip()
     report_type = str(data.get("reportType") or data.get("report_type") or meta.get("reportType") or "").strip()
     standard = str(data.get("standard") or meta.get("standard") or "").strip()
-    form_schema = data.get("form_schema") if isinstance(data.get("form_schema"), dict) else {}
-    if not form_schema:
-        form_schema = data.get("formSchema") if isinstance(data.get("formSchema"), dict) else {}
-    schema_extras = _form_schema_extra_payload(data, form_schema)
-    constants = data.get("constants") if isinstance(data.get("constants"), dict) else {}
-    if not constants:
-        constants = form_schema.get("constants") if isinstance(form_schema.get("constants"), dict) else {}
-    enums = data.get("enums") if isinstance(data.get("enums"), dict) else {}
-    if not enums:
-        enums = form_schema.get("enums") if isinstance(form_schema.get("enums"), dict) else {}
-    steps = data.get("steps") if isinstance(data.get("steps"), list) else []
-    if not steps:
-        steps = form_schema.get("steps") if isinstance(form_schema.get("steps"), list) else []
-    input_fields = _sanitize_pdf_field_texts(data.get("fields") if isinstance(data.get("fields"), list) else [])
-    # 强制规范 pdfFieldId：必须为 f+序号，防止前端传入语义名称污染绑定键。
-    input_fields = _normalize_pdf_fields_for_unified_template(input_fields, {}, {})
-    is_report_fe = _htmlpdf_is_report_template_context(
-        request, data, meta if isinstance(meta, dict) else {}
-    )
-    payload = {
-        "templateId": template_id or name.rsplit(".", 1)[0],
-        "templateName": template_name or name,
-        "version": template_version or "1.0.0",
-        "reportType": report_type,
-        "standard": standard,
-        "pdfUrl": str(data.get("pdfUrl") or meta.get("pdfUrl") or ""),
-        "locale": str(data.get("locale") or meta.get("locale") or "zh-CN"),
-        "constants": constants,
-        "enums": enums,
-        "steps": steps,
-    }
-    _merge_form_schema_extras(payload, schema_extras)
-    has_matrix_layout = False
-    for st in payload.get("steps") if isinstance(payload.get("steps"), list) else []:
-        if not isinstance(st, dict):
-            continue
-        for sec in st.get("sections") if isinstance(st.get("sections"), list) else []:
-            if not isinstance(sec, dict):
-                continue
-            if str(sec.get("layout") or "").strip().lower() == "matrixtable":
-                has_matrix_layout = True
-                break
-        if has_matrix_layout:
-            break
-
     lib_task_for_inst = _resolve_library_task_for_htmlpdf_frontend_export(
         request, data, meta if isinstance(meta, dict) else {}
     )
     from utils.frontend_export_pipeline import (
         build_editor_saved_frontend_json,
+        pdf_fields_from_template_blob,
+        radiation_chapter_from_template_blob,
+        read_bound_primary_template_json,
         resolve_task_template_pdf_path,
+        template_obj_for_frontend_export,
     )
     from utils.pdf_field_formulas import build_pdf_field_formula_merge_source
 
-    template_blob = _try_read_library_template_blob_for_formulas(
-        request, data, meta if isinstance(meta, dict) else {}
-    ) or {}
-    template_obj = dict(payload)
-    for key in (
-        "templateId",
-        "templateName",
-        "version",
-        "reportType",
-        "standard",
-        "pdfUrl",
-        "locale",
-    ):
-        val = template_blob.get(key)
-        if val not in (None, ""):
-            template_obj[key] = val
-    if isinstance(template_blob.get("constants"), dict) and template_blob.get("constants"):
-        template_obj["constants"] = template_blob["constants"]
-    if isinstance(template_blob.get("enums"), dict) and template_blob.get("enums"):
-        template_obj["enums"] = template_blob["enums"]
-    _merge_form_schema_extras(template_obj, schema_extras)
-
-    _ff_raw_fe = _export_request_field_formulas_raw(data, form_schema)
-    _ff_src = build_pdf_field_formula_merge_source(
-        input_fields,
-        template_blob if isinstance(template_blob, dict) else None,
-        root_field_formulas=_ff_raw_fe,
+    template_blob = read_bound_primary_template_json(
+        request,
+        library_task=lib_task_for_inst,
+        data=data,
+        meta=meta if isinstance(meta, dict) else {},
     )
+    if not isinstance(template_blob, dict) or not template_blob:
+        template_blob = _try_read_library_template_blob_for_formulas(
+            request, data, meta if isinstance(meta, dict) else {}
+        )
+    if not isinstance(template_blob, dict) or not template_blob:
+        return JsonResponse(
+            {
+                "error": (
+                    "未找到绑定的主坐标模板 JSON。请先保存坐标模板，并从任务模板库进入编辑器后再导出前端 JSON。"
+                )
+            },
+            status=400,
+        )
+
+    is_report_fe = _htmlpdf_is_report_template_context(
+        request, data, meta if isinstance(meta, dict) else {}
+    )
+    fields_for_export = _sanitize_pdf_field_texts(pdf_fields_from_template_blob(template_blob))
+    fields_for_export = _normalize_pdf_fields_for_unified_template(fields_for_export, {}, {})
+    radiation_chapter_full = radiation_chapter_from_template_blob(template_blob)
+    template_obj = template_obj_for_frontend_export(template_blob)
+    _ff_src = build_pdf_field_formula_merge_source(fields_for_export, template_blob)
 
     pdf_path = resolve_task_template_pdf_path(lib_task_for_inst)
-    fields_for_export = list(input_fields)
     if not pdf_path:
         fields_for_export = _assign_htmlpdf_template_sections_to_fields(
             request.user.id, fields_for_export, skip_for_report=is_report_fe
         )
 
-    if has_matrix_layout:
-        from apps.api.inspection_report_make import build_instruments_root_for_frontend_export
-        from utils.pdf_field_formulas import merge_field_formulas_into_frontend
-        from utils.frontend_runtime_export import finalize_runtime_frontend_export
+    project_obj = None
+    if lib_task_for_inst is not None:
+        from apps.api.inspection_frontend_export_service import resolve_project_for_library_task_export
 
-        payload = merge_field_formulas_into_frontend(template_obj, _ff_src)
-        payload["steps"] = steps
-        payload.update(build_instruments_root_for_frontend_export(task_obj=lib_task_for_inst, payload={}))
-        payload.pop("instrumentCatalogOptions", None)
-        payload.pop("bindings", None)
-        payload.pop("pdfBindings", None)
-        payload = finalize_runtime_frontend_export(payload)
-    else:
-        project_obj = None
-        if lib_task_for_inst is not None:
-            from apps.api.inspection_frontend_export_service import resolve_project_for_library_task_export
-
-            project_obj = resolve_project_for_library_task_export(
-                request, lib_task_for_inst, data, meta
-            )
-        payload = build_editor_saved_frontend_json(
-            template_obj,
-            fields_for_export,
-            pdf_path=pdf_path,
-            extra_formula_source=_ff_src,
-            task_obj=lib_task_for_inst,
-            project_obj=project_obj,
+        project_obj = resolve_project_for_library_task_export(
+            request, lib_task_for_inst, data, meta
         )
+    payload = build_editor_saved_frontend_json(
+        template_obj,
+        fields_for_export,
+        pdf_path=pdf_path,
+        extra_formula_source=_ff_src,
+        task_obj=lib_task_for_inst,
+        project_obj=project_obj,
+        radiation_chapter_state=radiation_chapter_full,
+    )
 
     try:
         raw = json_std.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")

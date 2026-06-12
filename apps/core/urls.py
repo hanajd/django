@@ -45,6 +45,11 @@ urlpatterns = [
         views.library_project_create_wizard_options,
         name='library_project_create_wizard_options',
     ),
+    path(
+        'files/projects/mock-inspection-submit/',
+        views.library_project_mock_inspection_submit,
+        name='library_project_mock_inspection_submit',
+    ),
     path('files/commission-manage/', views.commission_manage, name='commission_manage'),
     path('files/hospital-info/', views.hospital_info_manage, name='hospital_info_manage'),
     path(

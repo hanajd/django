@@ -1,4 +1,5 @@
-{# 设备编辑 / 历史 / 加入项目 弹窗 #}
+{# 设备历史（浏览/编辑均可查看）；编辑与加入项目弹窗仅编辑模式 #}
+{% if hospital_info_edit %}
 <dialog id="equipment-edit-dialog" class="rounded-3xl shadow-2xl border-0 p-0 w-full max-w-lg backdrop:bg-slate-900/40">
     <form method="post" id="equipment-edit-form" class="p-6 max-h-[min(90vh,40rem)] overflow-y-auto">
         {% csrf_token %}
@@ -107,6 +108,7 @@
         </div>
     </form>
 </dialog>
+{% endif %}
 
 <dialog id="equipment-history-dialog" class="rounded-3xl shadow-2xl border-0 p-0 w-full max-w-lg backdrop:bg-slate-900/40">
     <div class="p-6 max-h-[min(85vh,36rem)] overflow-y-auto">
@@ -122,6 +124,7 @@
     </div>
 </dialog>
 
+{% if hospital_info_edit %}
 <dialog id="equipment-project-dialog" class="rounded-3xl shadow-2xl border-0 p-0 w-full max-w-md backdrop:bg-slate-900/40">
     <form method="post" id="equipment-project-form" class="p-6">
         {% csrf_token %}
@@ -145,6 +148,7 @@
         <button type="submit" class="mt-4 w-full py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">确认加入</button>
     </form>
 </dialog>
+{% endif %}
 
 <script>
 (function () {
@@ -608,4 +612,6 @@
 })();
 </script>
 
+{% if hospital_info_edit %}
 {% include "core/partials/library_report_task_picker_sheet.html" %}
+{% endif %}

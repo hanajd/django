@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import copy
 import re
 from collections import defaultdict, deque
 from typing import Any, Dict, List, Mapping, Optional, Set
@@ -31,6 +32,48 @@ def extract_pdf_field_refs(expression: str) -> List[str]:
     for m in _PDF_FID_RE.finditer(expression or ""):
         out.add(normalize_pdf_field_id(m.group(0)))
     return sorted(out)
+
+
+def remap_pdf_field_refs_in_text(expr: str, id_map: Mapping[str, str]) -> str:
+    """将公式/判定串中的 f 号按映射表替换（与 HTMLPDF ``remapFormulaPdfFieldRefs`` 一致）。"""
+    if not expr or not id_map:
+        return expr
+
+    def repl(m: re.Match) -> str:
+        old = normalize_pdf_field_id(m.group(0))
+        return str(id_map.get(old) or old)
+
+    return _PDF_FID_RE.sub(repl, expr)
+
+
+def remap_pdf_field_row_formula_metadata(field: Dict[str, Any], id_map: Mapping[str, str]) -> None:
+    """栏位重编号后，同步改写与该栏位绑定的公式/判定中的 f 引用。"""
+    if not isinstance(field, dict) or not id_map:
+        return
+    for key in ("fieldExpression", "pdfFieldExpression"):
+        raw = str(field.get(key) or "").strip()
+        if raw:
+            field[key] = remap_pdf_field_refs_in_text(raw, id_map)
+    for rules_key in ("formulaRules", "fieldExpressionRules"):
+        rules = field.get(rules_key)
+        if not isinstance(rules, list):
+            continue
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+            cond = str(rule.get("condition") or "").strip()
+            if cond:
+                rule["condition"] = remap_pdf_field_refs_in_text(cond, id_map)
+            for expr_key in ("expression", "formula"):
+                raw = str(rule.get(expr_key) or "").strip()
+                if raw:
+                    rule[expr_key] = remap_pdf_field_refs_in_text(raw, id_map)
+    jct = field.get("judgmentCriteriaByTestType")
+    if isinstance(jct, dict):
+        for sub in ("acceptance", "status"):
+            raw = str(jct.get(sub) or "").strip()
+            if raw:
+                jct[sub] = remap_pdf_field_refs_in_text(raw, id_map)
 
 
 def _coerce_field_formulas_dict(raw: Any) -> Dict[str, str]:
@@ -213,6 +256,14 @@ def _collect_pdf_field_metadata_by_id(template_obj: Mapping[str, Any]) -> Dict[s
             chunk["fieldVerdict"] = fv
         if row.get("judgmentCriteriaManual"):
             chunk["judgmentCriteriaManual"] = True
+        rules = row.get("formulaRules")
+        if not isinstance(rules, list) or not rules:
+            rules = row.get("fieldExpressionRules")
+        if isinstance(rules, list) and rules:
+            chunk["formulaRules"] = copy.deepcopy(rules)
+        mean_ref = str(row.get("chapterMeanPdfFieldId") or "").strip()
+        if mean_ref:
+            chunk["chapterMeanPdfFieldId"] = normalize_pdf_field_id(mean_ref) or mean_ref
         if chunk:
             meta[pid] = {**meta.get(pid, {}), **chunk}
     return meta
@@ -271,7 +322,7 @@ def build_pdf_field_formula_merge_source(
     """
     构造 ``merge_field_formulas_into_frontend`` 用的模板片段。
 
-    始终以当前编辑器/请求中的 ``pdf.fields`` 为主；库中模板仅补充缺失的公式与判定。
+    前端 JSON 导出时 ``input_fields`` 应为主坐标模板 ``pdf.fields``；库内模板用于补全公式与判定元数据。
     """
     rows: List[Dict[str, Any]] = [
         dict(r) for r in (input_fields or []) if isinstance(r, dict)
@@ -301,6 +352,14 @@ def build_pdf_field_formula_merge_source(
                 row["fieldVerdict"] = fv
             if extra.get("judgmentCriteriaManual") and not row.get("judgmentCriteriaManual"):
                 row["judgmentCriteriaManual"] = True
+            rules = extra.get("formulaRules")
+            if not isinstance(rules, list) or not rules:
+                rules = extra.get("fieldExpressionRules")
+            if isinstance(rules, list) and rules:
+                row["formulaRules"] = copy.deepcopy(rules)
+            mean_ref = str(extra.get("chapterMeanPdfFieldId") or "").strip()
+            if mean_ref:
+                row["chapterMeanPdfFieldId"] = mean_ref
     out: Dict[str, Any] = {"pdf": {"fields": rows}}
     if root_field_formulas is not None:
         out["fieldFormulas"] = root_field_formulas
@@ -348,6 +407,24 @@ def embed_pdf_field_formulas_into_frontend_fields(
         if extra.get("judgmentCriteriaManual"):
             src["judgmentCriteriaManual"] = True
             fld["judgmentCriteriaManual"] = True
+        rules = extra.get("formulaRules")
+        if not isinstance(rules, list) or not rules:
+            rules = extra.get("fieldExpressionRules")
+        if isinstance(rules, list) and rules:
+            fld["formulaRules"] = copy.deepcopy(rules)
+            src["formulaRules"] = copy.deepcopy(rules)
+            fld.pop("fieldExpressionRules", None)
+            src.pop("fieldExpressionRules", None)
+        mean_ref = str(extra.get("chapterMeanPdfFieldId") or "").strip()
+        if mean_ref:
+            fld["chapterMeanPdfFieldId"] = mean_ref
+            src["chapterMeanPdfFieldId"] = mean_ref
+        try:
+            from utils.conditional_field_rules import apply_field_logic_connectors_for_frontend_export
+
+            apply_field_logic_connectors_for_frontend_export(fld)
+        except Exception:
+            pass
 
 
 def _sanitize_expression_preview(expr: str, max_len: int = 512) -> str:

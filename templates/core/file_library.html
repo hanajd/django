@@ -5,17 +5,13 @@
 {% block content %}
 {% include "core/partials/file_library_commission_org_modal.html" %}
 {% if role_perm.perm_file_delete %}
-{% for f in files %}
-{% if f.file_library_may_delete %}
-<form id="del-form-{{ f.pk }}" method="post" action="{% url 'file_library_delete' f.pk %}" class="hidden">
+<form id="file-lib-delete-form" method="post" action="" class="hidden" aria-hidden="true">
     {% csrf_token %}
     {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
     {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
     {% if uploader_selected %}<input type="hidden" name="uploader" value="{{ uploader_selected }}">{% endif %}
     {% if project_selected %}<input type="hidden" name="project" value="{{ project_selected }}">{% endif %}
 </form>
-{% endif %}
-{% endfor %}
 {% endif %}
 
 <div class="max-w-[1680px] mx-auto pb-8">
@@ -427,6 +423,8 @@
         .file-lib-report[open] > summary .fl-chevron-rpt { transform: rotate(90deg); }
         .file-lib-site[open] > summary .fl-chevron-site { transform: rotate(90deg); }
         .file-lib-task[open] > summary .fl-chevron-task { transform: rotate(90deg); }
+        tr.file-lib-row { content-visibility: auto; contain-intrinsic-size: auto 4.5rem; }
+        .file-lib-tech-name-btn[aria-expanded="true"] { border-bottom-left-radius: 0; border-bottom-right-radius: 0; background: rgb(241 245 249 / 0.9); }
     </style>
     {% if file_library_row_selection %}
     {% if can_batch_delete %}
@@ -582,13 +580,7 @@
                                                 <i class="ri-download-2-line"></i>下载
                                             </a>
                                             {% endif %}
-                                            {% if role_perm.perm_file_delete and f.file_library_may_delete %}
-                                            <button type="submit" form="del-form-{{ f.pk }}"
-                                                    class="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50/80 px-2.5 py-1.5 text-xs font-medium text-red-800 transition hover:border-red-300 hover:bg-red-100"
-                                                    onclick="return confirm('确定删除该文件？');">
-                                                <i class="ri-delete-bin-line"></i>删除
-                                            </button>
-                                            {% endif %}
+                                            {% include "core/partials/file_library_delete_button.html" %}
                                         </div>
                                     </td>
                                 </tr>
@@ -681,13 +673,7 @@
                                                                 <i class="ri-download-2-line"></i>下载
                                                             </a>
                                                             {% endif %}
-                                                            {% if role_perm.perm_file_delete and f.file_library_may_delete %}
-                                                            <button type="submit" form="del-form-{{ f.pk }}"
-                                                                    class="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50/80 px-2.5 py-1.5 text-xs font-medium text-red-800 transition hover:border-red-300 hover:bg-red-100"
-                                                                    onclick="return confirm('确定删除该文件？');">
-                                                                <i class="ri-delete-bin-line"></i>删除
-                                                            </button>
-                                                            {% endif %}
+                                                            {% include "core/partials/file_library_delete_button.html" %}
                                                         </div>
                                                     </td>
                                                 </tr>
@@ -772,13 +758,7 @@
                                                         <i class="ri-download-2-line"></i>下载
                                                     </a>
                                                     {% endif %}
-                                                    {% if role_perm.perm_file_delete and f.file_library_may_delete %}
-                                                    <button type="submit" form="del-form-{{ f.pk }}"
-                                                            class="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50/80 px-2.5 py-1.5 text-xs font-medium text-red-800 transition hover:border-red-300 hover:bg-red-100"
-                                                            onclick="return confirm('确定删除该文件？');">
-                                                        <i class="ri-delete-bin-line"></i>删除
-                                                    </button>
-                                                    {% endif %}
+                                                    {% include "core/partials/file_library_delete_button.html" %}
                                                 </div>
                                             </td>
                                         </tr>
@@ -1108,32 +1088,84 @@
             }
         });
     }
+    var deleteForm = document.getElementById('file-lib-delete-form');
+    if (deleteForm) {
+        document.addEventListener('click', function (e) {
+            var btn = e.target.closest('.file-lib-delete-btn');
+            if (!btn) return;
+            var url = btn.getAttribute('data-delete-url') || '';
+            if (!url) return;
+            var label = btn.getAttribute('data-delete-label') || '该文件';
+            if (!window.confirm('确定删除「' + label + '」？')) return;
+            deleteForm.action = url;
+            deleteForm.submit();
+        });
+    }
+
+    var openTechNamePanel = null;
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest('.file-lib-tech-name-btn');
+        if (!btn) return;
+        e.preventDefault();
+        var wrap = btn.closest('.file-lib-tech-name');
+        if (!wrap) return;
+        var panel = wrap.querySelector('.file-lib-tech-name-panel');
+        var src = wrap.querySelector('.file-lib-tech-name-src');
+        if (!panel || !src) return;
+        var willOpen = panel.classList.contains('hidden');
+        if (openTechNamePanel && openTechNamePanel !== panel) {
+            openTechNamePanel.classList.add('hidden');
+            var prevBtn = openTechNamePanel.closest('.file-lib-tech-name')?.querySelector('.file-lib-tech-name-btn');
+            if (prevBtn) prevBtn.setAttribute('aria-expanded', 'false');
+        }
+        if (willOpen) {
+            if (!panel.textContent) {
+                var techName = '';
+                if (src.tagName === 'TEMPLATE' && src.content) {
+                    techName = src.content.textContent || '';
+                } else {
+                    techName = src.textContent || '';
+                }
+                panel.textContent = techName.trim() || '—';
+            }
+            panel.classList.remove('hidden');
+            btn.setAttribute('aria-expanded', 'true');
+            openTechNamePanel = panel;
+        } else {
+            panel.classList.add('hidden');
+            btn.setAttribute('aria-expanded', 'false');
+            openTechNamePanel = null;
+        }
+    });
+
     var live = document.getElementById('file-lib-live-search');
     var liveHint = document.getElementById('file-lib-live-search-hint');
+    var liveTimer = null;
     if (live) {
         live.addEventListener('input', function () {
-            var q = (live.value || '').trim().toLowerCase();
-            var rows = document.querySelectorAll('tr.file-lib-row[data-file-lib-search]');
-            var n = 0;
-            var vis = 0;
-            rows.forEach(function (tr) {
-                var hay = (tr.getAttribute('data-file-lib-search') || '').toLowerCase();
-                var ok = !q || hay.indexOf(q) >= 0;
-                tr.style.display = ok ? '' : 'none';
-                n += 1;
-                if (ok) {
-                    vis += 1;
+            if (liveTimer) window.clearTimeout(liveTimer);
+            liveTimer = window.setTimeout(function () {
+                var q = (live.value || '').trim().toLowerCase();
+                var rows = document.querySelectorAll('tr.file-lib-row[data-file-lib-search]');
+                var n = rows.length;
+                var vis = 0;
+                for (var i = 0; i < n; i += 1) {
+                    var tr = rows[i];
+                    var hay = (tr.getAttribute('data-file-lib-search') || '').toLowerCase();
+                    var ok = !q || hay.indexOf(q) >= 0;
+                    tr.style.display = ok ? '' : 'none';
+                    if (ok) vis += 1;
                 }
-            });
-            if (liveHint) {
-                if (q && n) {
-                    liveHint.textContent = '本页 ' + n + ' 条，显示 ' + vis + ' 条（只搜已展开的行）。';
-                    liveHint.classList.remove('hidden');
-                } else {
-                    liveHint.textContent = '';
-                    liveHint.classList.add('hidden');
+                if (liveHint) {
+                    if (q && n) {
+                        liveHint.textContent = '本页 ' + n + ' 条，显示 ' + vis + ' 条（只搜已展开的行）。';
+                        liveHint.classList.remove('hidden');
+                    } else {
+                        liveHint.textContent = '';
+                        liveHint.classList.add('hidden');
+                    }
                 }
-            }
+            }, 120);
         });
     }
 })();

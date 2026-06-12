@@ -9,6 +9,8 @@ import os
 import re
 from typing import Any, Iterator
 
+from utils.frontend_schema_rule_engine import CANONICAL_SIGNATURE_PDF_FIELD_ROLES
+
 _DATA_URL_RE = re.compile(
     r"^data:image/(?P<fmt>jpeg|jpg|png|webp);base64,(?P<data>.+)$",
     re.IGNORECASE | re.DOTALL,
@@ -17,8 +19,19 @@ _DATA_URL_RE = re.compile(
 # 现场记录仅保留三个签名角色（与 JS009 V3 模板一致）
 CANONICAL_SIGNATURE_ROLES = ("inspector", "checker", "accompanyingPerson")
 
-# pdfFieldId -> 角色（f36=检测员 f35=校核 f34=陪同；含旧版 f76/f78/f77）
+# 现行模板：仅 f625 / f632 / f633 三个签名 pdfFieldId
 _PDF_FIELD_TO_SIGNATURE_ROLE: dict[str, str] = {
+    pid: role for pid, (role, _label) in CANONICAL_SIGNATURE_PDF_FIELD_ROLES.items()
+}
+
+_SIGNATURE_PDF_FIELD_IDS = frozenset(_PDF_FIELD_TO_SIGNATURE_ROLE.keys())
+
+_ROLE_TO_PDF_FIELD: dict[str, str] = {
+    role: pid for pid, (role, _label) in CANONICAL_SIGNATURE_PDF_FIELD_ROLES.items()
+}
+
+# 旧版提交只读归并，禁止写回 dynamicData
+_LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE: dict[str, str] = {
     "f36": "inspector",
     "f35": "checker",
     "f34": "accompanyingPerson",
@@ -27,13 +40,7 @@ _PDF_FIELD_TO_SIGNATURE_ROLE: dict[str, str] = {
     "f77": "accompanyingPerson",
 }
 
-_SIGNATURE_PDF_FIELD_IDS = frozenset(_PDF_FIELD_TO_SIGNATURE_ROLE.keys())
-
-_ROLE_TO_PDF_FIELD: dict[str, str] = {
-    "inspector": "f36",
-    "checker": "f35",
-    "accompanyingPerson": "f34",
-}
+_LEGACY_SIGNATURE_PDF_FIELD_IDS = frozenset(_LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE.keys())
 
 _ROLE_ALIAS_TO_CANONICAL: dict[str, str] = {
     "inspector": "inspector",
@@ -49,6 +56,9 @@ _ROLE_ALIAS_TO_CANONICAL: dict[str, str] = {
     "accompanyingperson": "accompanyingPerson",
     "approver": "accompanyingPerson",
     "受检单位陪同人": "accompanyingPerson",
+    "f625": "inspector",
+    "f632": "checker",
+    "f633": "accompanyingPerson",
     "f36": "inspector",
     "f35": "checker",
     "f34": "accompanyingPerson",
@@ -61,8 +71,8 @@ _SIGNATURE_KEYS = frozenset(_ROLE_ALIAS_TO_CANONICAL.keys()) | frozenset(
     CANONICAL_SIGNATURE_ROLES
 )
 
-# dynamicData 中签名字段 pdfFieldId（勿含 f665 等数值栏）
-_DYNAMIC_SIGNATURE_FIELD_IDS = _SIGNATURE_PDF_FIELD_IDS
+# dynamicData 中签名字段 pdfFieldId（现行 + 旧版只读）
+_DYNAMIC_SIGNATURE_FIELD_IDS = _SIGNATURE_PDF_FIELD_IDS | _LEGACY_SIGNATURE_PDF_FIELD_IDS
 
 _MIN_INLINE_BINARY_LEN = 120
 
@@ -224,10 +234,8 @@ def consolidate_submit_signatures(payload: dict) -> dict:
 
     for k, v in sig_in.items():
         _offer(str(k), v)
-    for pid, role in _PDF_FIELD_TO_SIGNATURE_ROLE.items():
+    for pid in _DYNAMIC_SIGNATURE_FIELD_IDS:
         _offer(pid, dd.get(pid))
-    for k, v in dd.items():
-        _offer(str(k), v)
 
     # 误写入 f665/f676/f677 的签名图：仅当对应角色仍空时归位到检测员/校核/陪同
     _LEGACY_MISPLACED = (
@@ -262,6 +270,12 @@ def consolidate_submit_signatures(payload: dict) -> dict:
         for pid, _role in _LEGACY_MISPLACED:
             if _looks_like_inline_image(dd_out.get(pid)) or _is_stored_media_path(
                 dd_out.get(pid)
+            ):
+                dd_out.pop(pid, None)
+        for pid in _LEGACY_SIGNATURE_PDF_FIELD_IDS:
+            val = dd_out.get(pid)
+            if isinstance(val, str) and val.strip() and (
+                _looks_like_inline_image(val) or _is_stored_media_path(val)
             ):
                 dd_out.pop(pid, None)
     return out

@@ -557,6 +557,43 @@
             margin-bottom: 4px;
             font-weight: 600;
         }
+        .conditional-rules-editor {
+            margin-bottom: 12px;
+        }
+        .conditional-rule-card {
+            margin-bottom: 10px;
+            padding: 10px;
+            border: 1px dashed #d9e3f5;
+            border-radius: 8px;
+            background: #f8fbff;
+        }
+        .conditional-rule-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 8px;
+            font-size: 12px;
+            font-weight: 700;
+            color: #1d2129;
+        }
+        .conditional-rule-manual-tag {
+            display: inline-block;
+            margin-bottom: 6px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: #fff7e8;
+            color: #d46b08;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .conditional-judgment-block {
+            margin-bottom: 12px;
+            padding: 10px;
+            border: 1px solid #edf1f7;
+            border-radius: 8px;
+            background: #fafbfc;
+        }
         .formula-hint {
             font-size: 11px;
             color: #86909c;
@@ -1701,6 +1738,7 @@
                 </div>
                 <p class="sidebar-hint" style="margin:0 0 8px;">按 PDF 内「一、」…「六、」章节标题纵坐标归类：栏位落在两标题之间归属上一章，末章以下归属第六章；点击「识别章节」可重算。</p>
                 <div id="sectionNav" class="section-nav-chips"></div>
+                <button id="btnRadiationChapterFormula" type="button" class="formula-tool-btn" style="display:none;margin:6px 0;" title="编辑第五章报出值条件公式（测量均值保存/导出时自动 avg，无需在此配置）">第五章章节公式</button>
                 <div id="structureFieldEditor" class="structure-grid" style="display:none;">
                     <label>当前栏位所属章节
                         <select id="fieldSectionSelect"></select>
@@ -3226,13 +3264,44 @@
                 }
             });
             fieldIdSeq = list.length + 1;
-            if (opts && opts.remapExpressions) {
-                list.forEach(f => {
-                    if (!f || !String(f.fieldExpression || '').trim()) return;
-                    f.fieldExpression = remapFormulaPdfFieldRefs(f.fieldExpression, remap);
-                });
+            if (opts && opts.remapExpressions && remap.size) {
+                list.forEach(f => remapPdfFieldRefsOnField(f, remap));
+                if (typeof templateContext !== 'undefined' && templateContext
+                    && templateContext.radiationProtectionChapter) {
+                    remapPdfFieldRefsOnConditionalRules(
+                        templateContext.radiationProtectionChapter.reportValueRules, remap);
+                }
             }
             return { remap, changed };
+        }
+
+        function remapPdfFieldRefsOnConditionalRules(rules, remap) {
+            if (!Array.isArray(rules) || !remap || !remap.size) return;
+            rules.forEach(r => {
+                if (!r || typeof r !== 'object') return;
+                if (r.condition) r.condition = remapFormulaPdfFieldRefs(r.condition, remap);
+                const ex = r.expression != null ? r.expression : r.formula;
+                if (ex != null) {
+                    const neu = remapFormulaPdfFieldRefs(String(ex), remap);
+                    if (r.expression != null) r.expression = neu;
+                    else r.formula = neu;
+                }
+            });
+        }
+
+        function remapPdfFieldRefsOnField(f, remap) {
+            if (!f || !remap || !remap.size) return;
+            if (f.fieldExpression) {
+                f.fieldExpression = remapFormulaPdfFieldRefs(f.fieldExpression, remap);
+            }
+            ['formulaRules', 'fieldExpressionRules'].forEach(key => {
+                remapPdfFieldRefsOnConditionalRules(f[key], remap);
+            });
+            const j = f.judgmentCriteriaByTestType;
+            if (j && typeof j === 'object') {
+                if (j.acceptance) j.acceptance = remapFormulaPdfFieldRefs(j.acceptance, remap);
+                if (j.status) j.status = remapFormulaPdfFieldRefs(j.status, remap);
+            }
         }
 
         function remapFormulaPdfFieldRefs(expr, remap) {
@@ -3361,10 +3430,12 @@
 
         let selectedFieldId = null;
         let formulaModalOpen = false;
+        let formulaModalChapterMode = false;
 
         function openFormulaModal(id) {
             const f = getFieldById(id);
             if (!f) return;
+            formulaModalChapterMode = false;
             selectedFieldId = f.id;
             formulaModalOpen = true;
             updateSelectedFieldRows();
@@ -3386,6 +3457,7 @@
 
         function closeFormulaModal() {
             formulaModalOpen = false;
+            formulaModalChapterMode = false;
             closeFormulaFieldPicker();
             if (formulaModalBackdrop) {
                 formulaModalBackdrop.classList.remove('open');
@@ -3401,6 +3473,201 @@
             const j = f.judgmentCriteriaByTestType;
             j.acceptance = j.acceptance != null ? String(j.acceptance) : '';
             j.status = j.status != null ? String(j.status) : '';
+        }
+
+        function newConditionalRuleId() {
+            return 'rule_' + Math.random().toString(16).slice(2, 14);
+        }
+
+        function normalizeConditionalRuleRow(rule, idx) {
+            const row = rule && typeof rule === 'object' ? rule : {};
+            const cond = String(row.condition || '').trim();
+            const expr = String(row.expression != null ? row.expression : (row.formula || '')).trim();
+            const label = String(row.label || ('条件' + (idx + 1))).trim();
+            const id = String(row.id || newConditionalRuleId()).trim();
+            return { id, label, condition: cond, expression: expr, formula: expr };
+        }
+
+        function isManualConditionalRule(rule, ruleCount) {
+            const expr = String((rule && (rule.expression || rule.formula)) || '').trim();
+            const cond = String((rule && rule.condition) || '').trim();
+            return !!expr && !cond && ruleCount > 1;
+        }
+
+        function ensureFormulaRules(f) {
+            if (!f) return [];
+            if (!Array.isArray(f.formulaRules) || !f.formulaRules.length) {
+                if (Array.isArray(f.fieldExpressionRules) && f.fieldExpressionRules.length) {
+                    f.formulaRules = f.fieldExpressionRules.slice();
+                } else {
+                    f.formulaRules = [];
+                }
+            }
+            f.formulaRules = f.formulaRules.map((r, i) => normalizeConditionalRuleRow(r, i));
+            delete f.fieldExpressionRules;
+            return f.formulaRules;
+        }
+
+        function compileJudgmentRuleSetToText(block) {
+            if (!block || typeof block !== 'object') return '';
+            const logic = String(block.logicExpression || '').trim();
+            if (logic) return logic;
+            const rules = Array.isArray(block.rules) ? block.rules : [];
+            const exprs = rules.map(r => String((r && (r.expression || r.formula)) || '').trim()).filter(Boolean);
+            if (!exprs.length) return '';
+            const sep = block.combine === 'or' ? ' 或 ' : ' 且 ';
+            return exprs.join(sep);
+        }
+
+        function migrateLegacyFormulaRuleMeta(f) {
+            if (!f) return;
+            delete f.formulaSelectionMode;
+            delete f.requiresManualFormulaSelection;
+            delete f.selectionMode;
+            delete f.requiresManualSelection;
+            ensureFormulaRules(f);
+        }
+
+        function migrateJudgmentRuleSetsToCriteria(f) {
+            if (!f || !f.judgmentRuleSets || typeof f.judgmentRuleSets !== 'object') return;
+            ensureJudgmentObj(f);
+            const acc = compileJudgmentRuleSetToText(f.judgmentRuleSets.acceptance);
+            const st = compileJudgmentRuleSetToText(f.judgmentRuleSets.status);
+            if (acc && !String(f.judgmentCriteriaByTestType.acceptance || '').trim()) {
+                f.judgmentCriteriaByTestType.acceptance = acc;
+            }
+            if (st && !String(f.judgmentCriteriaByTestType.status || '').trim()) {
+                f.judgmentCriteriaByTestType.status = st;
+            }
+            delete f.judgmentRuleSets;
+            delete f.formulaSelectionMode;
+            delete f.requiresManualFormulaSelection;
+            delete f.judgmentSelectionMode;
+            delete f.requiresManualJudgmentSelection;
+        }
+
+        function createConditionalRulesEditor(cfg) {
+            const wrap = document.createElement('div');
+            wrap.className = 'conditional-rules-editor';
+
+            const render = () => {
+                wrap.innerHTML = '';
+                const hint = document.createElement('p');
+                hint.className = 'formula-judgment-hint';
+                hint.textContent = cfg.hint || '每条含：条件说明、判断条件（可空）、公式/判定表达式。不填判断条件时，现场人员需人工选择适用公式。';
+                wrap.appendChild(hint);
+
+                (cfg.rules || []).forEach((rule, idx) => {
+                    const card = document.createElement('div');
+                    card.className = 'conditional-rule-card';
+                    const head = document.createElement('div');
+                    head.className = 'conditional-rule-head';
+                    const headTitle = document.createElement('span');
+                    headTitle.textContent = '条件 ' + (idx + 1);
+                    head.appendChild(headTitle);
+                    if (cfg.allowDelete !== false) {
+                        const delBtn = document.createElement('button');
+                        delBtn.type = 'button';
+                        delBtn.className = 'formula-tool-btn danger';
+                        delBtn.textContent = '删除';
+                        delBtn.addEventListener('click', () => {
+                            cfg.rules.splice(idx, 1);
+                            if (cfg.onChange) cfg.onChange();
+                            render();
+                        });
+                        head.appendChild(delBtn);
+                    }
+                    card.appendChild(head);
+
+                    const syncRuleMeta = () => {
+                        const normalized = normalizeConditionalRuleRow(rule, idx);
+                        Object.assign(rule, normalized);
+                        const manual = isManualConditionalRule(rule, (cfg.rules || []).length);
+                        if (manual) {
+                            if (!card.querySelector('.conditional-rule-manual-tag')) {
+                                const manualTag = document.createElement('span');
+                                manualTag.className = 'conditional-rule-manual-tag';
+                                manualTag.textContent = '需现场人工选择';
+                                card.insertBefore(manualTag, card.children[1] || null);
+                            }
+                        } else {
+                            const tag = card.querySelector('.conditional-rule-manual-tag');
+                            if (tag) tag.remove();
+                        }
+                    };
+
+                    const labelLbl = document.createElement('div');
+                    labelLbl.className = 'formula-input-label';
+                    labelLbl.textContent = '条件说明';
+                    const labelIn = document.createElement('input');
+                    labelIn.type = 'text';
+                    labelIn.value = String(rule.label || '');
+                    labelIn.placeholder = '仅备注，便于现场理解';
+                    labelIn.addEventListener('input', () => {
+                        rule.label = labelIn.value;
+                        syncRuleMeta();
+                        if (cfg.onChange) cfg.onChange();
+                    });
+                    const condLbl = document.createElement('div');
+                    condLbl.className = 'formula-input-label';
+                    condLbl.textContent = '判断条件（可空）';
+                    const condIn = document.createElement('textarea');
+                    condIn.spellcheck = false;
+                    condIn.rows = 2;
+                    condIn.value = String(rule.condition || '');
+                    condIn.placeholder = cfg.conditionPlaceholder || '例：f12>=f13；留空则需现场人工选择公式';
+                    condIn.addEventListener('input', () => {
+                        rule.condition = condIn.value;
+                        syncRuleMeta();
+                        if (cfg.onChange) cfg.onChange();
+                    });
+                    const exprLbl = document.createElement('div');
+                    exprLbl.className = 'formula-input-label';
+                    exprLbl.textContent = cfg.expressionLabel || '公式';
+                    const exprIn = document.createElement('textarea');
+                    exprIn.spellcheck = false;
+                    exprIn.rows = 2;
+                    exprIn.value = String(rule.expression || rule.formula || '');
+                    exprIn.placeholder = cfg.expressionPlaceholder || '';
+                    exprIn.addEventListener('focus', () => {
+                        if (cfg.setActiveExpressionInput) cfg.setActiveExpressionInput(exprIn);
+                    });
+                    exprIn.addEventListener('input', () => {
+                        rule.expression = exprIn.value;
+                        rule.formula = exprIn.value;
+                        syncRuleMeta();
+                        if (cfg.onChange) cfg.onChange();
+                    });
+                    card.appendChild(labelLbl);
+                    card.appendChild(labelIn);
+                    card.appendChild(condLbl);
+                    card.appendChild(condIn);
+                    card.appendChild(exprLbl);
+                    card.appendChild(exprIn);
+                    syncRuleMeta();
+                    wrap.appendChild(card);
+                });
+
+                const addBtn = document.createElement('button');
+                addBtn.type = 'button';
+                addBtn.className = 'primary';
+                addBtn.textContent = '添加条件';
+                addBtn.addEventListener('click', () => {
+                    cfg.rules.push({
+                        id: newConditionalRuleId(),
+                        label: '条件' + (cfg.rules.length + 1),
+                        condition: '',
+                        expression: '',
+                        formula: ''
+                    });
+                    if (cfg.onChange) cfg.onChange();
+                    render();
+                });
+                wrap.appendChild(addBtn);
+            };
+
+            render();
+            return wrap;
         }
 
         function inferJudgmentCriteriaStrings(f) {
@@ -3452,8 +3719,36 @@
                 .replace(/[）]/g, ')')
                 .replace(/[×]/g, '*')
                 .replace(/[÷]/g, '/')
-                .replace(/[％]/g, '%');
+                .replace(/[％]/g, '%')
+                .replace(/[～]/g, '~');
             return s;
+        }
+
+        function splitTopLevelRangeFormula(expr) {
+            const s = String(expr || '').trim();
+            if (!s) return null;
+            let depth = 0;
+            let inStr = null;
+            let escape = false;
+            for (let i = 0; i < s.length; i++) {
+                const ch = s[i];
+                if (inStr) {
+                    if (escape) { escape = false; continue; }
+                    if (ch === '\\') { escape = true; continue; }
+                    if (ch === inStr) inStr = null;
+                    continue;
+                }
+                if (ch === "'" || ch === '"') { inStr = ch; continue; }
+                if (ch === '(') { depth += 1; continue; }
+                if (ch === ')') { depth = Math.max(0, depth - 1); continue; }
+                if (depth === 0 && (ch === '~' || ch === '～') && s[i + 1] !== '/') {
+                    const left = s.slice(0, i).trim();
+                    const right = s.slice(i + 1).trim();
+                    if (left && right) return [left, right];
+                    return null;
+                }
+            }
+            return null;
         }
 
         function getFieldFormulaId(f, fallbackIndex) {
@@ -3477,6 +3772,13 @@
                 || String(f.judgmentCriteriaByTestType.status || '').trim());
         }
 
+        function hasFieldFormulaRules(f) {
+            if (!f) return false;
+            if (String(f.fieldExpression || '').trim()) return true;
+            ensureFormulaRules(f);
+            return (f.formulaRules || []).some(r => String(r.expression || r.formula || '').trim());
+        }
+
         function updateFieldRowIndicators(id) {
             const f = getFieldById(id);
             const row = document.querySelector('.field-row[data-field-id="' + id + '"]');
@@ -3487,7 +3789,7 @@
             if (meta) meta.remove();
             meta = document.createElement('div');
             meta.className = 'field-row-meta';
-            if (String(f.fieldExpression || '').trim()) {
+            if (hasFieldFormulaRules(f)) {
                 const tag = document.createElement('span');
                 tag.className = 'field-row-tag has-formula';
                 tag.textContent = '已设公式';
@@ -3579,8 +3881,23 @@
             if (balance !== 0) {
                 return { level: 'error', message: '括号没有成对闭合，请检查左括号和右括号数量。' };
             }
-            if (/[+\-*/%]\s*$/.test(raw.trim())) {
-                return { level: 'error', message: '公式末尾不能是 + - * / %，请补上后面的栏位或数字。' };
+            const rangeParts = splitTopLevelRangeFormula(raw);
+            if (rangeParts) {
+                const leftCheck = validateFormulaExpression(rangeParts[0], currentId);
+                const rightCheck = validateFormulaExpression(rangeParts[1], currentId);
+                if (leftCheck.level === 'error') {
+                    return { level: 'error', message: '范围公式左侧有误：' + leftCheck.message };
+                }
+                if (rightCheck.level === 'error') {
+                    return { level: 'error', message: '范围公式右侧有误：' + rightCheck.message };
+                }
+                if (leftCheck.level === 'warn' || rightCheck.level === 'warn') {
+                    return { level: 'warn', message: '范围公式 a~b：左右两侧分别求值后拼接为「左~右」，请确认两侧都已写完。' };
+                }
+                return { level: 'ok', message: '范围公式：两侧分别计算后以 ~ 连接输出，例如 min(f1,f2)~max(f1,f2)。' };
+            }
+            if (/[+\-*/%~]\s*$/.test(raw.trim())) {
+                return { level: 'error', message: '公式末尾不能是 + - * / % ~，请补上后面的栏位、数字或函数。' };
             }
             if (/,\s*$/.test(raw.trim())) {
                 return { level: 'warn', message: '公式以逗号结尾，可能尚未写完（例如函数里还缺参数）。' };
@@ -4022,8 +4339,12 @@
         function renderFormulaPanel() {
             const host = document.getElementById('fieldFormulaPanel');
             if (!host) return;
-                const f = selectedFieldId ? getFieldById(selectedFieldId) : null;
             host.innerHTML = '';
+            if (formulaModalChapterMode) {
+                renderRadiationProtectionChapterFormulaPanel(host, null);
+                return;
+            }
+            const f = selectedFieldId ? getFieldById(selectedFieldId) : null;
             if (!f) {
                 const p = document.createElement('div');
                 p.className = 'formula-empty';
@@ -4062,18 +4383,31 @@
             summary.appendChild(metaEl);
             host.appendChild(summary);
 
-            const formulaSection = createFormulaSection(1, '计算公式', '只需自动计算的栏位才填写；可手写加减乘除，或点「从表格选栏位」插入编号。不计算的栏位请留空。');
+            const formulaSection = createFormulaSection(1, '计算公式', '支持条件公式与范围输出：可写 min(f1,f2)~max(f1,f2)，结果为「左值~右值」。不填判断条件时，现场人员需人工选择适用公式。');
+            ensureFormulaRules(f);
+            let activeFormulaExprInput = null;
+            const formulaRulesEditor = createConditionalRulesEditor({
+                rules: f.formulaRules,
+                expressionLabel: '公式',
+                expressionPlaceholder: '例：avg(f1,f2,f3)、min(f1,f2)~max(f1,f2)、round({mean},2)',
+                setActiveExpressionInput: (el) => { activeFormulaExprInput = el; },
+                onChange: () => {
+                    updateFieldRowIndicators(f.id);
+                }
+            });
+            formulaSection.appendChild(formulaRulesEditor);
+
             const formulaLabel = document.createElement('div');
             formulaLabel.className = 'formula-input-label';
             const formulaLabelText = document.createElement('span');
-            formulaLabelText.textContent = '公式内容';
+            formulaLabelText.textContent = '默认/兜底公式（可选）';
             const formulaLabelHint = document.createElement('span');
             formulaLabelHint.textContent = pid + ' =';
             formulaLabel.appendChild(formulaLabelText);
             formulaLabel.appendChild(formulaLabelHint);
             const t1 = document.createElement('textarea');
             t1.spellcheck = false;
-            t1.placeholder = '例：avg(f1,f2,f3)、std(f1,f2,f3)、var(f1,f2,f3)、round(avg(f1,f2,f3), 2)';
+            t1.placeholder = '例：avg(f1,f2,f3)、min(f1,f2,f3)~max(f1,f2,f3)、round(avg(f1,f2,f3),2)';
             t1.value = String(f.fieldExpression || '');
             const preview = document.createElement('div');
             preview.className = 'formula-preview';
@@ -4107,6 +4441,7 @@
                 ['×', '*'],
                 ['÷', '/'],
                 ['%', '%'],
+                ['范围 ~', '~'],
                 ['( )', '()', -1]
             ].forEach(([label, value, offset]) => {
                 const btn = document.createElement('button');
@@ -4160,9 +4495,10 @@
                 + '<li><code>std(f1,f2,f3)</code> / <code>stdev</code> / <code>stddev</code>：样本标准差（n-1）；<code>var</code> / <code>variance</code>：样本方差</li>'
                 + '<li><code>median(f1,f2,f3)</code>：中位数；<code>count(f1,f2)</code>：有效数值个数</li>'
                 + '<li><code>round(f1, 2)</code>：保留小数；<code>if(条件, 真, 假)</code>：按条件取值</li>'
+                + '<li><code>min(f1,f2)~max(f1,f2)</code>：范围输出，两侧分别求值后拼接为 <code>左~右</code></li>'
                 + '<li><code>parseNum(f1)</code>：从带单位文字取数字</li>'
                 + '</ul>'
-                + '<p class="formula-fn-note">栏位用 <code>f数字</code>；只写等号右边，例如 <code>f34+f35</code>。</p>';
+                + '<p class="formula-fn-note">栏位用 <code>f数字</code>；只写等号右边，例如 <code>f34+f35</code> 或 <code>min(f1,f3)~max(f1,f3)</code>。</p>';
             fnToggle.addEventListener('click', () => {
                 const open = fnHelp.style.display !== 'none';
                 fnHelp.style.display = open ? 'none' : 'block';
@@ -4180,7 +4516,8 @@
             fieldPickBtn.title = '打开与「映射现场」类似的窗口：预览 PDF，鼠标悬停高亮，点击插入栏位编号';
             fieldPickBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                openFormulaFieldPicker(fieldPickBtn, t1, f.id, { pid: pid, syncFormulaUi: syncFormulaUi });
+                const targetInput = activeFormulaExprInput || t1;
+                openFormulaFieldPicker(fieldPickBtn, targetInput, f.id, { pid: pid, syncFormulaUi: syncFormulaUi });
             });
             fieldPickRow.appendChild(fieldPickBtn);
             formulaSection.appendChild(fieldPickRow);
@@ -4189,10 +4526,10 @@
             host.appendChild(formulaSection);
             syncFormulaUi();
 
-            const judgmentSection = createFormulaSection(2, '合格判定', '按检测类型填写是否合格；多数栏位验收与状态相同即可。');
+            const judgmentSection = createFormulaSection(2, '合格判定', '按检测类型填写是否合格；多条判定直接写在同一行，用「且」取交集、「或」取并集。');
             const judgmentHint = document.createElement('p');
             judgmentHint.className = 'formula-judgment-hint';
-            judgmentHint.textContent = '支持常见写法：不超过/<=25、不低于/>=10、±2 或 +-2、100±5、10-20（也认 10~20、10到20）。失焦时自动规范符号。';
+            judgmentHint.textContent = '支持：不超过/<=25、不低于/>=10、±2、100±5、10-20；复杂组合例：±5% 且 ±5000、<=25 或 >=10、(±5% 且 ±5000)。';
             judgmentSection.appendChild(judgmentHint);
 
             const row2 = document.createElement('div');
@@ -4276,7 +4613,11 @@
             [
                 ['插入「不超过」', '<='],
                 ['插入「不低于」', '>='],
-                ['插入「±」', '±']
+                ['插入「±」', '±'],
+                ['插入「且」', ' 且 '],
+                ['插入「或」', ' 或 '],
+                ['插入「(」', '('],
+                ['插入「)」', ')']
             ].forEach(([label, snippet]) => {
                 const btn = document.createElement('button');
                 btn.type = 'button';
@@ -4309,6 +4650,7 @@
             btnClrFormula.textContent = '清空公式';
             btnClrFormula.addEventListener('click', () => {
                 f.fieldExpression = '';
+                f.formulaRules = [];
                 t1.value = '';
                 syncFormulaUi();
             });
@@ -4318,6 +4660,7 @@
             btnClrAll.textContent = '清空本栏规则';
             btnClrAll.addEventListener('click', () => {
                 f.fieldExpression = '';
+                f.formulaRules = [];
                 f.judgmentCriteriaByTestType = { acceptance: '', status: '' };
                 f.judgmentCriteriaManual = false;
                 renderFormulaPanel();
@@ -4330,6 +4673,262 @@
 
         function getAutoSemantic(f) {
             return f && f.autoSemantic && typeof f.autoSemantic === 'object' ? f.autoSemantic : {};
+        }
+
+        function defaultRadiationProtectionChapter() {
+            return {
+                chapterKey: 'site_radiation_protection',
+                meanFormula: { mode: 'per_row_avg', description: '同点位三次测量读数取平均' },
+                reportValueRules: [
+                    { id: 'rule_ge_response', label: '出束时间≥仪器响应时间', condition: '', formula: '' },
+                    { id: 'rule_lt_response', label: '出束时间＜仪器响应时间', condition: '', formula: '' }
+                ],
+                fieldBindings: []
+            };
+        }
+
+        function ensureRadiationProtectionChapter() {
+            if (!templateContext.radiationProtectionChapter || typeof templateContext.radiationProtectionChapter !== 'object') {
+                templateContext.radiationProtectionChapter = defaultRadiationProtectionChapter();
+            }
+            const ch = templateContext.radiationProtectionChapter;
+            if (!Array.isArray(ch.reportValueRules)) {
+                ch.reportValueRules = defaultRadiationProtectionChapter().reportValueRules;
+            }
+            return ch;
+        }
+
+        function fieldDisplayLabel(f) {
+            return String(f.placeholder || f.title || f.label || f.id || '').trim();
+        }
+
+        function protectionRowPointKey(f, sem) {
+            const pt = String((sem && sem.radiationPoint) || '').trim();
+            if (pt) return pt;
+            const label = fieldDisplayLabel(f);
+            if (!label) return '';
+            const suffixes = [
+                /_测量读数M\d+$/i,
+                /_测量读数M$/i,
+                /_测量均值Mbar$/i,
+                /_测量均值/i,
+                /_报出值D$/i,
+                /_报出值$/i,
+                /_备注$/i
+            ];
+            for (let i = 0; i < suffixes.length; i++) {
+                const m = label.match(suffixes[i]);
+                if (m) return label.slice(0, m.index).trim();
+            }
+            return label;
+        }
+
+        function readingIndexFromField(f, sem) {
+            const idx = Number(sem && sem.readingIndex) || 0;
+            if (idx) return idx;
+            const m = fieldDisplayLabel(f).match(/读数M?(\d+)/i);
+            return m ? Number(m[1]) : 0;
+        }
+
+        function radiationColumnRole(f) {
+            const sem = getAutoSemantic(f);
+            if (sem.radiationColumn) return String(sem.radiationColumn);
+            if (sem.meanOfReadings) return '测量均值Mbar';
+            const ph = fieldDisplayLabel(f);
+            if (ph.includes('报出')) return '报出值D';
+            if (ph.includes('均值') || ph.includes('平均')) return '测量均值Mbar';
+            if (ph.includes('读数')) return '测量读数M';
+            return '';
+        }
+
+        function isRadiationProtectionChapterField(f) {
+            if (!f || !shouldUseSiteRecordSections()) return false;
+            const sk = String(f.templateSectionKey || '').trim();
+            if (sk === 'site_radiation_protection') return true;
+            const sem = getAutoSemantic(f);
+            return !!(sem.radiationPoint || sem.radiationColumn || sem.tableId);
+        }
+
+        function buildRadiationProtectionBindingsFromFields() {
+            const rows = {};
+            fields.forEach(f => {
+                if (!isRadiationProtectionChapterField(f)) return;
+                const sem = getAutoSemantic(f);
+                const pid = String(f.pdfFieldId || f.id || '').trim();
+                if (!pid) return;
+                const role = radiationColumnRole(f);
+                if (!role && !(sem && sem.radiationPoint)) return;
+                const pt = protectionRowPointKey(f, sem);
+                if (!pt) return;
+                const row = rows[pt] || {
+                    radiationPoint: pt,
+                    row: sem.row,
+                    reading_1: '',
+                    reading_2: '',
+                    reading_3: '',
+                    mean_m: '',
+                    report_d: '',
+                    remark: ''
+                };
+                if (role === '测量读数M') {
+                    const idx = readingIndexFromField(f, sem);
+                    if (idx === 1) row.reading_1 = pid;
+                    else if (idx === 2) row.reading_2 = pid;
+                    else if (idx === 3) row.reading_3 = pid;
+                    else if (!row.reading_1) row.reading_1 = pid;
+                    else if (!row.reading_2) row.reading_2 = pid;
+                    else if (!row.reading_3) row.reading_3 = pid;
+                } else if (role === '测量均值Mbar' || sem.meanOfReadings) {
+                    row.mean_m = pid;
+                } else if (role === '报出值D') {
+                    row.report_d = pid;
+                } else if (role === '备注') {
+                    row.remark = pid;
+                }
+                rows[pt] = row;
+            });
+            return Object.values(rows);
+        }
+
+        function syncRadiationProtectionChapterBindings() {
+            const ch = ensureRadiationProtectionChapter();
+            ch.fieldBindings = buildRadiationProtectionBindingsFromFields();
+            return ch;
+        }
+
+        function meanExpressionForBindingRow(binding) {
+            if (!binding || typeof binding !== 'object') return '';
+            const refs = ['reading_1', 'reading_2', 'reading_3']
+                .map(k => String(binding[k] || '').trim())
+                .filter(Boolean);
+            if (refs.length >= 2) return 'avg(' + refs.slice(0, 3).join(',') + ')';
+            return String(binding.mean_m || '').trim();
+        }
+
+        /** 保存前：按 fieldBindings 将均值公式写入各「测量均值」栏位 fieldExpression。 */
+        function applyMeanFormulasToFields() {
+            const ch = syncRadiationProtectionChapterBindings();
+            const mode = (ch.meanFormula && ch.meanFormula.mode) ? String(ch.meanFormula.mode) : 'per_row_avg';
+            if (mode !== 'per_row_avg') return;
+            const byPoint = {};
+            (ch.fieldBindings || []).forEach(b => {
+                const pt = String(b.radiationPoint || '').trim();
+                if (pt) byPoint[pt] = b;
+            });
+            fields.forEach(f => {
+                if (!f || !isRadiationProtectionChapterField(f)) return;
+                const role = radiationColumnRole(f);
+                const sem = getAutoSemantic(f);
+                if (role !== '测量均值Mbar' && !sem.meanOfReadings) return;
+                const pt = protectionRowPointKey(f, sem);
+                const expr = meanExpressionForBindingRow(byPoint[pt]);
+                if (expr && /^avg\(/i.test(expr)) f.fieldExpression = expr;
+            });
+        }
+
+        function getRadiationProtectionChapterPayload(forFrontend) {
+            const ch = syncRadiationProtectionChapterBindings();
+            if (forFrontend) {
+                return {
+                    chapterKey: ch.chapterKey || 'site_radiation_protection',
+                    meanFormula: ch.meanFormula || defaultRadiationProtectionChapter().meanFormula,
+                    reportValueRules: Array.isArray(ch.reportValueRules)
+                        ? ch.reportValueRules.map((r, i) => normalizeConditionalRuleRow(r, i))
+                        : defaultRadiationProtectionChapter().reportValueRules.slice()
+                };
+            }
+            return ch;
+        }
+
+        function openRadiationChapterFormulaModal() {
+            if (!fields.some(isRadiationProtectionChapterField)) {
+                alert('请先将栏位归入「工作场所放射防护检测结果」章节，或执行红字自动框选。');
+                return;
+            }
+            formulaModalChapterMode = true;
+            formulaModalOpen = true;
+            if (formulaModalBackdrop) {
+                formulaModalBackdrop.classList.add('open');
+                formulaModalBackdrop.setAttribute('aria-hidden', 'false');
+            }
+            renderFormulaPanel();
+        }
+
+        function renderRadiationProtectionChapterFormulaPanel(host, triggerField) {
+            const ch = syncRadiationProtectionChapterBindings();
+            host.innerHTML = '';
+            if (formulaModalSubtitle) {
+                formulaModalSubtitle.textContent = '第五章 · 工作场所放射防护 · 章节公式';
+            }
+
+            const intro = document.createElement('div');
+            intro.className = 'formula-selected-card';
+            intro.innerHTML = '<div class="formula-selected-title">章节公式（全表复用）</div>'
+                + '<div class="formula-selected-meta">测量均值：各行自动 avg(三次读数)。报出值：按下方条件公式套用到每一行，可用 {mean} 表示该行测量均值。</div>';
+            host.appendChild(intro);
+
+            const meanBox = document.createElement('div');
+            meanBox.className = 'formula-section';
+            meanBox.innerHTML = '<h4>1. 测量均值（自动）</h4>'
+                + '<p>每行公式：<code>avg(读数1,读数2,读数3)</code>；保存坐标模板时写入对应均值栏位 <code>fieldExpression</code>，导出前端 JSON 时写入 <code>formSchema.steps</code>。无需在此逐行配置。</p>';
+            host.appendChild(meanBox);
+
+            const reportSec = createFormulaSection(2, '报出值条件公式', '按顺序匹配条件；不填判断条件时需现场人工选择公式。可用 {mean} 插入该行测量均值。');
+            let activeFormulaInput = null;
+            if (!Array.isArray(ch.reportValueRules)) {
+                ch.reportValueRules = defaultRadiationProtectionChapter().reportValueRules.slice();
+            }
+            ch.reportValueRules = ch.reportValueRules.map((r, i) => {
+                const row = normalizeConditionalRuleRow(r, i);
+                row.formula = row.expression;
+                return row;
+            });
+            const rulesEditor = createConditionalRulesEditor({
+                rules: ch.reportValueRules,
+                expressionLabel: '报出值公式',
+                expressionPlaceholder: '例：{mean}*f20 或 if(...)',
+                conditionPlaceholder: '例：f12>=f13（出束时间≥响应时间）；留空则需现场人工选择',
+                hint: '每条含：条件说明、判断条件（可空）、报出值公式。不填判断条件时，现场人员需人工选择适用公式。',
+                setActiveExpressionInput: (el) => { activeFormulaInput = el; },
+                onChange: () => {
+                    ch.reportValueRules.forEach((rule, i) => {
+                        const row = normalizeConditionalRuleRow(rule, i);
+                        rule.formula = row.expression;
+                        rule.expression = row.expression;
+                    });
+                }
+            });
+            reportSec.appendChild(rulesEditor);
+
+            const toolRow = document.createElement('div');
+            toolRow.className = 'formula-chip-row';
+            const meanBtn = document.createElement('button');
+            meanBtn.type = 'button';
+            meanBtn.className = 'formula-tool-btn';
+            meanBtn.textContent = '插入测量均值 {mean}';
+            meanBtn.title = '在报出值公式中插入占位符 {mean}，导出时替换为该行均值栏位编号';
+            meanBtn.addEventListener('click', () => {
+                const ta = activeFormulaInput || reportSec.querySelector('textarea[placeholder*="mean"]');
+                if (ta) insertTextAtCursor(ta, '{mean}');
+            });
+            const pickBtn = document.createElement('button');
+            pickBtn.type = 'button';
+            pickBtn.className = 'primary';
+            pickBtn.textContent = '在 PDF 上选栏位';
+            pickBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const ta = activeFormulaInput || reportSec.querySelector('textarea');
+                if (!ta) return;
+                openFormulaFieldPicker(pickBtn, ta, triggerField ? triggerField.id : null, {
+                    pid: '{param}',
+                    syncFormulaUi: () => {}
+                });
+            });
+            toolRow.appendChild(meanBtn);
+            toolRow.appendChild(pickBtn);
+            reportSec.appendChild(toolRow);
+
+            host.appendChild(reportSec);
         }
 
         const SITE_RECORD_SECTIONS = [
@@ -4395,6 +4994,10 @@
                 statusEl.textContent = fields.length
                     ? ('已归类 ' + labeled + ' / ' + fields.length + ' 个栏位')
                     : '暂无栏位';
+            }
+            const rpBtn = document.getElementById('btnRadiationChapterFormula');
+            if (rpBtn) {
+                rpBtn.style.display = shouldUseSiteRecordSections() ? 'inline-block' : 'none';
             }
         }
 
@@ -5561,6 +6164,11 @@
             return { added: accepted.length, skipped: skipped, accepted: accepted };
         }
 
+        const btnRadiationChapterFormula = document.getElementById('btnRadiationChapterFormula');
+        if (btnRadiationChapterFormula) {
+            btnRadiationChapterFormula.onclick = () => openRadiationChapterFormulaModal();
+        }
+
         btnAutoRedBoxes.onclick = async () => {
             if (!pdfDoc || !pdfReady) {
                 alert('模板 PDF 尚未加载完成，请稍后重试。');
@@ -5649,6 +6257,9 @@
                 labelPersistedFromFile: f.labelPersistedFromFile != null ? !!f.labelPersistedFromFile : true,
                 labelRuleNamed: !!f.labelRuleNamed,
                 fieldExpression: String(f.fieldExpression || f.pdfFieldExpression || '').trim(),
+                formulaRules: Array.isArray(f.formulaRules)
+                    ? f.formulaRules.slice()
+                    : (Array.isArray(f.fieldExpressionRules) ? f.fieldExpressionRules.slice() : []),
                 judgmentCriteriaByTestType: (f.judgmentCriteriaByTestType && typeof f.judgmentCriteriaByTestType === 'object')
                     ? {
                         acceptance: f.judgmentCriteriaByTestType.acceptance != null ? String(f.judgmentCriteriaByTestType.acceptance) : '',
@@ -5658,7 +6269,11 @@
                 judgmentCriteriaManual: !!f.judgmentCriteriaManual,
                 title: f.title != null ? String(f.title) : ''
                 };
-            }).map(item => normalizeFieldSize(item));
+            }).map(item => {
+                migrateLegacyFormulaRuleMeta(item);
+                migrateJudgmentRuleSetsToCriteria(item);
+                return normalizeFieldSize(item);
+            });
             fields.forEach(item => {
                 if (item.wrap) item.wrap.remove();
                 else item.el?.remove();
@@ -5671,6 +6286,11 @@
             refreshFieldList();
             const tm = (d && d.template_meta && typeof d.template_meta === 'object') ? d.template_meta : {};
             const fs = (d && d.form_schema && typeof d.form_schema === 'object') ? d.form_schema : {};
+            const rpChapter = (fs.radiationProtectionChapter && typeof fs.radiationProtectionChapter === 'object')
+                ? fs.radiationProtectionChapter
+                : ((d.radiationProtectionChapter && typeof d.radiationProtectionChapter === 'object')
+                    ? d.radiationProtectionChapter
+                    : defaultRadiationProtectionChapter());
             templateContext = {
                 templateId: d.templateId || tm.templateId || templateContext.templateId || '',
                 templateName: d.templateName || tm.templateName || templateContext.templateName || '',
@@ -5683,7 +6303,8 @@
                 enums: (d.enums && typeof d.enums === 'object') ? d.enums : ((fs.enums && typeof fs.enums === 'object') ? fs.enums : templateContext.enums || {}),
                 steps: Array.isArray(d.steps) ? d.steps : (Array.isArray(fs.steps) ? fs.steps : (templateContext.steps || [])),
                 libraryTaskId: keepLt,
-                libraryTemplateFileId: keepLf
+                libraryTemplateFileId: keepLf,
+                radiationProtectionChapter: rpChapter
             };
             const b = (d && d.bindings && typeof d.bindings === 'object') ? d.bindings : {};
             setSuppressAutoImport(false);
@@ -5777,16 +6398,8 @@
             return base;
         }
 
-        async function refreshTemplateJsonOptions(preferredId) {
-            const params = new URLSearchParams();
-            const lt = resolvedLibraryTaskIdStr();
-            const pdf = resolvedLibraryTemplateFileIdStr();
-            if (lt) params.set('library_task_id', lt);
-            if (pdf) params.set('template_pdf_id', pdf);
-            const qs = params.toString();
-            const res = await fetch('/files/htmlpdf/api/template-jsons/' + (qs ? ('?' + qs) : ''));
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || '读取模板 JSON 列表失败');
+        function applyTemplateJsonOptionsToSelect(data, preferredId) {
+            if (!templateJsonSelect || !data) return;
             const prefer = String(
                 preferredId
                 || templateContext.defaultJsonTemplateId
@@ -5809,8 +6422,28 @@
                 templateJsonSelect.value = String(data.templates[0].id);
             }
             if (data.scoped === false && (data.templates || []).length > 15) {
-                console.warn(data.hint || '模板 JSON 列表未按任务筛选');
+                console.warn(data.hint || '模板 JSON 列表未按任务筛选，无绑定历史');
             }
+        }
+
+        async function refreshTemplateJsonOptions(preferredId) {
+            const params = new URLSearchParams();
+            const lt = resolvedLibraryTaskIdStr();
+            const pdf = resolvedLibraryTemplateFileIdStr();
+            if (lt) params.set('library_task_id', lt);
+            if (pdf) params.set('template_pdf_id', pdf);
+            const qs = params.toString();
+            const res = await fetch('/files/htmlpdf/api/template-jsons/' + (qs ? ('?' + qs) : ''));
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '读取模板 JSON 列表失败');
+            if (data.library_task_id) {
+                templateContext.libraryTaskId = String(data.library_task_id);
+            }
+            if (data.default_json_template_id) {
+                templateContext.defaultJsonTemplateId = String(data.default_json_template_id);
+            }
+            applyTemplateJsonOptionsToSelect(data, preferredId);
+            return data;
         }
         document.getElementById('btnImportTemplate').onclick = () => {
             const sel = templateJsonSelect.value || '';
@@ -5870,6 +6503,7 @@
 
         function buildFieldsPayload() {
             applyPdfFieldIdRenumber(false);
+            applyMeanFormulasToFields();
             return fields.map(i => {
                 const row = {
                     id: i.id,
@@ -5901,7 +6535,23 @@
                 if (i.labelRuleNamed) row.labelRuleNamed = true;
                 const fe = String(i.fieldExpression || '').trim();
                 if (fe) row.fieldExpression = fe;
+                migrateLegacyFormulaRuleMeta(i);
+                ensureFormulaRules(i);
+                const formulaRules = (i.formulaRules || []).map((r, idx) => {
+                    const norm = normalizeConditionalRuleRow(r, idx);
+                    return {
+                        id: norm.id,
+                        label: norm.label,
+                        condition: norm.condition,
+                        expression: norm.expression,
+                        formula: norm.expression
+                    };
+                }).filter(r => r.expression || r.condition || r.label);
+                if (formulaRules.length) {
+                    row.formulaRules = formulaRules;
+                }
                 ensureJudgmentObj(i);
+                migrateJudgmentRuleSetsToCriteria(i);
                 const acc = String(i.judgmentCriteriaByTestType.acceptance || '').trim();
                 const st = String(i.judgmentCriteriaByTestType.status || '').trim();
                 if (acc || st) {
@@ -6014,8 +6664,10 @@
                     form_schema: {
                         constants: templateContext.constants || {},
                         enums: templateContext.enums || {},
-                        steps: templateContext.steps || []
+                        steps: templateContext.steps || [],
+                        radiationProtectionChapter: getRadiationProtectionChapterPayload(false)
                     },
+                    radiationProtectionChapter: getRadiationProtectionChapterPayload(false),
                     bindings: buildBindingsForExport(),
                     report_site_field_map: reportTaskContext.reportSiteFieldMap || []
                 })
@@ -6037,14 +6689,24 @@
                     window.open(d.file.library_url, '_blank');
                 }
                 const savedJsonId = d.file && d.file.id ? Number(d.file.id) : 0;
-                await refreshTemplateJsonOptions().catch(() => {});
-                if (savedJsonId) {
-                    if (templateJsonSelect) {
-                        templateJsonSelect.value = String(savedJsonId);
-                    }
-                    if (rot && rot.ok) {
-                        await autoImportLibraryJson(savedJsonId);
-                    }
+                if (d.library_task_id) {
+                    templateContext.libraryTaskId = String(d.library_task_id);
+                }
+                if (Array.isArray(d.template_json_options) && d.template_json_options.length) {
+                    applyTemplateJsonOptionsToSelect({
+                        templates: d.template_json_options,
+                        default_json_template_id: d.default_json_template_id,
+                        scoped: true,
+                        library_task_id: d.library_task_id
+                    }, savedJsonId || null);
+                } else {
+                    await refreshTemplateJsonOptions(savedJsonId || null).catch(err => console.warn('刷新模板 JSON 下拉失败', err));
+                }
+                if (savedJsonId && templateJsonSelect) {
+                    templateJsonSelect.value = String(savedJsonId);
+                }
+                if (savedJsonId && rot && rot.ok) {
+                    await autoImportLibraryJson(savedJsonId);
                 }
             }).catch(err => alert(err.message));
         }
@@ -6088,8 +6750,10 @@
                     formSchema: {
                         constants: templateContext.constants || {},
                         enums: templateContext.enums || {},
-                        steps: templateContext.steps || []
+                        steps: templateContext.steps || [],
+                        radiationProtectionChapter: getRadiationProtectionChapterPayload(true)
                     },
+                    radiationProtectionChapter: getRadiationProtectionChapterPayload(true),
                     meta: {
                         libraryTaskId: libTask,
                         libraryTemplateFileId: libTpl,

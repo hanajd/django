@@ -1,0 +1,468 @@
+{
+  "schema": "workplace_radiation_js009_chapter5/v1",
+  "template_id": "JXFS/JS-009",
+  "source_pdf": "tabletest.pdf",
+  "chapter_range": {
+    "start_page": 5,
+    "end_page": 7,
+    "before_section": "六、平面布局示意图"
+  },
+  "layout": {
+    "schema": "workplace_radiation_js009/v1",
+    "template_id": "JXFS/JS-009",
+    "source_pdf": "tabletest.pdf",
+    "reference_page": 5,
+    "orientation": "landscape",
+    "page_size": {
+      "width": 841.9000244140625,
+      "height": 595.2999877929688
+    },
+    "section_title": {
+      "text": "五、工作场所放射防护检测结果",
+      "x_left": 42.6,
+      "x_right": 190.08,
+      "y_top": 60.18,
+      "first_page_only": true
+    },
+    "preface_blocks": {
+      "instrument_info": {
+        "label": "（1）、使用的检测仪器相关信息",
+        "y_top": 74.23,
+        "x_left": 42.6,
+        "x_right": 810.82,
+        "first_page_only": true
+      },
+      "condition": {
+        "label": "（2）、检测条件",
+        "y_top": 89.35,
+        "x_left": 42.6,
+        "x_right": 810.82,
+        "first_page_only": true
+      }
+    },
+    "table": {
+      "x_left": 31.08,
+      "x_right": 810.82,
+      "y_top": 101.6,
+      "columns": {
+        "point_id": {
+          "x0": 31.08,
+          "x1": 65.0
+        },
+        "location_main": {
+          "x0": 65.0,
+          "x1": 147.8
+        },
+        "location_sub": {
+          "x0": 147.75,
+          "x1": 232.0
+        },
+        "location_full": {
+          "x0": 65.0,
+          "x1": 232.0
+        },
+        "reading_1": {
+          "x0": 232.0,
+          "x1": 328.35
+        },
+        "reading_2": {
+          "x0": 328.35,
+          "x1": 444.9
+        },
+        "reading_3": {
+          "x0": 444.9,
+          "x1": 552.4
+        },
+        "readings_merged": {
+          "x0": 232.0,
+          "x1": 552.4
+        },
+        "mean_m": {
+          "x0": 552.4,
+          "x1": 668.5
+        },
+        "report_d": {
+          "x0": 668.5,
+          "x1": 810.82
+        }
+      },
+      "header_labels": {
+        "point_id": "序号",
+        "location": "检测点位置",
+        "readings": "测量读数M，μSv/h",
+        "mean_m": "测量均值M̄，μSv/h",
+        "report_d": "报出值D，μSv/h"
+      },
+      "header_row_count": 2,
+      "row_heights": {
+        "header": 20.69,
+        "simple": 18.9,
+        "complex_sub": 19.1
+      },
+      "complex_location_main_right": 147.8,
+      "background_row": {
+        "label": "本底水平（μSv/h）及范围",
+        "reading_slots": 10,
+        "slot_labels": [
+          "①",
+          "②",
+          "③",
+          "④",
+          "⑤",
+          "⑥",
+          "⑦",
+          "⑧",
+          "⑨",
+          "⑩"
+        ]
+      },
+      "notes": {
+        "below_table": true,
+        "full_width": true
+      }
+    },
+    "pagination": {
+      "table_y_top_first_page": 101.6,
+      "continuation_header_y": 61.38,
+      "content_bottom": 535.91,
+      "footer_margin_below_table": 59.39,
+      "repeat_header_on_new_page": true,
+      "repeat_section_title_on_new_page": false,
+      "include_preface_on_first_page_only": true
+    },
+    "point_patterns": {
+      "simple": "单行：序号 + 检测点位置（跨 location_main~location_sub）+ 3次读数 + 均值 + 报出值",
+      "complex": "复杂：序号与 location_main 纵向合并；location_sub 为中部/上端等；右侧同简单行",
+      "location_format": "名称与距离连写，如「观察窗C外表面30cm」「防护门M（）外表面30cm」"
+    },
+    "chapter_range": {
+      "start_page": 5,
+      "end_page": 7
+    }
+  },
+  "preface": {
+    "section_title": {
+      "text": "五、工作场所放射防护检测结果",
+      "x_left": 42.599998474121094,
+      "x_right": 190.08311462402344,
+      "y_top": 60.18446350097656
+    },
+    "instrument_info": {
+      "label": "（1）、使用的检测仪器相关信息",
+      "y_top": 74.23,
+      "text": "，X 射线能量档对应的仪器校准因子k1： ，响应时间修正系数k2： ，探测下限： 。"
+    },
+    "condition": {
+      "label": "（2）、检测条件",
+      "y_top": 89.35,
+      "text": "曝光模式（部位： ），球管朝 照射， kV mA s（ mAs）。"
+    }
+  },
+  "pages": [
+    {
+      "page": 5,
+      "width": 841.9000244140625,
+      "height": 595.2999877929688,
+      "table_row_count": 23,
+      "table_bottom_y": 535.91,
+      "parsed_row_count": 23
+    },
+    {
+      "page": 6,
+      "width": 841.9000244140625,
+      "height": 595.2999877929688,
+      "table_row_count": 25,
+      "table_bottom_y": 532.71,
+      "parsed_row_count": 24
+    },
+    {
+      "page": 7,
+      "width": 841.9000244140625,
+      "height": 595.2999877929688,
+      "table_row_count": 23,
+      "table_bottom_y": 522.21,
+      "parsed_row_count": 22
+    }
+  ],
+  "table_template": {
+    "header_rows": [
+      {
+        "kind": "header",
+        "page": 5,
+        "row_index": 1,
+        "bbox": {
+          "x0": 31.08,
+          "y0": 104.64,
+          "x1": 810.82,
+          "y1": 122.29,
+          "h": 17.65
+        },
+        "cells": {
+          "0": "序号",
+          "1": "检测点位置",
+          "3": "测量读数M，μSv/h",
+          "6": "测量均值M，μSv/h",
+          "7": "报出值D，μSv/h"
+        }
+      }
+    ],
+    "points": [
+      {
+        "type": "simple",
+        "location": "工作人员操作位K"
+      },
+      {
+        "type": "simple",
+        "location": "管线（□地沟 □线孔）洞口处"
+      },
+      {
+        "type": "simple",
+        "location": "管线（□地沟 □线孔）洞口处"
+      },
+      {
+        "type": "simple",
+        "location": "管线洞口处"
+      },
+      {
+        "type": "complex",
+        "location": "观察窗C（ ） 外表面30cm 处",
+        "sub_rows": [
+          {
+            "location_sub": "中部"
+          },
+          {
+            "location_sub": "上端"
+          },
+          {
+            "location_sub": "下端"
+          },
+          {
+            "location_sub": "左侧"
+          },
+          {
+            "location_sub": "右侧"
+          }
+        ]
+      },
+      {
+        "type": "complex",
+        "location": "防护门M（ ） 外表面30cm 处",
+        "sub_rows": [
+          {
+            "location_sub": "门体中部"
+          },
+          {
+            "location_sub": "上端"
+          },
+          {
+            "location_sub": "下端"
+          },
+          {
+            "location_sub": "左侧"
+          },
+          {
+            "location_sub": "右侧"
+          }
+        ]
+      },
+      {
+        "type": "complex",
+        "location": "防护门M（ ） 外表面30cm 处",
+        "sub_rows": [
+          {
+            "location_sub": "门体中部"
+          },
+          {
+            "location_sub": "上端"
+          },
+          {
+            "location_sub": "下端"
+          },
+          {
+            "location_sub": "左侧"
+          },
+          {
+            "location_sub": "右侧"
+          }
+        ]
+      },
+      {
+        "type": "complex",
+        "location": "防护门M（ ） 外表面30cm 处",
+        "sub_rows": [
+          {
+            "location_sub": "门体中部"
+          },
+          {
+            "location_sub": "上端"
+          },
+          {
+            "location_sub": "下端"
+          },
+          {
+            "location_sub": "左侧"
+          },
+          {
+            "location_sub": "右侧"
+          }
+        ]
+      },
+      {
+        "type": "complex",
+        "location": "东墙外表面 30cm 处",
+        "sub_rows": [
+          {
+            "location_sub": "左侧"
+          },
+          {
+            "location_sub": "中部"
+          },
+          {
+            "location_sub": "右侧"
+          }
+        ]
+      },
+      {
+        "type": "complex",
+        "location": "南墙外表面 30cm 处",
+        "sub_rows": [
+          {
+            "location_sub": "左侧"
+          },
+          {
+            "location_sub": "中部"
+          },
+          {
+            "location_sub": "右侧"
+          }
+        ]
+      },
+      {
+        "type": "complex",
+        "location": "西墙外表面 30cm 处",
+        "sub_rows": [
+          {
+            "location_sub": "左侧"
+          },
+          {
+            "location_sub": "中部"
+          },
+          {
+            "location_sub": "右侧"
+          }
+        ]
+      },
+      {
+        "type": "complex",
+        "location": "北墙外表面 30cm 处",
+        "sub_rows": [
+          {
+            "location_sub": "左侧"
+          },
+          {
+            "location_sub": "中部"
+          },
+          {
+            "location_sub": "右侧"
+          }
+        ]
+      },
+      {
+        "type": "simple",
+        "location": "顶棚上方（楼上）距顶棚地面100 cm"
+      },
+      {
+        "type": "simple",
+        "location": "地面下方（楼下）距楼下地面170 cm"
+      },
+      {
+        "type": "simple",
+        "location": "排风扇/排风口外表面30cm 处（距 地面高度约 cm）"
+      }
+    ],
+    "background": {
+      "kind": "background",
+      "page": 7,
+      "row_index": 20,
+      "bbox": {
+        "x0": 31.08,
+        "y0": 426.99,
+        "x1": 810.82,
+        "y1": 459.19,
+        "h": 32.2
+      },
+      "label": "本底水平（μSv/h）及范围",
+      "slots": [
+        {
+          "col": 2,
+          "label": "①"
+        },
+        {
+          "col": 3,
+          "label": "②"
+        },
+        {
+          "col": 5,
+          "label": "③"
+        },
+        {
+          "col": 7,
+          "label": "④"
+        },
+        {
+          "col": 8,
+          "label": "⑤"
+        }
+      ],
+      "cells": {
+        "0": "本底水平（μSv /h）及范围",
+        "2": "①",
+        "3": "②",
+        "5": "③",
+        "7": "④",
+        "8": "⑤",
+        "9": ""
+      }
+    },
+    "notes": {
+      "kind": "notes",
+      "page": 7,
+      "row_index": 22,
+      "bbox": {
+        "x0": 31.08,
+        "y0": 459.19,
+        "x1": 810.82,
+        "y1": 522.21,
+        "h": 63.02
+      },
+      "text": "1.检测时采用巡测方式点位最高值处取三个测量值的平均值，当出束时间≥测量仪器响应时间时，报出值D=M（测量读数平均值）×k1（X 射线能量档对应的仪器校准因子）），本底报出值为本 底测量读数最小值×k～本底测量读数最小值×k。 2.当出束时间＜测量仪器响应时间时，报出值D=k1（X 射线能量档对应的仪器校准因子）×k2（响应时间修正系数）×（M（测量读数平均值）-B（本底读数平均值））； 3.响应时间修正系数，仪器剂量率时间响应修正系数�= 1/（1 −�−2.197�/τ），�/τ值详见JXFS/ZY-021《放射性场所X、γ射线防护检测作业指导书》。"
+    },
+    "field_bindings": [],
+    "chapter_formulas": {
+      "meanFormula": {
+        "mode": "per_row_avg",
+        "description": "同点位三次测量读数取平均"
+      },
+      "reportValueRules": [
+        {
+          "id": "rule_ge_response",
+          "label": "出束时间≥仪器响应时间",
+          "condition": "",
+          "formula": ""
+        },
+        {
+          "id": "rule_lt_response",
+          "label": "出束时间＜仪器响应时间",
+          "condition": "",
+          "formula": ""
+        }
+      ]
+    }
+  },
+  "summary": {
+    "point_groups": 15,
+    "simple_points": 7,
+    "complex_points": 8,
+    "total_sub_rows": 32
+  }
+}

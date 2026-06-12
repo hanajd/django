@@ -27,7 +27,7 @@
                     <th class="px-4 py-2.5 text-left">检测状态</th>
                     <th class="px-4 py-2.5 text-left min-w-[12rem]">报告任务模板</th>
                     <th class="px-4 py-2.5 text-left">现场记录</th>
-                    <th class="px-4 py-2.5 w-40"></th>
+                    <th class="px-4 py-2.5 min-w-[8rem]"></th>
                 </tr>
             </thead>
             <tbody>
@@ -104,6 +104,7 @@
                         </ul>
                     </td>
                     <td class="px-4 py-3">
+                        <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
                         {% if can_edit_project_workbench %}
                         <form method="post" class="inline" onsubmit="return confirm('从本次委托中移除该设备？（不会删除设备主数据）');">
                             {% csrf_token %}
@@ -114,6 +115,15 @@
                             <button type="submit" class="text-xs text-rose-600 hover:underline">移除</button>
                         </form>
                         {% endif %}
+                        {% if can_mock_inspection_submit and card.can_mock_submit %}
+                        <button type="button"
+                                class="mock-submit-eq-btn text-xs text-violet-700 hover:text-violet-900 hover:underline font-medium"
+                                data-link-id="{{ card.link.id }}"
+                                data-equipment-name="{{ card.equipment.name|escape }}">
+                            模拟提交
+                        </button>
+                        {% endif %}
+                        </div>
                     </td>
                 </tr>
                 {% endfor %}
@@ -222,5 +232,49 @@
     <p class="text-sm text-slate-500">您无权修改项目委托设备。</p>
     {% else %}
     <p class="text-sm text-slate-600">请先在左侧选择一个项目。</p>
+    {% endif %}
+
+    {% if can_mock_inspection_submit and selected_project %}
+    <script>
+    (function () {
+        var apiUrl = "{{ mock_inspection_submit_api_url|default:'/files/projects/mock-inspection-submit/'|escapejs }}";
+        var projectId = "{{ selected_project_id|escapejs }}";
+        function csrfToken() {
+            var el = document.querySelector('input[name=csrfmiddlewaretoken]');
+            return el ? el.value : "";
+        }
+        document.querySelectorAll(".mock-submit-eq-btn").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                var linkId = btn.getAttribute("data-link-id") || "";
+                var eqName = btn.getAttribute("data-equipment-name") || "该设备";
+                if (!linkId || !projectId) return;
+                if (!confirm("为「" + eqName + "」生成模拟数据并提交现场记录？\n将写入 submit 库并自动回填生成 PDF（与 App 提交流程一致）。")) {
+                    return;
+                }
+                btn.disabled = true;
+                var body = new URLSearchParams();
+                body.set("project_id", projectId);
+                body.set("link_id", linkId);
+                var headers = { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded" };
+                var token = csrfToken();
+                if (token) headers["X-CSRFToken"] = token;
+                fetch(apiUrl, { method: "POST", credentials: "same-origin", headers: headers, body: body.toString() })
+                    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+                    .then(function (res) {
+                        if (!res.ok || !res.j || !res.j.ok) {
+                            throw new Error((res.j && res.j.message) || "模拟提交失败");
+                        }
+                        var n = (res.j.submitted || []).length;
+                        alert("模拟提交完成，已写入 submit 库并回填现场记录 PDF（" + n + " 个任务）。");
+                        window.location.reload();
+                    })
+                    .catch(function (err) {
+                        alert(err.message || "模拟提交失败");
+                    })
+                    .finally(function () { btn.disabled = false; });
+            });
+        });
+    })();
+    </script>
     {% endif %}
 </div>

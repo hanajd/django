@@ -168,20 +168,49 @@ def library_task_equipment_context_by_task_id(
     return ctx
 
 
+def site_submit_tasks_for_report_task(
+    project: LibraryProject,
+    report_task: LibraryTask | None,
+) -> list[dict]:
+    """设备所挂载报告下的现场记录任务（含项目内 taskNo，供模拟提交）。"""
+    from apps.core.project_numbering import project_task_no_for_library_task, project_tasks_ordered
+
+    if project is None or report_task is None:
+        return []
+    ordered = project_tasks_ordered(project)
+    rows: list[dict] = []
+    for st in report_task.report_source_tasks.filter(
+        output_target=LibraryTask.OUTPUT_SITE_RECORD
+    ).order_by("code", "id"):
+        task_no = project_task_no_for_library_task(st, project, ordered_tasks=ordered)
+        if not task_no:
+            continue
+        rows.append(
+            {
+                "taskNo": task_no,
+                "libraryTaskId": st.pk,
+                "code": st.code or "",
+                "name": st.name or "",
+                "label": f"{task_no} · {st.code} · {st.name}",
+            }
+        )
+    return rows
+
+
 def project_equipment_cards(project: LibraryProject) -> list[dict]:
     cards: list[dict] = []
     for link in project_equipment_queryset(project):
         eq = link.equipment
         task = normalize_equipment_report_task(effective_report_task(link))
         site_labels: list[str] = []
+        site_submit_tasks: list[dict] = []
         report_label = ""
         if task is not None:
             report_label = f"{task.code} · {task.name}"
+            site_submit_tasks = site_submit_tasks_for_report_task(project, task)
             site_labels = [
-                f"{t.code} · {t.name}"
-                for t in task.report_source_tasks.filter(
-                    output_target=LibraryTask.OUTPUT_SITE_RECORD
-                ).order_by("code")
+                f"{row['code']} · {row['name']}" if row.get("code") else row.get("name") or "—"
+                for row in site_submit_tasks
             ]
         itype = (link.inspection_type or "").strip()
         cards.append(
@@ -195,8 +224,10 @@ def project_equipment_cards(project: LibraryProject) -> list[dict]:
                 "report_task_label": report_label or "—",
                 "report_task_folder": report_task_folder_breadcrumb(task),
                 "site_task_labels": site_labels,
+                "site_submit_tasks": site_submit_tasks,
                 "department_label": eq.department.full_display_name,
                 "can_sync_tasks": task is not None,
+                "can_mock_submit": bool(site_submit_tasks),
             }
         )
     return cards
