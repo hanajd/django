@@ -15,6 +15,22 @@ _F_ID_RE = re.compile(r"^f\d+$", re.IGNORECASE)
 _MOCK_DEFAULT_PRECISION = 2
 _RP_ROW_INDEX_RE = re.compile(r"_r(\d+)(?:_(.+))?$", re.IGNORECASE)
 _SLASH = "/"
+_ASSIGNED_SEQ_VALUE_RE = re.compile(r"^\d+(?:~\d+)?$")
+
+
+def _is_assigned_seq_value(value: Any) -> bool:
+    if value in (None, "", _SLASH):
+        return False
+    return bool(_ASSIGNED_SEQ_VALUE_RE.match(str(value).strip()))
+
+
+def _payload_pid_value(payload: dict, pid: str) -> Any:
+    pid = str(pid or "").strip().lower()
+    dd = payload.get("dynamicData") if isinstance(payload.get("dynamicData"), dict) else {}
+    tr = payload.get("testResult") if isinstance(payload.get("testResult"), dict) else {}
+    if pid in dd and dd[pid] not in (None, ""):
+        return dd[pid]
+    return tr.get(pid)
 
 
 def _iter_form_fields(frontend_obj: dict) -> Iterable[dict]:
@@ -254,15 +270,43 @@ def _field_pdf_anchor_rect(field: dict) -> tuple[int, float, float]:
     return page, 0.0, 0.0
 
 
+def _field_pdf_anchor_y_bounds(field: dict) -> tuple[int, float, float]:
+    """返回 (page, y0, y1)。"""
+    anchor = field.get("pdfAnchor")
+    if not isinstance(anchor, dict):
+        return 5, 0.0, 0.0
+    rect = anchor.get("rect")
+    try:
+        page = int(anchor.get("page") or 5)
+    except (TypeError, ValueError):
+        page = 5
+    if isinstance(rect, (list, tuple)) and len(rect) >= 4:
+        try:
+            y0 = float(rect[1])
+            y1 = float(rect[3])
+            if y1 < y0:
+                y0, y1 = y1, y0
+            return page, y0, y1
+        except (TypeError, ValueError):
+            pass
+    _, _, y0 = _field_pdf_anchor_rect(field)
+    return page, y0, y0
+
+
+def _field_pdf_anchor_y_center(field: dict) -> tuple[int, float]:
+    page, y0, y1 = _field_pdf_anchor_y_bounds(field)
+    return page, (y0 + y1) / 2.0
+
+
+def _seq_field_anchor_height(field: dict) -> float:
+    _, y0, y1 = _field_pdf_anchor_y_bounds(field)
+    return abs(y1 - y0)
+
+
 def _is_rp_table_seq_field(field: dict) -> bool:
-    """表格序号列：排除页眉区误标为「序号_r*」的校准因子等栏位（如 f208）。"""
-    label = str(field.get("label") or field.get("hierarchyKey") or "").strip()
-    if not re.match(r"^序号_r\d+", label, re.IGNORECASE):
-        return False
-    _page, x0, y0 = _field_pdf_anchor_rect(field)
-    if _page < 5:
-        return False
-    return y0 >= 190.0 and x0 <= 80.0
+    from radiation_detection_report.chapter5_field_sync import is_rp_table_seq_field
+
+    return is_rp_table_seq_field(field)
 
 
 def _is_rp_preface_factor_field(field: dict) -> bool:
@@ -276,23 +320,36 @@ def _is_rp_preface_factor_field(field: dict) -> bool:
     return False
 
 
-def _is_rp_table_managed_field(field: dict) -> bool:
-    if _is_background_level_field(field) or _is_rp_preface_factor_field(field):
-        return False
-    if _is_rp_table_seq_field(field):
+def _is_protection_section_field(field: dict) -> bool:
+    """第五章防护表栏位（含 steps / pdf.fields）。"""
+    sk = str(field.get("templateSectionKey") or field.get("sectionKey") or "").strip()
+    if sk in ("site_radiation_protection", "radiation_protection"):
         return True
-    label = str(field.get("hierarchyKey") or field.get("label") or "")
-    if "检测点位置" in label and "_r" in label:
+    if str(field.get("sectionType") or "").strip() == "radiationProtection":
         return True
     try:
         from radiation_detection_report.chapter5_field_sync import field_looks_like_protection_table_cell
 
-        if field_looks_like_protection_table_cell(field):
-            return True
+        return field_looks_like_protection_table_cell(field)
     except ImportError:
-        if re.search(r"_测量读数M\d*|_测量均值|_报出值", label, re.I):
-            return True
-    return False
+        label = str(field.get("hierarchyKey") or field.get("label") or "")
+        if not re.search(r"_r\d+", label, re.I):
+            return False
+        return bool(re.search(r"_测量读数M\d*|_测量均值|_报出值D|_报出值", label, re.I))
+
+
+def _is_rp_table_managed_field(field: dict, *, managed_pids: set[str] | None = None) -> bool:
+    if _is_background_level_field(field) or _is_rp_preface_factor_field(field):
+        return False
+    if _is_rp_table_seq_field(field):
+        return True
+    pid = str(field.get("pdfFieldId") or field.get("id") or "").strip().lower()
+    if managed_pids and pid and pid in managed_pids:
+        return True
+    label = str(field.get("hierarchyKey") or field.get("label") or "")
+    if "检测点位置" in label and re.search(r"_r\d+", label, re.I):
+        return _is_protection_section_field(field)
+    return _is_protection_section_field(field)
 
 
 def _fill_rp_preface_factor_fields(
@@ -348,28 +405,97 @@ def _binding_has_background_cells(binding: dict, pid_to_field: dict[str, dict]) 
     return False
 
 
+def _radiation_protection_chapter_config(frontend_obj: dict) -> dict:
+    chapter = frontend_obj.get("radiationProtectionChapter")
+    if isinstance(chapter, dict):
+        return chapter
+    form_schema = frontend_obj.get("formSchema")
+    if isinstance(form_schema, dict):
+        chapter = form_schema.get("radiationProtectionChapter")
+        if isinstance(chapter, dict):
+            return chapter
+    return {}
+
+
+def _is_valid_rp_data_binding(binding: dict, pid_to_field: dict[str, dict]) -> bool:
+    if not isinstance(binding, dict) or _is_rp_background_binding(binding):
+        return False
+    if _binding_has_background_cells(binding, pid_to_field):
+        return False
+    pt = str(binding.get("radiationPoint") or "")
+    if not _RP_ROW_INDEX_RE.search(pt):
+        return False
+    if not any(str(binding.get(k) or "").strip() for k in ("reading_1", "reading_2", "reading_3")):
+        return False
+    for key in ("reading_1", "reading_2", "reading_3", "mean_m", "report_d"):
+        pid = str(binding.get(key) or "").strip().lower()
+        if not pid:
+            continue
+        field = pid_to_field.get(pid)
+        if isinstance(field, dict) and not _is_protection_section_field(field):
+            return False
+    return True
+
+
 def _build_rp_table_bindings(frontend_obj: dict) -> list[dict]:
     from radiation_detection_report.chapter5_field_sync import build_field_bindings_from_fields
 
-    fields = [f for f in _iter_form_fields(frontend_obj) if isinstance(f, dict)]
     pid_to_field = _index_fields_by_pdf_field_id(frontend_obj)
-    bindings = build_field_bindings_from_fields(fields)
+    chapter = _radiation_protection_chapter_config(frontend_obj)
+    raw_bindings = chapter.get("fieldBindings")
+    if isinstance(raw_bindings, list) and raw_bindings:
+        bindings = [copy.deepcopy(row) for row in raw_bindings if isinstance(row, dict)]
+    else:
+        fields = [f for f in _iter_form_fields(frontend_obj) if isinstance(f, dict)]
+        bindings = build_field_bindings_from_fields(fields)
     out: list[dict] = []
     for row in bindings:
-        if not isinstance(row, dict) or _is_rp_background_binding(row):
-            continue
-        if _binding_has_background_cells(row, pid_to_field):
-            continue
-        if not any(str(row.get(k) or "").strip() for k in ("reading_1", "reading_2", "reading_3", "mean_m", "report_d")):
-            continue
-        out.append(row)
-    out.sort(
-        key=lambda r: (
-            _row_index_from_radiation_point(str(r.get("radiationPoint") or "")),
-            str(r.get("radiationPoint") or ""),
-        )
+        if _is_valid_rp_data_binding(row, pid_to_field):
+            out.append(row)
+    return _sort_rp_bindings_by_table_order(out, pid_to_field)
+
+
+def _binding_table_sort_key(binding: dict, pid_to_field: dict[str, dict]) -> tuple:
+    for key in ("reading_1", "reading_2", "reading_3", "mean_m", "report_d"):
+        pid = str(binding.get(key) or "").strip().lower()
+        field = pid_to_field.get(pid)
+        if isinstance(field, dict):
+            page, x0, y0 = _field_pdf_anchor_rect(field)
+            return (page, y0, x0, str(binding.get("radiationPoint") or ""))
+    row_idx = _row_index_from_radiation_point(str(binding.get("radiationPoint") or ""))
+    return (5, float(row_idx), 0.0, str(binding.get("radiationPoint") or ""))
+
+
+def _sort_rp_bindings_by_table_order(
+    bindings: list[dict],
+    pid_to_field: dict[str, dict],
+) -> list[dict]:
+    return sorted(
+        bindings,
+        key=lambda row: _binding_table_sort_key(row, pid_to_field),
     )
-    return out
+
+
+def _collect_rp_managed_pids(
+    frontend_obj: dict,
+    bindings: list[dict],
+) -> set[str]:
+    pid_to_field = _index_fields_by_pdf_field_id(frontend_obj)
+    pids = _collect_rp_table_pids(bindings)
+    location_fields = _location_fields_by_row_index(frontend_obj)
+    for binding in bindings:
+        seq_field = _seq_field_for_binding(binding, pid_to_field, frontend_obj)
+        if isinstance(seq_field, dict):
+            pid = str(seq_field.get("pdfFieldId") or seq_field.get("id") or "").strip().lower()
+            if pid and _F_ID_RE.match(pid):
+                pids.add(pid)
+        row_idx = _row_index_from_radiation_point(str(binding.get("radiationPoint") or ""))
+        loc_field = location_fields.get(row_idx)
+        if isinstance(loc_field, dict):
+            pid = str(loc_field.get("pdfFieldId") or loc_field.get("id") or "").strip().lower()
+            if pid and _F_ID_RE.match(pid):
+                pids.add(pid)
+    return pids
 
 
 def _collect_rp_table_pids(bindings: list[dict]) -> set[str]:
@@ -377,7 +503,7 @@ def _collect_rp_table_pids(bindings: list[dict]) -> set[str]:
     for binding in bindings:
         if not isinstance(binding, dict):
             continue
-        for key in ("reading_1", "reading_2", "reading_3", "mean_m", "report_d", "remark"):
+        for key in ("seq_no", "reading_1", "reading_2", "reading_3", "mean_m", "report_d", "remark"):
             pid = str(binding.get(key) or "").strip().lower()
             if pid and _F_ID_RE.match(pid):
                 pids.add(pid)
@@ -424,6 +550,37 @@ def _seq_fields_by_row_index(frontend_obj: dict) -> dict[int, dict]:
     return out
 
 
+def _reading_anchor_field_for_binding(
+    binding: dict,
+    pid_to_field: dict[str, dict],
+) -> dict | None:
+    """首格读数可能为空（如跨页续表 r1 仅 M2/M3），依次回退到其它读数/均值/报出值格。"""
+    for key in ("reading_1", "reading_2", "reading_3", "mean_m", "report_d"):
+        pid = str(binding.get(key) or "").strip().lower()
+        field = pid_to_field.get(pid)
+        if isinstance(field, dict):
+            return field
+    return None
+
+
+def _seq_field_for_binding(
+    binding: dict,
+    pid_to_field: dict[str, dict],
+    frontend_obj: dict,
+) -> dict | None:
+    """优先 fieldBindings.seq_no；否则按读数格 PDF 位置匹配序号栏。"""
+    seq_pid = str(binding.get("seq_no") or "").strip().lower()
+    if seq_pid and _F_ID_RE.match(seq_pid):
+        field = pid_to_field.get(seq_pid)
+        if isinstance(field, dict):
+            return field
+    from radiation_detection_report.chapter5_field_sync import seq_field_for_binding_row
+
+    fields = [f for f in _iter_form_fields(frontend_obj) if isinstance(f, dict)]
+    matched = seq_field_for_binding_row(binding, fields, pid_to_field)
+    return dict(matched) if isinstance(matched, dict) else None
+
+
 def _location_fields_by_row_index(frontend_obj: dict) -> dict[int, dict]:
     out: dict[int, dict] = {}
     for field in _iter_form_fields(frontend_obj):
@@ -465,35 +622,62 @@ def _mock_rp_reading_value(rng: random.Random) -> float:
     return round(rng.uniform(0.12, 0.38), _MOCK_DEFAULT_PRECISION)
 
 
-def _group_rp_bindings_for_selection(bindings: list[dict]) -> list[tuple[str, str, list[dict]]]:
-    """按检测点位置聚合：复杂点位（有分表头）整组选择；简单行单独一组。"""
-    groups: list[tuple[str, str, list[dict]]] = []
+def _bindings_share_seq_merge(prev_binding: dict, next_binding: dict) -> bool:
+    """表格顺序相邻两行是否属于同一跨行序号单元（同主检测点且带分表头）。"""
+    prev_pt = str(prev_binding.get("radiationPoint") or "")
+    next_pt = str(next_binding.get("radiationPoint") or "")
+    if not (_has_sub_location_in_point(prev_pt) and _has_sub_location_in_point(next_pt)):
+        return False
+    return _location_main_from_radiation_point(prev_pt) == _location_main_from_radiation_point(next_pt)
+
+
+def _assign_rp_sequence_numbers(
+    payload: dict,
+    bindings: list[dict],
+    selected: set[int],
+    pid_to_field: dict[str, dict],
+    frontend_obj: dict,
+) -> int:
+    """按表格顺序为已填行编序号 1、2、3…；跨行合并格写 n~m。"""
+    assigned = 0
+    seq_no = 1
     i = 0
     n = len(bindings)
     while i < n:
-        binding = bindings[i]
-        pt = str(binding.get("radiationPoint") or "")
-        loc = _location_main_from_radiation_point(pt)
-        if _has_sub_location_in_point(pt):
-            grp = [binding]
-            j = i + 1
-            while j < n:
-                nxt = bindings[j]
-                npt = str(nxt.get("radiationPoint") or "")
-                if (
-                    _location_main_from_radiation_point(npt) == loc
-                    and _has_sub_location_in_point(npt)
-                ):
-                    grp.append(nxt)
-                    j += 1
-                else:
-                    break
-            groups.append(("complex", loc, grp))
-            i = j
-        else:
-            groups.append(("simple", loc, [binding]))
+        if i not in selected:
             i += 1
-    return groups
+            continue
+        group = [i]
+        j = i + 1
+        while j < n and j in selected and _bindings_share_seq_merge(bindings[j - 1], bindings[j]):
+            group.append(j)
+            j += 1
+        if len(group) > 1:
+            seq_text = f"{seq_no}~{seq_no + len(group) - 1}"
+            seq_no += len(group)
+        else:
+            seq_text = str(seq_no)
+            seq_no += 1
+        first_seq_field = _seq_field_for_binding(bindings[group[0]], pid_to_field, frontend_obj)
+        first_seq_pid = ""
+        if isinstance(first_seq_field, dict):
+            first_seq_pid = str(
+                first_seq_field.get("pdfFieldId") or first_seq_field.get("id") or ""
+            ).strip().lower()
+            _write_field_value_to_payload(payload, first_seq_field, seq_text)
+            assigned += 1
+        if len(group) > 1:
+            for gi in group[1:]:
+                extra_seq = _seq_field_for_binding(bindings[gi], pid_to_field, frontend_obj)
+                if not isinstance(extra_seq, dict):
+                    continue
+                extra_pid = str(
+                    extra_seq.get("pdfFieldId") or extra_seq.get("id") or ""
+                ).strip().lower()
+                if extra_pid and extra_pid != first_seq_pid:
+                    _write_field_value_to_payload(payload, extra_seq, _SLASH)
+        i = j
+    return assigned
 
 
 def _binding_cell_pids(binding: dict) -> list[str]:
@@ -510,16 +694,20 @@ def _slash_rp_binding_row(
     binding: dict,
     *,
     pid_to_field: dict[str, dict],
-    seq_fields: dict[int, dict],
+    frontend_obj: dict,
     location_fields: dict[int, dict],
 ) -> None:
     for pid in _binding_cell_pids(binding):
         _write_pid_value_to_payload(payload, pid, _SLASH, field=pid_to_field.get(pid))
+    seq_field = _seq_field_for_binding(binding, pid_to_field, frontend_obj)
+    if isinstance(seq_field, dict):
+        seq_pid = str(
+            seq_field.get("pdfFieldId") or seq_field.get("id") or ""
+        ).strip().lower()
+        if not _is_assigned_seq_value(_payload_pid_value(payload, seq_pid)):
+            _write_field_value_to_payload(payload, seq_field, _SLASH)
     row_idx = _row_index_from_radiation_point(str(binding.get("radiationPoint") or ""))
     if row_idx:
-        seq_field = seq_fields.get(row_idx)
-        if isinstance(seq_field, dict):
-            _write_field_value_to_payload(payload, seq_field, _SLASH)
         loc_field = location_fields.get(row_idx)
         if isinstance(loc_field, dict):
             _write_field_value_to_payload(payload, loc_field, _SLASH)
@@ -551,106 +739,83 @@ def _apply_radiation_protection_chapter_mock(
     select_ratio: float = 0.48,
 ) -> dict[str, int]:
     """
-    第五章防护表：随机选取部分检测点行填写（不含本底水平），序号从 1 起编；
-    同检测点多分表头用 x~y；未填行全部写 /。
+    第五章防护表：按表格顺序、以最小数据行为单位随机填写（整行填或整行 /）；
+    序号从 1 起连续编号，跨多行合并格写 n~m；未填行全部写 /。
     """
     bindings = _build_rp_table_bindings(frontend_obj)
     if not bindings:
         return {
-            "groups": 0,
+            "rows": 0,
             "selected": 0,
             "slashed": 0,
             "slashedBindings": [],
             "filledPids": [],
             "bindingCount": 0,
-        }
-
-    groups = _group_rp_bindings_for_selection(bindings)
-    if not groups:
-        return {
-            "groups": 0,
-            "selected": 0,
-            "slashed": 0,
-            "slashedBindings": [],
-            "filledPids": [],
-            "bindingCount": len(bindings),
+            "seqAssigned": 0,
         }
 
     pid_to_field = _index_fields_by_pdf_field_id(frontend_obj)
-    seq_fields = _seq_fields_by_row_index(frontend_obj)
     location_fields = _location_fields_by_row_index(frontend_obj)
+    ratio = max(0.15, min(0.85, float(select_ratio)))
 
     selected: set[int] = set()
-    for gi, (_gtype, _loc, _grp) in enumerate(groups):
-        if rng.random() < max(0.15, min(0.85, float(select_ratio))):
-            selected.add(gi)
-    if not selected and len(groups) > 1:
-        selected.add(rng.randint(0, len(groups) - 1))
-    if len(selected) >= len(groups) and len(groups) > 2:
+    for bi in range(len(bindings)):
+        if rng.random() < ratio:
+            selected.add(bi)
+    if not selected and len(bindings) > 1:
+        selected.add(rng.randint(0, len(bindings) - 1))
+    if len(selected) >= len(bindings) and len(bindings) > 2:
         selected.discard(rng.choice(list(selected)))
 
-    seq_no = 1
     slashed_rows = 0
-    selected_groups = 0
-    for gi, (gtype, _loc, grp) in enumerate(groups):
-        if gi not in selected:
-            for binding in grp:
-                _slash_rp_binding_row(
-                    payload,
-                    binding,
-                    pid_to_field=pid_to_field,
-                    seq_fields=seq_fields,
-                    location_fields=location_fields,
-                )
-                slashed_rows += 1
-            continue
-
-        selected_groups += 1
-        if gtype == "complex" and len(grp) > 1:
-            start_seq = seq_no
-            end_seq = seq_no + len(grp) - 1
-            seq_text = f"{start_seq}~{end_seq}"
-            seq_no = end_seq + 1
-        else:
-            seq_text = str(seq_no)
-            seq_no += 1
-
-        for bi, binding in enumerate(grp):
-            _fill_rp_binding_readings(
+    for bi, binding in enumerate(bindings):
+        if bi not in selected:
+            _slash_rp_binding_row(
                 payload,
                 binding,
                 pid_to_field=pid_to_field,
-                rng=rng,
+                frontend_obj=frontend_obj,
+                location_fields=location_fields,
             )
-            row_idx = _row_index_from_radiation_point(str(binding.get("radiationPoint") or ""))
-            if row_idx and bi == 0:
-                seq_field = seq_fields.get(row_idx)
-                if isinstance(seq_field, dict):
-                    _write_field_value_to_payload(payload, seq_field, str(seq_text))
+            slashed_rows += 1
+            continue
+        _fill_rp_binding_readings(
+            payload,
+            binding,
+            pid_to_field=pid_to_field,
+            rng=rng,
+        )
+
+    seq_assigned = _assign_rp_sequence_numbers(
+        payload,
+        bindings,
+        selected,
+        pid_to_field,
+        frontend_obj,
+    )
 
     slashed_bindings: list[dict] = []
     filled_pids: set[str] = set()
-    for gi, (_gtype, _loc, grp) in enumerate(groups):
-        if gi not in selected:
-            slashed_bindings.extend(grp)
-        else:
-            for binding in grp:
-                for pid in _binding_cell_pids(binding):
-                    filled_pids.add(pid.lower())
-                row_idx = _row_index_from_radiation_point(str(binding.get("radiationPoint") or ""))
-                seq_field = seq_fields.get(row_idx)
-                if isinstance(seq_field, dict):
-                    spid = str(seq_field.get("pdfFieldId") or seq_field.get("id") or "").strip().lower()
-                    if spid:
-                        filled_pids.add(spid)
+    for bi, binding in enumerate(bindings):
+        if bi not in selected:
+            slashed_bindings.append(binding)
+            continue
+        for pid in _binding_cell_pids(binding):
+            filled_pids.add(pid.lower())
+        seq_field = _seq_field_for_binding(binding, pid_to_field, frontend_obj)
+        if isinstance(seq_field, dict):
+            spid = str(seq_field.get("pdfFieldId") or seq_field.get("id") or "").strip().lower()
+            if spid:
+                filled_pids.add(spid)
 
     return {
-        "groups": len(groups),
-        "selected": selected_groups,
+        "rows": len(bindings),
+        "selected": len(selected),
         "slashed": slashed_rows,
         "slashedBindings": slashed_bindings,
         "filledPids": sorted(filled_pids),
         "bindingCount": len(bindings),
+        "seqAssigned": seq_assigned,
     }
 
 
@@ -663,7 +828,6 @@ def _finalize_rp_slashed_bindings(
     if not slashed_bindings:
         return
     pid_to_field = _index_fields_by_pdf_field_id(frontend_obj)
-    seq_fields = _seq_fields_by_row_index(frontend_obj)
     location_fields = _location_fields_by_row_index(frontend_obj)
     for binding in slashed_bindings:
         if isinstance(binding, dict):
@@ -671,29 +835,39 @@ def _finalize_rp_slashed_bindings(
                 payload,
                 binding,
                 pid_to_field=pid_to_field,
-                seq_fields=seq_fields,
+                frontend_obj=frontend_obj,
                 location_fields=location_fields,
             )
 
 
-def _slash_unfilled_rp_table_cells(payload: dict, frontend_obj: dict) -> int:
+def _slash_unfilled_rp_table_cells(
+    payload: dict,
+    frontend_obj: dict,
+    *,
+    managed_pids: set[str] | None = None,
+) -> int:
     """未选中的防护表数据格若仍为空，统一写 /。"""
+    if not managed_pids:
+        managed_pids = _collect_rp_managed_pids(
+            frontend_obj,
+            _build_rp_table_bindings(frontend_obj),
+        )
     dd = payload.get("dynamicData") if isinstance(payload.get("dynamicData"), dict) else {}
     tr = payload.get("testResult") if isinstance(payload.get("testResult"), dict) else {}
+    pid_to_field = _index_fields_by_pdf_field_id(frontend_obj)
     slashed = 0
-    for field in _iter_form_fields(frontend_obj):
-        if not isinstance(field, dict):
-            continue
-        if not _is_rp_table_managed_field(field) or _is_background_level_field(field):
-            continue
-        pid = str(field.get("pdfFieldId") or field.get("id") or "").strip().lower()
-        if not pid:
+    for pid in sorted(managed_pids):
+        if not pid or not _F_ID_RE.match(pid):
             continue
         cur = dd.get(pid)
         if cur is None or cur == "":
             cur = tr.get(pid)
         if cur in (None, ""):
-            _write_field_value_to_payload(payload, field, _SLASH)
+            field = pid_to_field.get(pid)
+            if isinstance(field, dict):
+                _write_field_value_to_payload(payload, field, _SLASH)
+            else:
+                _write_pid_value_to_payload(payload, pid, _SLASH)
             slashed += 1
     return slashed
 
@@ -1116,7 +1290,7 @@ def build_mock_submit_from_frontend_template(
     payload["dynamicData"]["f2"] = task_no
 
     rp_bindings = _build_rp_table_bindings(frontend_obj)
-    rp_table_pids = _collect_rp_table_pids(rp_bindings)
+    rp_managed_pids = _collect_rp_managed_pids(frontend_obj, rp_bindings)
 
     field_count = 0
     filled_count = 0
@@ -1130,7 +1304,10 @@ def build_mock_submit_from_frontend_template(
             if (field_count + seed) % max(1, int(1 / fill_ratio)) != 0:
                 continue
 
-        if _is_rp_table_managed_field(field) and not _is_background_level_field(field):
+        if (
+            _is_rp_table_managed_field(field, managed_pids=rp_managed_pids)
+            and not _is_background_level_field(field)
+        ):
             continue
 
         if _field_should_skip_mock_fill(field):
@@ -1151,7 +1328,11 @@ def build_mock_submit_from_frontend_template(
         frontend_obj,
         rp_stats.get("slashedBindings") if isinstance(rp_stats.get("slashedBindings"), list) else [],
     )
-    rp_stats["gapSlashed"] = _slash_unfilled_rp_table_cells(payload, frontend_obj)
+    rp_stats["gapSlashed"] = _slash_unfilled_rp_table_cells(
+        payload,
+        frontend_obj,
+        managed_pids=rp_managed_pids,
+    )
 
     payload["_mockMeta"] = {
         "generator": "mock_inspection_submit",
@@ -1454,6 +1635,7 @@ def execute_mock_submit_for_equipment_link(
                 case=case,
                 project=project,
                 sync_equipment_payload=payload,
+                library_task=library_task,
             )
         except InspectionSubmitExecutionError as exc:
             raise ValueError(f"任务 {resolved_no}：{exc.message}") from exc

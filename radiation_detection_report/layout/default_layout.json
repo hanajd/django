@@ -52,11 +52,11 @@
     "complex_location_main_width": 205.4,
     "complex_location_sub_width": 127.55,
     "header_labels": {
-      "point_id": "检测点\n编号",
+      "point_id": "序号",
       "location": "检测点位置",
-      "result": "检测结果\n(μSv/h)",
-      "standard": "标准要求\n(μSv/h)",
-      "evaluation": "结果\n评价"
+      "result": "报出值D，μSv/h",
+      "standard": "标准要求",
+      "evaluation": "结果评价"
     },
     "background_row": {
       "label": "本底值（μSv/h）",

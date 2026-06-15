@@ -5,7 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from apps.core.htmlpdf_service import parse_template_json
-from apps.core.library_access import library_file_access_allowed, library_user_may_edit_library_task
+from apps.core.library_access import (
+    library_template_file_accessible_for_task,
+    library_user_may_edit_library_task,
+)
 from apps.core.library_task_template_binding_service import get_task_template_pair
 from apps.core.models import LibraryFile, LibraryTask
 from apps.core import pipeline_service
@@ -429,7 +432,7 @@ def build_report_task_template_context(
     if json_lf is None and is_report:
         _pdf_lf, json_lf = get_task_template_pair(task)
     report_parsed: dict | None = None
-    if json_lf and library_file_access_allowed(user, json_lf):
+    if json_lf and library_template_file_accessible_for_task(user, task, json_lf):
         report_parsed = _load_parsed_template_json(json_lf)
         report_site_field_configs = _load_report_site_field_configs_from_json_file(json_lf)
         if report_site_field_configs:
@@ -483,10 +486,10 @@ def build_site_template_bundle(user, *, site_task_id: int) -> dict[str, Any]:
         return {"ok": False, "error": "无权访问该现场记录模板"}
 
     pdf_lf, json_lf = _first_template_files_for_task(task)
-    if pdf_lf is None or not library_file_access_allowed(user, pdf_lf):
+    if pdf_lf is None or not library_template_file_accessible_for_task(user, task, pdf_lf):
         return {"ok": False, "error": "该现场记录任务尚未绑定模板 PDF"}
     fields: list[dict[str, Any]] = []
-    if json_lf and library_file_access_allowed(user, json_lf):
+    if json_lf and library_template_file_accessible_for_task(user, task, json_lf):
         try:
             path = pipeline_service.library_absolute_path(json_lf.relative_path)
             parsed = parse_template_json(path.read_text(encoding="utf-8", errors="replace"))
@@ -650,4 +653,7 @@ def apply_report_site_field_map_to_value_mapping(
         else:
             final_value = "\n".join(picked_parts)
 
+        for key in _field_semantic_candidate_keys(report_field):
+            if key:
+                value_mapping[key] = final_value
         value_mapping[report_pid] = final_value

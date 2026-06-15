@@ -9,28 +9,17 @@ import os
 import re
 from typing import Any, Iterator
 
-from utils.frontend_schema_rule_engine import CANONICAL_SIGNATURE_PDF_FIELD_ROLES
+from utils.frontend_schema_rule_engine import collect_signature_pdf_bindings
 
 _DATA_URL_RE = re.compile(
     r"^data:image/(?P<fmt>jpeg|jpg|png|webp);base64,(?P<data>.+)$",
     re.IGNORECASE | re.DOTALL,
 )
 
-# 现场记录仅保留三个签名角色（与 JS009 V3 模板一致）
+# 现场记录仅保留三个签名角色
 CANONICAL_SIGNATURE_ROLES = ("inspector", "checker", "accompanyingPerson")
 
-# 现行模板：仅 f625 / f632 / f633 三个签名 pdfFieldId
-_PDF_FIELD_TO_SIGNATURE_ROLE: dict[str, str] = {
-    pid: role for pid, (role, _label) in CANONICAL_SIGNATURE_PDF_FIELD_ROLES.items()
-}
-
-_SIGNATURE_PDF_FIELD_IDS = frozenset(_PDF_FIELD_TO_SIGNATURE_ROLE.keys())
-
-_ROLE_TO_PDF_FIELD: dict[str, str] = {
-    role: pid for pid, (role, _label) in CANONICAL_SIGNATURE_PDF_FIELD_ROLES.items()
-}
-
-# 旧版提交只读归并，禁止写回 dynamicData
+# 旧版提交只读归并（dynamicData 历史 f 槽）
 _LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE: dict[str, str] = {
     "f36": "inspector",
     "f35": "checker",
@@ -40,7 +29,81 @@ _LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE: dict[str, str] = {
     "f77": "accompanyingPerson",
 }
 
+# 曾误将 f625/f632/f633 硬编码为签名；只读兼容已落盘旧提交，禁止用于新模板/schema
+_STALE_MISASSIGNED_SIGNATURE_PDF_FIELD_ROLES: dict[str, str] = {
+    "f625": "inspector",
+    "f632": "checker",
+    "f633": "accompanyingPerson",
+}
+
 _LEGACY_SIGNATURE_PDF_FIELD_IDS = frozenset(_LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE.keys())
+_STALE_SIGNATURE_PDF_FIELD_IDS = frozenset(_STALE_MISASSIGNED_SIGNATURE_PDF_FIELD_ROLES.keys())
+
+
+def _signature_maps_for_payload(
+    payload: dict | None,
+    *,
+    template_obj: dict | None = None,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """role↔pdfFieldId：优先模板/steps 动态解析，叠加旧版只读 f 槽。"""
+    role_to_pdf, pdf_to_role = collect_signature_pdf_bindings(template_obj, payload=payload)
+    role_to_pdf = dict(role_to_pdf)
+    pdf_to_role = dict(pdf_to_role)
+    for pid, role in _LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE.items():
+        pdf_to_role.setdefault(pid, role)
+    for pid, role in _STALE_MISASSIGNED_SIGNATURE_PDF_FIELD_ROLES.items():
+        pdf_to_role.setdefault(pid, role)
+    for role in CANONICAL_SIGNATURE_ROLES:
+        if role not in role_to_pdf:
+            for pid, r in pdf_to_role.items():
+                if r == role:
+                    role_to_pdf[role] = pid
+                    break
+    return role_to_pdf, pdf_to_role
+
+
+def _pdf_field_to_signature_role_map(
+    payload: dict | None = None,
+    *,
+    template_obj: dict | None = None,
+) -> dict[str, str]:
+    _, pdf_to_role = _signature_maps_for_payload(payload, template_obj=template_obj)
+    return pdf_to_role
+
+
+def _role_to_pdf_field_map(
+    payload: dict | None = None,
+    *,
+    template_obj: dict | None = None,
+) -> dict[str, str]:
+    role_to_pdf, _ = _signature_maps_for_payload(payload, template_obj=template_obj)
+    return role_to_pdf
+
+
+def _dynamic_signature_field_ids(
+    payload: dict | None = None,
+    *,
+    template_obj: dict | None = None,
+) -> frozenset[str]:
+    return frozenset(_pdf_field_to_signature_role_map(payload, template_obj=template_obj).keys())
+
+
+# 模块级默认（无 payload 时仅旧版 f 槽；调用方应优先传 payload/template）
+_PDF_FIELD_TO_SIGNATURE_ROLE: dict[str, str] = {
+    **_LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE,
+    **_STALE_MISASSIGNED_SIGNATURE_PDF_FIELD_ROLES,
+}
+_SIGNATURE_PDF_FIELD_IDS = frozenset(_PDF_FIELD_TO_SIGNATURE_ROLE.keys())
+_ROLE_TO_PDF_FIELD: dict[str, str] = {
+    role: next((pid for pid, r in _PDF_FIELD_TO_SIGNATURE_ROLE.items() if r == role), "")
+    for role in CANONICAL_SIGNATURE_ROLES
+}
+_ROLE_TO_PDF_FIELD = {k: v for k, v in _ROLE_TO_PDF_FIELD.items() if v}
+
+# 无 payload 时的兜底集合（旧版 + 历史误映射）；新逻辑请用 ``_dynamic_signature_field_ids(payload)``
+_DYNAMIC_SIGNATURE_FIELD_IDS = (
+    _SIGNATURE_PDF_FIELD_IDS | _LEGACY_SIGNATURE_PDF_FIELD_IDS | _STALE_SIGNATURE_PDF_FIELD_IDS
+)
 
 _ROLE_ALIAS_TO_CANONICAL: dict[str, str] = {
     "inspector": "inspector",
@@ -70,9 +133,6 @@ _ROLE_ALIAS_TO_CANONICAL: dict[str, str] = {
 _SIGNATURE_KEYS = frozenset(_ROLE_ALIAS_TO_CANONICAL.keys()) | frozenset(
     CANONICAL_SIGNATURE_ROLES
 )
-
-# dynamicData 中签名字段 pdfFieldId（现行 + 旧版只读）
-_DYNAMIC_SIGNATURE_FIELD_IDS = _SIGNATURE_PDF_FIELD_IDS | _LEGACY_SIGNATURE_PDF_FIELD_IDS
 
 _MIN_INLINE_BINARY_LEN = 120
 
@@ -232,9 +292,13 @@ def consolidate_submit_signatures(payload: dict) -> dict:
         if _is_stored_media_path(s) or _looks_like_inline_image(s):
             buckets[role].append(s)
 
+    role_to_pdf = _role_to_pdf_field_map(out)
+    pdf_to_role = _pdf_field_to_signature_role_map(out)
+    dynamic_ids = set(pdf_to_role.keys())
+
     for k, v in sig_in.items():
         _offer(str(k), v)
-    for pid in _DYNAMIC_SIGNATURE_FIELD_IDS:
+    for pid in dynamic_ids:
         _offer(pid, dd.get(pid))
 
     # 误写入 f665/f676/f677 的签名图：仅当对应角色仍空时归位到检测员/校核/陪同
@@ -263,9 +327,9 @@ def consolidate_submit_signatures(payload: dict) -> dict:
 
     if isinstance(out.get("dynamicData"), dict):
         dd_out = out["dynamicData"]
-        for pid in _SIGNATURE_PDF_FIELD_IDS:
-            role = _PDF_FIELD_TO_SIGNATURE_ROLE.get(pid)
-            if role and merged.get(role):
+        for role in CANONICAL_SIGNATURE_ROLES:
+            pid = role_to_pdf.get(role)
+            if pid and merged.get(role):
                 dd_out[pid] = merged[role]
         for pid, _role in _LEGACY_MISPLACED:
             if _looks_like_inline_image(dd_out.get(pid)) or _is_stored_media_path(
@@ -291,13 +355,15 @@ def extract_canonical_signature_assets(payload: dict) -> tuple[dict, list[dict]]
 
     hash_to_pending: dict[str, dict] = {}
 
+    role_to_pdf = _role_to_pdf_field_map(out)
+
     for role in CANONICAL_SIGNATURE_ROLES:
         val = sig.get(role)
         if not isinstance(val, str) or not val.strip():
             sig[role] = None
             continue
         if _is_stored_media_path(val):
-            pid = _ROLE_TO_PDF_FIELD.get(role)
+            pid = role_to_pdf.get(role)
             if pid and isinstance(out.get("dynamicData"), dict):
                 out["dynamicData"][pid] = val.strip()
             continue
@@ -313,14 +379,14 @@ def extract_canonical_signature_assets(payload: dict) -> tuple[dict, list[dict]]
         if digest in hash_to_pending:
             item = hash_to_pending[digest]
             item.setdefault("targets", []).append(("signatures", role))
-            pid = _ROLE_TO_PDF_FIELD.get(role)
+            pid = role_to_pdf.get(role)
             if pid:
                 item["targets"].append(("dynamicData", pid))
             sig[role] = ""
             continue
         filename = f"{role}.{ext}"
         targets: list[tuple] = [("signatures", role)]
-        pid = _ROLE_TO_PDF_FIELD.get(role)
+        pid = role_to_pdf.get(role)
         if pid:
             targets.append(("dynamicData", pid))
         item = {

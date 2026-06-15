@@ -60,6 +60,7 @@ from apps.core.library_access import (
     USER_PROFILE_ONLY_PERM_OVERRIDE_KEYS,
     library_export_merge_allowed_under_own_files_scope,
     library_file_access_allowed,
+    library_template_file_accessible_for_task,
     library_user_may_delete_library_file,
     library_file_write_blocked_by_project_revocation,
     library_scope_own_files_only,
@@ -3548,27 +3549,42 @@ def _annotate_file_library_display(user, files: list) -> None:
             f.file_library_project_key = "none"
             f.file_library_project_heading = "未关联项目"
 
-        report_task = _resolve_report_task_for_case(task_no, project) if project is not None else None
-        if report_task is not None:
-            f.file_library_report_key = str(report_task.pk)
-            f.file_library_report_heading = f"{report_task.code} · {report_task.name}"
-        else:
-            f.file_library_report_key = "none"
-            f.file_library_report_heading = "未配置报告任务"
+        if f.category == LibraryFile.CATEGORY_REPORT:
+            from apps.api.inspection_pdf_service import resolve_report_library_task_for_file
 
-        if f.category == LibraryFile.CATEGORY_INSPECTION_SUBMIT:
-            site_task = None
-            site_tasks = [
-                t
-                for t in tasks
-                if getattr(t, "output_target", None) == LibraryTask.OUTPUT_SITE_RECORD
-            ]
-            if site_tasks:
-                site_task = sorted(site_tasks, key=lambda x: ((x.code or ""), x.id))[0]
-            elif project is not None and task_no:
-                lt = _resolve_library_task_for_task_no(task_no, project)
-                if lt is not None and lt.output_target == LibraryTask.OUTPUT_SITE_RECORD:
-                    site_task = lt
+            report_task = resolve_report_library_task_for_file(
+                f, case, project, bound_tasks=tasks
+            )
+            if report_task is not None:
+                f.file_library_report_key = str(report_task.pk)
+                f.file_library_report_heading = f"{report_task.code} · {report_task.name}"
+            else:
+                f.file_library_report_key = "none"
+                f.file_library_report_heading = "未配置报告任务"
+            f.file_library_site_record_key = ""
+            f.file_library_site_record_heading = ""
+            f.file_library_submit_bucket = ""
+        elif f.category in (
+            LibraryFile.CATEGORY_INSPECTION_SUBMIT,
+            LibraryFile.CATEGORY_SITE_RECORD,
+        ):
+            from apps.api.inspection_pdf_service import resolve_site_record_library_task_for_file
+            from apps.core.project_numbering import parent_report_task_for_site_task
+
+            site_task = resolve_site_record_library_task_for_file(f, case, project)
+            report_task = (
+                parent_report_task_for_site_task(site_task, project)
+                if site_task is not None and project is not None
+                else None
+            )
+            if report_task is None and project is not None:
+                report_task = _resolve_report_task_for_case(task_no, project)
+            if report_task is not None:
+                f.file_library_report_key = str(report_task.pk)
+                f.file_library_report_heading = f"{report_task.code} · {report_task.name}"
+            else:
+                f.file_library_report_key = "none"
+                f.file_library_report_heading = "未配置报告任务"
             if site_task is not None:
                 f.file_library_site_record_key = str(site_task.pk)
                 nm = (site_task.name or "").strip() or (site_task.code or "").strip() or "?"
@@ -3577,10 +3593,20 @@ def _annotate_file_library_display(user, files: list) -> None:
             else:
                 f.file_library_site_record_key = "none"
                 f.file_library_site_record_heading = "未绑定现场记录任务"
-            from apps.core.library_file_service import classify_inspection_submit_library_file
+            if f.category == LibraryFile.CATEGORY_INSPECTION_SUBMIT:
+                from apps.core.library_file_service import classify_inspection_submit_library_file
 
-            f.file_library_submit_bucket = classify_inspection_submit_library_file(f)
+                f.file_library_submit_bucket = classify_inspection_submit_library_file(f)
+            else:
+                f.file_library_submit_bucket = ""
         else:
+            report_task = _resolve_report_task_for_case(task_no, project) if project is not None else None
+            if report_task is not None:
+                f.file_library_report_key = str(report_task.pk)
+                f.file_library_report_heading = f"{report_task.code} · {report_task.name}"
+            else:
+                f.file_library_report_key = "none"
+                f.file_library_report_heading = "未配置报告任务"
             f.file_library_site_record_key = ""
             f.file_library_site_record_heading = ""
             f.file_library_submit_bucket = ""
@@ -3700,12 +3726,13 @@ def _split_inspection_submit_files(flist: list) -> tuple[list, list, list]:
 
 
 def _nest_file_library_by_project_report_site(files: list) -> list[dict]:
-    """三级：检测项目 → 报告任务 → 现场记录任务 → 文件（检测提交分类列表）。"""
+    """三级：检测项目 → 报告任务 → 现场记录任务 → 文件；报告 PDF 挂在报告任务层。"""
     from collections import defaultdict
 
     tree: dict[str, dict[str, dict[str, list]]] = defaultdict(
         lambda: defaultdict(lambda: defaultdict(list))
     )
+    report_files: dict[tuple[str, str], list] = defaultdict(list)
     project_heading: dict[str, str] = {}
     report_heading: dict[tuple[str, str], str] = {}
     site_heading: dict[tuple[str, str, str], str] = {}
@@ -3713,37 +3740,54 @@ def _nest_file_library_by_project_report_site(files: list) -> list[dict]:
     for f in files:
         pk = getattr(f, "file_library_project_key", "none")
         rk = getattr(f, "file_library_report_key", "none")
-        sk = getattr(f, "file_library_site_record_key", "none") or "none"
-        tree[pk][rk][sk].append(f)
         project_heading[pk] = getattr(f, "file_library_project_heading", "未关联项目")
         report_heading[(pk, rk)] = getattr(f, "file_library_report_heading", "报告")
+        if f.category == LibraryFile.CATEGORY_REPORT:
+            report_files[(pk, rk)].append(f)
+            continue
+        sk = getattr(f, "file_library_site_record_key", "none") or "none"
+        tree[pk][rk][sk].append(f)
         site_heading[(pk, rk, sk)] = getattr(f, "file_library_site_record_heading", "现场记录")
 
     def _project_latest_ts(pkey: str) -> float:
         latest = None
-        for _rk, smap in tree[pkey].items():
+        for _rk, smap in tree.get(pkey, {}).items():
             for _sk, flist in smap.items():
                 for lf in flist:
                     if lf.created_at and (latest is None or lf.created_at > latest):
                         latest = lf.created_at
+        for (_pk, _rk), flist in report_files.items():
+            if _pk != pkey:
+                continue
+            for lf in flist:
+                if lf.created_at and (latest is None or lf.created_at > latest):
+                    latest = lf.created_at
         return latest.timestamp() if latest else 0.0
 
-    sorted_pkeys = sorted(tree.keys(), key=lambda k: (-_project_latest_ts(k), project_heading.get(k, "")))
+    all_pkeys = set(tree.keys()) | {pk for (pk, _rk) in report_files.keys()}
+    sorted_pkeys = sorted(all_pkeys, key=lambda k: (-_project_latest_ts(k), project_heading.get(k, "")))
 
     out: list[dict] = []
     for pkey in sorted_pkeys:
-        rmap = tree[pkey]
+        rmap = tree.get(pkey, {})
+        reports: list[dict] = []
+        total_n = 0
+        report_rkeys = {rk for (pk, rk) in report_files.keys() if pk == pkey}
         sorted_rkeys = sorted(
-            rmap.keys(),
+            set(rmap.keys()) | report_rkeys,
             key=lambda rk: (
-                -max((_leaf_latest_ts(rmap[rk][sk]) for sk in rmap[rk]), default=0.0),
+                -max(
+                    (
+                        _leaf_latest_ts(rmap.get(rk, {}).get(sk, []))
+                        for sk in rmap.get(rk, {})
+                    ),
+                    default=_leaf_latest_ts(report_files.get((pkey, rk), [])),
+                ),
                 report_heading.get((pkey, rk), ""),
             ),
         )
-        reports: list[dict] = []
-        total_n = 0
         for rkey in sorted_rkeys:
-            smap = rmap[rkey]
+            smap = rmap.get(rkey, {})
             sorted_skeys = sorted(
                 smap.keys(),
                 key=lambda sk: (-_leaf_latest_ts(smap[sk]), site_heading.get((pkey, rkey, sk), "")),
@@ -3751,6 +3795,8 @@ def _nest_file_library_by_project_report_site(files: list) -> list[dict]:
             site_records: list[dict] = []
             subtotal = 0
             for skey in sorted_skeys:
+                if skey == "none":
+                    continue
                 flist = smap[skey]
                 flist.sort(
                     key=lambda lf: (
@@ -3771,10 +3817,19 @@ def _nest_file_library_by_project_report_site(files: list) -> list[dict]:
                     }
                 )
                 subtotal += len(flist)
+            rpt_flist = list(report_files.get((pkey, rkey), []))
+            rpt_flist.sort(
+                key=lambda lf: (
+                    -(lf.created_at.timestamp() if lf.created_at else 0),
+                    -lf.pk,
+                )
+            )
+            subtotal += len(rpt_flist)
             reports.append(
                 {
                     "report_key": rkey,
                     "report_heading": report_heading.get((pkey, rkey), "报告"),
+                    "files": rpt_flist,
                     "file_count": subtotal,
                     "site_records": site_records,
                 }
@@ -4778,6 +4833,7 @@ def file_library(request):
             template_pdf_id=template_pdf_id,
             template_json_name=template_json_name,
             task_obj=report_task,
+            source_payload=source_payload,
         )
         if not ok:
             messages.error(
@@ -5160,7 +5216,7 @@ def file_library(request):
     if tab == "template":
         file_library_nested_groups = _nest_file_library_by_library_task(files)
         file_library_nested_mode = "library_task"
-    elif tab == "inspection_submit":
+    elif tab in ("inspection_submit", "site_record", "report"):
         file_library_nested_groups = _nest_file_library_by_project_report_site(files)
         file_library_nested_mode = "project_report_site"
     else:
@@ -5235,6 +5291,8 @@ def file_library(request):
         fl_path=fl_path,
         tree_mode=file_library_tree_mode,
         commission_org_nav=commission_org_nav,
+        use_submit_buckets=(tab == "inspection_submit"),
+        show_report_files_at_report_level=(tab == "report"),
     )
     file_library_use_explorer = True
     fl_base = reverse("file_library") + _file_library_query_string(
@@ -5910,7 +5968,20 @@ def htmlpdf_api_import_json_from_library(request):
     except Exception:
         return JsonResponse({"error": "template_id 无效"}, status=400)
     lf = get_object_or_404(LibraryFile, pk=template_id, category=LibraryFile.CATEGORY_TEMPLATE)
-    if not library_file_access_allowed(request.user, lf):
+    lt_raw = data.get("library_task_id") or data.get("libraryTaskId")
+    task_for_access = None
+    if lt_raw is not None and str(lt_raw).strip() != "":
+        try:
+            task_for_access = LibraryTask.objects.filter(pk=int(lt_raw)).first()
+        except (TypeError, ValueError):
+            pass
+    if task_for_access is not None:
+        file_allowed = library_template_file_accessible_for_task(
+            request.user, task_for_access, lf
+        )
+    else:
+        file_allowed = library_file_access_allowed(request.user, lf)
+    if not file_allowed:
         return JsonResponse({"error": "无权访问该模板"}, status=403)
     path = pipeline_service.library_absolute_path(lf.relative_path)
     if not path.is_file():
@@ -5958,7 +6029,20 @@ def htmlpdf_api_use_template_pdf(request):
     except Exception:
         return JsonResponse({"error": "template_id 无效"}, status=400)
     lf = get_object_or_404(LibraryFile, pk=template_id, category=LibraryFile.CATEGORY_TEMPLATE)
-    if not library_file_access_allowed(request.user, lf):
+    lt_raw = data.get("library_task_id") or data.get("libraryTaskId")
+    task_for_access = None
+    if lt_raw is not None and str(lt_raw).strip() != "":
+        try:
+            task_for_access = LibraryTask.objects.filter(pk=int(lt_raw)).first()
+        except (TypeError, ValueError):
+            pass
+    if task_for_access is not None:
+        file_allowed = library_template_file_accessible_for_task(
+            request.user, task_for_access, lf
+        )
+    else:
+        file_allowed = library_file_access_allowed(request.user, lf)
+    if not file_allowed:
         return JsonResponse({"error": "无权访问该模板"}, status=403)
     path = pipeline_service.library_absolute_path(lf.relative_path)
     if not path.is_file():

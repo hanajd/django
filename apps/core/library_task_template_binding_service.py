@@ -7,8 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from apps.core.library_access import (
-    library_file_access_allowed,
-    library_user_may_access_assigned_library_task,
+    library_template_file_accessible_for_task,
     library_user_may_edit_library_task,
 )
 from apps.core.library_file_service import (
@@ -426,19 +425,8 @@ def restore_task_template_from_history(*, history_id: int, user) -> dict[str, An
 
 
 def _editor_json_file_accessible(user, task: LibraryTask, lf: LibraryFile) -> bool:
-    """
-    编辑器下拉是否可列出该 JSON。
-
-    轮换进历史的文件会从任务 M2M 解绑，``library_file_access_allowed``  alone 会误判；
-    任务模板库历史表仍可见，故对仍可读的磁盘文件放宽为「可维护/可打开该任务」即可选。
-    """
-    if library_file_access_allowed(user, lf):
-        return True
-    if not library_file_exists_on_disk(lf):
-        return False
-    return library_user_may_edit_library_task(user, task) or library_user_may_access_assigned_library_task(
-        user, task
-    )
+    """编辑器下拉是否可列出该 JSON（含已轮换进历史、已从任务解绑的文件）。"""
+    return library_template_file_accessible_for_task(user, task, lf)
 
 
 def list_task_editor_template_json_options(

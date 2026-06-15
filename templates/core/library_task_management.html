@@ -450,7 +450,7 @@
                                         <td class="px-3 py-2 text-slate-800" title="文件 ID {{ h.file_id_snapshot }}">{{ h.original_name_snapshot|default:h.file_id_snapshot }}</td>
                                         <td class="px-3 py-2 text-slate-500 text-xs whitespace-nowrap">{{ h.replaced_at|date:"Y-m-d H:i" }}</td>
                                         <td class="px-3 py-2 whitespace-nowrap">
-                                            {% if task_edit_mode and h.file_still_available %}
+                                            {% if task_may_edit and task_edit_mode and h.file_still_available %}
                                             <form method="post" class="inline" onsubmit="return confirm('确定将当前 {{ h.file_role|upper }} 绑定恢复为该历史文件？');">
                                                 {% csrf_token %}
                                                 <input type="hidden" name="action" value="restore_task_template_history">
@@ -461,6 +461,8 @@
                                                 {% if rp %}<input type="hidden" name="return_project" value="{{ rp }}">{% endif %}
                                                 <button type="submit" class="text-violet-600 hover:underline text-xs">恢复</button>
                                             </form>
+                                            {% elif task_may_edit and not task_edit_mode and h.file_still_available %}
+                                            <a href="{{ task_library_edit_url }}" class="text-slate-500 hover:text-violet-600 text-xs">进入编辑后恢复</a>
                                             {% elif not h.file_still_available %}
                                             <span class="text-slate-400 text-xs">已删除</span>
                                             {% endif %}

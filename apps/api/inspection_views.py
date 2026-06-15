@@ -605,15 +605,25 @@ def _parse_client_datetime(value):
     return dt
 
 
-def _attach_inspection_submit_files_to_site_tasks(created_rows, task_no: str, project, user) -> None:
-    """将检测提交类文件挂到项目内「现场记录」文件库任务，便于按任务枚举（不依赖旧版 taskNo 文件名前缀）。"""
+def _attach_inspection_submit_files_to_site_tasks(
+    created_rows,
+    task_no: str,
+    project,
+    user,
+    *,
+    library_task=None,
+) -> None:
+    """将检测提交类文件挂到本次提交对应的唯一现场记录任务（避免挂到错误报告/现场环节）。"""
+    from apps.api.inspection_pdf_service import resolve_site_record_task_for_submit_attach
+
     ids = [int(c["id"]) for c in (created_rows or []) if c.get("id")]
-    tids: list[int] = []
-    for t in _pick_submit_generation_tasks(task_no, project):
-        if getattr(t, "output_target", None) == LibraryTask.OUTPUT_SITE_RECORD:
-            tids.append(int(t.pk))
-    if ids and tids:
-        attach_files_to_tasks(ids, tids, user=user)
+    site_task = resolve_site_record_task_for_submit_attach(
+        task_no,
+        project,
+        library_task=library_task,
+    )
+    if ids and site_task is not None:
+        attach_files_to_tasks(ids, [int(site_task.pk)], user=user)
 
 
 def _persist_submit_section_photos(
@@ -623,6 +633,8 @@ def _persist_submit_section_photos(
     project,
     pending_photos: list[dict],
     batch,
+    *,
+    library_task=None,
 ) -> list[dict]:
     """将 sectionPhotos 落盘至 inspection_submits/{委托编号}/{时间戳}/photos/。"""
     if not pending_photos:
@@ -648,7 +660,9 @@ def _persist_submit_section_photos(
         submit_batch=batch,
         submit_subdir="photos",
     )
-    _attach_inspection_submit_files_to_site_tasks(created, task_no, project, user)
+    _attach_inspection_submit_files_to_site_tasks(
+        created, task_no, project, user, library_task=library_task
+    )
     created_idx = 0
     for item in pending_photos:
         if not item.get("raw_bytes"):
@@ -670,6 +684,8 @@ def _persist_submit_binary_assets(
     project,
     pending_items: list[dict],
     batch,
+    *,
+    library_task=None,
 ) -> list[dict]:
     """将 dynamicData/signatures 等提取的二进制落盘，返回与 pending_items 顺序对应的 created 行。"""
     created_rows: list[dict] = []
@@ -696,7 +712,9 @@ def _persist_submit_binary_assets(
         row = created[0] if created else {}
         created_rows.append(row)
         if row:
-            _attach_inspection_submit_files_to_site_tasks([row], task_no, project, user)
+            _attach_inspection_submit_files_to_site_tasks(
+                [row], task_no, project, user, library_task=library_task
+            )
     return created_rows
 
 
@@ -707,6 +725,8 @@ def _persist_submit_payload_file(
     project,
     payload: dict,
     batch,
+    *,
+    library_task=None,
 ):
     """将最终提交 JSON 写入 inspection_submits/{委托编号}/{时间戳}/（payload 应已外置 base64）。"""
     site_base = site_record_name_for_submit_storage(task_no, project)
@@ -723,7 +743,9 @@ def _persist_submit_payload_file(
         submit_batch=batch,
         submit_subdir="",
     )
-    _attach_inspection_submit_files_to_site_tasks(created, task_no, project, user)
+    _attach_inspection_submit_files_to_site_tasks(
+        created, task_no, project, user, library_task=library_task
+    )
 
 
 def _persist_submit_signature_files(
@@ -733,6 +755,8 @@ def _persist_submit_signature_files(
     project,
     submission: InspectionSubmission,
     batch,
+    *,
+    library_task=None,
 ):
     """签名 PNG 写入 inspection_submits/{委托编号}/{时间戳}/signatures/。"""
     raw = submission.raw_payload if isinstance(submission.raw_payload, dict) else {}
@@ -779,7 +803,9 @@ def _persist_submit_signature_files(
         submit_batch=batch,
         submit_subdir="signatures",
     )
-    _attach_inspection_submit_files_to_site_tasks(created, task_no, project, user)
+    _attach_inspection_submit_files_to_site_tasks(
+        created, task_no, project, user, library_task=library_task
+    )
 
 
 class _InspectionTaskAccessMixin:
@@ -1556,9 +1582,6 @@ def ensure_case_for_project_library_task(project, library_task, user):
     task_no = mixin._build_project_task_no(project, library_task)
     if not task_no:
         raise ValueError("任务未挂载到本项目")
-    case = InspectionCase.objects.filter(case_no=task_no).first()
-    if case is not None and case.library_project_id == project.pk:
-        return case, task_no
     assignment = (
         LibraryTaskAssignment.objects.filter(project=project, library_task=library_task)
         .order_by("id")
@@ -1588,6 +1611,7 @@ def execute_inspection_submit_for_task(
     project: LibraryProject,
     ph_map_id: str | None = None,
     sync_equipment_payload: dict | None = None,
+    library_task=None,
 ) -> dict:
     """
     与 ``InspectionSubmitByTaskAPIView.post`` 相同：入库、写 inspection_submits、回填现场记录/报告 PDF。
@@ -1606,7 +1630,9 @@ def execute_inspection_submit_for_task(
     payload["createdAt"] = payload.get("createdAt") or now_iso
     payload["updatedAt"] = payload.get("updatedAt") or now_iso
 
-    gen_tasks = list(_pick_submit_generation_tasks(task_no, project))
+    gen_tasks = list(
+        _pick_submit_generation_tasks(task_no, project, library_task=library_task)
+    )
     submit_task_obj = gen_tasks[0] if gen_tasks else None
     payload, inst_bundle = finalize_submit_instruments_in_payload(
         payload,
@@ -1696,21 +1722,31 @@ def execute_inspection_submit_for_task(
         )
     if ins_rows:
         InspectionSubmissionInstrument.objects.bulk_create(ins_rows)
+    attach_site_task = library_task
+    if attach_site_task is None:
+        attach_site_task = _resolve_library_task_for_task_no(task_no, project)
+
     photo_created = _persist_submit_section_photos(
-        user, task_no, case, project, pending_photos, submit_batch
+        user, task_no, case, project, pending_photos, submit_batch, library_task=attach_site_task
     )
     binary_created = _persist_submit_binary_assets(
-        user, task_no, case, project, pending_binaries, submit_batch
+        user, task_no, case, project, pending_binaries, submit_batch, library_task=attach_site_task
     )
     apply_extracted_asset_urls(storage_payload, pending_photos, photo_created)
     apply_extracted_asset_urls(storage_payload, pending_binaries, binary_created)
     obj.raw_payload = storage_payload
     obj.save(update_fields=["raw_payload"])
-    _persist_submit_payload_file(user, task_no, case, project, storage_payload, submit_batch)
-    _persist_submit_signature_files(user, task_no, case, project, obj, submit_batch)
+    _persist_submit_payload_file(
+        user, task_no, case, project, storage_payload, submit_batch, library_task=attach_site_task
+    )
+    _persist_submit_signature_files(
+        user, task_no, case, project, obj, submit_batch, library_task=attach_site_task
+    )
 
     generation_results = []
-    for task_obj in _pick_submit_generation_tasks(task_no, project):
+    for task_obj in _pick_submit_generation_tasks(
+        task_no, project, library_task=library_task
+    ):
         filled_fields, template_pdf_id, fill_reason, template_json_name = _build_filled_template_fields_for_task(
             task_obj,
             storage_payload,
@@ -1738,6 +1774,7 @@ def execute_inspection_submit_for_task(
             template_pdf_id=template_pdf_id,
             template_json_name=template_json_name,
             task_obj=task_obj,
+            source_payload=storage_payload if task_obj.output_target == LibraryTask.OUTPUT_REPORT else None,
         )
         generation_results.append(
             {
@@ -2005,6 +2042,7 @@ class InspectionTaskManualExportReportAPIView(_InspectionTaskAccessMixin, APIVie
             template_pdf_id=template_pdf_id,
             template_json_name=template_json_name,
             task_obj=report_task,
+            source_payload=source_payload,
         )
         if not ok:
             return _fail(pdf_reason or "报告导出失败", status.HTTP_500_INTERNAL_SERVER_ERROR)

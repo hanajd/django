@@ -627,6 +627,26 @@ def library_template_granted_via_editable_task(user, lf: LibraryFile) -> bool:
     return False
 
 
+def library_template_file_accessible_for_task(user, task, lf: LibraryFile) -> bool:
+    """
+    在指定任务上下文中是否可读该模板文件。
+
+    轮换进历史的文件会从任务 M2M 解绑，仅 ``library_file_access_allowed`` 会误判为无权；
+    任务模板库历史与编辑器下拉已放宽为「可维护/可打开该任务」即可读。
+    """
+    if library_file_access_allowed(user, lf):
+        return True
+    if task is None or lf.category != LibraryFile.CATEGORY_TEMPLATE:
+        return False
+    from apps.core.library_file_service import library_file_exists_on_disk
+
+    if not library_file_exists_on_disk(lf):
+        return False
+    return library_user_may_edit_library_task(user, task) or library_user_may_access_assigned_library_task(
+        user, task
+    )
+
+
 def _library_task_linked_to_user_scoped_projects(user, task) -> bool:
     """任务模板已挂载到当前用户可见的检测项目（分配/自建/主责）。"""
     pids = library_user_scoped_project_ids(user)

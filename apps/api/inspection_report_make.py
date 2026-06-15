@@ -286,6 +286,33 @@ def _normalize_iso_strings_in_test_date_part_slots(value_mapping: dict) -> None:
                 value_mapping[sk] = str(dt.day)
 
 
+_PREFERRED_INSPECTED_UNIT_PDF_FIELD_IDS = ("f6", "f5", "f4", "f3", "f2")
+_PREFERRED_INSPECTED_ADDRESS_PDF_FIELD_IDS = ("f8", "f9", "f7")
+
+
+def _scalar_submit_text_value(v: object) -> str:
+    if v in (None, "") or isinstance(v, (dict, list, bool)):
+        return ""
+    return str(v).strip()
+
+
+def _inspected_unit_from_pdf_field_slots(blob: dict, *, preferred_ids: tuple[str, ...]) -> str:
+    """App/模拟提交常把受检单位写在 hospitalInfo/dynamicData 的 pdfFieldId 槽（如 f6）。"""
+    if not isinstance(blob, dict):
+        return ""
+    for pid in preferred_ids:
+        s = _scalar_submit_text_value(blob.get(pid))
+        if s:
+            return s
+    for k in sorted(blob.keys()):
+        if not isinstance(k, str) or not re.fullmatch(r"f\d+", k, flags=re.IGNORECASE):
+            continue
+        s = _scalar_submit_text_value(blob.get(k))
+        if s:
+            return s
+    return ""
+
+
 def _hospital_info_inspected_unit_name(hi: dict) -> str:
     """hospitalInfo 中受检侧机构名（无模板语境时的兜底顺序）。
 
@@ -303,6 +330,8 @@ def _hospital_info_inspected_unit_name(hi: dict) -> str:
         "entityName",
         "commissionedUnit",
         "inspection",
+        "受检单位",
+        "受检单位名称",
     ):
         v = hi.get(k)
         if isinstance(v, str) and v.strip():
@@ -311,13 +340,29 @@ def _hospital_info_inspected_unit_name(hi: dict) -> str:
             s = str(v).strip()
             if s:
                 return s
+    return _inspected_unit_from_pdf_field_slots(hi, preferred_ids=_PREFERRED_INSPECTED_UNIT_PDF_FIELD_IDS)
+
+
+def _resolve_inspected_unit_name_from_submit(source_data: dict) -> str:
+    hi = source_data.get("hospitalInfo") if isinstance(source_data.get("hospitalInfo"), dict) else {}
+    dd = source_data.get("dynamicData") if isinstance(source_data.get("dynamicData"), dict) else {}
+    for blob in (hi, dd):
+        name = _hospital_info_inspected_unit_name(blob)
+        if name:
+            return name
     return ""
 
 
 def _hospital_info_inspected_unit_address(hi: dict) -> str:
     if not isinstance(hi, dict):
         return ""
-    for k in ("address", "inspectionAddress", "unitAddress", "hospitalAddress"):
+    for k in (
+        "address",
+        "inspectionAddress",
+        "unitAddress",
+        "hospitalAddress",
+        "受检单位地址",
+    ):
         v = hi.get(k)
         if isinstance(v, str) and v.strip():
             return v.strip()
@@ -325,7 +370,53 @@ def _hospital_info_inspected_unit_address(hi: dict) -> str:
             s = str(v).strip()
             if s:
                 return s
+    return _inspected_unit_from_pdf_field_slots(hi, preferred_ids=_PREFERRED_INSPECTED_ADDRESS_PDF_FIELD_IDS)
+
+
+def _resolve_inspected_unit_address_from_submit(source_data: dict) -> str:
+    hi = source_data.get("hospitalInfo") if isinstance(source_data.get("hospitalInfo"), dict) else {}
+    dd = source_data.get("dynamicData") if isinstance(source_data.get("dynamicData"), dict) else {}
+    for blob in (hi, dd):
+        addr = _hospital_info_inspected_unit_address(blob)
+        if addr:
+            return addr
     return ""
+
+
+def _resolve_inspection_type_display(source_data: dict, project=None) -> str:
+    """从现场记录 radio 槽或 reportInfo 解析检测类型展示文案。"""
+    hi = source_data.get("hospitalInfo") if isinstance(source_data.get("hospitalInfo"), dict) else {}
+    dd = source_data.get("dynamicData") if isinstance(source_data.get("dynamicData"), dict) else {}
+    ri = source_data.get("reportInfo") if isinstance(source_data.get("reportInfo"), dict) else {}
+    for blob in (hi, dd):
+        if blob.get("f610") is True:
+            return "验收检测"
+        if blob.get("f609") is True:
+            return "状态检测"
+        if blob.get("f613") is True:
+            return "定期检测"
+    for raw in (
+        ri.get("inspectionType"),
+        ri.get("reportType"),
+        hi.get("testType"),
+        dd.get("f86"),
+    ):
+        t = str(raw or "").strip()
+        if not t:
+            continue
+        tl = t.lower()
+        if tl in {"acceptance", "验收", "验收检测"} or t == "验收检测":
+            return "验收检测"
+        if tl in {"status", "状态", "状态检测"} or t == "状态检测":
+            return "状态检测"
+        if tl in {"periodic", "定期", "定期检测"} or t == "定期检测":
+            return "定期检测"
+        if "状态" in t:
+            return "状态检测"
+        if "验收" in t:
+            return "验收检测"
+    proj_name = str(getattr(project, "name", "") if project is not None else "").strip()
+    return "状态检测" if "状态" in proj_name else "验收检测"
 
 
 def _build_submit_value_mapping(source_data: dict, map_id: str | None = None):
@@ -418,7 +509,7 @@ def _build_submit_derived_value_mapping(
     hospital_info = source_data.get("hospitalInfo") or {}
     equipment_info = source_data.get("equipmentInfo") or {}
     test_result = source_data.get("testResult") or {}
-    hospital_name = _hospital_info_inspected_unit_name(hospital_info)
+    hospital_name = _resolve_inspected_unit_name_from_submit(source_data)
     model = str(equipment_info.get("model") or "")
     device_name = str(equipment_info.get("deviceName") or "")
     year = str(report_info.get("year") or "").strip()
@@ -542,7 +633,7 @@ def _build_submit_derived_value_mapping(
 
     contact_name = (contact_name or str(hospital_info.get("contactPerson") or "")).strip()
     contact_phone = (contact_phone or str(hospital_info.get("contactPhone") or "")).strip()
-    addr = _hospital_info_inspected_unit_address(hospital_info)
+    addr = _resolve_inspected_unit_address_from_submit(source_data)
     rated = str(equipment_info.get("ratedParams") or "")
     mfr = str(equipment_info.get("manufacturer") or "")
     serial = str(equipment_info.get("serialNo") or "")
@@ -629,6 +720,8 @@ def _build_submit_derived_value_mapping(
         derived["委托单位名称"] = _corg
         derived["委托单位_委托单位名称"] = _corg
         derived["commissionOrganization"] = _corg
+
+    derived["检测类型"] = _resolve_inspection_type_display(source_data, project)
 
     if is_report:
         now = timezone.localtime()
@@ -5928,6 +6021,14 @@ def _collect_signature_values(source_data: dict) -> dict[str, str]:
             if key and _is_signature_image_text(v):
                 out[key] = v
 
+    from apps.api.inspection_submit_payload_service import (
+        _dynamic_signature_field_ids,
+        _pdf_field_to_signature_role_map,
+    )
+
+    sig_field_ids = _dynamic_signature_field_ids(source_data)
+    pdf_to_role = _pdf_field_to_signature_role_map(source_data)
+
     # 2) schema fields where type=signature
     steps = source_data.get("steps")
     if isinstance(steps, list):
@@ -5965,44 +6066,29 @@ def _collect_signature_values(source_data: dict) -> dict[str, str]:
                         out[fid] = val
                     # 一对多签名框：将同一签名值扩展到所有关联 pdfFieldId，
                     # 以便模板回填阶段命中每个 image 字段。
-                    src_pdf_id = str(src.get("pdfFieldId") or "").strip()
+                    src_pdf_id = str(src.get("pdfFieldId") or fld.get("pdfFieldId") or "").strip()
                     if src_pdf_id:
-                        from apps.api.inspection_submit_payload_service import (
-                            _DYNAMIC_SIGNATURE_FIELD_IDS,
-                        )
-
-                        if src_pdf_id in _DYNAMIC_SIGNATURE_FIELD_IDS:
-                            out[src_pdf_id] = val
+                        out[src_pdf_id] = val
                     src_pdf_ids = src.get("pdfFieldIds")
                     if isinstance(src_pdf_ids, list):
-                        from apps.api.inspection_submit_payload_service import (
-                            _DYNAMIC_SIGNATURE_FIELD_IDS,
-                        )
-
                         for pid in src_pdf_ids:
                             p = str(pid or "").strip()
-                            if p and p in _DYNAMIC_SIGNATURE_FIELD_IDS:
+                            if p:
                                 out[p] = val
 
-    # 3) dynamicData：仅现行 f625/f632/f633 及旧版签名 f 槽（禁止把质控数值栏当签名扩散）
+    # 3) dynamicData：模板/steps 解析的签名 f 槽 + 旧版只读 f 槽
     dynamic_data = source_data.get("dynamicData")
     if isinstance(dynamic_data, dict):
-        from apps.api.inspection_submit_payload_service import (
-            _DYNAMIC_SIGNATURE_FIELD_IDS,
-            _LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE,
-            _PDF_FIELD_TO_SIGNATURE_ROLE,
-        )
+        from apps.api.inspection_submit_payload_service import _LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE
 
         for k, v in dynamic_data.items():
             key = str(k or "").strip()
-            if not key or key not in _DYNAMIC_SIGNATURE_FIELD_IDS:
+            if not key or key not in sig_field_ids:
                 continue
             if not _is_signature_image_text(v):
                 continue
             out[key] = v
-            role = _PDF_FIELD_TO_SIGNATURE_ROLE.get(key) or _LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE.get(
-                key
-            )
+            role = pdf_to_role.get(key) or _LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE.get(key)
             if role:
                 out[role] = v
 
@@ -6041,6 +6127,27 @@ def _fill_template_fields_with_submit_enhanced(
     4) 特殊「典型值」检测条件/检测结果仍可在末段做行对齐拼接；单项判定第二遍推算。
     """
     signature_values = _collect_signature_values(source_data)
+    from utils.frontend_schema_rule_engine import collect_signature_pdf_bindings
+
+    _sig_template_obj = {
+        "fields": template_fields if isinstance(template_fields, list) else [],
+        "steps": report_template_steps if isinstance(report_template_steps, list) else [],
+    }
+    _, _sig_pdf_to_role = collect_signature_pdf_bindings(
+        _sig_template_obj, payload=source_data if isinstance(source_data, dict) else None
+    )
+    from apps.api.inspection_submit_payload_service import (
+        _LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE,
+        _STALE_MISASSIGNED_SIGNATURE_PDF_FIELD_ROLES,
+    )
+
+    _signature_pdf_ids = set(_sig_pdf_to_role.keys())
+    for pid, role in {
+        **_LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE,
+        **_STALE_MISASSIGNED_SIGNATURE_PDF_FIELD_ROLES,
+    }.items():
+        _signature_pdf_ids.add(pid)
+        _sig_pdf_to_role.setdefault(pid, role)
     value_mapping = _prepare_backfill_value_mapping(
         source_data,
         map_id=map_id,
@@ -6579,25 +6686,27 @@ def _fill_template_fields_with_submit_enhanced(
         return picked
 
     def _pick_signature_for_field(field: dict):
-        """仅 f625/f632/f633 三个签名 image 域：严格按 pdfFieldId 取值。"""
-        from apps.api.inspection_submit_payload_service import (
-            _PDF_FIELD_TO_SIGNATURE_ROLE,
-            _SIGNATURE_PDF_FIELD_IDS,
-        )
+        """签名 image 域：按模板解析的 pdfFieldId 或签字标签命中。"""
+        from utils.frontend_schema_rule_engine import _signature_role_from_label
 
         pid = _field_pdf_id(field)
-        if not pid or pid not in _SIGNATURE_PDF_FIELD_IDS:
+        ft = (field.get("fieldType") or "").lower()
+        label = str(field.get("id") or field.get("title") or field.get("placeholder") or "")
+        is_sig_slot = pid in _signature_pdf_ids or (
+            ft == "image" and _signature_role_from_label(label) is not None
+        )
+        if not is_sig_slot:
             return ""
-        picked = signature_values.get(pid)
+        picked = signature_values.get(pid) if pid else ""
         if picked:
             return picked
-        role = _PDF_FIELD_TO_SIGNATURE_ROLE.get(pid)
+        role = _sig_pdf_to_role.get(pid or "")
         if role:
             picked = signature_values.get(role)
             if picked:
                 return picked
         dd = source_data.get("dynamicData")
-        if isinstance(dd, dict):
+        if isinstance(dd, dict) and pid:
             val = dd.get(pid)
             if _is_signature_image_text(val):
                 return val
@@ -6632,10 +6741,13 @@ def _fill_template_fields_with_submit_enhanced(
             )
             continue
         if field_type == "image":
-            from apps.api.inspection_submit_payload_service import _SIGNATURE_PDF_FIELD_IDS
-
             pid_img = _field_pdf_id(field)
-            if pid_img in _SIGNATURE_PDF_FIELD_IDS:
+            from utils.frontend_schema_rule_engine import _signature_role_from_label
+
+            label_img = str(field.get("id") or field.get("title") or field.get("placeholder") or "")
+            if pid_img in _signature_pdf_ids or (
+                _signature_role_from_label(label_img) is not None
+            ):
                 picked_img = _pick_signature_for_field(field)
             else:
                 picked_img = _pick_dynamic_image_for_pdf_field(field, source_data)
@@ -7208,22 +7320,10 @@ def _prepare_backfill_value_mapping(
 
 
 def _resolve_report_task_for_case(task_no: str, project):
-    """
-    解析当前案件应使用的报告任务。
-    优先规则：
-    1) taskNo 直接对应且输出目标=report 的任务；
-    2) 项目中第一个输出目标=report 的任务。
-    """
-    from apps.api.inspection_pdf_service import _resolve_library_task_for_task_no
+    """解析当前案件应使用的报告任务（含现场记录 taskNo → 父报告）。"""
+    from apps.api.inspection_pdf_service import resolve_report_task_for_case
 
-    task_obj = _resolve_library_task_for_task_no(task_no, project)
-    if task_obj is not None and task_obj.output_target == LibraryTask.OUTPUT_REPORT:
-        return task_obj
-    return (
-        project.library_tasks.filter(output_target=LibraryTask.OUTPUT_REPORT)
-        .order_by("code", "id")
-        .first()
-    )
+    return resolve_report_task_for_case(task_no, project)
 
 
 def _normalize_fields_for_htmlpdf(fields):
@@ -7387,6 +7487,7 @@ def _persist_filled_pdf_from_submit(
     template_pdf_id=None,
     template_json_name: str = "",
     task_obj=None,
+    source_payload: dict | None = None,
 ):
     from apps.api.inspection_pdf_service import _resolve_library_task_for_task_no
 
@@ -7421,6 +7522,25 @@ def _persist_filled_pdf_from_submit(
     try:
         source_pdf = pipeline_service.library_absolute_path(template_pdf_lf.relative_path)
         pdf_bytes = htmlpdf_service.build_filled_pdf(normalized_fields, source_pdf)
+        if (
+            task_obj is not None
+            and task_obj.output_target == LibraryTask.OUTPUT_REPORT
+            and isinstance(source_payload, dict)
+            and source_payload
+        ):
+            from radiation_detection_report.report_pdf_integrator import (
+                try_enrich_report_pdf_with_radiation_table,
+            )
+
+            pdf_bytes = try_enrich_report_pdf_with_radiation_table(
+                pdf_bytes,
+                source_payload=source_payload,
+                project=project,
+                case=case,
+                report_task=task_obj,
+                task_no=task_no,
+                manual_device_count=None,
+            )
     except Exception as exc:
         return False, f"PDF 渲染失败: {exc}", None
     output_category = LibraryFile.CATEGORY_REPORT if task_obj.output_target == LibraryTask.OUTPUT_REPORT else LibraryFile.CATEGORY_SITE_RECORD

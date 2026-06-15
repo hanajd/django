@@ -470,12 +470,11 @@ def _report_file_count(rg: dict, *, site_level: bool) -> int:
             return int(rg["file_count"])
         except (TypeError, ValueError):
             pass
+    total = len(rg.get("files") or [])
     if site_level:
-        total = 0
         for sg in rg.get("site_records") or []:
             total += _dict_file_count(sg)
-        return total
-    return len(rg.get("files") or [])
+    return total
 
 
 def _project_file_count(pg: dict, *, site_level: bool) -> int:
@@ -759,6 +758,8 @@ def build_file_library_explorer(
     fl_path: str,
     tree_mode: str,
     commission_org_nav: list[dict],
+    use_submit_buckets: bool = True,
+    show_report_files_at_report_level: bool = False,
 ) -> tuple[list[TreeNode], list[BreadcrumbItem], list[FolderEntry], list]:
     """
     文件库主区：按路径只展示当前层级的子文件夹；文件列表由 views 在叶子层注入。
@@ -782,9 +783,21 @@ def build_file_library_explorer(
         return tree, crumbs, folders, files_here
 
     if nested_mode == "project_report_site":
-        return _explorer_project_report(path, segs, crumbs, folders, nested_groups, tree, site_level=True)
+        return _explorer_project_report(
+            path,
+            segs,
+            crumbs,
+            folders,
+            nested_groups,
+            tree,
+            site_level=True,
+            use_submit_buckets=use_submit_buckets,
+            show_report_files_at_report_level=show_report_files_at_report_level,
+        )
     if nested_mode == "project_report":
-        return _explorer_project_report(path, segs, crumbs, folders, nested_groups, tree, site_level=False)
+        return _explorer_project_report(
+            path, segs, crumbs, folders, nested_groups, tree, site_level=False
+        )
 
   # trash / flat: root = all files passed in nested_groups as flat? views handles separately
     return tree, crumbs, folders, files_here
@@ -799,6 +812,8 @@ def _explorer_project_report(
     tree: list[TreeNode],
     *,
     site_level: bool,
+    use_submit_buckets: bool = True,
+    show_report_files_at_report_level: bool = False,
 ) -> tuple[list[TreeNode], list[BreadcrumbItem], list[FolderEntry], list]:
     files_here: list = []
 
@@ -815,16 +830,18 @@ def _explorer_project_report(
                 for sg in sites:
                     sk = str(sg.get("site_key", "none"))
                     sn = _dict_file_count(sg)
-                    bucket_nodes = [
-                        TreeNode(
-                            id=f"s-{sk}-{g_seg}",
-                            label=label,
-                            path=f"p-{pk}/r-{rk}/s-{sk}/{g_seg}",
-                            node_type="folder",
-                            count=len(_site_bucket_file_list(sg, bucket)),
-                        )
-                        for bucket, g_seg, label, _icon in _INSPECTION_SUBMIT_BUCKETS
-                    ]
+                    bucket_nodes: list[TreeNode] = []
+                    if use_submit_buckets:
+                        bucket_nodes = [
+                            TreeNode(
+                                id=f"s-{sk}-{g_seg}",
+                                label=label,
+                                path=f"p-{pk}/r-{rk}/s-{sk}/{g_seg}",
+                                node_type="folder",
+                                count=len(_site_bucket_file_list(sg, bucket)),
+                            )
+                            for bucket, g_seg, label, _icon in _INSPECTION_SUBMIT_BUCKETS
+                        ]
                     s_children.append(
                         TreeNode(
                             id=f"s-{sk}",
@@ -919,18 +936,23 @@ def _explorer_project_report(
             crumbs.append(BreadcrumbItem(str(rg.get("report_heading") or "报告"), f"p-{pk}/r-{rk}"))
             if site_level:
                 if len(segs) == 2:
-                    for sg in rg.get("site_records") or []:
-                        sk = str(sg.get("site_key", "none"))
-                        sn = _dict_file_count(sg)
-                        folders.append(
-                            FolderEntry(
-                                kind="folder",
-                                label=str(sg.get("site_heading") or "现场记录"),
-                                path=f"p-{pk}/r-{rk}/s-{sk}",
-                                meta=f"{sn} 个文件",
-                                count=sn,
+                    if show_report_files_at_report_level:
+                        files_here = list(rg.get("files") or [])
+                    else:
+                        for sg in rg.get("site_records") or []:
+                            sk = str(sg.get("site_key", "none"))
+                            if sk == "none":
+                                continue
+                            sn = _dict_file_count(sg)
+                            folders.append(
+                                FolderEntry(
+                                    kind="folder",
+                                    label=str(sg.get("site_heading") or "现场记录"),
+                                    path=f"p-{pk}/r-{rk}/s-{sk}",
+                                    meta=f"{sn} 个文件",
+                                    count=sn,
+                                )
                             )
-                        )
                     return tree, crumbs, folders, files_here
                 if len(segs) >= 3 and segs[2][0] == "s":
                     sk = segs[2][1]
@@ -942,7 +964,10 @@ def _explorer_project_report(
                             BreadcrumbItem(str(sg.get("site_heading") or "现场记录"), site_base)
                         )
                         if len(segs) == 3:
-                            folders.extend(_site_submit_bucket_folders(pk, rk, sk, sg))
+                            if use_submit_buckets:
+                                folders.extend(_site_submit_bucket_folders(pk, rk, sk, sg))
+                            else:
+                                files_here = list(sg.get("files") or [])
                             return tree, crumbs, folders, files_here
                         if len(segs) >= 4 and segs[3][0] == "g":
                             g_key = segs[3][1]

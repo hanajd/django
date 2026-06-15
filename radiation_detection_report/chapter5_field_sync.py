@@ -37,6 +37,9 @@ ROW_TOKEN_REPORT = "__ROW_REPORT__"
 _COLUMN_READING = "测量读数M"
 _COLUMN_MEAN = "测量均值Mbar"
 _COLUMN_REPORT = "报出值D"
+_COLUMN_SEQ = "序号"
+_SEQ_LABEL_RE = re.compile(r"^序号_r\d+", re.I)
+_F_ID_RE = re.compile(r"^f\d+$", re.I)
 
 
 def _norm(s: Any) -> str:
@@ -77,7 +80,10 @@ def field_looks_like_protection_table_cell(field: Mapping[str, Any]) -> bool:
     blob = _field_label_blob(field)
     if not blob or "本底" in blob or "序号本底水平" in blob:
         return False
-    if re.search(r"_测量读数M\d*|_测量均值|_报出值", blob, re.I):
+    # 须含表格行号 _rN，避免性能章节「均匀性_报出值_HU」等误入防护表绑定
+    if not re.search(r"_r\d+", blob, re.I):
+        return False
+    if re.search(r"_测量读数M\d*|_测量均值Mbar|_测量均值|_报出值D|_报出值", blob, re.I):
         return True
     return False
 
@@ -150,6 +156,85 @@ def _reading_index_from_field(sem: Mapping[str, Any], field: Mapping[str, Any]) 
     return 0
 
 
+def _field_pdf_anchor_rect(field: Mapping[str, Any]) -> tuple[int, float, float]:
+    page, x0, y0, _y1 = _field_pdf_anchor_bounds(field)
+    return page, x0, y0
+
+
+def _field_pdf_anchor_bounds(field: Mapping[str, Any]) -> tuple[int, float, float, float]:
+    """统一 steps.pdfAnchor 与 pdf.fields 顶层 rect（page,x0,y0,w,h）。"""
+    anchor = field.get("pdfAnchor")
+    if isinstance(anchor, dict):
+        rect = anchor.get("rect")
+        try:
+            page = int(anchor.get("page") or 5)
+        except (TypeError, ValueError):
+            page = 5
+        if isinstance(rect, (list, tuple)) and len(rect) >= 4:
+            try:
+                x0 = float(rect[0])
+                y0 = float(rect[1])
+                x1 = float(rect[2])
+                y1 = float(rect[3])
+                if y1 < y0:
+                    y0, y1 = y1, y0
+                return page, x0, y0, y1
+            except (TypeError, ValueError):
+                pass
+        if isinstance(rect, (list, tuple)) and len(rect) >= 2:
+            try:
+                return page, float(rect[0]), float(rect[1]), float(rect[1])
+            except (TypeError, ValueError):
+                pass
+    rect = field.get("rect")
+    if isinstance(rect, (list, tuple)) and len(rect) >= 5:
+        try:
+            page = int(rect[0])
+            x0 = float(rect[1])
+            y0 = float(rect[2])
+            height = float(rect[4])
+            return page, x0, y0, y0 + height
+        except (TypeError, ValueError):
+            pass
+    return 5, 0.0, 0.0, 0.0
+
+
+def _field_pdf_anchor_y_bounds(field: Mapping[str, Any]) -> tuple[int, float, float]:
+    page, _x0, y0, y1 = _field_pdf_anchor_bounds(field)
+    return page, y0, y1
+
+
+def _field_pdf_anchor_y_center(field: Mapping[str, Any]) -> tuple[int, float]:
+    page, y0, y1 = _field_pdf_anchor_y_bounds(field)
+    return page, (y0 + y1) / 2.0
+
+
+def _seq_field_anchor_height(field: Mapping[str, Any]) -> float:
+    _, y0, y1 = _field_pdf_anchor_y_bounds(field)
+    return abs(y1 - y0)
+
+
+def is_rp_table_seq_field(field: Mapping[str, Any]) -> bool:
+    """
+    第五章表格序号列（含续页与跨行合并格；排除表前误标为「序号_r*」的校准因子等）。
+    """
+    if not isinstance(field, dict):
+        return False
+    label = _field_display_label(field)
+    if not _SEQ_LABEL_RE.match(label):
+        return False
+    page, x0, _y0 = _field_pdf_anchor_rect(field)
+    if page < 5 or x0 > 80.0:
+        return False
+    height = _seq_field_anchor_height(field)
+    if page > 5:
+        return True
+    if height >= 36.0:
+        return True
+    _, _, y0 = _field_pdf_anchor_rect(field)
+    return y0 >= 190.0
+
+
 def _column_role(sem: Mapping[str, Any], field: Mapping[str, Any]) -> str:
     col = _norm(sem.get("radiationColumn") or "")
     if col:
@@ -157,6 +242,8 @@ def _column_role(sem: Mapping[str, Any], field: Mapping[str, Any]) -> str:
     if sem.get("meanOfReadings") or field.get("mean"):
         return _COLUMN_MEAN
     ph = _field_display_label(field)
+    if _SEQ_LABEL_RE.match(ph):
+        return _COLUMN_SEQ if is_rp_table_seq_field(field) else ""
     if "报出" in ph:
         return _COLUMN_REPORT
     if "均值" in ph or "平均" in ph:
@@ -164,6 +251,76 @@ def _column_role(sem: Mapping[str, Any], field: Mapping[str, Any]) -> str:
     if "读数" in ph:
         return _COLUMN_READING
     return ""
+
+
+def reading_anchor_field_for_binding(
+    binding: Mapping[str, Any],
+    fields_by_pid: Mapping[str, Mapping[str, Any]],
+) -> Mapping[str, Any] | None:
+    """首格读数可能为空，依次回退到其它读数/均值/报出值格。"""
+    for key in ("reading_1", "reading_2", "reading_3", "mean_m", "report_d"):
+        pid = _norm(binding.get(key) or "").lower()
+        field = fields_by_pid.get(pid)
+        if isinstance(field, dict):
+            return field
+    return None
+
+
+def seq_field_for_binding_row(
+    binding: Mapping[str, Any],
+    fields: List[Mapping[str, Any]],
+    fields_by_pid: Mapping[str, Mapping[str, Any]],
+) -> Mapping[str, Any] | None:
+    """按读数格 PDF 纵向位置匹配同行序号栏（含跨行合并序号格）。"""
+    read_field = reading_anchor_field_for_binding(binding, fields_by_pid)
+    if not isinstance(read_field, dict):
+        return None
+    read_page, read_y = _field_pdf_anchor_y_center(read_field)
+    contained: list[Mapping[str, Any]] = []
+    best: Mapping[str, Any] | None = None
+    best_dist = 1e9
+    for field in fields or []:
+        if not isinstance(field, dict) or not is_rp_table_seq_field(field):
+            continue
+        page, seq_y0, seq_y1 = _field_pdf_anchor_y_bounds(field)
+        if page != read_page:
+            continue
+        if seq_y0 <= read_y <= seq_y1:
+            contained.append(field)
+            continue
+        dist = min(abs(read_y - seq_y0), abs(read_y - seq_y1))
+        if dist < best_dist:
+            best_dist = dist
+            best = field
+    if contained:
+        return max(contained, key=_seq_field_anchor_height)
+    return best
+
+
+def attach_seq_no_to_bindings(
+    bindings: List[Dict[str, Any]],
+    fields: List[Mapping[str, Any]],
+) -> None:
+    """为每行 fieldBindings 写入序号列 pdfFieldId（seq_no）。"""
+    if not bindings:
+        return
+    by_pid: Dict[str, Dict[str, Any]] = {}
+    for field in fields or []:
+        if not isinstance(field, dict):
+            continue
+        pid = export_field_pdf_id(field)
+        if pid:
+            by_pid[pid] = dict(field)
+    for row in bindings:
+        if not isinstance(row, dict):
+            continue
+        seq_field = seq_field_for_binding_row(row, fields, by_pid)
+        if isinstance(seq_field, dict):
+            pid = export_field_pdf_id(seq_field)
+            if pid:
+                row["seq_no"] = pid
+        elif not _norm(row.get("seq_no") or ""):
+            row.setdefault("seq_no", "")
 
 
 def protection_field_semantic_unified(field: Mapping[str, Any]) -> Dict[str, Any]:
@@ -219,6 +376,7 @@ def build_field_bindings_from_fields(fields: List[Mapping[str, Any]]) -> List[Di
             {
                 "radiationPoint": pt,
                 "row": sem.get("row"),
+                "seq_no": "",
                 "reading_1": "",
                 "reading_2": "",
                 "reading_3": "",
@@ -227,7 +385,9 @@ def build_field_bindings_from_fields(fields: List[Mapping[str, Any]]) -> List[Di
                 "remark": "",
             },
         )
-        if role == _COLUMN_READING:
+        if role == _COLUMN_SEQ:
+            row["seq_no"] = pid
+        elif role == _COLUMN_READING:
             idx = _reading_index_from_field(sem, field)
             if idx == 1:
                 row["reading_1"] = pid
@@ -248,6 +408,7 @@ def build_field_bindings_from_fields(fields: List[Mapping[str, Any]]) -> List[Di
             row["remark"] = pid
     out = list(rows.values())
     out.sort(key=lambda r: (r.get("row") is None, r.get("row") or 0, r.get("radiationPoint") or ""))
+    attach_seq_no_to_bindings(out, fields)
     return out
 
 
@@ -612,13 +773,17 @@ def index_export_fields_by_pdf_field_id(payload: Mapping[str, Any]) -> Dict[str,
 
 
 def _bindings_look_stale(bindings: List[Mapping[str, Any]]) -> bool:
-    """旧版把「读数/均值/报出值」整段 id 当作 radiationPoint，需从 pdf.fields 重算。"""
+    """旧版绑定缺序号列或 radiationPoint 含栏位后缀时，需从 pdf.fields 重算。"""
     stale_markers = ("_测量读数", "_测量均值", "_报出值")
+    data_keys = ("reading_1", "reading_2", "reading_3", "mean_m", "report_d")
     for row in bindings or []:
         if not isinstance(row, dict):
             continue
         pt = _norm(row.get("radiationPoint") or "")
         if any(marker in pt for marker in stale_markers):
+            return True
+        has_data = any(_norm(row.get(k) or "") for k in data_keys)
+        if has_data and not _norm(row.get("seq_no") or ""):
             return True
     return False
 

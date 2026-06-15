@@ -78,6 +78,19 @@ def _is_background_row(cells: Dict[int, str]) -> bool:
     return "本底水平" in "".join(cells.values())
 
 
+def _row_has_slash_placeholder(texts: Dict[int, str]) -> bool:
+    """
+    第五章表格：除序号列外任一单元格为 ``/`` 表示未检测，整行丢弃。
+    序号列 ``/`` 为复杂点位续行标记，允许。
+    """
+    for col_idx, cell in texts.items():
+        if _normalize_text(cell) == "/":
+            if col_idx == 0:
+                continue
+            return True
+    return False
+
+
 def _row_bbox(cells: List[Tuple[int, Tuple[float, float, float, float]]]) -> Dict[str, float]:
     xs0 = [r[0] for _, r in cells]
     ys0 = [r[1] for _, r in cells]
@@ -154,6 +167,9 @@ def _parse_table_rows_on_page(
             )
             continue
 
+        if _row_has_slash_placeholder(texts):
+            continue
+
         loc_main = texts.get(1, "")
         loc_sub = texts.get(2, "")
         point_id = texts.get(0, "")
@@ -180,6 +196,9 @@ def _parse_table_rows_on_page(
                 )
             continue
 
+        mean_m = texts.get(6, "")
+        report_d = texts.get(7, "")
+
         if loc_main and loc_sub:
             parsed.append(
                 {
@@ -189,7 +208,10 @@ def _parse_table_rows_on_page(
                     "bbox": _row_bbox(row_cells),
                     "location_main": loc_main,
                     "location_sub": loc_sub,
+                    "point_id": point_id,
                     "readings": [texts.get(i, "") for i in (3, 4, 5) if i in texts or i <= 5],
+                    "mean_m": mean_m,
+                    "report_d": report_d,
                 }
             )
         elif loc_sub and not loc_main:
@@ -200,7 +222,10 @@ def _parse_table_rows_on_page(
                     "row_index": ri,
                     "bbox": _row_bbox(row_cells),
                     "location_sub": loc_sub,
+                    "point_id": point_id,
                     "readings": [texts.get(i, "") for i in (3, 4, 5)],
+                    "mean_m": mean_m,
+                    "report_d": report_d,
                 }
             )
         elif loc_main:
@@ -213,6 +238,8 @@ def _parse_table_rows_on_page(
                     "point_id": point_id,
                     "location": loc_main,
                     "readings": [texts.get(i, "") for i in (3, 4, 5)],
+                    "mean_m": mean_m,
+                    "report_d": report_d,
                 }
             )
 

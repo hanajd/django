@@ -1,7 +1,7 @@
 import copy
 import hashlib
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from utils.unified_template_fields import frontend_rect_from_field, materialize_unified_pdf_fields
 from utils.pdf_field_formulas import merge_field_formulas_into_frontend
@@ -410,22 +410,25 @@ def _contains_any(text: str, tokens: tuple[str, ...]) -> bool:
 
 _INSTRUMENT_SCOPE_QC_MARKERS = (
     "主要检测仪器_质量控制",
-    "质量控制（性能）检测",
-    "质量控制(性能)检测",
+    "主要检测仪器-质量控制",
 )
 _INSTRUMENT_SCOPE_RADIATION_MARKERS = (
     "主要检测仪器_工作场所放射防护",
     "主要检测仪器_放射防护",
-    "工作场所放射防护检测",
+    "主要检测仪器-工作场所放射防护",
+    "主要检测仪器-放射防护",
 )
 
 
 def _infer_instrument_scope_from_text(*texts: str) -> str | None:
-    """新版模板：质控章/防护章内各有一个「主要检测仪器_*」仪器选择格。"""
+    """新版模板：第三章「受检设备主要检测仪器及检测人员」内各有一个「主要检测仪器_*」仪器选择格。"""
     blob = "|".join(str(t or "").strip() for t in texts if str(t or "").strip())
     if not blob:
         return None
     norm = normalize_field_text_by_underscore_rules(blob)
+    # 防护/质控结果章标题、单元格常含「工作场所放射防护检测」「质量控制（性能）检测」等子串，不得误判为仪器栏。
+    if "主要检测仪器" not in blob and "主要检测仪器" not in norm:
+        return None
     if any(m in blob or m in norm for m in _INSTRUMENT_SCOPE_QC_MARKERS):
         return "qualityControl"
     if any(m in blob or m in norm for m in _INSTRUMENT_SCOPE_RADIATION_MARKERS):
@@ -571,11 +574,14 @@ SEMANTIC_ROLE_MAPPINGS = {
     "受检单位陪同人": {"id_prefix": "accompanyingPerson", "type": "signature"},
 }
 
-# JS009 V3 等现场记录：仪器及检测人员章内三个 image 签名框（与旧版 f34/f35/f36 不同）
-CANONICAL_SIGNATURE_PDF_FIELD_ROLES: Dict[str, Tuple[str, str]] = {
-    "f625": ("inspector", "参与主要检测人员（签字）"),
-    "f632": ("checker", "校核员及校核日期（签字）"),
-    "f633": ("accompanyingPerson", "受检单位陪同人（签字）"),
+# 旧版现场记录 PDF 签名框（只读兼容历史提交 dynamicData，禁止用于新模板 schema 推断）
+_LEGACY_SIGNATURE_PDF_FIELD_ROLES: Dict[str, Tuple[str, str]] = {
+    "f36": ("inspector", "参与主要检测人员（签字）"),
+    "f35": ("checker", "校核员及校核日期（签字）"),
+    "f34": ("accompanyingPerson", "受检单位陪同人（签字）"),
+    "f76": ("inspector", "参与主要检测人员（签字）"),
+    "f78": ("checker", "校核员及校核日期（签字）"),
+    "f77": ("accompanyingPerson", "受检单位陪同人（签字）"),
 }
 
 CANONICAL_SIGNATURE_ROLE_IDS = frozenset({"inspector", "checker", "accompanyingPerson"})
@@ -729,7 +735,7 @@ def _field_is_signature_image(field: Dict[str, Any]) -> bool:
 
 def _field_is_floor_plan_image(field: Dict[str, Any], *, in_layout_section: bool = False) -> bool:
     """
-    仅平面图影像：须在「平面布局示意图」章节内的 image 框，且非签字栏。
+    平面图影像：非签字类 image 框；在「平面布局示意图」章节内一律视为 floorPlan（兜底误命名）。
     """
     if _field_is_signature_image(field):
         return False
@@ -741,10 +747,7 @@ def _field_is_floor_plan_image(field: Dict[str, Any], *, in_layout_section: bool
         return False
     if _label_indicates_floor_plan_image(label):
         return True
-    if not in_layout_section:
-        return False
-    # 本章内无明确文案的 image 占位（自动框选常为「图片N」）视为平面图
-    if re.match(r"^图片\d*$", label) or label in ("图片", "平面图", "平面布局", "平面布局示意图"):
+    if in_layout_section:
         return True
     return False
 
@@ -775,10 +778,91 @@ def _infer_type(raw_type: str, label: str) -> str:
 
 
 def _signature_role_from_pdf_field_id(pdf_field_id: str) -> Tuple[str, str] | None:
+    """仅识别旧版固定 f 槽；新模板签名必须靠标签 + image 栏位。"""
     pid = str(pdf_field_id or "").strip().lower()
     if not pid:
         return None
-    return CANONICAL_SIGNATURE_PDF_FIELD_ROLES.get(pid)
+    return _LEGACY_SIGNATURE_PDF_FIELD_ROLES.get(pid)
+
+
+def _is_pdf_field_row_signature_image(row: Dict[str, Any]) -> bool:
+    if not isinstance(row, dict):
+        return False
+    label = str(row.get("id") or row.get("placeholder") or row.get("title") or "").strip()
+    ft = str(row.get("fieldType") or "text").strip().lower()
+    if ft not in ("image", "signature"):
+        return False
+    return _signature_role_from_label(label) is not None
+
+
+def collect_signature_pdf_bindings(
+    template_obj: Optional[Dict[str, Any]] = None,
+    *,
+    payload: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """
+    从模板 pdf.fields（image + 签字标签）或 formSchema/payload steps（type=signature）
+    收集 ``role -> pdfFieldId`` 与 ``pdfFieldId -> role``。不依赖固定 f 号。
+    """
+    role_to_pdf: Dict[str, str] = {}
+    pdf_to_role: Dict[str, str] = {}
+
+    def _register(role_id: str, pid: str) -> None:
+        r = str(role_id or "").strip()
+        p = str(pid or "").strip()
+        if not r or not p or not re.match(r"^f\d+$", p, re.I):
+            return
+        p = p.lower()
+        if p not in pdf_to_role:
+            pdf_to_role[p] = r
+        if r not in role_to_pdf:
+            role_to_pdf[r] = p
+
+    if isinstance(template_obj, dict):
+        pdf = template_obj.get("pdf") if isinstance(template_obj.get("pdf"), dict) else {}
+        fields = pdf.get("fields") if isinstance(pdf.get("fields"), list) else []
+        if not fields:
+            fields = template_obj.get("fields") if isinstance(template_obj.get("fields"), list) else []
+        for row in fields:
+            if not _is_pdf_field_row_signature_image(row):
+                continue
+            role = _signature_role_from_label(
+                str(row.get("id") or row.get("placeholder") or row.get("title") or "")
+            )
+            if role:
+                _register(role[0], str(row.get("pdfFieldId") or ""))
+
+    steps_sources: List[Any] = []
+    if isinstance(payload, dict):
+        steps_sources.append(payload.get("steps"))
+    if isinstance(template_obj, dict):
+        fs = template_obj.get("formSchema")
+        if isinstance(fs, dict):
+            steps_sources.append(fs.get("steps"))
+        steps_sources.append(template_obj.get("steps"))
+
+    for steps in steps_sources:
+        if not isinstance(steps, list):
+            continue
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            for section in step.get("sections") or []:
+                if not isinstance(section, dict):
+                    continue
+                for field in section.get("fields") or []:
+                    if not isinstance(field, dict):
+                        continue
+                    if str(field.get("type") or "").lower() != "signature":
+                        continue
+                    role_id = str(field.get("id") or "").strip()
+                    if role_id not in CANONICAL_SIGNATURE_ROLE_IDS:
+                        continue
+                    src = field.get("source") if isinstance(field.get("source"), dict) else {}
+                    pid = str(field.get("pdfFieldId") or src.get("pdfFieldId") or "").strip()
+                    _register(role_id, pid)
+
+    return role_to_pdf, pdf_to_role
 
 
 def _signature_role_from_label(label: str) -> Tuple[str, str] | None:
@@ -811,12 +895,16 @@ def _resolve_canonical_signature_role(
     *,
     field_type: str = "",
 ) -> Tuple[str, str] | None:
-    """标签 + pdfFieldId 解析三角色签名；供导出 steps 与 submitPath 使用。"""
-    role = _signature_role_from_label(label) or _signature_role_from_pdf_field_id(pdf_field_id)
+    """标签 + image 栏位解析三角色签名；禁止把 checkbox/文本 f 槽误当签名。"""
+    role = _signature_role_from_label(label)
     if role:
         return role
     ft = str(field_type or "").lower()
-    if ft == "signature" or _field_is_signature_image({"label": label, "type": field_type or "text"}):
+    if ft in ("check", "number", "boolean", "radio", "select", "text", "textarea"):
+        return None
+    if ft in ("image", "signature") or _field_is_signature_image(
+        {"label": label, "type": field_type or "text"}
+    ):
         return _signature_role_from_pdf_field_id(pdf_field_id)
     return None
 
@@ -1863,21 +1951,23 @@ def _compact_single_form_field(
     if label:
         out["label"] = label
 
+    primary_pid = str(src.get("pdfFieldId") or field.get("pdfFieldId") or "").strip()
     pdf_ids = src.get("pdfFieldIds")
+    merged_ids: List[str] = []
+    if primary_pid:
+        merged_ids.append(primary_pid)
     if isinstance(pdf_ids, list):
-        cleaned = [str(x).strip() for x in pdf_ids if str(x).strip()]
-        if len(cleaned) > 1:
-            out["pdfFieldIds"] = cleaned
-        elif len(cleaned) == 1:
-            out["pdfFieldId"] = cleaned[0]
-    if "pdfFieldId" not in out and "pdfFieldIds" not in out:
-        pid = str(
-            src.get("pdfFieldId")
-            or field.get("pdfFieldId")
-            or ""
-        ).strip()
-        if pid:
-            out["pdfFieldId"] = pid
+        for x in pdf_ids:
+            pid = str(x or "").strip()
+            if pid and pid not in merged_ids:
+                merged_ids.append(pid)
+    if len(merged_ids) > 1:
+        out["pdfFieldIds"] = merged_ids
+        out["pdfFieldId"] = merged_ids[0]
+    elif len(merged_ids) == 1:
+        out["pdfFieldId"] = merged_ids[0]
+    elif primary_pid:
+        out["pdfFieldId"] = primary_pid
 
     if keep_pdf_anchor:
         anchor = field.get("pdfAnchor")
@@ -4440,7 +4530,7 @@ def _layout_section_field_targets(section: Dict[str, Any]) -> List[Any]:
 
 
 def _apply_floor_plan_field_types(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """平面布局示意图章：图片栏 floorPlan；其余 number 栏位改为 text；签字仍为 signature。"""
+    """平面布局示意图章：任意 image 栏 floorPlan（兜底误命名）；其余 number 改为 text。"""
     for step in payload.get("steps") or []:
         if not isinstance(step, dict):
             continue
@@ -4735,6 +4825,12 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
         if signature_role:
             ft = "signature"
         pdf_section_key = str(item.get("templateSectionKey") or "").strip()
+        if (
+            pdf_section_key == "site_layout_diagram"
+            and str(item.get("fieldType") or "").lower() == "image"
+            and not signature_role
+        ):
+            ft = "floorPlan"
         # 规则1：新版 PDF 章节锚点（纵坐标区间）优先
         pdf_hierarchy = None
         if pdf_section_key:
@@ -4820,7 +4916,14 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
                     existed_pdf_ids = []
                 current_pdf_id = str(item.get("pdfFieldId") or "").strip()
                 if current_pdf_id and current_pdf_id not in existed_pdf_ids:
-                    existed_pdf_ids.append(current_pdf_id)
+                    if _is_pdf_field_row_signature_image(
+                        {
+                            "id": item.get("label") or item.get("rawId"),
+                            "fieldType": item.get("fieldType"),
+                            "pdfFieldId": current_pdf_id,
+                        }
+                    ) or str(item.get("fieldType") or "").lower() in ("image", "signature"):
+                        existed_pdf_ids.append(current_pdf_id)
                 src["pdfFieldIds"] = existed_pdf_ids
 
                 existed_pages = src.get("pages")

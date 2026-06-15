@@ -105,17 +105,44 @@ def _parse_assignment_task_no(task_no: str):
     return aid if aid > 0 else None
 
 
-def resolve_site_record_library_task_for_inspection_submit_file(
-    lf: LibraryFile, case: InspectionCase, project: LibraryProject | None
+def resolve_site_record_task_for_submit_attach(
+    task_no: str,
+    project,
+    *,
+    library_task: LibraryTask | None = None,
 ) -> LibraryTask | None:
     """
-    与文件库列表分组一致：检测提交文件所归属的「现场记录」文件库任务。
+    检测提交落库后应挂载的现场记录任务（仅一条，避免挂到错误环节）。
+
+    优先显式 library_task；否则按 taskNo 解析且必须为 output_target=site_record。
+    taskNo 指向报告任务时不回退到「项目内首个现场记录」，防止文件库分组错位。
+    """
+    if library_task is not None:
+        if getattr(library_task, "output_target", None) == LibraryTask.OUTPUT_SITE_RECORD:
+            return library_task
+        return None
+    if project is None:
+        return None
+    lt = _resolve_library_task_for_task_no(task_no, project)
+    if lt is not None and lt.output_target == LibraryTask.OUTPUT_SITE_RECORD:
+        return lt
+    return None
+
+
+def resolve_site_record_library_task_for_file(
+    lf: LibraryFile,
+    case: InspectionCase | None,
+    project: LibraryProject | None,
+) -> LibraryTask | None:
+    """
+    与文件库列表分组一致：检测提交 / 现场记录 PDF 所归属的「现场记录」文件库任务。
     优先 M2M 绑定且 output_target=site_record 的任务；否则用案件 taskNo 在项目内解析。
     """
-    if (
-        lf.category != LibraryFile.CATEGORY_INSPECTION_SUBMIT
-        or project is None
-        or case is None
+    if project is None:
+        return None
+    if lf.category not in (
+        LibraryFile.CATEGORY_INSPECTION_SUBMIT,
+        LibraryFile.CATEGORY_SITE_RECORD,
     ):
         return None
     site_tasks = [
@@ -125,6 +152,8 @@ def resolve_site_record_library_task_for_inspection_submit_file(
     ]
     if site_tasks:
         return sorted(site_tasks, key=lambda x: ((x.code or ""), x.id))[0]
+    if case is None:
+        return None
     task_no = (case.case_no or "").strip()
     if not task_no:
         return None
@@ -132,6 +161,96 @@ def resolve_site_record_library_task_for_inspection_submit_file(
     if lt is not None and lt.output_target == LibraryTask.OUTPUT_SITE_RECORD:
         return lt
     return None
+
+
+def resolve_site_record_library_task_for_inspection_submit_file(
+    lf: LibraryFile, case: InspectionCase, project: LibraryProject | None
+) -> LibraryTask | None:
+    """兼容旧名；见 ``resolve_site_record_library_task_for_file``。"""
+    return resolve_site_record_library_task_for_file(lf, case, project)
+
+
+def resolve_report_library_task_for_file(
+    lf: LibraryFile,
+    case: InspectionCase | None,
+    project: LibraryProject | None,
+    *,
+    bound_tasks: Sequence[LibraryTask] | None = None,
+) -> LibraryTask | None:
+    """
+    文件库分组：报告 PDF 所归属的「报告」文件库任务。
+    优先 M2M 绑定 report；其次由已绑定的现场记录反查父报告；再按案件 taskNo 解析。
+    不因 taskNo 指向现场记录而回退到「项目内首个报告」，避免文件夹错位。
+    """
+    from apps.core.project_numbering import parent_report_task_for_site_task, report_tasks_for_project
+
+    if project is None:
+        return None
+    if lf.category != LibraryFile.CATEGORY_REPORT:
+        return None
+
+    tasks = list(bound_tasks) if bound_tasks is not None else list(lf.library_tasks.all())
+    report_tasks = [
+        t
+        for t in tasks
+        if getattr(t, "output_target", None) == LibraryTask.OUTPUT_REPORT
+    ]
+    if report_tasks:
+        return sorted(report_tasks, key=lambda x: ((x.code or ""), x.id))[0]
+
+    site_tasks = [
+        t
+        for t in tasks
+        if getattr(t, "output_target", None) == LibraryTask.OUTPUT_SITE_RECORD
+    ]
+    if site_tasks:
+        site_task = sorted(site_tasks, key=lambda x: ((x.code or ""), x.id))[0]
+        parent = parent_report_task_for_site_task(site_task, project)
+        if parent is not None:
+            return parent
+
+    if case is not None:
+        task_no = (case.case_no or "").strip()
+        if task_no:
+            lt = _resolve_library_task_for_task_no(task_no, project)
+            if lt is not None and lt.output_target == LibraryTask.OUTPUT_REPORT:
+                return lt
+            if lt is not None and lt.output_target == LibraryTask.OUTPUT_SITE_RECORD:
+                parent = parent_report_task_for_site_task(lt, project)
+                if parent is not None:
+                    return parent
+
+    reports = report_tasks_for_project(project)
+    if len(reports) == 1:
+        return reports[0]
+    return None
+
+
+def resolve_report_task_for_case(
+    task_no: str,
+    project,
+    *,
+    allow_single_report_fallback: bool = True,
+) -> LibraryTask | None:
+    """
+    解析案件对应的报告任务（导出/回填等）。
+    ``allow_single_report_fallback`` 为 True 且项目仅一个报告任务时作兜底。
+    """
+    from apps.core.project_numbering import parent_report_task_for_site_task, report_tasks_for_project
+
+    if project is None:
+        return None
+    lt = _resolve_library_task_for_task_no(task_no, project)
+    if lt is not None and lt.output_target == LibraryTask.OUTPUT_REPORT:
+        return lt
+    if lt is not None and lt.output_target == LibraryTask.OUTPUT_SITE_RECORD:
+        parent = parent_report_task_for_site_task(lt, project)
+        if parent is not None:
+            return parent
+    if not allow_single_report_fallback:
+        return None
+    reports = report_tasks_for_project(project)
+    return reports[0] if reports else None
 
 
 def _is_inspection_submit_json_linked_to_case(lf: LibraryFile) -> bool:
@@ -249,7 +368,17 @@ def _display_project_id(project) -> str:
     return project_public_id(project)
 
 
-def _pick_submit_generation_tasks(task_no: str, project):
+def _pick_submit_generation_tasks(
+    task_no: str,
+    project,
+    *,
+    library_task: LibraryTask | None = None,
+):
+    if library_task is not None and getattr(library_task, "output_target", None) in (
+        LibraryTask.OUTPUT_SITE_RECORD,
+        LibraryTask.OUTPUT_REPORT,
+    ):
+        return [library_task]
     assignment_task = _resolve_library_task_for_task_no(task_no, project)
     if assignment_task and assignment_task.output_target in (LibraryTask.OUTPUT_SITE_RECORD, LibraryTask.OUTPUT_REPORT):
         # 仅生成当前案件/提交所对应文件库任务的 PDF，避免挂到同项目其它 output 任务上
@@ -974,10 +1103,17 @@ def _inspected_org_from_submit_row(row: dict) -> str:
     sub = row.get("submit")
     if not isinstance(sub, dict):
         return ""
+    try:
+        from apps.api.inspection_report_make import _resolve_inspected_unit_name_from_submit
+
+        v = _resolve_inspected_unit_name_from_submit(sub)
+        if v:
+            return v.strip()
+    except Exception:
+        pass
     hi = sub.get("hospitalInfo") or {}
     if not isinstance(hi, dict):
         return ""
-    # 多数模板「受检单位」在 inspection2；name 常为机构全称；inspection 多为委托侧故置后
     for k in (
         "inspection2",
         "name",

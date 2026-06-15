@@ -73,6 +73,7 @@ class TableLayout:
     h_simple: float = 21.75
     h_complex_sub: float = 22.0
     header_labels: Dict[str, str] = field(default_factory=dict)
+    notes_prefix: str = "注："
     repeat_header_on_new_page: bool = True
     condition_on_first_page_only: bool = True
 
@@ -131,6 +132,7 @@ class TableLayout:
             h_simple=float(t.get("row_heights", {}).get("simple", 21.75)),
             h_complex_sub=float(t.get("row_heights", {}).get("complex_sub", 22.0)),
             header_labels=dict(t.get("header_labels", {})),
+            notes_prefix=str(t.get("notes_row", {}).get("prefix") or "注："),
             repeat_header_on_new_page=bool(pag.get("repeat_header_on_new_page", True)),
             condition_on_first_page_only=bool(pag.get("include_condition_on_first_page_only", True)),
         )
@@ -402,6 +404,12 @@ def _draw_line(
         x += _char_width(ch, fonts, fontsize)
 
 
+def _evaluation_text_color(text: str) -> Tuple[float, float, float]:
+    if str(text or "").strip() == "不合格":
+        return (1.0, 0.0, 0.0)
+    return (0.0, 0.0, 0.0)
+
+
 def _draw_cell_content(
     page: fitz.Page,
     rect: fitz.Rect,
@@ -409,6 +417,8 @@ def _draw_cell_content(
     fonts: FontResources,
     fontsize: float,
     align: str = "center",
+    *,
+    text_color: Tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> None:
     if not text:
         return
@@ -424,9 +434,44 @@ def _draw_cell_content(
         baseline = base_y + li * leading
         if align == "word_justify":
             extra = None if is_last_in_para else _word_justify_extra_gap(line, max_w, fonts, fontsize)
-            _draw_line(page, line, baseline, inner, fonts, fontsize, "left", letter_gap=extra)
+            _draw_line_colored(page, line, baseline, inner, fonts, fontsize, "left", text_color, letter_gap=extra)
         else:
-            _draw_line(page, line, baseline, inner, fonts, fontsize, align)
+            _draw_line_colored(page, line, baseline, inner, fonts, fontsize, align, text_color)
+
+
+def _draw_line_colored(
+    page: fitz.Page,
+    line: str,
+    baseline: float,
+    inner: fitz.Rect,
+    fonts: FontResources,
+    fontsize: float,
+    align: str,
+    text_color: Tuple[float, float, float],
+    letter_gap: Optional[float] = None,
+) -> None:
+    max_w = max(8.0, inner.width)
+    line_w = _measure_text(line, fonts, fontsize)
+    extra_gap = letter_gap
+    if extra_gap is None and align == "justify" and line_w < max_w and len(line) > 1:
+        extra_gap = (max_w - line_w) / (len(line) - 1)
+    if extra_gap is not None and extra_gap > 0:
+        x = inner.x0
+        for i, ch in enumerate(line):
+            fn = fonts.page_font(ch)
+            page.insert_text((x, baseline), ch, fontname=fn, fontsize=fontsize, color=text_color)
+            x += _char_width(ch, fonts, fontsize)
+            if i < len(line) - 1:
+                x += extra_gap
+        return
+    if align == "left":
+        x = inner.x0
+    else:
+        x = inner.x0 + max(0.0, (inner.width - line_w) / 2.0)
+    for ch in line:
+        fn = fonts.page_font(ch)
+        page.insert_text((x, baseline), ch, fontname=fn, fontsize=fontsize, color=text_color)
+        x += _char_width(ch, fonts, fontsize)
 
 
 class RadiationTableBuilder:
@@ -441,9 +486,22 @@ class RadiationTableBuilder:
         self.page_index = 0
         self.title_drawn = False
 
+    def _insert_page_watermark(self) -> None:
+        if self.page is None:
+            return
+        try:
+            from utils.pdf_merge import _merged_report_insert_watermark_bottom_layer
+
+            _merged_report_insert_watermark_bottom_layer(
+                self.page, self.layout.page_width, self.layout.page_height
+            )
+        except Exception:
+            pass
+
     def _new_page(self, *, continuation: bool) -> None:
         self.page_index += 1
         self.page = self.doc.new_page(width=self.layout.page_width, height=self.layout.page_height)
+        self._insert_page_watermark()
         self.fonts = _register_fonts(self.page, self.font_base)
         if continuation:
             self.y = self.layout.continuation_y_top
@@ -521,7 +579,10 @@ class RadiationTableBuilder:
         ]
         for rect, text, align in cells:
             _draw_cell_border(self.page, rect)
-            _draw_cell_content(self.page, rect, text, self.fonts, FONT_SIZE_XIAO_SI, align=align)
+            color = _evaluation_text_color(text) if rect.x0 >= L.col_evaluation[0] - 0.5 else (0.0, 0.0, 0.0)
+            _draw_cell_content(
+                self.page, rect, text, self.fonts, FONT_SIZE_XIAO_SI, align=align, text_color=color
+            )
         self.y = y1
 
     def _complex_group_height(self, point: Dict[str, Any], sub_count: int) -> float:
@@ -544,8 +605,12 @@ class RadiationTableBuilder:
         y1 = y0 + total_h
         L = self.layout
 
+        group_id = str(point.get("id", ""))
+        id_rect = fitz.Rect(L.col_point_id[0], y0, L.col_point_id[1], y1)
         main_rect = fitz.Rect(L.col_location_main[0], y0, L.col_location_main[1], y1)
+        _draw_cell_border(self.page, id_rect)
         _draw_cell_border(self.page, main_rect)
+        _draw_cell_content(self.page, id_rect, group_id, self.fonts, FONT_SIZE_XIAO_SI, align="center")
         location_text = resolve_complex_location(point)
         _draw_cell_content(self.page, main_rect, location_text, self.fonts, FONT_SIZE_XIAO_SI, align="left")
 
@@ -553,9 +618,7 @@ class RadiationTableBuilder:
         for i, sub in enumerate(subs):
             sy0 = y0 + i * sub_h
             sy1 = y0 + (i + 1) * sub_h
-            sub_id = str(sub.get("id", ""))
             cells = [
-                (self._col_rect(sy0, sy1, L.col_point_id), sub_id, "center"),
                 (fitz.Rect(L.col_location_sub[0], sy0, L.col_location_sub[1], sy1), str(sub.get("location_sub", "")), "left"),
                 (self._col_rect(sy0, sy1, L.col_result), str(sub.get("result", "")), "center"),
                 (self._col_rect(sy0, sy1, L.col_standard), str(sub.get("standard", "≤2.5")), "center"),
@@ -563,7 +626,10 @@ class RadiationTableBuilder:
             ]
             for rect, text, align in cells:
                 _draw_cell_border(self.page, rect)
-                _draw_cell_content(self.page, rect, text, self.fonts, FONT_SIZE_XIAO_SI, align=align)
+                color = _evaluation_text_color(text) if rect.x0 >= L.col_evaluation[0] - 0.5 else (0.0, 0.0, 0.0)
+                _draw_cell_content(
+                    self.page, rect, text, self.fonts, FONT_SIZE_XIAO_SI, align=align, text_color=color
+                )
         self.y = y1
 
     def _draw_background_row(self, bg: Dict[str, Any]) -> None:
@@ -572,15 +638,33 @@ class RadiationTableBuilder:
         y0, y1 = self.y, self.y + h
         L = self.layout
         label_rect = fitz.Rect(L.col_point_id[0], y0, L.col_location_sub[1], y1)
-        value_rect = fitz.Rect(L.col_result[0], y0, L.col_evaluation[1], y1)
-        _draw_cell_border(self.page, label_rect)
-        _draw_cell_border(self.page, value_rect)
-        _draw_cell_content(self.page, label_rect, str(bg.get("label", "本底值（μSv/h）")), self.fonts, FONT_SIZE_XIAO_SI, align="center")
-        _draw_cell_content(self.page, value_rect, str(bg.get("value", "")), self.fonts, FONT_SIZE_XIAO_SI, align="center")
+        result_rect = self._col_rect(y0, y1, L.col_result)
+        standard_rect = self._col_rect(y0, y1, L.col_standard)
+        evaluation_rect = self._col_rect(y0, y1, L.col_evaluation)
+        for rect in (label_rect, result_rect, standard_rect, evaluation_rect):
+            _draw_cell_border(self.page, rect)
+        _draw_cell_content(
+            self.page,
+            label_rect,
+            str(bg.get("label", "本底值（μSv/h）")),
+            self.fonts,
+            FONT_SIZE_XIAO_SI,
+            align="center",
+        )
+        _draw_cell_content(
+            self.page,
+            result_rect,
+            str(bg.get("value", "")),
+            self.fonts,
+            FONT_SIZE_XIAO_SI,
+            align="center",
+        )
         self.y = y1
 
     def _draw_notes_row(self, notes: Sequence[str]) -> None:
-        text = "\n".join(str(n) for n in notes)
+        body = "\n".join(str(n) for n in notes)
+        prefix = str(self.layout.notes_prefix or "").strip()
+        text = f"{prefix}\n{body}" if prefix and body and not body.startswith(prefix) else body
         inner_w = max(8.0, self.layout.table_x_right - self.layout.table_x_left - 2 * CELL_PAD_X)
         min_notes_h = _text_block_height(1, FONT_SIZE_WU_HAO) + 2 * CELL_PAD_Y
         row_h = _autofit_row_height(text, inner_w, self.fonts, FONT_SIZE_WU_HAO, min_height=min_notes_h)
@@ -624,7 +708,13 @@ def load_layout(path: str) -> TableLayout:
 
 def load_report_data(path: str) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+    try:
+        from radiation_detection_report.report_evaluation import apply_report_evaluations
+
+        return apply_report_evaluations(data)
+    except Exception:
+        return data
 
 
 def generate_table_pdf(layout_path: str, data_path: str, output_pdf: str) -> None:

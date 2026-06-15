@@ -4730,15 +4730,113 @@
             return m ? Number(m[1]) : 0;
         }
 
+        function fieldPdfAnchorRect(f) {
+            const anchor = f && f.pdfAnchor;
+            if (!anchor || typeof anchor !== 'object') return { page: 5, x0: 0, y0: 0 };
+            const rect = anchor.rect;
+            const page = Number(anchor.page) || 5;
+            if (Array.isArray(rect) && rect.length >= 2) {
+                return { page, x0: Number(rect[0]) || 0, y0: Number(rect[1]) || 0 };
+            }
+            return { page, x0: 0, y0: 0 };
+        }
+
+        function fieldPdfAnchorYBounds(f) {
+            const anchor = f && f.pdfAnchor;
+            if (!anchor || typeof anchor !== 'object') return { page: 5, y0: 0, y1: 0 };
+            const rect = anchor.rect;
+            const page = Number(anchor.page) || 5;
+            if (Array.isArray(rect) && rect.length >= 4) {
+                let y0 = Number(rect[1]) || 0;
+                let y1 = Number(rect[3]) || 0;
+                if (y1 < y0) { const t = y0; y0 = y1; y1 = t; }
+                return { page, y0, y1 };
+            }
+            const { y0 } = fieldPdfAnchorRect(f);
+            return { page, y0, y1: y0 };
+        }
+
+        function fieldPdfAnchorYCenter(f) {
+            const { page, y0, y1 } = fieldPdfAnchorYBounds(f);
+            return { page, y: (y0 + y1) / 2 };
+        }
+
+        function seqFieldAnchorHeight(f) {
+            const { y0, y1 } = fieldPdfAnchorYBounds(f);
+            return Math.abs(y1 - y0);
+        }
+
+        function isRpTableSeqField(f) {
+            const ph = fieldDisplayLabel(f);
+            if (!/^序号_r\d+/i.test(ph)) return false;
+            const { page, x0, y0 } = fieldPdfAnchorRect(f);
+            if (page < 5 || x0 > 80) return false;
+            const height = seqFieldAnchorHeight(f);
+            if (page > 5) return true;
+            if (height >= 36) return true;
+            return y0 >= 190;
+        }
+
         function radiationColumnRole(f) {
             const sem = getAutoSemantic(f);
             if (sem.radiationColumn) return String(sem.radiationColumn);
             if (sem.meanOfReadings) return '测量均值Mbar';
             const ph = fieldDisplayLabel(f);
+            if (/^序号_r\d+/i.test(ph) && isRpTableSeqField(f)) return '序号';
             if (ph.includes('报出')) return '报出值D';
             if (ph.includes('均值') || ph.includes('平均')) return '测量均值Mbar';
             if (ph.includes('读数')) return '测量读数M';
             return '';
+        }
+
+        function readingAnchorFieldForBindingRow(binding) {
+            const keys = ['reading_1', 'reading_2', 'reading_3', 'mean_m', 'report_d'];
+            for (let i = 0; i < keys.length; i++) {
+                const pid = String(binding[keys[i]] || '').trim().toLowerCase();
+                if (!pid) continue;
+                const hit = fields.find(x => String(x.pdfFieldId || x.id || '').trim().toLowerCase() === pid);
+                if (hit) return hit;
+            }
+            return null;
+        }
+
+        function seqFieldForBindingRow(binding) {
+            const readField = readingAnchorFieldForBindingRow(binding);
+            if (!readField) return null;
+            const { page: readPage, y: readY } = fieldPdfAnchorYCenter(readField);
+            const contained = [];
+            let best = null;
+            let bestDist = 1e9;
+            fields.forEach(f => {
+                if (!isRpTableSeqField(f)) return;
+                const { page, y0, y1 } = fieldPdfAnchorYBounds(f);
+                if (page !== readPage) return;
+                if (y0 <= readY && readY <= y1) {
+                    contained.push(f);
+                    return;
+                }
+                const dist = Math.min(Math.abs(readY - y0), Math.abs(readY - y1));
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = f;
+                }
+            });
+            if (contained.length) {
+                return contained.reduce((a, b) => (seqFieldAnchorHeight(a) >= seqFieldAnchorHeight(b) ? a : b));
+            }
+            return best;
+        }
+
+        function attachSeqNoToBindings(bindingRows) {
+            (bindingRows || []).forEach(row => {
+                if (!row || typeof row !== 'object') return;
+                const seqField = seqFieldForBindingRow(row);
+                if (seqField) {
+                    row.seq_no = String(seqField.pdfFieldId || seqField.id || '').trim();
+                } else if (!row.seq_no) {
+                    row.seq_no = '';
+                }
+            });
         }
 
         function isRadiationProtectionChapterField(f) {
@@ -4763,6 +4861,7 @@
                 const row = rows[pt] || {
                     radiationPoint: pt,
                     row: sem.row,
+                    seq_no: '',
                     reading_1: '',
                     reading_2: '',
                     reading_3: '',
@@ -4770,7 +4869,9 @@
                     report_d: '',
                     remark: ''
                 };
-                if (role === '测量读数M') {
+                if (role === '序号') {
+                    row.seq_no = pid;
+                } else if (role === '测量读数M') {
                     const idx = readingIndexFromField(f, sem);
                     if (idx === 1) row.reading_1 = pid;
                     else if (idx === 2) row.reading_2 = pid;
@@ -4787,7 +4888,9 @@
                 }
                 rows[pt] = row;
             });
-            return Object.values(rows);
+            const out = Object.values(rows);
+            attachSeqNoToBindings(out);
+            return out;
         }
 
         function syncRadiationProtectionChapterBindings() {
