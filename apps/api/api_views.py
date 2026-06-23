@@ -17,9 +17,15 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
-from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
+from apps.api.jwt_auth_service import (
+    issue_login_jwt_payload,
+    jwt_refresh_error_message,
+    refresh_jwt_tokens,
+    revoke_prior_refresh_tokens_if_needed,
+)
 from apps.core.library_access import (
     library_file_access_allowed,
     library_user_can_assign_tasks_to_participants,
@@ -34,7 +40,6 @@ from apps.core.library_file_service import (
     save_library_binary_uploads,
 )
 from apps.core import pipeline_service
-from apps.core.session_lease import revoke_user_refresh_tokens
 from apps.core.models import LibraryFile, LibraryProject, Menu, Role, UserProfile
 from apps.core.models import LibraryOCRProcessTask
 from apps.core.serializers import (
@@ -574,34 +579,11 @@ class AuthAPIView(APIView):
         # 验证用户名和密码
         user = authenticate(request, username=username, password=password)
         if user:
-            if getattr(settings, "AUTH_REVOKE_PRIOR_REFRESH_TOKENS_ON_LOGIN", True):
-                revoke_user_refresh_tokens(user)
-            # 生成 JWT Token
-            refresh = RefreshToken.for_user(user)
-            
-            # 获取用户角色信息
-            role_code = None
-            role_name = None
-            try:
-                if hasattr(user, 'profile') and user.profile.role:
-                    role_code = user.profile.role.code
-                    role_name = user.profile.role.name
-            except:
-                pass
-            
-            return Response({
-                'access': str(refresh.access_token),
-                'refresh': str(refresh),
-                'user': {
-                    'id': user.id,
-                    'username': user.username,
-                    'email': user.email,
-                    'first_name': user.first_name,
-                    'last_name': user.last_name,
-                    'role_code': role_code,
-                    'role_name': role_name,
-                }
-            }, status=status.HTTP_200_OK)
+            revoke_prior_refresh_tokens_if_needed(user)
+            return Response(
+                issue_login_jwt_payload(user),
+                status=status.HTTP_200_OK,
+            )
         else:
             return Response({
                 'error': '用户名或密码错误'
@@ -609,26 +591,27 @@ class AuthAPIView(APIView):
 
 
 class TokenRefreshAPIView(APIView):
-    """Token 刷新接口"""
+    """Token 刷新接口（与 SIMPLE_JWT 轮换策略一致，返回 access_expires_in 供客户端调度刷新）。"""
     permission_classes = [AllowAny]
-    
+
     def post(self, request):
-        """刷新 Token"""
-        refresh_token = request.data.get('refresh')
+        refresh_token = (request.data.get("refresh") or "").strip()
         if not refresh_token:
-            return Response({
-                'error': '缺少 refresh token'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
+            return Response(
+                {"error": "缺少 refresh token", "code": "refresh_required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         try:
-            refresh = RefreshToken(refresh_token)
-            return Response({
-                'access': str(refresh.access_token),
-            }, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({
-                'error': 'Token 无效或已过期'
-            }, status=status.HTTP_401_UNAUTHORIZED)
+            payload = refresh_jwt_tokens(refresh_token)
+        except (InvalidToken, TokenError) as exc:
+            return Response(
+                {
+                    "error": jwt_refresh_error_message(exc),
+                    "code": "token_not_valid",
+                },
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 class UserViewSet(viewsets.ModelViewSet):

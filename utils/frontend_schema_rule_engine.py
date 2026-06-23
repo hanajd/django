@@ -1,7 +1,7 @@
 import copy
 import hashlib
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from utils.unified_template_fields import frontend_rect_from_field, materialize_unified_pdf_fields
 from utils.pdf_field_formulas import merge_field_formulas_into_frontend
@@ -468,6 +468,47 @@ def _apply_scoped_instrument_select_field(field_obj: Dict[str, Any]) -> bool:
     return True
 
 
+_RP_INSTRUMENT_META_MARKERS = (
+    "使用的检测仪器相关信息",
+    "仪器校准因子",
+    "校准因子",
+    "修正系数",
+    "探测下限",
+    "响应时间修正",
+)
+
+
+def _field_template_section_key(field_obj: Mapping[str, Any]) -> str:
+    src = field_obj.get("source") if isinstance(field_obj.get("source"), dict) else {}
+    return str(
+        src.get("templateSectionKey")
+        or field_obj.get("templateSectionKey")
+        or field_obj.get("sectionKey")
+        or ""
+    ).strip()
+
+
+def _is_radiation_chapter_instrument_meta_field(haystack: str, section_key: str) -> bool:
+    """第五章表前「使用的检测仪器相关信息」区：参与报出值公式，不是第三章仪器清单。"""
+    if section_key == "site_radiation_protection":
+        return True
+    return any(marker in haystack for marker in _RP_INSTRUMENT_META_MARKERS)
+
+
+def _is_legacy_chapter3_instrument_list_field(haystack: str, section_key: str) -> bool:
+    """第三章旧版检测仪器清单格（检测仪器N / 校准日期 / 有效期）。"""
+    if section_key not in ("", "site_instruments_staff"):
+        return False
+    # 新版模板：instruments 仅 instrument_select（主要检测仪器_质控/防护）；勿把表内下划线日期格误判为仪器清单。
+    if _contains_any(haystack, ("主要检测仪器",)) and not _infer_instrument_scope_from_text(haystack):
+        return False
+    if re.search(r"检测仪器\s*\d", haystack, re.I):
+        return True
+    if re.search(r"(?:^|[|])仪器\d", haystack, re.I):
+        return True
+    return _contains_any(haystack, ("校准日期", "有效期"))
+
+
 def _assign_submit_bucket(field_obj: Dict[str, Any]) -> Dict[str, str]:
     """
     为前端字段标注提交归属桶，便于前端渲染后直接组装 submit payload：
@@ -506,10 +547,20 @@ def _assign_submit_bucket(field_obj: Dict[str, Any]) -> Dict[str, str]:
     if inst_scope == "radiationProtection":
         return {"bucket": "instruments", "path": "instruments.radiationProtection"}
 
-    # instruments: 检测仪器相关（第三章人员/清单；不含已分章节的 scoped 仪器格）
-    if _contains_any(haystack, ("检测仪器", "仪器", "校准日期", "有效期")) or fid == "instruments":
-        if not inst_scope:
-            return {"bucket": "instruments", "path": "instruments"}
+    section_key = _field_template_section_key(field_obj)
+
+    if ft == "instrument_select":
+        return {
+            "bucket": "instruments",
+            "path": f"instruments.{inst_scope}" if inst_scope else "instruments",
+        }
+
+    if _is_radiation_chapter_instrument_meta_field(haystack, section_key):
+        return {"bucket": "testResult", "path": f"testResult.{pdf_fid or fid}"}
+
+    # instruments 仅第三章仪器清单；禁止「仪器」子串误伤第五章表前区、质控结果格等
+    if _is_legacy_chapter3_instrument_list_field(haystack, section_key) or fid == "instruments":
+        return {"bucket": "instruments", "path": "instruments"}
 
     # reportInfo
     if _contains_any(haystack, ("委托编号", "受检编号", "检测日期", "环境温度", "湿度", "temperature", "humidity")):
@@ -1339,8 +1390,10 @@ def _classify_by_underscore(raw_key: str) -> Tuple[str, str, str, str] | None:
         section_display = prefix if prefix else " / ".join(parts[:-1])
     head = parts[0].lower()
     joined = key.lower()
-    # 检测仪器分层强制落到检测仪器步骤
-    if "检测仪器" in key or head in {"instrument", "instruments"}:
+    # 检测仪器分层：仅第三章「主要检测仪器_*」或旧版「检测仪器N」清单
+    if _infer_instrument_scope_from_text(key) or re.search(r"检测仪器\s*\d", key, re.I):
+        return ("step_instruments", "检测仪器", "sec_instruments", "检测仪器")
+    if head in {"instrument", "instruments"}:
         return ("step_instruments", "检测仪器", "sec_instruments", "检测仪器")
     # 委托单位_*（互斥勾选项、委托单位名称等）统一并入基本信息-医院信息。
     # 勿用「委托单位」子串匹配：否则「委托单位_委托单位名称」等虽能命中，但条件易误读；
@@ -2013,6 +2066,8 @@ def _compact_single_form_field(
             }
     if field.get("judgmentCriteriaManual") or src.get("judgmentCriteriaManual"):
         out["judgmentCriteriaManual"] = True
+    if field.get("fieldFormulaUserOverride") or src.get("fieldFormulaUserOverride"):
+        out["fieldFormulaUserOverride"] = True
     fv = field.get("fieldVerdict")
     if not isinstance(fv, dict) or not fv:
         fv = src.get("fieldVerdict")
@@ -3096,7 +3151,11 @@ def _collapse_mutually_exclusive_checks_to_radio(payload: Dict[str, Any]) -> Dic
     - 控制方式：自动控制/手动控制 -> enumRef=controlMode
     - 单位：μGy/s、μGy/min、mGy/min -> enumRef=doseRateUnit
     - 是/否/有/无 -> enumRef=yesNo
+
+    前端已不再支持互斥 radio，保留各 boolean 勾选独立提交。
     """
+    return payload
+
     y_tolerance = 10.0
     unit_label_map = {"μgy/s": "uGyPerSec", "μgy/min": "uGyPerMin", "mgy/min": "mGyPerMin"}
     yes_no_map = {"是": "yes", "否": "no", "有": "yes", "无": "no"}
@@ -3446,7 +3505,11 @@ def _remove_boolean_duplicates_after_radio(payload: Dict[str, Any]) -> Dict[str,
     """
     去重：若同一 section 已存在 radio，则移除与其同组的重复 boolean 勾选。
     避免“同一组既有 boolean 又有 radio”。
+
+    前端已不再使用 radio，跳过 boolean 去重。
     """
+    return payload
+
     steps = payload.get("steps")
     if not isinstance(steps, list):
         return payload
@@ -4731,7 +4794,11 @@ def _apply_radiation_protection_mean_formulas(payload: Dict[str, Any]) -> Dict[s
                         (rf.get("pdfFieldId") or (rf.get("source") or {}).get("pdfFieldId") or "")
                     ).strip()
                 ]
-                if len(pids) >= 2 and not str(mf.get("fieldExpression") or "").strip():
+                if (
+                    len(pids) >= 2
+                    and not str(mf.get("fieldExpression") or "").strip()
+                    and not mf.get("fieldFormulaUserOverride")
+                ):
                     mf["fieldExpression"] = f"avg({','.join(pids[:3])})"
     return payload
 
@@ -4806,6 +4873,23 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
     # 与 HTMLPDF 侧栏一致：保持 pdf.fields 传入顺序，不按 PDF 坐标重排后再编号
     sorted_items = sorted(normalized_items, key=lambda it: (it.get("listIndex") or 999999,))
     section_catalog = _site_record_template_section_catalog()
+    rpc_layout_json = None
+    for container in (schema_extras, form_schema_top, template_obj):
+        if not isinstance(container, dict):
+            continue
+        rpc = container.get("radiationProtectionChapter")
+        if isinstance(rpc, dict):
+            rpc_layout_json = rpc.get("layout") if isinstance(rpc.get("layout"), dict) else rpc
+            break
+    try:
+        from radiation_detection_report.chapter5_field_sync import infer_protection_table_column_layout
+
+        protection_column_layout = infer_protection_table_column_layout(
+            normalized_items,
+            layout_json=rpc_layout_json,
+        )
+    except Exception:
+        protection_column_layout = {}
     for idx, item in enumerate(sorted_items, start=1):
         # 规则1：第一页勾选项归位（状态检测/验收检测）
         if item.get("page") == 1 and item.get("fieldType", "").lower() == "check":
@@ -5005,6 +5089,16 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
                 unit = _pick_unit(field_label)
                 if unit:
                     field_obj["unit"] = unit
+        try:
+            from radiation_detection_report.chapter5_field_sync import apply_protection_field_export_typing
+
+            apply_protection_field_export_typing(
+                field_obj,
+                item,
+                column_layout=protection_column_layout,
+            )
+        except Exception:
+            pass
         if str(field_obj.get("source", {}).get("anchorType") or "").lower() == "check":
             field_obj["type"] = "boolean"
             field_obj["defaultValue"] = bool(field_obj.get("defaultValue", False))

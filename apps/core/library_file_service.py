@@ -94,8 +94,36 @@ def inspection_submit_relative_path(
     subdir: str = "",
 ) -> str:
     """相对 FILE_LIBRARY_ROOT 的路径：inspection_submits/{委托编号}/{时间戳}/[{subdir}/]{文件名}"""
+    return library_batch_relative_path(
+        "inspection_submits", batch, filename, subdir=subdir
+    )
+
+
+def site_record_relative_path(
+    batch: InspectionSubmitBatchStorage,
+    filename: str,
+    *,
+    subdir: str = "",
+) -> str:
+    """
+    现场记录 PDF 磁盘路径：site_records/{委托编号}/{时间戳}/[{subdir}/]{文件名}。
+    层级与 inspection_submits 一致，便于按项目/批次对照提交 JSON 与导出 PDF。
+    """
+    return library_batch_relative_path(
+        "site_records", batch, filename, subdir=subdir
+    )
+
+
+def library_batch_relative_path(
+    root_prefix: str,
+    batch: InspectionSubmitBatchStorage,
+    filename: str,
+    *,
+    subdir: str = "",
+) -> str:
+    """{root_prefix}/{委托编号}/{时间戳}/[{subdir}/]{文件名}"""
     parts = [
-        "inspection_submits",
+        (root_prefix or "").strip().strip("/"),
         batch.commission_code,
         batch.batch_timestamp,
     ]
@@ -103,6 +131,117 @@ def inspection_submit_relative_path(
     if sub:
         parts.append(sub)
     parts.append(safe_library_basename(filename))
+    return "/".join(p for p in parts if p)
+
+
+_BATCH_FOLDER_PATH_RE = re.compile(
+    r"^(?:inspection_submits|site_records)/([^/]+)/(\d{14})(?:/|$)",
+    re.I,
+)
+
+
+def parse_batch_storage_from_relative_path(relative_path: str) -> InspectionSubmitBatchStorage | None:
+    """从 inspection_submits / site_records 批次目录路径解析委托编号与时间戳。"""
+    rel = (relative_path or "").replace("\\", "/").strip().lstrip("/")
+    m = _BATCH_FOLDER_PATH_RE.match(rel)
+    if not m:
+        return None
+    code = (m.group(1) or "").strip()
+    ts = (m.group(2) or "").strip()
+    if not code or not ts:
+        return None
+    return InspectionSubmitBatchStorage(commission_code=code, batch_timestamp=ts)
+
+
+def resolve_site_record_batch_storage(
+    *,
+    project,
+    case=None,
+    task_no: str = "",
+    source_payload: dict | None = None,
+    source_submit_relative_path: str | None = None,
+    created_at=None,
+) -> InspectionSubmitBatchStorage:
+    """
+    解析现场记录落盘批次目录：优先与同源检测提交 JSON 同批（同委托编号/时间戳），
+    否则按提交 updatedAt/createdAt 或当前时间新建批次。
+    """
+    for rel in (source_submit_relative_path,):
+        parsed = parse_batch_storage_from_relative_path(rel or "")
+        if parsed is not None:
+            return parsed
+    if case is not None and project is not None:
+        for lf in (
+            LibraryFile.objects.filter(
+                category=LibraryFile.CATEGORY_INSPECTION_SUBMIT,
+                link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
+                link_object_id=int(case.pk),
+                projects=project,
+                deleted_at__isnull=True,
+            )
+            .order_by("-created_at", "-id")
+            .distinct()
+        ):
+            rel = (lf.relative_path or "").replace("\\", "/")
+            if not rel.lower().endswith(".json"):
+                continue
+            parsed = parse_batch_storage_from_relative_path(rel)
+            if parsed is not None:
+                return parsed
+    if isinstance(source_payload, dict):
+        for key in ("updatedAt", "createdAt", "submittedAt"):
+            raw = source_payload.get(key)
+            if not raw:
+                continue
+            try:
+                from django.utils.dateparse import parse_datetime
+
+                dt = parse_datetime(str(raw).replace("Z", "+00:00"))
+            except Exception:
+                dt = None
+            if dt is not None:
+                if timezone.is_naive(dt):
+                    dt = timezone.make_aware(dt, timezone.get_current_timezone())
+                return InspectionSubmitBatchStorage(
+                    commission_code=library_commission_code_for_project(project),
+                    batch_timestamp=library_batch_timestamp(dt),
+                )
+    if created_at is not None:
+        return InspectionSubmitBatchStorage(
+            commission_code=library_commission_code_for_project(project),
+            batch_timestamp=library_batch_timestamp(created_at),
+        )
+    return make_inspection_submit_batch_storage(project)
+
+
+def report_relative_path(
+    disk_name: str,
+    *,
+    project=None,
+    library_task=None,
+    created_at=None,
+) -> str:
+    """
+    报告 PDF 磁盘路径：reports/{委托编号}/{任务代码}/{年}/{月}/{日}/{HHMMSS}_{磁盘名}。
+    便于在本地 media 目录按项目与时间浏览，与 inspection_submits 分层风格一致。
+    """
+    code = library_commission_code_for_project(project) if project is not None else "unknown"
+    task_seg = ""
+    if library_task is not None:
+        task_seg = sanitize_library_original_filename_fragment(
+            (getattr(library_task, "code", None) or getattr(library_task, "name", None) or ""),
+            48,
+        )
+    ts = created_at or timezone.now()
+    local = timezone.localtime(ts)
+    day = local.strftime("%Y/%m/%d")
+    hm = local.strftime("%H%M%S")
+    parts = ["reports", code]
+    if task_seg:
+        parts.append(task_seg)
+    parts.extend(day.split("/"))
+    fname = f"{hm}_{safe_library_basename(disk_name)}"
+    parts.append(fname)
     return "/".join(parts)
 
 
@@ -217,8 +356,11 @@ def save_library_binary_uploads(
     enforce_storage_quota: bool = True,
     submit_batch: Optional[InspectionSubmitBatchStorage] = None,
     submit_subdir: str = "",
+    site_record_batch: Optional[InspectionSubmitBatchStorage] = None,
     template_library_task=None,
     template_storage_slot: str = "current",
+    report_project=None,
+    report_library_task=None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
     """
     将上传的文件写入磁盘并创建 LibraryFile。
@@ -364,20 +506,34 @@ def save_library_binary_uploads(
             )
             abs_p = Path(settings.FILE_LIBRARY_ROOT) / rel
             abs_p.parent.mkdir(parents=True, exist_ok=True)
-        else:
-            if category == LibraryFile.CATEGORY_TEMPLATE:
-                from apps.core.template_storage_service import build_template_relative_path
+        elif category == LibraryFile.CATEGORY_TEMPLATE:
+            from apps.core.template_storage_service import build_template_relative_path
 
-                rel = build_template_relative_path(
-                    disk_name=disk_name,
-                    task=template_library_task,
-                    slot=template_storage_slot,
-                )
-                abs_p = pipeline_service.library_absolute_path(rel)
-                abs_p.parent.mkdir(parents=True, exist_ok=True)
-            else:
-                rel = f"{rel_prefix}/{disk_name}"
-                abs_p = dest_dir / disk_name
+            rel = build_template_relative_path(
+                disk_name=disk_name,
+                task=template_library_task,
+                slot=template_storage_slot,
+            )
+            abs_p = pipeline_service.library_absolute_path(rel)
+            abs_p.parent.mkdir(parents=True, exist_ok=True)
+        elif category == LibraryFile.CATEGORY_REPORT:
+            rel = report_relative_path(
+                disk_name,
+                project=report_project,
+                library_task=report_library_task,
+            )
+            abs_p = pipeline_service.library_absolute_path(rel)
+            abs_p.parent.mkdir(parents=True, exist_ok=True)
+        elif (
+            category == LibraryFile.CATEGORY_SITE_RECORD
+            and site_record_batch is not None
+        ):
+            rel = site_record_relative_path(site_record_batch, disk_name)
+            abs_p = Path(settings.FILE_LIBRARY_ROOT) / rel
+            abs_p.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            rel = f"{rel_prefix}/{disk_name}"
+            abs_p = dest_dir / disk_name
         if not abs_p.exists():
             abs_p.write_bytes(raw)
         lf = LibraryFile.objects.create(
@@ -587,3 +743,112 @@ def convert_template_word_to_temp_pdf(lf: LibraryFile, user_id: int) -> Tuple[st
     if not out_path.is_file():
         raise RuntimeError("converted pdf not found")
     return rel, out_name
+
+
+def reorganize_flat_reports_on_disk(*, dry_run: bool = False) -> dict:
+    """
+    将 ``reports/{uuid}.pdf`` 平铺文件迁入 ``report_relative_path`` 分层目录，并更新 LibraryFile.relative_path。
+    仅处理 relative_path 形如 ``reports/<32hex>.pdf`` 且无二级目录的记录。
+    """
+    import re
+
+    flat_re = re.compile(r"^reports/[0-9a-f]{32}\.pdf$", re.I)
+    stats = {"scanned": 0, "moved": 0, "skipped": 0, "errors": []}
+    qs = (
+        LibraryFile.objects.filter(category=LibraryFile.CATEGORY_REPORT, deleted_at__isnull=True)
+        .prefetch_related("projects")
+        .order_by("id")
+    )
+    for lf in qs:
+        rel = (lf.relative_path or "").replace("\\", "/").strip()
+        if not flat_re.match(rel):
+            stats["skipped"] += 1
+            continue
+        stats["scanned"] += 1
+        src = pipeline_service.library_absolute_path(rel)
+        if not src.is_file():
+            stats["errors"].append(f"id={lf.pk}: missing disk file {rel}")
+            continue
+        project = lf.projects.order_by("id").first()
+        task = lf.library_tasks.order_by("id").first()
+        disk_name = src.name
+        new_rel = report_relative_path(
+            disk_name,
+            project=project,
+            library_task=task,
+            created_at=lf.created_at,
+        )
+        if new_rel == rel:
+            stats["skipped"] += 1
+            continue
+        dst = pipeline_service.library_absolute_path(new_rel)
+        if dry_run:
+            stats["moved"] += 1
+            continue
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if dst.is_file():
+                stats["errors"].append(f"id={lf.pk}: target exists {new_rel}")
+                continue
+            shutil.move(str(src), str(dst))
+            lf.relative_path = new_rel
+            lf.save(update_fields=["relative_path"])
+            stats["moved"] += 1
+        except OSError as exc:
+            stats["errors"].append(f"id={lf.pk}: {exc}")
+    return stats
+
+
+def reorganize_flat_site_records_on_disk(*, dry_run: bool = False) -> dict:
+    """
+    将 ``site_records/{uuid}.pdf`` 平铺文件迁入 ``site_record_relative_path`` 分层目录，
+    并更新 LibraryFile.relative_path。批次时间戳优先取自同案件检测提交 JSON 目录。
+    """
+    flat_re = re.compile(r"^site_records/[0-9a-f]{32}\.pdf$", re.I)
+    stats = {"scanned": 0, "moved": 0, "skipped": 0, "errors": []}
+    qs = (
+        LibraryFile.objects.filter(category=LibraryFile.CATEGORY_SITE_RECORD, deleted_at__isnull=True)
+        .prefetch_related("projects")
+        .order_by("id")
+    )
+    for lf in qs:
+        rel = (lf.relative_path or "").replace("\\", "/").strip()
+        if not flat_re.match(rel):
+            stats["skipped"] += 1
+            continue
+        stats["scanned"] += 1
+        src = pipeline_service.library_absolute_path(rel)
+        if not src.is_file():
+            stats["errors"].append(f"id={lf.pk}: missing disk file {rel}")
+            continue
+        project = lf.projects.order_by("id").first()
+        case = None
+        if lf.link_entity == LibraryFile.LINK_ENTITY_INSPECTION_CASE and lf.link_object_id:
+            from apps.core.models import InspectionCase
+
+            case = InspectionCase.objects.filter(pk=int(lf.link_object_id)).first()
+        batch = resolve_site_record_batch_storage(
+            project=project,
+            case=case,
+            created_at=lf.created_at,
+        )
+        new_rel = site_record_relative_path(batch, src.name)
+        if new_rel == rel:
+            stats["skipped"] += 1
+            continue
+        dst = pipeline_service.library_absolute_path(new_rel)
+        if dry_run:
+            stats["moved"] += 1
+            continue
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if dst.is_file():
+                stats["errors"].append(f"id={lf.pk}: target exists {new_rel}")
+                continue
+            shutil.move(str(src), str(dst))
+            lf.relative_path = new_rel
+            lf.save(update_fields=["relative_path"])
+            stats["moved"] += 1
+        except OSError as exc:
+            stats["errors"].append(f"id={lf.pk}: {exc}")
+    return stats

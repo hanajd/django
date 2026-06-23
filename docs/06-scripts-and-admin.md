@@ -8,15 +8,26 @@
 
 ## 2. 自定义管理命令
 
-路径：`apps/core/management/commands/`
+### 2.1 `apps/core/management/commands/`
 
-| 命令 | 文件 | 用途（以代码内文档为准） |
-|------|------|---------------------------|
-| `init_data` | `init_data.py` | 初始化基础数据 |
+| 命令 | 文件 | 用途 |
+|------|------|------|
+| `init_data` | `init_data.py` | 初始化角色与菜单种子数据 |
 | `ensure_party_a_demo` | `ensure_party_a_demo.py` | 甲方演示/引导环境相关数据 |
-| `ensure_template_tester` | `ensure_template_tester.py` | 模板测试账号相关 |
+| `ensure_template_tester` | `ensure_template_tester.py` | 模板测试角色与用户 |
+| `backup_database` | `backup_database.py` | SQLite 在线备份、列出备份、恢复 |
 | `purge_library_trash` | `purge_library_trash.py` | 永久删除回收站中超时（默认 31 天）的文件库记录；建议由 cron 每日执行 |
 | `check_library_media` | `check_library_media.py` | 校验 DB 文件库记录与 `media/file_library` 磁盘是否一致；缺失则移入回收站。启动时默认自动执行，可加 `--dry-run` |
+| `migrate_template_storage_layout` | `migrate_template_storage_layout.py` | 迁移模板到分层目录结构 `templates/{检测类型}/{设备}/report\|site/{code}/` |
+| `reconstruct_task_templates_from_storage` | `reconstruct_task_templates_from_storage.py` | 从 `templates/**/_task.json` 还原 DB 绑定 |
+| `repair_task_template_library` | `repair_task_template_library.py` | 补齐任务模板库缺口（执行前自动备份） |
+| `fix_repaired_task_templates` | `fix_repaired_task_templates.py` | 修复还原后的模板绑定配对 |
+
+### 2.2 `apps/api/management/commands/`
+
+| 命令 | 文件 | 用途 |
+|------|------|------|
+| `mock_inspection_submit` | `mock_inspection_submit.py` | 从前端模板 JSON 生成模拟提交并可选预览回填 |
 
 使用方式：`python3 manage.py <command> [options]`
 

@@ -352,6 +352,25 @@ def _protection_fields_have_matrix_semantics(fields: List[Dict[str, Any]]) -> bo
     return with_row > 0
 
 
+def _protection_matrix_upgrade_viable(
+    fields: List[Dict[str, Any]],
+    grouped: Dict[int, Dict[str, Dict[str, Any]]],
+    *,
+    min_coverage: float = 0.75,
+) -> bool:
+    """
+    matrixTable 仅适用于少量标准列（读数/均值/报出/备注/点位）。
+    复杂 PDF（双组读数、序号、测量值、表前参数等）合并后会大量丢栏位，应保留平铺 fields。
+    """
+    total = sum(1 for f in fields or [] if isinstance(f, dict))
+    if total <= 0:
+        return False
+    covered = sum(len(cells) for cells in (grouped or {}).values())
+    if covered < max(1, int(total * min_coverage)):
+        return False
+    return True
+
+
 def _group_protection_fields(fields: List[Dict[str, Any]]) -> Dict[int, Dict[str, Dict[str, Any]]]:
     """按 table.row 分组防护表平铺栏位 -> row_index -> cell_key -> field。"""
     grouped: Dict[int, Dict[str, Dict[str, Any]]] = {}
@@ -600,7 +619,9 @@ def _upgrade_radiation_protection_section(sec: Dict[str, Any], titles: Dict[str,
         return out
 
     if fields and _protection_fields_have_matrix_semantics(fields):
-        return _build_protection_matrix_from_fields(fields, title)
+        grouped = _group_protection_fields(fields)
+        if _protection_matrix_upgrade_viable(fields, grouped):
+            return _build_protection_matrix_from_fields(fields, title)
 
     if fields:
         keep_pdf_anchor = _is_pdf_overlay_payload({"pdfOverlay": True})

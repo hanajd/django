@@ -1,0 +1,6 @@
+{
+  "access_token_hours": 12,
+  "refresh_token_days": 30,
+  "leeway_seconds": 120,
+  "_comment": "修改本文件后无需重启 Django。新登录/刷新的 token 立即使用新有效期；已签发的 token 仍按原 exp 过期。"
+}

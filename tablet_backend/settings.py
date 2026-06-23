@@ -48,6 +48,7 @@ MIDDLEWARE = [
     'django.middleware.http.ConditionalGetMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'apps.api.middleware.JwtRuntimeSettingsMiddleware',
     'apps.core.middleware.WebSessionLeaseMiddleware',
     'apps.core.middleware.PartyADemoSecurityMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
@@ -200,15 +201,29 @@ REST_FRAMEWORK = {
     ),
 }
 
-# JWT 认证配置
+# JWT 认证配置（平板 App：较长 access、刷新接口返回 expires_in；默认不轮换 refresh 避免并发刷新竞态）
+def _env_bool(name: str, default: str = "0") -> bool:
+    return os.environ.get(name, default).strip().lower() not in ("0", "false", "no", "off")
+
+
+_JWT_ACCESS_HOURS = float(os.environ.get("JWT_ACCESS_TOKEN_HOURS", "8"))
+_JWT_REFRESH_DAYS = float(os.environ.get("JWT_REFRESH_TOKEN_DAYS", "30"))
+_JWT_ROTATE_REFRESH = _env_bool("JWT_ROTATE_REFRESH_TOKENS", "0")
+
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(hours=2),  # 访问令牌有效期 2 小时
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),  # 刷新令牌有效期 7 天
-    'ROTATE_REFRESH_TOKENS': True,  # 刷新时轮换刷新令牌
-    'BLACKLIST_AFTER_ROTATION': True,  # 轮换后将旧令牌加入黑名单
-    'AUTH_HEADER_TYPES': ('Bearer',),
-    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
+    "ACCESS_TOKEN_LIFETIME": timedelta(hours=_JWT_ACCESS_HOURS),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=_JWT_REFRESH_DAYS),
+    # 默认关闭轮换：旧客户端只保存 access 时，开启轮换会导致 refresh 链断裂与双请求竞态 401
+    "ROTATE_REFRESH_TOKENS": _JWT_ROTATE_REFRESH,
+    "BLACKLIST_AFTER_ROTATION": _JWT_ROTATE_REFRESH,
+    "LEEWAY": int(os.environ.get("JWT_LEEWAY_SECONDS", "120")),
+    "AUTH_HEADER_TYPES": ("Bearer",),
+    "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
+    "UPDATE_LAST_LOGIN": True,
 }
+
+# 热更新 JWT 有效期：编辑此 JSON 后无需重启（见 apps/api/jwt_runtime_config.py）
+JWT_RUNTIME_CONFIG_FILE = BASE_DIR / "jwt_runtime.json"
 
 # CORS 配置（允许跨域访问）
 CORS_ALLOWED_ORIGINS = [
@@ -244,6 +259,7 @@ AUTH_SINGLE_WEB_SESSION_SKIP_SUPERUSER = os.environ.get(
     "AUTH_SINGLE_WEB_SESSION_SKIP_SUPERUSER", ""
 ).strip().lower() in ("1", "true", "yes")
 # 平板 /api 使用账号密码登录换 JWT 时，吊销该用户此前签发的 refresh（需安装 token_blacklist）。
+# test / test-N 沙箱账号默认跳过，允许多端并行调试；生产账号仍单端登录。
 AUTH_REVOKE_PRIOR_REFRESH_TOKENS_ON_LOGIN = os.environ.get(
     "AUTH_REVOKE_PRIOR_REFRESH_TOKENS_ON_LOGIN", "1"
 ).strip().lower() not in ("0", "false", "no", "off")

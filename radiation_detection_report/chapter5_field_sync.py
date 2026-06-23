@@ -11,7 +11,7 @@ import copy
 import json
 import re
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 from utils.conditional_field_rules import (
     compile_conditional_expression,
@@ -27,6 +27,28 @@ CHAPTER_KEY = "site_radiation_protection"
 SCHEMA_KEY = "radiationProtectionChapter"
 
 ROW_TOKEN_MEAN = "__ROW_MEAN__"
+ROW_TOKEN_MEAN2 = "__ROW_MEAN2__"
+
+_DUAL_GROUP_SLOT_KEYS: tuple[str, ...] = (
+    "reading_1",
+    "reading_2",
+    "reading_3",
+    "mean_m",
+    "reading_1_2",
+    "reading_2_2",
+    "reading_3_2",
+    "mean_m_2",
+    "report_d",
+    "report_d_2",
+)
+
+_SINGLE_GROUP_SLOT_KEYS: tuple[str, ...] = (
+    "reading_1",
+    "reading_2",
+    "reading_3",
+    "mean_m",
+    "report_d",
+)
 ROW_TOKEN_READING = (
     ("reading1", "__ROW_READING1__", "测量读数M", 1),
     ("reading2", "__ROW_READING2__", "测量读数M", 2),
@@ -40,6 +62,11 @@ _COLUMN_REPORT = "报出值D"
 _COLUMN_SEQ = "序号"
 _SEQ_LABEL_RE = re.compile(r"^序号_r\d+", re.I)
 _F_ID_RE = re.compile(r"^f\d+$", re.I)
+_RP_LOCATION_COLUMN_ROLES = frozenset({"检测点位置", "位置细分"})
+PROTECTION_NUMBER_PRECISION = 3
+_HEADER_READING_RE = re.compile(r"测量读数|读数\s*M", re.I)
+_HEADER_MEAN_RE = re.compile(r"测量均值|均值\s*M", re.I)
+_HEADER_REPORT_RE = re.compile(r"报出值", re.I)
 
 
 def _norm(s: Any) -> str:
@@ -83,9 +110,139 @@ def field_looks_like_protection_table_cell(field: Mapping[str, Any]) -> bool:
     # 须含表格行号 _rN，避免性能章节「均匀性_报出值_HU」等误入防护表绑定
     if not re.search(r"_r\d+", blob, re.I):
         return False
-    if re.search(r"_测量读数M\d*|_测量均值Mbar|_测量均值|_报出值D|_报出值", blob, re.I):
+    if re.search(r"_测量读数M\d*|_测量均值Mbar|_测量均值|_测量值|_报出值D|_报出值", blob, re.I):
         return True
     return False
+
+
+_BG_READING_LABEL_RE = re.compile(
+    r"^本底水平(?:及范围)?\d+$|^本底水平_[①②③④⑤⑥⑦⑧⑨⑩]_测量读数$",
+    re.I,
+)
+
+
+def is_background_reading_pdf_field(field: Mapping[str, Any]) -> bool:
+    """本底行 ①–⑩ 填写格（非范围汇总、非均值格）。"""
+    if not isinstance(field, dict) or not is_protection_pdf_field(field):
+        return False
+    for key in ("id", "label", "hierarchyKey", "placeholder", "title"):
+        text = _norm(field.get(key) or "")
+        if not text or "序号本底" in text:
+            continue
+        if _BG_READING_LABEL_RE.match(text):
+            expr = _norm(
+                field.get("fieldExpression")
+                or field.get("formula")
+                or field.get("pdfFieldExpression")
+                or ""
+            )
+            if expr and ("avg(" in expr.lower() or "min(" in expr.lower()):
+                return False
+            return True
+    return False
+
+
+def is_background_range_pdf_field(field: Mapping[str, Any]) -> bool:
+    """本底水平及范围汇总格（min~max × 校准因子），不得套用章节报出值公式。"""
+    if not isinstance(field, dict):
+        return False
+    blob = _field_label_blob(field)
+    return "序号本底" in blob and ("报出" in blob or "范围" in blob)
+
+
+def is_background_level_pdf_field(field: Mapping[str, Any]) -> bool:
+    return is_background_reading_pdf_field(field) or is_background_range_pdf_field(field)
+
+
+def _background_reading_fields_sorted(fields: List[Any]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for field in fields or []:
+        if not isinstance(field, dict) or not is_background_reading_pdf_field(field):
+            continue
+        pid = export_field_pdf_id(field)
+        if not pid:
+            continue
+        page, x0, y0 = _field_pdf_anchor_rect(field)
+        label = _field_display_label(field)
+        item_id = _norm(field.get("id") or "")
+        text = item_id or label
+        tier = 0
+        if re.match(r"^本底水平及范围\d+$", text, re.I):
+            tier = 2
+        elif re.match(r"^本底水平\d+$", text, re.I):
+            tier = 1
+        rows.append(
+            {
+                "field": field,
+                "pid": pid,
+                "page": page,
+                "x0": x0,
+                "y0": y0,
+                "tier": tier,
+            }
+        )
+    if not rows:
+        return []
+    best_tier = max(int(r.get("tier") or 0) for r in rows)
+    rows = [r for r in rows if int(r.get("tier") or 0) == best_tier]
+    rows.sort(key=lambda r: (r["page"], r["y0"], r["x0"], r["pid"]))
+    return rows
+
+
+def _chapter_g1_calibration_factor_pid(chapter: Optional[Mapping[str, Any]]) -> str:
+    """从章节报出值规则第一组表达式提取校准因子 f 号（如 {mean}*f927）。"""
+    chapter = chapter if isinstance(chapter, dict) else {}
+    rules = chapter.get("reportValueRules") if isinstance(chapter.get("reportValueRules"), list) else []
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        expr = _norm(rule.get("expression") or rule.get("formula") or "")
+        if not expr or "{mean2}" in expr:
+            continue
+        m = re.search(r"\*\s*(f\d+)", expr, re.I)
+        if m:
+            return m.group(1).lower()
+    return ""
+
+
+def background_range_expression(reading_pids: Sequence[str], factor_pid: str) -> str:
+    refs = [_norm(pid) for pid in reading_pids if _norm(pid)]
+    if len(refs) < 2 or not _norm(factor_pid):
+        return ""
+    joined = ",".join(refs)
+    factor = _norm(factor_pid)
+    return f"(min({joined}) * {factor}) ~ (max({joined}) * {factor})"
+
+
+def apply_background_formulas_to_pdf_fields(
+    fields: List[Any],
+    *,
+    chapter: Optional[Mapping[str, Any]] = None,
+) -> None:
+    """
+    本底水平及范围：写入 min(f…)~max(f…)×校准因子（仿 CT 验收 f603），
+    不被章节报出值规则 {mean}*f927 覆盖。
+    """
+    chapter = chapter if isinstance(chapter, dict) else {}
+    reading_rows = _background_reading_fields_sorted(fields)
+    if len(reading_rows) < 2:
+        return
+    factor_pid = _chapter_g1_calibration_factor_pid(chapter)
+    if not factor_pid:
+        return
+    reading_pids = [str(r["pid"]) for r in reading_rows]
+    expr = background_range_expression(reading_pids, factor_pid)
+    if not expr:
+        return
+    for field in fields or []:
+        if not isinstance(field, dict) or not is_background_range_pdf_field(field):
+            continue
+        field["fieldExpression"] = expr
+        field["formula"] = expr
+        src = field.get("source") if isinstance(field.get("source"), dict) else {}
+        if isinstance(src, dict):
+            field["source"] = {**src, "pdfFieldExpression": expr}
+        field["fieldFormulaUserOverride"] = True
 
 
 def is_protection_pdf_field(field: Mapping[str, Any]) -> bool:
@@ -96,7 +253,7 @@ def is_protection_pdf_field(field: Mapping[str, Any]) -> bool:
         return True
     if _norm(field.get("sectionType") or "") == "radiationProtection":
         return True
-    sem = field_table_semantic(field)
+    sem = protection_field_semantic_unified(field)
     if sem.get("tableId") or sem.get("radiationPoint") or sem.get("radiationColumn"):
         return True
     if field_looks_like_protection_table_cell(field):
@@ -118,6 +275,7 @@ _PROTECTION_ROW_SUFFIX_PATTERNS = (
     re.compile(r"_测量读数M$", re.I),
     re.compile(r"_测量均值Mbar$", re.I),
     re.compile(r"_测量均值.*$", re.I),
+    re.compile(r"_测量值$", re.I),
     re.compile(r"_报出值D$", re.I),
     re.compile(r"_报出值$", re.I),
     re.compile(r"_备注$", re.I),
@@ -196,6 +354,15 @@ def _field_pdf_anchor_bounds(field: Mapping[str, Any]) -> tuple[int, float, floa
             return page, x0, y0, y0 + height
         except (TypeError, ValueError):
             pass
+    try:
+        page = int(field.get("page") or 5)
+        x0 = float(field.get("x") or 0.0)
+        y0 = float(field.get("y") or 0.0)
+        height = float(field.get("h") or 0.0)
+        if x0 or y0 or height:
+            return page, x0, y0, y0 + height
+    except (TypeError, ValueError):
+        pass
     return 5, 0.0, 0.0, 0.0
 
 
@@ -250,7 +417,947 @@ def _column_role(sem: Mapping[str, Any], field: Mapping[str, Any]) -> str:
         return _COLUMN_MEAN
     if "读数" in ph:
         return _COLUMN_READING
+    if "测量值" in ph and "报出" not in ph:
+        return _COLUMN_READING
     return ""
+
+
+def _field_sort_x(field: Mapping[str, Any]) -> float:
+    _page, x0, _y0 = _field_pdf_anchor_rect(field)
+    return float(x0)
+
+
+def _binding_reading_keys(*, group: int = 1) -> tuple[str, str, str]:
+    if group == 2:
+        return ("reading_1_2", "reading_2_2", "reading_3_2")
+    return ("reading_1", "reading_2", "reading_3")
+
+
+def _binding_mean_key(*, group: int = 1) -> str:
+    return "mean_m_2" if group == 2 else "mean_m"
+
+
+def _binding_report_key(*, group: int = 1) -> str:
+    return "report_d_2" if group == 2 else "report_d"
+
+
+def _pdf_item_x_bounds(item: Mapping[str, Any]) -> tuple[float, float, float]:
+    x0 = float(item.get("x") or 0.0)
+    w = float(item.get("w") or 0.0)
+    x1 = x0 + w
+    return x0, x1, (x0 + x1) / 2.0
+
+
+_LAYOUT_COLUMN_BAND_KEYS = (
+    "point_id",
+    "location_main",
+    "location_sub",
+    "location_full",
+    "reading_1",
+    "reading_2",
+    "reading_3",
+    "readings_merged",
+    "mean_m",
+    "report_d",
+    "mean_m_2",
+    "report_d_2",
+)
+
+_BINDING_SLOT_KEYS = frozenset(_SINGLE_GROUP_SLOT_KEYS + _DUAL_GROUP_SLOT_KEYS)
+
+_PROTECTION_DATA_COLUMN_SLOTS = frozenset(
+    {
+        "reading_1",
+        "reading_2",
+        "reading_3",
+        "mean_m",
+        "report_d",
+        "reading_1_2",
+        "reading_2_2",
+        "reading_3_2",
+        "mean_m_2",
+        "report_d_2",
+    }
+)
+
+_SLOT_TO_COLUMN_ROLE: Dict[str, str] = {
+    "reading_1": _COLUMN_READING,
+    "reading_2": _COLUMN_READING,
+    "reading_3": _COLUMN_READING,
+    "reading_1_2": _COLUMN_READING,
+    "reading_2_2": _COLUMN_READING,
+    "reading_3_2": _COLUMN_READING,
+    "mean_m": _COLUMN_MEAN,
+    "mean_m_2": _COLUMN_MEAN,
+    "report_d": _COLUMN_REPORT,
+    "report_d_2": _COLUMN_REPORT,
+}
+
+
+def _layout_columns_from_json(layout: Mapping[str, Any]) -> Dict[str, Dict[str, float]]:
+    table = layout.get("table") if isinstance(layout.get("table"), dict) else {}
+    cols = table.get("columns") if isinstance(table.get("columns"), dict) else {}
+    if not cols and isinstance(layout.get("columns"), dict):
+        cols = layout.get("columns")  # type: ignore[assignment]
+    out: Dict[str, Dict[str, float]] = {}
+    for key in _LAYOUT_COLUMN_BAND_KEYS:
+        band = cols.get(key)
+        if isinstance(band, dict) and band.get("x0") is not None and band.get("x1") is not None:
+            out[key] = {"x0": float(band["x0"]), "x1": float(band["x1"])}
+    return out
+
+
+def _default_layout_column_bands() -> Dict[str, Dict[str, float]]:
+    if not DEFAULT_LAYOUT_PATH.is_file():
+        return {}
+    try:
+        with DEFAULT_LAYOUT_PATH.open("r", encoding="utf-8") as f:
+            blob = json.load(f)
+        return _layout_columns_from_json(blob.get("layout") or blob)
+    except Exception:
+        return {}
+
+
+def _field_as_layout_item(field: Mapping[str, Any]) -> Dict[str, Any]:
+    page, x0, y0, y1 = _field_pdf_anchor_bounds(field)
+    x0b, x1b = _field_pdf_x_bounds(field)
+    w = float(field.get("w") or 0.0) or max(0.0, x1b - x0b)
+    h = float(field.get("h") or 0.0) or max(0.0, y1 - y0)
+    return {
+        "page": page,
+        "x": x0,
+        "y": y0,
+        "w": w,
+        "h": h,
+        "templateSectionKey": str(field.get("templateSectionKey") or ""),
+    }
+
+
+def _field_pdf_x_bounds(field: Mapping[str, Any]) -> tuple[float, float]:
+    page, x0, y0, y1 = _field_pdf_anchor_bounds(field)
+    del page, y0, y1
+    try:
+        w = float(field.get("w") or 0.0)
+        if w > 0:
+            return x0, x0 + w
+    except (TypeError, ValueError):
+        pass
+    anchor = field.get("pdfAnchor")
+    if isinstance(anchor, dict):
+        rect = anchor.get("rect")
+        if isinstance(rect, (list, tuple)) and len(rect) >= 4:
+            try:
+                ax0 = float(rect[0])
+                ax1 = float(rect[2])
+                if ax1 > ax0:
+                    return ax0, ax1
+            except (TypeError, ValueError):
+                pass
+    rect = field.get("rect")
+    if isinstance(rect, (list, tuple)) and len(rect) >= 4:
+        try:
+            w = float(rect[3])
+            if w > 0:
+                return x0, x0 + w
+        except (TypeError, ValueError):
+            pass
+    return x0, x0
+
+
+def _ensure_layout_data_columns(layout: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(layout)
+    cols = dict(out.get("columns") or {})
+    defaults = _default_layout_column_bands()
+    for key, band in defaults.items():
+        cols.setdefault(key, band)
+    out["columns"] = cols
+    return out
+
+
+def resolve_protection_table_layout(
+    fields: List[Mapping[str, Any]],
+    *,
+    layout_json: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """第五章表列带：版式 JSON + tabletest 默认 + 栏位推断（检测点/读数左界）。"""
+    items = [_field_as_layout_item(f) for f in fields or [] if isinstance(f, dict)]
+    root = layout_json.get("layout") if isinstance(layout_json, dict) and isinstance(layout_json.get("layout"), dict) else layout_json
+    base = infer_protection_table_column_layout(items, layout_json=root if isinstance(root, dict) else None)
+    merged_cols = dict(_default_layout_column_bands())
+    merged_cols.update(base.get("columns") or {})
+    if isinstance(root, dict):
+        merged_cols.update(_layout_columns_from_json(root))
+    base["columns"] = merged_cols
+    return _ensure_layout_data_columns(base)
+
+
+def _is_rp_table_data_row_field(field: Mapping[str, Any], *, preface_y_cutoff: float = 360.0) -> bool:
+    page, _x0, y0, _y1 = _field_pdf_anchor_bounds(field)
+    if page < 5:
+        return False
+    if page == 5 and y0 < preface_y_cutoff:
+        return False
+    return True
+
+
+def _protection_row_coordinate_key(field: Mapping[str, Any]) -> str:
+    """同行数据格共用 page + 行心 y（不解析 placeholder 标签）。"""
+    page, y0, y1 = _field_pdf_anchor_y_bounds(field)
+    y_mid = round((y0 + y1) / 2.0, 1)
+    return f"rp_p{page}_y{y_mid}"
+
+
+def _protection_data_column_slot_keys() -> tuple[str, ...]:
+    return tuple(
+        key
+        for key in _LAYOUT_COLUMN_BAND_KEYS
+        if key not in ("point_id", "location_main", "location_sub", "location_full", "readings_merged")
+    )
+
+
+def _is_rp_measurement_data_cell(
+    field: Mapping[str, Any],
+    column_layout: Mapping[str, Any],
+) -> bool:
+    """第五章数据行内、检测点列右侧的读数/均值/报出格（列带未命中时仍纳入绑定）。"""
+    if not _is_rp_table_data_row_field(field, preface_y_cutoff=float(column_layout.get("preface_y_cutoff") or 360.0)):
+        return False
+    x0, x1 = _field_pdf_x_bounds(field)
+    cols = column_layout.get("columns") if isinstance(column_layout.get("columns"), dict) else {}
+    for loc_key in ("location_full", "location_sub", "location_main"):
+        band = cols.get(loc_key) or column_layout.get(loc_key)
+        if isinstance(band, dict):
+            loc_x1 = float(band.get("x1") or 0.0)
+            if loc_x1 > 0 and x1 <= loc_x1 + 2.5:
+                return False
+    reading_start = column_layout.get("reading_start_x")
+    if reading_start is None:
+        loc_full = cols.get("location_full") or column_layout.get("location_full")
+        if isinstance(loc_full, dict):
+            reading_start = float(loc_full.get("x1") or 0.0)
+    if reading_start is not None and x0 < float(reading_start) - 5.0:
+        return False
+    return True
+
+
+def _dual_binding_assignment_complete(out: Mapping[str, Any]) -> bool:
+    """双组表：每组三次读数 + 两个均值均已绑定。"""
+    keys = (
+        "reading_1",
+        "reading_2",
+        "reading_3",
+        "reading_1_2",
+        "reading_2_2",
+        "reading_3_2",
+        "mean_m",
+        "mean_m_2",
+    )
+    return all(_norm(out.get(k) or "") for k in keys)
+
+
+def _assign_dual_group_slots_by_x(items: List[Dict[str, Any]]) -> Dict[str, str]:
+    """
+    双组表按 x 从左到右：组1(读数×3+均值) + 组2(读数×3+均值) + 报出值。
+    与 JS115 口腔全景等「成组交错」版式一致，而非先 6 个读数再 2 个均值。
+    """
+    ordered = sorted(items, key=lambda it: float(it.get("x0") or 0.0))
+    out: Dict[str, str] = {}
+    for slot, it in zip(_DUAL_GROUP_SLOT_KEYS, ordered):
+        pid = _norm(it.get("pid") or "")
+        if pid:
+            out[slot] = pid
+    return out
+
+
+def _assign_single_group_slots_by_x(items: List[Dict[str, Any]]) -> Dict[str, str]:
+    ordered = sorted(items, key=lambda it: float(it.get("x0") or 0.0))
+    slots = _SINGLE_GROUP_SLOT_KEYS + ("report_d_2",)
+    out: Dict[str, str] = {}
+    for slot, it in zip(slots, ordered):
+        pid = _norm(it.get("pid") or "")
+        if pid:
+            out[slot] = pid
+    return out
+
+
+def protection_data_column_slot(
+    field: Mapping[str, Any],
+    column_layout: Mapping[str, Any],
+) -> str:
+    """按 PDF x 坐标落入版式列带，返回 binding 槽位名（reading_1 / mean_m / …）。"""
+    preface = float(column_layout.get("preface_y_cutoff") or 360.0)
+    if not _is_rp_table_data_row_field(field, preface_y_cutoff=preface):
+        return ""
+    x0, x1 = _field_pdf_x_bounds(field)
+    cols = column_layout.get("columns") if isinstance(column_layout.get("columns"), dict) else {}
+    xc = (x0 + x1) / 2.0
+    matches: list[tuple[float, str]] = []
+    for key in _protection_data_column_slot_keys():
+        band = cols.get(key)
+        if not isinstance(band, dict):
+            continue
+        if not _x_band_contains(band, x0, x1, tol=2.5):
+            continue
+        band_center = (float(band.get("x0") or 0.0) + float(band.get("x1") or 0.0)) / 2.0
+        matches.append((abs(xc - band_center), key))
+    if not matches:
+        return ""
+    matches.sort(key=lambda item: item[0])
+    return matches[0][1]
+
+
+def _column_role_from_semantics(sem: Mapping[str, Any], field: Mapping[str, Any]) -> str:
+    col = _norm(sem.get("radiationColumn") or "")
+    if col:
+        return col
+    if sem.get("meanOfReadings") or field.get("mean"):
+        return _COLUMN_MEAN
+    return ""
+
+
+def _column_role_for_binding(
+    field: Mapping[str, Any],
+    sem: Mapping[str, Any],
+    *,
+    column_layout: Optional[Mapping[str, Any]] = None,
+) -> str:
+    """第五章 binding 列角色：仅由 PDF 列带 x 坐标决定，不解析 placeholder/label。"""
+    del sem
+    layout = column_layout if isinstance(column_layout, dict) else {}
+    if not layout:
+        layout = resolve_protection_table_layout([field])
+    slot = protection_data_column_slot(field, layout)
+    return _SLOT_TO_COLUMN_ROLE.get(slot, "")
+
+
+def _derive_radiation_point_label(
+    row_items: List[Dict[str, Any]],
+    fields: List[Mapping[str, Any]],
+    column_layout: Mapping[str, Any],
+) -> str:
+    """binding 行标识：page + 行心 y 坐标键（不用 label 拼接点位名）。"""
+    del fields, column_layout
+    if not row_items:
+        return ""
+    anchor = row_items[0].get("field")
+    if isinstance(anchor, dict):
+        return _protection_row_coordinate_key(anchor)
+    return ""
+
+
+def _is_rp_table_data_row_item(item: Mapping[str, Any], *, preface_y_cutoff: float) -> bool:
+    page = int(item.get("page") or 0)
+    if page < 5:
+        return False
+    y0 = float(item.get("y") or 0.0)
+    if page == 5 and y0 < preface_y_cutoff:
+        return False
+    return True
+
+
+def infer_protection_table_column_layout(
+    items: List[Mapping[str, Any]],
+    *,
+    layout_json: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    推断第五章防护表列带：检测点位置主列/子列与首列读数左边界。
+    优先用版式 JSON 的 table.columns；否则从 site_radiation_protection 栏位 x 坐标聚类。
+    """
+    named_cols = _layout_columns_from_json(layout_json) if isinstance(layout_json, dict) else {}
+    if not named_cols and DEFAULT_LAYOUT_PATH.is_file():
+        try:
+            with DEFAULT_LAYOUT_PATH.open("r", encoding="utf-8") as f:
+                named_cols = _layout_columns_from_json(json.load(f).get("layout") or {})
+        except Exception:
+            named_cols = {}
+
+    rp_items = [
+        it
+        for it in items or []
+        if isinstance(it, dict) and str(it.get("templateSectionKey") or "") == CHAPTER_KEY
+    ]
+    if not rp_items:
+        return {"columns": named_cols}
+
+    preface_y = 360.0
+    data_items = [it for it in rp_items if _is_rp_table_data_row_item(it, preface_y_cutoff=preface_y)]
+    narrow_x0: list[float] = []
+    for it in data_items:
+        x0, x1, _xc = _pdf_item_x_bounds(it)
+        width = x1 - x0
+        if width <= 0:
+            continue
+        if 18.0 <= width <= 72.0 and x0 >= 180.0:
+            narrow_x0.append(x0)
+    reading_start_x = min(narrow_x0) if narrow_x0 else None
+
+    point_x1 = None
+    for it in data_items:
+        x0, x1, _xc = _pdf_item_x_bounds(it)
+        if x0 <= 45.0 and (x1 - x0) <= 48.0:
+            point_x1 = max(point_x1 or x1, x1)
+
+    if reading_start_x is None and named_cols.get("reading_1"):
+        reading_start_x = float(named_cols["reading_1"]["x0"])
+    if point_x1 is None and named_cols.get("point_id"):
+        point_x1 = float(named_cols["point_id"]["x1"])
+
+    location_x0 = float(named_cols.get("location_main", {}).get("x0") or point_x1 or 65.0)
+    if point_x1 is not None:
+        location_x0 = max(location_x0, float(point_x1))
+
+    layout_out: Dict[str, Any] = {
+        "columns": dict(named_cols),
+        "location_x0": location_x0,
+        "reading_start_x": float(reading_start_x) if reading_start_x is not None else None,
+        "preface_y_cutoff": preface_y,
+    }
+    if named_cols.get("location_main"):
+        layout_out["location_main"] = dict(named_cols["location_main"])
+    if named_cols.get("location_sub"):
+        layout_out["location_sub"] = dict(named_cols["location_sub"])
+    if layout_out.get("reading_start_x") is not None:
+        layout_out["location_full"] = {
+            "x0": location_x0,
+            "x1": float(layout_out["reading_start_x"]),
+        }
+    return layout_out
+
+
+def _x_band_contains(band: Mapping[str, Any], x0: float, x1: float, *, tol: float = 1.5) -> bool:
+    bx0 = float(band.get("x0") or 0.0) - tol
+    bx1 = float(band.get("x1") or 0.0) + tol
+    return x0 >= bx0 and x1 <= bx1
+
+
+def protection_field_column_role(
+    item: Mapping[str, Any],
+    column_layout: Optional[Mapping[str, Any]] = None,
+    *,
+    auto_semantic: Optional[Mapping[str, Any]] = None,
+) -> str:
+    sem = auto_semantic if isinstance(auto_semantic, dict) else {}
+    if not sem:
+        raw = item.get("autoSemantic")
+        sem = raw if isinstance(raw, dict) else {}
+    for key in ("radiationColumn", "typeName"):
+        role = _norm(sem.get(key) or "")
+        if role:
+            return role
+    layout = column_layout if isinstance(column_layout, dict) else {}
+    if not _is_rp_table_data_row_item(item, preface_y_cutoff=float(layout.get("preface_y_cutoff") or 360.0)):
+        return ""
+    x0, x1, _xc = _pdf_item_x_bounds(item)
+    cols = layout.get("columns") if isinstance(layout.get("columns"), dict) else {}
+    for band_key, role in (
+        ("location_main", "检测点位置"),
+        ("location_sub", "位置细分"),
+        ("location_full", "检测点位置"),
+    ):
+        band = cols.get(band_key) or layout.get(band_key)
+        if isinstance(band, dict) and _x_band_contains(band, x0, x1):
+            return role
+    loc_full = layout.get("location_full")
+    if isinstance(loc_full, dict) and _x_band_contains(loc_full, x0, x1):
+        if cols.get("location_sub") and _x_band_contains(cols["location_sub"], x0, x1):
+            return "位置细分"
+        return "检测点位置"
+    reading_start = layout.get("reading_start_x")
+    location_x0 = layout.get("location_x0")
+    if reading_start is not None and location_x0 is not None:
+        if float(location_x0) - 1.5 <= x0 and x1 <= float(reading_start) + 1.5:
+            sub_band = cols.get("location_sub") or layout.get("location_sub")
+            if isinstance(sub_band, dict) and _x_band_contains(sub_band, x0, x1):
+                return "位置细分"
+            return "检测点位置"
+    return ""
+
+
+def is_protection_location_cell(
+    item: Mapping[str, Any],
+    column_layout: Optional[Mapping[str, Any]] = None,
+    *,
+    auto_semantic: Optional[Mapping[str, Any]] = None,
+) -> bool:
+    role = protection_field_column_role(item, column_layout, auto_semantic=auto_semantic)
+    return role in _RP_LOCATION_COLUMN_ROLES
+
+
+def apply_protection_field_export_typing(
+    field_obj: Dict[str, Any],
+    item: Mapping[str, Any],
+    *,
+    column_layout: Optional[Mapping[str, Any]] = None,
+) -> None:
+    """第五章导出：检测点位置列 text；其余数值 precision=3。"""
+    if str(item.get("templateSectionKey") or "") != CHAPTER_KEY:
+        return
+    src = field_obj.get("source") if isinstance(field_obj.get("source"), dict) else {}
+    auto_sem = src.get("autoSemantic") if isinstance(src.get("autoSemantic"), dict) else item.get("autoSemantic")
+    role = protection_field_column_role(item, column_layout, auto_semantic=auto_sem if isinstance(auto_sem, dict) else None)
+    if role in _RP_LOCATION_COLUMN_ROLES:
+        field_obj["type"] = "text"
+        field_obj.pop("precision", None)
+        field_obj.pop("unit", None)
+        if isinstance(src, dict):
+            sem = src.setdefault("autoSemantic", {})
+            if isinstance(sem, dict):
+                sem.setdefault("radiationColumn", role)
+                sem.setdefault("typeName", role)
+        return
+    if str(field_obj.get("type") or "").lower() == "number":
+        field_obj["precision"] = PROTECTION_NUMBER_PRECISION
+
+
+def field_is_protection_chapter_numeric_cell(field: Mapping[str, Any]) -> bool:
+    """现场记录第五章数值格：读数/均值/报出值/本底/表前因子等（非序号、非位置文字）。"""
+    if not is_protection_pdf_field(field):
+        return False
+    if is_rp_table_seq_field(field):
+        return False
+    tbl = field.get("table") if isinstance(field.get("table"), dict) else {}
+    col = _norm(tbl.get("radiationColumn") or tbl.get("typeName") or "")
+    if col in _RP_LOCATION_COLUMN_ROLES:
+        return False
+    blob = _field_label_blob(field)
+    if "检测点位置" in blob and not any(
+        kw in blob
+        for kw in (
+            "测量读数",
+            "报出值",
+            "测量均值",
+            "本底",
+            "μSv",
+            "Mbar",
+            "M1",
+            "M2",
+            "M3",
+            "校准",
+            "修正",
+            "因子",
+        )
+    ):
+        return False
+    return True
+
+
+def format_protection_numeric_display(
+    value: Any,
+    *,
+    precision: int = PROTECTION_NUMBER_PRECISION,
+) -> str:
+    """第五章数值 PDF/提交展示：固定小数位，避免 float 尾数如 81.38000000000001。"""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return str(int(value))
+    text = str(value).strip()
+    if not text or text == "/":
+        return text
+    if "~" in text or text.startswith("模拟_") or text.startswith("mock_"):
+        return text
+    try:
+        num = float(text)
+    except (TypeError, ValueError):
+        return text
+    prec = max(0, int(precision))
+    if prec == 0:
+        return str(int(round(num)))
+    return f"{round(num, prec):.{prec}f}"
+
+
+def _binding_has_dual_group(binding: Mapping[str, Any]) -> bool:
+    return bool(_norm(binding.get("mean_m_2") or "") or _norm(binding.get("report_d_2") or ""))
+
+
+def _header_role_counts_from_texts(texts: Mapping[Any, Any]) -> Dict[str, int]:
+    """统计表头行中测量读数/均值/报出值列标题出现次数。"""
+    counts = {"reading": 0, "mean": 0, "report": 0}
+    for raw in texts.values():
+        text = _norm(raw)
+        if not text or "本底" in text:
+            continue
+        if _HEADER_REPORT_RE.search(text):
+            counts["report"] += 1
+            continue
+        if _HEADER_MEAN_RE.search(text):
+            counts["mean"] += 1
+            continue
+        if _HEADER_READING_RE.search(text):
+            counts["reading"] += 1
+    return counts
+
+
+def _repeated_header_indicates_dual_group(counts: Mapping[str, int]) -> bool:
+    """表头重复：测量均值或报出值（或测量读数块）出现 ≥2 次 → 双组表。"""
+    if int(counts.get("mean") or 0) >= 2:
+        return True
+    if int(counts.get("report") or 0) >= 2:
+        return True
+    if int(counts.get("reading") or 0) >= 2:
+        return True
+    return False
+
+
+def _is_protection_table_header_row(cells: Mapping[Any, Any]) -> bool:
+    joined = "".join(_norm(v) for v in cells.values())
+    if "序号" not in joined:
+        return False
+    return (
+        "检测点位置" in joined
+        or "检测点" in joined
+        or "测量读数" in joined
+        or "测量均值" in joined
+        or "报出值" in joined
+    )
+
+
+def _protection_table_pages_from_fields(fields: List[Mapping[str, Any]]) -> List[int]:
+    pages: set[int] = set()
+    for field in fields or []:
+        if not isinstance(field, dict) or not is_protection_unified_field(field):
+            continue
+        sem = protection_field_semantic_unified(field)
+        role = _column_role(sem, field)
+        if role not in (_COLUMN_READING, _COLUMN_MEAN, _COLUMN_REPORT):
+            continue
+        page, _x0, _y0 = _field_pdf_anchor_rect(field)
+        if page >= 1:
+            pages.add(int(page))
+    return sorted(pages)
+
+
+def detect_dual_group_from_layout_header_rows(
+    layout: Optional[Mapping[str, Any]],
+) -> Optional[bool]:
+    """从版式 JSON 的 table_template.header_rows 读取表头重复。"""
+    if not isinstance(layout, dict):
+        return None
+    table_tpl = layout.get("table_template")
+    if not isinstance(table_tpl, dict):
+        return None
+    headers = table_tpl.get("header_rows")
+    if not isinstance(headers, list):
+        return None
+    saw_header = False
+    for row in headers:
+        if not isinstance(row, dict) or row.get("kind") != "header":
+            continue
+        cells = row.get("cells")
+        if not isinstance(cells, dict):
+            continue
+        saw_header = True
+        counts = _header_role_counts_from_texts(cells)
+        if _repeated_header_indicates_dual_group(counts):
+            return True
+        if int(counts.get("mean") or 0) == 1 and int(counts.get("report") or 0) == 1:
+            return False
+    return None if not saw_header else False
+
+
+def _page_text_header_dual_group(page: Any) -> Optional[bool]:
+    """从页面文本行扫描表头（表头列标题重复）。"""
+    try:
+        text = page.get_text("text")
+    except Exception:
+        return None
+    saw = False
+    for line in (text or "").splitlines():
+        line = _norm(line)
+        if "序号" not in line:
+            continue
+        if not (
+            "测量读数" in line
+            or "测量均值" in line
+            or "报出值" in line
+            or "检测点" in line
+        ):
+            continue
+        counts = {
+            "reading": len(_HEADER_READING_RE.findall(line)),
+            "mean": len(_HEADER_MEAN_RE.findall(line)),
+            "report": len(_HEADER_REPORT_RE.findall(line)),
+        }
+        saw = True
+        if _repeated_header_indicates_dual_group(counts):
+            return True
+        if counts["mean"] == 1 and counts["report"] == 1:
+            return False
+    return None if not saw else False
+
+
+def detect_dual_group_from_pdf_headers(
+    pdf_path: str,
+    *,
+    pages: Optional[Sequence[int]] = None,
+) -> Optional[bool]:
+    """
+    读取 PDF 表头行，根据列标题重复判定双组表。
+    返回 True/False 表示已识别；None 表示无法解析（无 PDF 或未找到表头）。
+    """
+    path = Path(pdf_path)
+    if not path.is_file():
+        return None
+    try:
+        import fitz
+    except Exception:
+        return None
+    try:
+        from radiation_detection_report.extract_tabletest_layout import _table_rows
+    except Exception:
+        try:
+            from extract_tabletest_layout import _table_rows
+        except Exception:
+            _table_rows = None
+
+    doc = fitz.open(str(path))
+    try:
+        page_nos = list(pages or range(1, len(doc) + 1))
+        for pno in page_nos:
+            if pno < 1 or pno > len(doc):
+                continue
+            page = doc[pno - 1]
+            if _table_rows is not None:
+                for row_cells in _table_rows(page):
+                    texts: Dict[int, str] = {}
+                    for ci, rect in row_cells:
+                        try:
+                            texts[ci] = _norm(page.get_text("text", clip=fitz.Rect(rect)))
+                        except Exception:
+                            texts[ci] = ""
+                    if not _is_protection_table_header_row(texts):
+                        continue
+                    counts = _header_role_counts_from_texts(texts)
+                    if _repeated_header_indicates_dual_group(counts):
+                        return True
+                    if int(counts.get("mean") or 0) == 1 and int(counts.get("report") or 0) == 1:
+                        return False
+            line_result = _page_text_header_dual_group(page)
+            if line_result is not None:
+                return line_result
+    finally:
+        doc.close()
+    return None
+
+
+def _resolve_template_pdf_path_from_payload(
+    payload: Optional[Mapping[str, Any]],
+) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    pdf = payload.get("pdf")
+    if not isinstance(pdf, dict):
+        return None
+    src = pdf.get("source_pdf")
+    if not isinstance(src, dict):
+        return None
+    tid = src.get("template_file_id")
+    if tid is not None:
+        try:
+            from apps.core import pipeline_service
+            from apps.core.models import LibraryFile
+
+            lf = LibraryFile.objects.filter(pk=int(tid)).first()
+            if lf is not None:
+                path = pipeline_service.library_absolute_path(lf.relative_path)
+                if path.is_file():
+                    return str(path)
+        except Exception:
+            pass
+    name = _norm(src.get("template_file_name") or "")
+    if name:
+        media_root = PACKAGE_DIR.parent / "media" / "file_library"
+        for candidate in (
+            media_root / "templates" / name,
+            media_root / name,
+        ):
+            if candidate.is_file():
+                return str(candidate)
+    return None
+
+
+def _report_rules_indicate_dual_group(chapter: Optional[Mapping[str, Any]]) -> bool:
+    """章节报出值公式含 {mean2} 时，表明模板按双组表配置。"""
+    if not isinstance(chapter, dict):
+        return False
+    rules = chapter.get("reportValueRules")
+    if not isinstance(rules, list):
+        return False
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        expr = _norm(rule.get("expression") or rule.get("formula"))
+        if "{mean2}" in expr or "__ROW_MEAN2__" in expr.lower():
+            return True
+    return False
+
+
+def detect_dual_group_from_field_column_layout(
+    fields: List[Mapping[str, Any]],
+    *,
+    min_dual_points: int = 3,
+) -> Optional[bool]:
+    """
+    从已标注防护表栏位推断双组布局：同 radiationPoint 下出现 ≥2 个均值列。
+    PDF/版式表头不可读时（如仅 JSON、无 source_pdf）的兜底。
+    """
+    point_items = _collect_point_data_fields(fields)
+    if not point_items:
+        return None
+    dual_pts = 0
+    single_pts = 0
+    for items in point_items.values():
+        n_mean = sum(1 for it in items if str(it.get("role") or "") == _COLUMN_MEAN)
+        n_cells = len(items)
+        if n_mean >= 2 or n_cells >= 8:
+            dual_pts += 1
+        elif n_mean == 1 or (4 <= n_cells < 8):
+            single_pts += 1
+    if dual_pts >= min_dual_points:
+        return True
+    if single_pts > 0 and dual_pts == 0:
+        return False
+    return None
+
+
+def _sync_dual_mean_formula_in_chapter(
+    chapter: Dict[str, Any],
+    bindings: Sequence[Mapping[str, Any]],
+    *,
+    dual_group: Optional[bool] = None,
+) -> None:
+    """按绑定结果同步 meanFormula.mode/groups，避免章节 JSON 仍写 groups:1 导致导出只算一组。"""
+    if dual_group is None:
+        dual_group = sum(
+            1 for b in (bindings or []) if isinstance(b, dict) and _norm(b.get("mean_m_2") or "")
+        ) >= 3
+    mf = chapter.setdefault("meanFormula", {})
+    if not isinstance(mf, dict):
+        mf = dict(default_chapter_config()["meanFormula"])
+        chapter["meanFormula"] = mf
+    if dual_group:
+        mf["mode"] = "per_row_avg_dual"
+        mf["groups"] = 2
+        mf["description"] = "双组测量：每组三次读数分别取平均；报出值分别对应各组均值"
+        mf["layoutSource"] = mf.get("layoutSource") or "field_column_layout"
+    elif str(mf.get("mode") or "") == "per_row_avg_dual":
+        mf["mode"] = "per_row_avg"
+        mf["groups"] = 1
+        if not _norm(mf.get("description")):
+            mf["description"] = default_chapter_config()["meanFormula"]["description"]
+        mf.pop("layoutSource", None)
+
+
+def resolve_table_dual_group_layout(
+    fields: List[Mapping[str, Any]],
+    *,
+    pdf_path: Optional[str] = None,
+    chapter: Optional[Mapping[str, Any]] = None,
+    layout: Optional[Mapping[str, Any]] = None,
+    template_payload: Optional[Mapping[str, Any]] = None,
+) -> bool:
+    """
+    表级双组判定：读取表头列标题是否重复（非数据行列数启发式）。
+    优先级：PDF 表头 > 版式 header_rows > 栏位列布局 > 章节已保存 meanFormula.groups。
+    """
+    pages = _protection_table_pages_from_fields(fields)
+    path = _norm(pdf_path or "") or _resolve_template_pdf_path_from_payload(template_payload)
+    if path:
+        header_dual = detect_dual_group_from_pdf_headers(path, pages=pages or None)
+        if header_dual is not None:
+            return header_dual
+
+    layout_dual = detect_dual_group_from_layout_header_rows(layout)
+    if layout_dual is not None:
+        return layout_dual
+
+    field_dual = detect_dual_group_from_field_column_layout(fields)
+    if field_dual is not None:
+        return field_dual
+
+    if _report_rules_indicate_dual_group(chapter):
+        return True
+
+    if isinstance(chapter, dict):
+        mf = chapter.get("meanFormula")
+        if isinstance(mf, dict):
+            mode = str(mf.get("mode") or "").strip()
+            try:
+                groups = int(mf.get("groups") or 1)
+            except (TypeError, ValueError):
+                groups = 1
+            if mode == "per_row_avg_dual" or groups >= 2:
+                return True
+
+    return False
+
+
+def _collect_point_data_fields(
+    fields: List[Mapping[str, Any]],
+    *,
+    column_layout: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """按 PDF 行坐标 + 列带 x 聚合读数/均值/报出格（不用 placeholder 标签拆行）。"""
+    layout = column_layout if isinstance(column_layout, dict) and column_layout.get("columns") else None
+    if layout is None:
+        layout = resolve_protection_table_layout(fields)
+    rows: Dict[str, List[Dict[str, Any]]] = {}
+    for field in fields or []:
+        if not is_protection_unified_field(field):
+            continue
+        if is_background_level_pdf_field(field):
+            continue
+        sem = protection_field_semantic_unified(field)
+        pid = export_field_pdf_id(field)
+        if not pid:
+            continue
+        slot = protection_data_column_slot(field, layout)
+        role = _SLOT_TO_COLUMN_ROLE.get(slot, "")
+        if role not in (_COLUMN_READING, _COLUMN_MEAN, _COLUMN_REPORT):
+            if not _is_rp_measurement_data_cell(field, layout):
+                continue
+            role = _COLUMN_READING
+            slot = ""
+        pt = _protection_row_coordinate_key(field)
+        if not pt:
+            continue
+        rows.setdefault(pt, []).append(
+            {
+                "field": field,
+                "sem": sem,
+                "pid": pid,
+                "role": role,
+                "slot": slot,
+                "x0": _field_sort_x(field),
+            }
+        )
+    return rows
+
+
+def _assign_slots_to_point_row(
+    items: List[Dict[str, Any]],
+    *,
+    dual_group: bool = False,
+) -> Dict[str, str]:
+    """双组表按 x 成组交错分配；单组表优先列带槽位，不完整时按 x 排序。"""
+    if not items:
+        return {}
+
+    if dual_group:
+        return _assign_dual_group_slots_by_x(items)
+
+    out: Dict[str, str] = {}
+    for it in items or []:
+        slot = _norm(it.get("slot") or "")
+        pid = _norm(it.get("pid") or "")
+        if slot and pid and slot in _BINDING_SLOT_KEYS and not out.get(slot):
+            out[slot] = pid
+
+    if out.get("reading_1") and (out.get("mean_m") or out.get("report_d") or out.get("reading_2")):
+        return out
+
+    return _assign_single_group_slots_by_x(items)
 
 
 def reading_anchor_field_for_binding(
@@ -258,7 +1365,19 @@ def reading_anchor_field_for_binding(
     fields_by_pid: Mapping[str, Mapping[str, Any]],
 ) -> Mapping[str, Any] | None:
     """首格读数可能为空，依次回退到其它读数/均值/报出值格。"""
-    for key in ("reading_1", "reading_2", "reading_3", "mean_m", "report_d"):
+    keys = (
+        "reading_1",
+        "reading_2",
+        "reading_3",
+        "reading_1_2",
+        "reading_2_2",
+        "reading_3_2",
+        "mean_m",
+        "mean_m_2",
+        "report_d",
+        "report_d_2",
+    )
+    for key in keys:
         pid = _norm(binding.get(key) or "").lower()
         field = fields_by_pid.get(pid)
         if isinstance(field, dict):
@@ -355,65 +1474,64 @@ def is_protection_unified_field(field: Mapping[str, Any]) -> bool:
     return sk in _RP_SECTION_KEYS
 
 
-def build_field_bindings_from_fields(fields: List[Mapping[str, Any]]) -> List[Dict[str, Any]]:
-    """按 radiationPoint 聚合第五章栏位，记录各列 pdfFieldId（PDF 或 steps 均可）。"""
+def build_field_bindings_from_fields(
+    fields: List[Mapping[str, Any]],
+    *,
+    dual_group: Optional[bool] = None,
+    pdf_path: Optional[str] = None,
+    chapter: Optional[Mapping[str, Any]] = None,
+    layout: Optional[Mapping[str, Any]] = None,
+    template_payload: Optional[Mapping[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    按 PDF 表格行列坐标聚合第五章栏位，记录各列 pdfFieldId。
+    行：page + 行心 y；列：版式列带 x（reading_1/2/3、mean_m、report_d）。
+    均值公式由 mean_expression_for_binding 动态生成，不硬编码 f 号、不解析 label。
+    """
+    if dual_group is None:
+        dual_group = resolve_table_dual_group_layout(
+            fields,
+            pdf_path=pdf_path,
+            chapter=chapter,
+            layout=layout,
+            template_payload=template_payload,
+        )
+    col_layout = resolve_protection_table_layout(fields, layout_json=layout)
+    point_items = _collect_point_data_fields(fields, column_layout=col_layout)
     rows: Dict[str, Dict[str, Any]] = {}
-    for field in fields or []:
-        if not is_protection_unified_field(field):
-            continue
-        sem = protection_field_semantic_unified(field)
-        pid = export_field_pdf_id(field)
-        if not pid:
-            continue
-        role = _column_role(sem, field)
-        if not role and not sem.get("radiationPoint"):
-            continue
-        pt = _protection_row_point_key(field, sem)
-        if not pt:
-            continue
+    for pt, items in point_items.items():
+        sem0 = items[0].get("sem") if items else {}
         row = rows.setdefault(
             pt,
             {
-                "radiationPoint": pt,
-                "row": sem.get("row"),
+                "radiationPoint": _derive_radiation_point_label(items, fields, col_layout),
+                "row": sem0.get("row") if isinstance(sem0, dict) else None,
                 "seq_no": "",
                 "reading_1": "",
                 "reading_2": "",
                 "reading_3": "",
                 "mean_m": "",
+                "reading_1_2": "",
+                "reading_2_2": "",
+                "reading_3_2": "",
+                "mean_m_2": "",
                 "report_d": "",
+                "report_d_2": "",
                 "remark": "",
             },
         )
-        if role == _COLUMN_SEQ:
-            row["seq_no"] = pid
-        elif role == _COLUMN_READING:
-            idx = _reading_index_from_field(sem, field)
-            if idx == 1:
-                row["reading_1"] = pid
-            elif idx == 2:
-                row["reading_2"] = pid
-            elif idx == 3:
-                row["reading_3"] = pid
-            else:
-                for k in ("reading_1", "reading_2", "reading_3"):
-                    if not row[k]:
-                        row[k] = pid
-                        break
-        elif role == _COLUMN_MEAN or sem.get("meanOfReadings"):
-            row["mean_m"] = pid
-        elif role == _COLUMN_REPORT:
-            row["report_d"] = pid
-        elif role == "备注":
-            row["remark"] = pid
+        row.update(_assign_slots_to_point_row(items, dual_group=dual_group))
     out = list(rows.values())
     out.sort(key=lambda r: (r.get("row") is None, r.get("row") or 0, r.get("radiationPoint") or ""))
     attach_seq_no_to_bindings(out, fields)
     return out
 
 
-def build_field_bindings_from_pdf_fields(fields: List[Mapping[str, Any]]) -> List[Dict[str, Any]]:
-    return build_field_bindings_from_fields(fields)
+def build_field_bindings_from_pdf_fields(
+    fields: List[Mapping[str, Any]],
+    **kwargs: Any,
+) -> List[Dict[str, Any]]:
+    return build_field_bindings_from_fields(fields, **kwargs)
 
 
 def export_chapter_config_for_frontend(chapter: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
@@ -463,9 +1581,11 @@ def field_has_per_cell_formula_override(
     *,
     chapter_rules: Optional[List[Mapping[str, Any]]] = None,
 ) -> bool:
-    """栏位已单独配置公式时，不再套用章节级报出值公式。"""
+    """栏位已单独配置公式时，章节均值/报出值公式不得覆盖。"""
     if not isinstance(field, dict):
         return False
+    if field.get("fieldFormulaUserOverride") is True:
+        return True
     src = field.get("source") if isinstance(field.get("source"), dict) else {}
     chapter_rules = chapter_rules if isinstance(chapter_rules, list) else []
     for key in ("formulaRules", "fieldExpressionRules"):
@@ -479,12 +1599,6 @@ def field_has_per_cell_formula_override(
             if chapter_rules and _field_rules_are_chapter_sourced(sval, chapter_rules):
                 continue
             return True
-    for key in ("fieldExpression", "formula"):
-        if _norm(field.get(key)):
-            return True
-    for key in ("pdfFieldExpression", "fieldExpression"):
-        if _norm(src.get(key)):
-            return True
     return False
 
 
@@ -494,6 +1608,7 @@ def default_chapter_config() -> Dict[str, Any]:
         "meanFormula": {
             "mode": "per_row_avg",
             "description": "同点位三次测量读数取平均",
+            "groups": 1,
         },
         "reportValueRules": [
             {
@@ -516,30 +1631,73 @@ def default_chapter_config() -> Dict[str, Any]:
 def build_chapter_state(
     fields: List[Mapping[str, Any]],
     existing: Optional[Mapping[str, Any]] = None,
+    *,
+    pdf_path: Optional[str] = None,
+    layout: Optional[Mapping[str, Any]] = None,
+    template_payload: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
+    dual_group = resolve_table_dual_group_layout(
+        fields,
+        pdf_path=pdf_path,
+        chapter=existing,
+        layout=layout,
+        template_payload=template_payload,
+    )
     state = copy.deepcopy(existing) if isinstance(existing, dict) else default_chapter_config()
     state["chapterKey"] = CHAPTER_KEY
-    state["fieldBindings"] = build_field_bindings_from_pdf_fields(fields)
+    state["fieldBindings"] = build_field_bindings_from_fields(
+        fields,
+        dual_group=dual_group,
+        pdf_path=pdf_path,
+        chapter=existing,
+        layout=layout,
+        template_payload=template_payload,
+    )
     state.setdefault("meanFormula", default_chapter_config()["meanFormula"])
+    mf = state["meanFormula"]
+    if not isinstance(mf, dict):
+        mf = default_chapter_config()["meanFormula"]
+        state["meanFormula"] = mf
+    if dual_group:
+        mf["mode"] = "per_row_avg_dual"
+        mf["groups"] = 2
+        mf["description"] = "双组测量：每组三次读数分别取平均；报出值分别对应各组均值"
+        mf["layoutSource"] = "repeated_table_header"
+    else:
+        if str(mf.get("mode") or "") == "per_row_avg_dual":
+            mf["mode"] = "per_row_avg"
+        mf["groups"] = 1
+        if not _norm(mf.get("description")):
+            mf["description"] = default_chapter_config()["meanFormula"]["description"]
+        mf.pop("layoutSource", None)
     rules = state.get("reportValueRules")
     if not isinstance(rules, list) or not rules:
         state["reportValueRules"] = default_chapter_config()["reportValueRules"]
     return state
 
 
-def _substitute_row_tokens(expr: str, binding: Mapping[str, Any]) -> str:
+def _substitute_row_tokens(
+    expr: str,
+    binding: Mapping[str, Any],
+    *,
+    report_group: int = 1,
+) -> str:
     out = str(expr or "")
+    mean_key = _binding_mean_key(group=report_group)
     repl = {
-        ROW_TOKEN_MEAN: _norm(binding.get("mean_m") or ""),
-        "__ROW_MEAN__": _norm(binding.get("mean_m") or ""),
-        "{mean}": _norm(binding.get("mean_m") or ""),
-        "__ROW_READING1__": _norm(binding.get("reading_1") or ""),
-        "__ROW_READING2__": _norm(binding.get("reading_2") or ""),
-        "__ROW_READING3__": _norm(binding.get("reading_3") or ""),
-        "{reading1}": _norm(binding.get("reading_1") or ""),
-        "{reading2}": _norm(binding.get("reading_2") or ""),
-        "{reading3}": _norm(binding.get("reading_3") or ""),
+        ROW_TOKEN_MEAN: _norm(binding.get(mean_key) or binding.get("mean_m") or ""),
+        ROW_TOKEN_MEAN2: _norm(binding.get("mean_m_2") or ""),
+        "__ROW_MEAN__": _norm(binding.get(mean_key) or binding.get("mean_m") or ""),
+        "__ROW_MEAN2__": _norm(binding.get("mean_m_2") or ""),
+        "{mean}": _norm(binding.get(mean_key) or binding.get("mean_m") or ""),
+        "{mean2}": _norm(binding.get("mean_m_2") or ""),
     }
+    for idx, key in enumerate(_binding_reading_keys(group=1), start=1):
+        repl[f"__ROW_READING{idx}__"] = _norm(binding.get(key) or "")
+        repl[f"{{reading{idx}}}"] = _norm(binding.get(key) or "")
+    for idx, key in enumerate(_binding_reading_keys(group=2), start=1):
+        repl[f"__ROW_READING{idx}_2__"] = _norm(binding.get(key) or "")
+        repl[f"{{reading{idx}_2}}"] = _norm(binding.get(key) or "")
     for token, fid in repl.items():
         if token and fid:
             out = out.replace(token, fid)
@@ -565,16 +1723,26 @@ def compile_report_expression(
 def manual_report_value_rules_for_binding(
     rules: List[Mapping[str, Any]],
     binding: Mapping[str, Any],
+    *,
+    report_group: int = 1,
 ) -> List[Dict[str, Any]]:
-    """condition 为空的章节报出值规则 → 栏位级列表（{mean} 已替换为该行均值 f 号）。"""
+    """condition 为空的章节报出值规则 → 栏位级列表（{mean}/{mean2} 已替换为该行均值 f 号）。"""
     manual_rows: List[Dict[str, Any]] = []
     for rule in normalize_rule_list(rules):
         cond = _norm(rule.get("condition"))
         expr = _norm(rule.get("expression") or rule.get("formula"))
         if cond or not expr:
             continue
+        if report_group == 1 and "{mean2}" in expr and "{mean}" not in expr:
+            continue
+        if report_group == 2 and "{mean}" in expr and "{mean2}" not in expr and "mean2" not in expr.lower():
+            continue
         row = export_rule_for_frontend(rule)
-        row["expression"] = _substitute_row_tokens(row.get("expression") or "", binding)
+        row["expression"] = _substitute_row_tokens(
+            row.get("expression") or "",
+            binding,
+            report_group=report_group,
+        )
         if row["expression"]:
             manual_rows.append(row)
     return manual_rows
@@ -588,6 +1756,8 @@ def _write_manual_report_rules_to_field(
     chapter_rules: Optional[List[Mapping[str, Any]]] = None,
 ) -> None:
     """单元格级条件公式：单条默认自动；多条且含自动规则时写入栏位备选。"""
+    if field_has_per_cell_formula_override(report_field, chapter_rules=chapter_rules):
+        return
     if not manual:
         return
     if len(manual) == 1 and not auto_expr:
@@ -624,6 +1794,7 @@ def apply_chapter_report_rules_to_field(
     binding: Mapping[str, Any],
     *,
     force: bool = False,
+    report_group: int = 1,
 ) -> None:
     """
     报出值栏位（steps / pdf.fields 均可）：
@@ -631,16 +1802,18 @@ def apply_chapter_report_rules_to_field(
     - condition 为空 → 写入 formulaRules（{mean} 已换行内 f 号），由前端按 §3.2 人工选公式；
     - 仅一条 condition 为空且无自动条 → 写 fieldExpression（默认公式）。
     """
+    if is_background_range_pdf_field(report_field):
+        return
     if not force and _field_has_user_cell_formula(report_field, chapter_rules=rules):
         return
     binding = _binding_with_mean_fallback(binding, report_field)
-    mean_pid = _norm(binding.get("mean_m") or "")
+    mean_pid = _norm(binding.get(_binding_mean_key(group=report_group)) or "")
     if mean_pid:
         report_field["chapterMeanPdfFieldId"] = mean_pid
     auto_expr = compile_report_expression(rules, binding)
     if auto_expr:
         _set_chapter_field_expression(report_field, auto_expr, chapter_rules=rules)
-    manual = manual_report_value_rules_for_binding(rules, binding)
+    manual = manual_report_value_rules_for_binding(rules, binding, report_group=report_group)
     _write_manual_report_rules_to_field(
         report_field,
         manual,
@@ -661,23 +1834,34 @@ def apply_report_formulas_to_pdf_fields(
         return
     bindings = chapter.get("fieldBindings") if isinstance(chapter.get("fieldBindings"), list) else None
     if not bindings:
-        bindings = build_field_bindings_from_pdf_fields(fields)
-    by_report = {
-        _norm(b.get("report_d") or ""): b
-        for b in bindings
-        if isinstance(b, dict) and _norm(b.get("report_d") or "")
-    }
+        bindings = build_field_bindings_from_pdf_fields(fields, chapter=chapter)
+    col_layout = resolve_protection_table_layout(fields)
+    by_report: Dict[str, tuple[Dict[str, Any], int]] = {}
+    for b in bindings:
+        if not isinstance(b, dict):
+            continue
+        for group in (1, 2):
+            pid = _norm(b.get(_binding_report_key(group=group)) or "")
+            if pid:
+                by_report[pid] = (b, group)
     for field in fields or []:
         if not isinstance(field, dict):
             continue
         if not is_protection_pdf_field(field):
             continue
-        sem = field_table_semantic(field)
-        if _column_role(sem, field) != _COLUMN_REPORT:
+        if is_background_level_pdf_field(field):
+            continue
+        slot = protection_data_column_slot(field, col_layout)
+        if slot not in ("report_d", "report_d_2"):
             continue
         pid = field_pdf_field_id(field)
-        binding = by_report.get(pid) or {}
-        apply_chapter_report_rules_to_field(field, rules, binding)
+        binding, group = by_report.get(pid) or ({}, 1)
+        apply_chapter_report_rules_to_field(
+            field,
+            rules,
+            binding,
+            report_group=group,
+        )
 
 
 def export_report_value_rules_for_frontend(
@@ -693,13 +1877,14 @@ def export_report_value_rules_for_frontend(
     return {"reportValueRules": exported}
 
 
-def mean_expression_for_binding(binding: Mapping[str, Any]) -> str:
-    refs = [_norm(binding.get(k) or "") for k in ("reading_1", "reading_2", "reading_3")]
+def mean_expression_for_binding(binding: Mapping[str, Any], *, group: int = 1) -> str:
+    refs = [_norm(binding.get(k) or "") for k in _binding_reading_keys(group=group)]
     refs = [r for r in refs if r]
     if len(refs) >= 2:
         return f"avg({','.join(refs[:3])})"
-    mean_pid = _norm(binding.get("mean_m") or "")
-    return mean_pid
+    if len(refs) == 1:
+        return refs[0]
+    return ""
 
 
 def apply_mean_formulas_to_pdf_fields(
@@ -710,31 +1895,45 @@ def apply_mean_formulas_to_pdf_fields(
     """保存坐标模板时：按 field_bindings 将 per_row_avg 均值公式写入 pdf.fields 均值列。"""
     chapter = chapter if isinstance(chapter, dict) else {}
     mean_cfg = chapter.get("meanFormula") if isinstance(chapter.get("meanFormula"), dict) else {}
-    if str(mean_cfg.get("mode") or "per_row_avg").strip() != "per_row_avg":
+    mode = str(mean_cfg.get("mode") or "per_row_avg").strip()
+    if mode not in ("per_row_avg", "per_row_avg_dual"):
         return
     bindings = chapter.get("fieldBindings") if isinstance(chapter.get("fieldBindings"), list) else None
     if not bindings:
-        bindings = build_field_bindings_from_pdf_fields(fields)
-    bind_map = bindings_by_point(bindings)
-    for field in fields or []:
-        if not isinstance(field, dict):
+        bindings = build_field_bindings_from_pdf_fields(fields, chapter=chapter)
+    by_pid = {
+        export_field_pdf_id(field): field
+        for field in (fields or [])
+        if isinstance(field, dict) and export_field_pdf_id(field)
+    }
+    groups = (1, 2) if mode == "per_row_avg_dual" or int(mean_cfg.get("groups") or 1) >= 2 else (1,)
+    for binding in bindings or []:
+        if not isinstance(binding, dict):
             continue
-        if not is_protection_pdf_field(field):
+        if _norm(binding.get("radiationPoint") or "").find("本底") >= 0:
             continue
-        sem = field_table_semantic(field)
-        role = _column_role(sem, field)
-        if role != _COLUMN_MEAN and not sem.get("meanOfReadings"):
-            continue
-        pt = _protection_row_point_key(field, sem)
-        binding = bind_map.get(pt) or {}
-        expr = mean_expression_for_binding(binding)
-        if expr and expr.lower().startswith("avg("):
-            field["fieldExpression"] = expr
+        for group in groups:
+            mean_pid = _norm(binding.get(_binding_mean_key(group=group)) or "")
+            if not mean_pid or mean_pid not in by_pid:
+                continue
+            mean_field = by_pid[mean_pid]
+            if field_has_per_cell_formula_override(mean_field):
+                continue
+            expr = mean_expression_for_binding(binding, group=group)
+            if expr:
+                mean_field["fieldExpression"] = expr
+            else:
+                mean_field.pop("fieldExpression", None)
+                mean_field.pop("pdfFieldExpression", None)
 
 
 def iter_frontend_export_fields(payload: Mapping[str, Any]):
     """遍历前端导出 JSON 中的栏位（含 matrixTable 单元格）。"""
     steps = payload.get("steps")
+    if not isinstance(steps, list):
+        form_schema = payload.get("formSchema")
+        if isinstance(form_schema, dict):
+            steps = form_schema.get("steps")
     if not isinstance(steps, list):
         return
     for step in steps:
@@ -775,7 +1974,18 @@ def index_export_fields_by_pdf_field_id(payload: Mapping[str, Any]) -> Dict[str,
 def _bindings_look_stale(bindings: List[Mapping[str, Any]]) -> bool:
     """旧版绑定缺序号列或 radiationPoint 含栏位后缀时，需从 pdf.fields 重算。"""
     stale_markers = ("_测量读数", "_测量均值", "_报出值")
-    data_keys = ("reading_1", "reading_2", "reading_3", "mean_m", "report_d")
+    data_keys = (
+        "reading_1",
+        "reading_2",
+        "reading_3",
+        "reading_1_2",
+        "reading_2_2",
+        "reading_3_2",
+        "mean_m",
+        "mean_m_2",
+        "report_d",
+        "report_d_2",
+    )
     for row in bindings or []:
         if not isinstance(row, dict):
             continue
@@ -793,18 +2003,43 @@ def resolve_chapter_field_bindings(
     *,
     pdf_fields: Optional[List[Any]] = None,
     export_payload: Optional[Mapping[str, Any]] = None,
+    pdf_path: Optional[str] = None,
+    layout: Optional[Mapping[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """解析第五章 field_bindings：优先 pdf.fields 重算；章节内仅存且未过期时沿用。"""
     if pdf_fields:
-        built = build_field_bindings_from_pdf_fields(pdf_fields)
+        built = build_field_bindings_from_pdf_fields(
+            pdf_fields,
+            chapter=chapter,
+            pdf_path=pdf_path,
+            layout=layout,
+            template_payload=export_payload,
+        )
         if built:
+            if isinstance(chapter, dict):
+                saved = chapter.get("fieldBindings")
+                if isinstance(saved, list) and saved and not _bindings_look_stale(saved):
+                    built_dual = sum(
+                        1 for b in built if isinstance(b, dict) and _norm(b.get("mean_m_2") or "")
+                    )
+                    saved_dual = sum(
+                        1 for b in saved if isinstance(b, dict) and _norm(b.get("mean_m_2") or "")
+                    )
+                    if saved_dual > built_dual:
+                        return [dict(x) for x in saved if isinstance(x, dict)]
             return built
     if isinstance(chapter, dict):
         raw = chapter.get("fieldBindings")
         if isinstance(raw, list) and raw and not _bindings_look_stale(raw):
             return [dict(x) for x in raw if isinstance(x, dict)]
     if export_payload is not None:
-        return build_field_bindings_from_fields(list(iter_frontend_export_fields(export_payload)))
+        return build_field_bindings_from_fields(
+            list(iter_frontend_export_fields(export_payload)),
+            chapter=chapter,
+            pdf_path=pdf_path,
+            layout=layout,
+            template_payload=export_payload,
+        )
     return []
 
 
@@ -852,6 +2087,7 @@ def resolve_chapter_config_for_export(
         pdf_fields=pdf_fields,
         export_payload=export_payload,
     )
+    _sync_dual_mean_formula_in_chapter(state, state.get("fieldBindings") or [])
     return state
 
 
@@ -867,27 +2103,50 @@ def apply_chapter_formulas_by_pdf_field_bindings(
         return payload
     by_pid = index_export_fields_by_pdf_field_id(payload)
     rules = report_value_rules if isinstance(report_value_rules, list) else []
+    dual_group = mean_mode == "per_row_avg_dual"
 
-    for binding in bindings:
+    for binding in bindings or []:
         if not isinstance(binding, dict):
             continue
-        mean_pid = _norm(binding.get("mean_m") or "")
-        if mean_mode == "per_row_avg" and mean_pid and mean_pid in by_pid:
-            expr = mean_expression_for_binding(binding)
-            if expr:
-                _set_chapter_field_expression(by_pid[mean_pid], expr)
-
-        report_pid = _norm(binding.get("report_d") or "")
-        if not report_pid or report_pid not in by_pid:
+        pt = str(binding.get("radiationPoint") or "")
+        if "本底" in pt or "序号本底" in pt:
             continue
-        report_field = by_pid[report_pid]
-        apply_chapter_report_rules_to_field(report_field, rules, binding, force=True)
+        groups = (1, 2) if dual_group else (1,)
+        for group in groups:
+            mean_pid = _norm(binding.get(_binding_mean_key(group=group)) or "")
+            if mean_mode in ("per_row_avg", "per_row_avg_dual") and mean_pid and mean_pid in by_pid:
+                mean_field = by_pid[mean_pid]
+                if not field_has_per_cell_formula_override(mean_field):
+                    expr = mean_expression_for_binding(binding, group=group)
+                    if expr:
+                        mean_field["fieldExpression"] = expr
 
+            report_pid = _norm(binding.get(_binding_report_key(group=group)) or "")
+            if not report_pid or report_pid not in by_pid:
+                continue
+            report_field = by_pid[report_pid]
+            if is_background_range_pdf_field(report_field):
+                continue
+            apply_chapter_report_rules_to_field(
+                report_field,
+                rules,
+                binding,
+                report_group=group,
+            )
+
+    report_pids = {
+        _norm(b.get(_binding_report_key(group=g)) or "")
+        for b in bindings
+        if isinstance(b, dict)
+        for g in (1, 2)
+    }
     # 兜底：绑定表未覆盖但 steps 上已有 chapterMeanPdfFieldId 的报出值栏位
     for pid, report_field in by_pid.items():
         if not isinstance(report_field, dict):
             continue
-        if pid in {_norm(b.get("report_d") or "") for b in bindings if isinstance(b, dict)}:
+        if pid in report_pids:
+            continue
+        if is_background_range_pdf_field(report_field):
             continue
         mean_pid = _norm(report_field.get("chapterMeanPdfFieldId") or "")
         if not mean_pid:
@@ -901,7 +2160,6 @@ def apply_chapter_formulas_by_pdf_field_bindings(
             report_field,
             rules,
             {"report_d": pid, "mean_m": mean_pid},
-            force=True,
         )
 
     return payload
@@ -939,6 +2197,13 @@ def apply_chapter_formulas_to_export_payload(
         report_value_rules=rules,
         mean_mode=mean_mode,
     )
+    export_fields = list(index_export_fields_by_pdf_field_id(payload).values())
+    if isinstance(pdf_fields, list):
+        seen = {export_field_pdf_id(f) for f in export_fields if isinstance(f, dict)}
+        for item in pdf_fields:
+            if isinstance(item, dict) and export_field_pdf_id(item) and export_field_pdf_id(item) not in seen:
+                export_fields.append(item)
+    apply_background_formulas_to_pdf_fields(export_fields, chapter=chapter)
     # 根级章节配置：优先保留模板已保存的 reportValueRules（含 {mean} 占位），勿用默认空规则覆盖
     src_rules = None
     if isinstance(chapter_in, dict) and isinstance(chapter_in.get("reportValueRules"), list):

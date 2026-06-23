@@ -1,5 +1,7 @@
 # 03 REST API（apps.api）
 
+完整端点清单见 [07-features-catalog.md](07-features-catalog.md) §3。
+
 ## 1. 路由挂载
 
 | 前缀 | 文件 | 说明 |

@@ -430,11 +430,13 @@ def bind_equipments_to_project(
 
 def sync_project_task_assignments_for_user(project, assignee, assigned_by) -> tuple[int, int]:
     """将项目下全部任务模板同步给指定用户（幂等），用于绑定设备后自动派发工单。"""
+    from apps.core.hospital_info_service import sync_project_library_tasks_from_equipments
     from apps.core.library_file_service import attach_files_to_projects
     from apps.core.models import LibraryProjectWorkflowMember, LibraryTaskAssignment
 
     if project is None or assignee is None:
         return 0, 0
+    sync_project_library_tasks_from_equipments(project, assigned_by)
     project_tasks = project_tasks_for_user_assignment(project)
     if not project_tasks:
         return 0, 0

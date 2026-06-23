@@ -40,18 +40,6 @@ def decode_png_base64_any(value: str):
         raise serializers.ValidationError("签名 Base64 数据无效") from exc
 
 
-def _pick_signature_text(signatures: dict, dynamic_data: dict, keys: tuple[str, ...]) -> str:
-    for k in keys:
-        v = signatures.get(k)
-        if isinstance(v, str) and v.strip():
-            return v.strip()
-    for k in keys:
-        v = dynamic_data.get(k)
-        if isinstance(v, str) and v.strip():
-            return v.strip()
-    return ""
-
-
 class InspectionSubmitSerializer(serializers.Serializer):
     # 暂不校验 taskNo 格式；实际任务号以 URL / 视图层解析为准
     taskNo = serializers.CharField(max_length=64)
@@ -89,50 +77,28 @@ class InspectionSubmitSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {"testResult": "当 isDsaDevice=false 时，dsa 字段必须为 null 或空对象"}
             )
-        signatures = attrs.get("signatures") or {}
-        dynamic_data = attrs.get("dynamicData") or {}
-        author_text = _pick_signature_text(
-            signatures,
-            dynamic_data,
-            (
-                "inspector",
-                "f36",
-                "author",
-                "mainInspector",
-                "检测员",
-                "f76",
-                "f665",
-            ),
+        from apps.api.inspection_submit_payload_service import (
+            consolidate_submit_signatures,
+            decode_signature_role_png_bytes,
         )
-        reviewer_text = _pick_signature_text(
-            signatures,
-            dynamic_data,
-            (
-                "checker",
-                "f35",
-                "reviewer",
-                "校核员及校核日期",
-                "校核",
-                "f78",
-                "f676",
-            ),
+
+        sig_payload = consolidate_submit_signatures(
+            {
+                "signatures": attrs.get("signatures") or {},
+                "dynamicData": attrs.get("dynamicData") or {},
+                "templateId": attrs.get("templateId") or "",
+            }
         )
-        approver_text = _pick_signature_text(
-            signatures,
-            dynamic_data,
-            (
-                "accompanyingPerson",
-                "f34",
-                "approver",
-                "authorizedSignatory",
-                "受检单位陪同人",
-                "f77",
-                "f677",
-            ),
+        merged_sig = (
+            sig_payload.get("signatures")
+            if isinstance(sig_payload.get("signatures"), dict)
+            else {}
         )
-        attrs["_author_png"] = decode_png_base64_any(author_text)
-        attrs["_reviewer_png"] = decode_png_base64_any(reviewer_text)
-        attrs["_approver_png"] = decode_png_base64_any(approver_text)
+        attrs["_author_png"] = decode_signature_role_png_bytes(merged_sig.get("inspector"))
+        attrs["_reviewer_png"] = decode_signature_role_png_bytes(merged_sig.get("checker"))
+        attrs["_approver_png"] = decode_signature_role_png_bytes(
+            merged_sig.get("accompanyingPerson")
+        )
         return attrs
 
 
@@ -146,8 +112,10 @@ class InspectionDraftSerializer(serializers.Serializer):
     conclusion = serializers.DictField(required=False)
 
     def validate(self, attrs):
+        from apps.api.inspection_submit_payload_service import decode_signature_role_png_bytes
+
         signatures = attrs.get("signatures") or {}
-        attrs["_author_png"] = decode_png_base64_any(signatures.get("author"))
-        attrs["_reviewer_png"] = decode_png_base64_any(signatures.get("reviewer"))
-        attrs["_approver_png"] = decode_png_base64_any(signatures.get("approver"))
+        attrs["_author_png"] = decode_signature_role_png_bytes(signatures.get("author"))
+        attrs["_reviewer_png"] = decode_signature_role_png_bytes(signatures.get("reviewer"))
+        attrs["_approver_png"] = decode_signature_role_png_bytes(signatures.get("approver"))
         return attrs

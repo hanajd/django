@@ -54,16 +54,10 @@ def _apply_row_eval(row: Dict[str, Any], *, default_standard: str) -> None:
         row["evaluation"] = evaluate_result(row.get("result"), std)
 
 
-def apply_report_evaluations(data: Mapping[str, Any]) -> Dict[str, Any]:
-    """遍历 simple/complex 子行，补全 standard 与 evaluation。"""
-    if not isinstance(data, dict):
-        return {}
-    out = dict(data)
-    default_std = DEFAULT_RADIATION_STANDARD
-    points = out.get("points")
-    if not isinstance(points, list):
-        return out
+def _evaluate_points_list(points: Any, *, default_std: str) -> list:
     new_points: list = []
+    if not isinstance(points, list):
+        return new_points
     for pt in points:
         if not isinstance(pt, dict):
             continue
@@ -80,5 +74,16 @@ def apply_report_evaluations(data: Mapping[str, Any]) -> Dict[str, Any]:
         else:
             _apply_row_eval(item, default_standard=default_std)
         new_points.append(item)
-    out["points"] = new_points
+    return new_points
+
+
+def apply_report_evaluations(data: Mapping[str, Any]) -> Dict[str, Any]:
+    """遍历 simple/complex 子行，补全 standard 与 evaluation。"""
+    if not isinstance(data, dict):
+        return {}
+    out = dict(data)
+    default_std = DEFAULT_RADIATION_STANDARD
+    out["points"] = _evaluate_points_list(out.get("points"), default_std=default_std)
+    if isinstance(out.get("points_group2"), list):
+        out["points_group2"] = _evaluate_points_list(out.get("points_group2"), default_std=default_std)
     return out

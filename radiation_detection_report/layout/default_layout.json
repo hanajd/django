@@ -7,10 +7,10 @@
     "height": 841.9000244140625
   },
   "section_title": {
-    "text": "1.1工作场所放射防护检测结果",
-    "x_left": 79.44,
+    "text": "1.1 工作场所放射防护检测结果",
+    "x_left": 70.92,
     "x_right": 244.44,
-    "y_top": 75.76
+    "y_top": 80.0
   },
   "table": {
     "x_left": 70.73,
@@ -52,11 +52,11 @@
     "complex_location_main_width": 205.4,
     "complex_location_sub_width": 127.55,
     "header_labels": {
-      "point_id": "序号",
+      "point_id": "检测点\n编号",
       "location": "检测点位置",
-      "result": "报出值D，μSv/h",
-      "standard": "标准要求",
-      "evaluation": "结果评价"
+      "result": "检测结果\n（μSv/h）",
+      "standard": "标准要求\n（μSv/h）",
+      "evaluation": "结果\n评价"
     },
     "background_row": {
       "label": "本底值（μSv/h）",

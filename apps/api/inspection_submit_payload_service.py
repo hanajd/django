@@ -207,6 +207,36 @@ def _media_relative_path(value: str) -> str:
     return s
 
 
+def decode_signature_role_png_bytes(value: str | None) -> bytes | None:
+    """
+    将签名栏位值（已落盘 /media/... 路径或内联 base64）解码为 PNG/JPEG 字节。
+    非签名短串（如 QC 数值 "/"）返回 None，不抛错。
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    s = value.strip()
+    if _is_stored_media_path(s):
+        try:
+            from django.conf import settings
+
+            rel = _media_relative_path(s)
+            full = os.path.join(settings.MEDIA_ROOT, rel)
+            if not os.path.isfile(full):
+                return None
+            with open(full, "rb") as fh:
+                raw = fh.read()
+            return raw or None
+        except OSError:
+            return None
+    if not _looks_like_inline_image(s):
+        return None
+    try:
+        raw, _ext = decode_image_bytes_any(s)
+        return raw
+    except (ValueError, base64.binascii.Error):
+        return None
+
+
 def _sha256_of_stored_media(value: str) -> str | None:
     """已落盘 /media/... 或 file_library/... 路径对应文件的 sha256；读不到则 None。"""
     if not _is_stored_media_path(value):

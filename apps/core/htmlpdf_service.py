@@ -466,8 +466,151 @@ def wrap_text_to_width(text: str, max_width: float, font: fitz.Font, font_size: 
     return "\n".join(lines)
 
 
-def fit_text_for_box(text: str, rect: fitz.Rect, font: fitz.Font) -> Tuple[str, float]:
-    max_fs = min(10.5, rect.height * 0.85)
+# 现场记录回填：五号 10.5pt（见 DEFAULT_FONT_PT）；报告回填：小四 12pt（REPORT_FILL_FONT_PT）
+_REPORT_FILL_FONT_PT = 12.0
+REPORT_FILL_FONT_PT = _REPORT_FILL_FONT_PT
+_INSTRUMENT_PACK_SEP = "；"
+
+
+def _pdf_field_width_pt(field: Dict[str, Any] | None) -> float | None:
+    """从模板栏位 dict 解析 PDF 文本域宽度（pt）。"""
+    if not isinstance(field, dict):
+        return None
+    anchor = field.get("pdfAnchor") if isinstance(field.get("pdfAnchor"), dict) else {}
+    ar = anchor.get("rect")
+    if isinstance(ar, (list, tuple)) and len(ar) >= 4:
+        try:
+            a0, a1, a2, a3 = float(ar[0]), float(ar[1]), float(ar[2]), float(ar[3])
+            w, h = abs(a2 - a0), abs(a3 - a1)
+            if w > 0 and h > 0 and w >= h:
+                return w
+        except (TypeError, ValueError):
+            pass
+    raw_rect = field.get("rect")
+    if isinstance(raw_rect, (list, tuple)) and len(raw_rect) >= 5:
+        try:
+            w = float(raw_rect[3])
+            if w > 0:
+                return w
+        except (TypeError, ValueError):
+            pass
+    if isinstance(raw_rect, (list, tuple)) and len(raw_rect) >= 4:
+        try:
+            w = abs(float(raw_rect[2]) - float(raw_rect[0]))
+            h = abs(float(raw_rect[3]) - float(raw_rect[1]))
+            if w > 0 and h > 0 and w >= h:
+                return w
+        except (TypeError, ValueError):
+            pass
+    if all(k in field for k in ("x0", "x1")):
+        try:
+            w = abs(float(field["x1"]) - float(field["x0"]))
+            if w > 0:
+                return w
+        except (TypeError, ValueError):
+            pass
+    w_val = field.get("w")
+    if w_val is not None:
+        try:
+            w = float(w_val)
+            if w > 0:
+                return w
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def estimate_pdf_field_chars_per_line(
+    field: Dict[str, Any] | None,
+    font_size: float = DEFAULT_FONT_PT,
+) -> int:
+    """按栏位宽度与回填字号估算每行可容纳汉字数（用于仪器打包）。"""
+    width = _pdf_field_width_pt(field)
+    if width is None or width <= 0:
+        return 96
+    return max(12, int(width / max(1.0, font_size * 1.02)))
+
+
+def wrap_instrument_text_to_width(
+    text: str,
+    max_width: float,
+    font: fitz.Font,
+    font_size: float,
+    separator: str = _INSTRUMENT_PACK_SEP,
+) -> str:
+    """检测仪器串：仅在 separator（；）处换行，单台仪器信息不拆开；极个别超宽条目才按字拆。"""
+    if max_width <= 0:
+        return text or ""
+    lines: List[str] = []
+    for para in (text or "").splitlines() or [""]:
+        para = para.strip()
+        if not para:
+            lines.append("")
+            continue
+        parts = para.split(separator)
+        segments: List[str] = []
+        for i, part in enumerate(parts):
+            seg = part.strip()
+            if not seg:
+                continue
+            if i < len(parts) - 1:
+                seg = f"{seg}{separator}"
+            segments.append(seg)
+        if not segments:
+            lines.append("")
+            continue
+        current = ""
+        for seg in segments:
+            candidate = seg if not current else f"{current}{seg}"
+            if font.text_length(candidate, fontsize=font_size) <= max_width:
+                current = candidate
+                continue
+            if current:
+                lines.append(current)
+                current = ""
+            if font.text_length(seg, fontsize=font_size) <= max_width:
+                current = seg
+                continue
+            wrapped_seg = wrap_text_to_width(seg, max_width, font, font_size)
+            seg_lines = wrapped_seg.splitlines()
+            if seg_lines:
+                lines.extend(seg_lines[:-1])
+                current = seg_lines[-1]
+        if current:
+            lines.append(current)
+    return "\n".join(lines)
+
+
+def fit_instrument_text_for_box(
+    text: str,
+    rect: fitz.Rect,
+    font: fitz.Font,
+    *,
+    max_font_pt: float = DEFAULT_FONT_PT,
+) -> Tuple[str, float]:
+    """检测仪器栏：按仪器条目边界换行并自适应缩小字号以放入框高。"""
+    max_fs = min(max_font_pt, rect.height * 0.85)
+    min_fs = 5.0
+    fs = max(max_fs, min_fs)
+    max_w = max(1.0, rect.width - 2)
+    while fs >= min_fs:
+        wrapped = wrap_instrument_text_to_width(text, max_w, font, fs)
+        line_count = max(1, wrapped.count("\n") + 1)
+        line_height = fs * 1.2
+        if line_count * line_height <= max(1.0, rect.height - 2):
+            return wrapped, fs
+        fs -= 0.5
+    return wrap_instrument_text_to_width(text, max_w, font, min_fs), min_fs
+
+
+def fit_text_for_box(
+    text: str,
+    rect: fitz.Rect,
+    font: fitz.Font,
+    *,
+    max_font_pt: float = DEFAULT_FONT_PT,
+) -> Tuple[str, float]:
+    max_fs = min(max_font_pt, rect.height * 0.85)
     min_fs = 5.0
     fs = max(max_fs, min_fs)
     while fs >= min_fs:
@@ -478,6 +621,34 @@ def fit_text_for_box(text: str, rect: fitz.Rect, font: fitz.Font) -> Tuple[str, 
             return wrapped, fs
         fs -= 0.5
     return wrap_text_to_width(text, max(1.0, rect.width - 2), font, min_fs), min_fs
+
+
+def _insert_multiline_text_left(
+    page: fitz.Page,
+    rect: fitz.Rect,
+    text: str,
+    font_name: str,
+    font_obj: fitz.Font,
+    fs: float,
+    color: tuple[float, float, float],
+) -> None:
+    """多行左对齐直写（insert_textbox 失败时的仪器栏回退）。"""
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    if not lines:
+        return
+    line_h = fs * 1.2
+    total_h = len(lines) * line_h
+    start_y = rect.y0 + max(0.0, (rect.height - total_h) / 2.0)
+    for i, line in enumerate(lines):
+        baseline_y = start_y + i * line_h + fs * 0.85
+        page.insert_text(
+            fitz.Point(rect.x0, baseline_y),
+            line,
+            fontname=font_name,
+            fontsize=fs,
+            color=color,
+            overlay=True,
+        )
 
 
 def ensure_min_text_rect(rect: fitz.Rect) -> fitz.Rect:
@@ -754,6 +925,22 @@ def parse_template_json(raw_text: str) -> Dict[str, Any]:
     raise ValueError("JSON structure unsupported")
 
 
+def _pdf_field_is_qc_verdict_slot(field: Dict[str, Any]) -> bool:
+    """质控表「单项判定」格（报告用小四）；现场记录不走此分支。"""
+    if field.get("_syntheticQcVerdict"):
+        return True
+    parts: list[str] = []
+    for k in ("id", "placeholder", "originalPlaceholder", "title", "label", "fieldId", "pdfFieldId"):
+        v = field.get(k)
+        if isinstance(v, str) and v.strip():
+            parts.append(v.strip())
+    blob = " ".join(parts)
+    if "单项判定" in blob:
+        return True
+    t = str(field.get("value") or field.get("content") or "").strip()
+    return t in ("合格", "不合格", "符合", "不符合")
+
+
 def _pdf_text_color_for_field(field: Dict[str, Any], text: str) -> tuple[float, float, float]:
     """回填 PDF 文字颜色：默认红；单项判定合格为绿、不合格为蓝。"""
     parts: list[str] = []
@@ -796,7 +983,12 @@ def _pdf_text_field_wants_justify_for_instrument_line(field: Dict[str, Any]) -> 
     return False
 
 
-def build_filled_pdf(fields: List[Dict[str, Any]], source_pdf: Path) -> bytes:
+def build_filled_pdf(
+    fields: List[Dict[str, Any]],
+    source_pdf: Path,
+    *,
+    fill_font_pt: float = DEFAULT_FONT_PT,
+) -> bytes:
     if not source_pdf.exists():
         raise FileNotFoundError("source pdf not found")
     doc = fitz.open(source_pdf)
@@ -814,7 +1006,7 @@ def build_filled_pdf(fields: List[Dict[str, Any]], source_pdf: Path) -> bytes:
             page = doc[int(f["page"]) - 1]
             field_type = (f.get("fieldType") or "text").lower()
             raw_rect = fitz.Rect(f["x0"], f["y0"], f["x1"], f["y1"])
-            if field_type == "text":
+            if field_type == "text" and not f.get("_syntheticQcVerdict"):
                 raw_rect = ensure_min_text_rect(raw_rect)
             r = safe_inset_rect(raw_rect, 0.6)
 
@@ -866,13 +1058,36 @@ def build_filled_pdf(fields: List[Dict[str, Any]], source_pdf: Path) -> bytes:
             text = str(f.get("value", "")).strip()
             if not text:
                 continue
+            if f.get("_syntheticQcVerdict"):
+                try:
+                    erase = fitz.Rect(
+                        r.x0 - 1.5,
+                        r.y0 - 1.0,
+                        r.x1 + 1.5,
+                        r.y1 + 1.0,
+                    )
+                    page.add_redact_annot(erase, fill=(1, 1, 1))
+                    page.apply_redactions()
+                except Exception:
+                    pass
             use_simsun = contains_cjk(text) or not times_font_path
             font_file = SIMSUN_FONT if use_simsun else times_font_path
             font_name = "F_SIMSUN" if use_simsun else "F_TIMES"
             page.insert_font(fontname=font_name, fontfile=str(font_file))
             font_obj = fitz.Font(fontfile=str(font_file))
-            wrapped_text, fs = fit_text_for_box(text, r, font_obj)
-            if _pdf_text_field_wants_justify_for_instrument_line(f):
+            is_instrument = _pdf_text_field_wants_justify_for_instrument_line(f)
+            if _pdf_field_is_qc_verdict_slot(f):
+                wrapped_text = text
+                fs = fill_font_pt
+            elif is_instrument:
+                wrapped_text, fs = fit_instrument_text_for_box(
+                    text, r, font_obj, max_font_pt=fill_font_pt
+                )
+            else:
+                wrapped_text, fs = fit_text_for_box(
+                    text, r, font_obj, max_font_pt=fill_font_pt
+                )
+            if is_instrument:
                 align = getattr(fitz, "TEXT_ALIGN_JUSTIFY", fitz.TEXT_ALIGN_LEFT)
             elif "\n" in wrapped_text:
                 align = fitz.TEXT_ALIGN_LEFT
@@ -880,20 +1095,43 @@ def build_filled_pdf(fields: List[Dict[str, Any]], source_pdf: Path) -> bytes:
                 align = fitz.TEXT_ALIGN_CENTER
             line_count = max(1, wrapped_text.count("\n") + 1)
             text_h = line_count * fs * 1.2
-            if text_h < r.height:
+            if is_instrument and "\n" in wrapped_text:
+                text_rect = r
+            elif text_h < r.height:
                 offset_y = (r.height - text_h) / 2.0
                 text_rect = fitz.Rect(r.x0, r.y0 + offset_y, r.x1, r.y1)
             else:
                 text_rect = r
-            page.insert_textbox(
+            text_color = _pdf_text_color_for_field(f, text)
+            remain = page.insert_textbox(
                 text_rect,
                 wrapped_text,
                 fontname=font_name,
                 fontsize=fs,
-                color=_pdf_text_color_for_field(f, text),
+                color=text_color,
                 align=align,
                 overlay=True,
             )
+            if remain < 0:
+                if is_instrument and "\n" in wrapped_text:
+                    _insert_multiline_text_left(
+                        page, text_rect, wrapped_text, font_name, font_obj, fs, text_color
+                    )
+                else:
+                    flat_text = wrapped_text.replace("\n", " ").strip()
+                    if flat_text:
+                        text_w = font_obj.text_length(flat_text, fontsize=fs)
+                        cx = (text_rect.x0 + text_rect.x1) / 2.0
+                        cy = (text_rect.y0 + text_rect.y1) / 2.0
+                        pt = fitz.Point(cx - (text_w / 2.0), cy + (fs * 0.35))
+                        page.insert_text(
+                            pt,
+                            flat_text,
+                            fontname=font_name,
+                            fontsize=fs,
+                            color=text_color,
+                            overlay=True,
+                        )
     finally:
         out = io.BytesIO()
         doc.save(out, clean=True, garbage=3)

@@ -11,7 +11,7 @@ import uuid
 from datetime import date
 from mimetypes import guess_type
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 from urllib.parse import quote, urlencode
 
 from django.conf import settings
@@ -335,6 +335,9 @@ def _sync_radiation_protection_chapter_state(
     normalized_fields: list,
     schema_extras: dict,
     data: dict,
+    *,
+    pdf_path: Optional[str] = None,
+    source_meta: Optional[dict] = None,
 ) -> dict:
     """从编辑器栏位同步第五章 field_bindings，并写入 formSchema 扩展。"""
     if not isinstance(schema_extras, dict):
@@ -354,17 +357,28 @@ def _sync_radiation_protection_chapter_state(
             if isinstance(container, dict) and isinstance(container.get(SCHEMA_KEY), dict):
                 existing = container.get(SCHEMA_KEY)
                 break
-    chapter = build_chapter_state(normalized_fields, existing if isinstance(existing, dict) else None)
+    template_payload: dict = dict(data) if isinstance(data, dict) else {}
+    if isinstance(source_meta, dict) and source_meta:
+        pdf_block = template_payload.get("pdf") if isinstance(template_payload.get("pdf"), dict) else {}
+        template_payload["pdf"] = {**pdf_block, "source_pdf": source_meta}
+    chapter = build_chapter_state(
+        normalized_fields,
+        existing if isinstance(existing, dict) else None,
+        pdf_path=pdf_path,
+        template_payload=template_payload,
+    )
     if isinstance(existing, dict) and isinstance(existing.get("reportValueRules"), list):
         chapter["reportValueRules"] = existing.get("reportValueRules")
     try:
         from radiation_detection_report.chapter5_field_sync import (
+            apply_background_formulas_to_pdf_fields,
             apply_mean_formulas_to_pdf_fields,
             apply_report_formulas_to_pdf_fields,
         )
 
         apply_mean_formulas_to_pdf_fields(normalized_fields, chapter=chapter)
         apply_report_formulas_to_pdf_fields(normalized_fields, chapter=chapter)
+        apply_background_formulas_to_pdf_fields(normalized_fields, chapter=chapter)
     except Exception:
         pass
     schema_extras[SCHEMA_KEY] = chapter
@@ -1437,8 +1451,10 @@ def _sync_library_project_tasks_to_user(project, assignee, assigned_by):
     将项目下任务模板同步给指定用户（幂等），并登记流程参与、模板文件关联。
     返回 (created_count, template_file_count)。
     """
+    from apps.core.hospital_info_service import sync_project_library_tasks_from_equipments
     from apps.core.project_equipment_service import project_tasks_for_user_assignment
 
+    sync_project_library_tasks_from_equipments(project, assigned_by)
     project_tasks = project_tasks_for_user_assignment(project)
     if not project_tasks:
         return 0, 0
@@ -3234,8 +3250,20 @@ def _library_tab_for_category(category: str) -> str:
 
 def _persist_binary_library_files(request, files, category: str, project_ids=None) -> int:
     """写入非 JSON 校验类文件；返回成功保存条数。"""
+    save_kwargs: dict = {}
+    clean_pids = parse_project_ids([str(x) for x in (project_ids or [])])
+    if category == LibraryFile.CATEGORY_SITE_RECORD and clean_pids:
+        project = LibraryProject.objects.filter(pk=clean_pids[0]).first()
+        if project is not None:
+            from apps.core.library_file_service import make_inspection_submit_batch_storage
+
+            save_kwargs["site_record_batch"] = make_inspection_submit_batch_storage(project)
     created, skipped = save_library_binary_uploads(
-        request.user, files, category, project_ids=project_ids or []
+        request.user,
+        files,
+        category,
+        project_ids=project_ids or [],
+        **save_kwargs,
     )
     for s in skipped:
         fn = s.get("filename") or "(无名)"
@@ -4590,6 +4618,8 @@ def file_library(request):
                     template_pdf_id=template_pdf_id,
                     template_json_name=template_json_name,
                     task_obj=task_obj,
+                    source_payload=payload,
+                    source_submit_relative_path=lf.relative_path,
                 )
                 if not ok:
                     skip_reasons.append(
@@ -4834,6 +4864,7 @@ def file_library(request):
             template_json_name=template_json_name,
             task_obj=report_task,
             source_payload=source_payload,
+            manual_device_count=manual_device_count,
         )
         if not ok:
             messages.error(
@@ -6205,7 +6236,14 @@ def htmlpdf_api_export_json(request):
     _assign_htmlpdf_template_sections_to_fields(
         request.user.id, normalized_fields, skip_for_report=is_report_tpl
     )
-    schema_extras = _sync_radiation_protection_chapter_state(normalized_fields, schema_extras, data)
+    session_pdf = htmlpdf_service.htmlpdf_source_pdf_path(request.user.id)
+    schema_extras = _sync_radiation_protection_chapter_state(
+        normalized_fields,
+        schema_extras,
+        data,
+        pdf_path=str(session_pdf) if session_pdf.is_file() else None,
+        source_meta=source_meta,
+    )
     constants = form_schema.get("constants") if isinstance(form_schema.get("constants"), dict) else {}
     enums = form_schema.get("enums") if isinstance(form_schema.get("enums"), dict) else {}
     steps = form_schema.get("steps") if isinstance(form_schema.get("steps"), list) else []
@@ -7440,8 +7478,15 @@ def htmlpdf_api_save_pdf(request):
     if output_category not in (LibraryFile.CATEGORY_SITE_RECORD, LibraryFile.CATEGORY_REPORT):
         return JsonResponse({"error": "output_category 仅支持 site_record/report"}, status=400)
     try:
+        fill_font_pt = (
+            htmlpdf_service.REPORT_FILL_FONT_PT
+            if output_category == LibraryFile.CATEGORY_REPORT
+            else htmlpdf_service.DEFAULT_FONT_PT
+        )
         pdf_bytes = htmlpdf_service.build_filled_pdf(
-            fields, htmlpdf_service.htmlpdf_source_pdf_path(request.user.id)
+            fields,
+            htmlpdf_service.htmlpdf_source_pdf_path(request.user.id),
+            fill_font_pt=fill_font_pt,
         )
     except FileNotFoundError:
         return JsonResponse({"error": "请先上传PDF"}, status=400)
@@ -7452,10 +7497,22 @@ def htmlpdf_api_save_pdf(request):
     if not filename.lower().endswith(".pdf"):
         filename = f"{filename}.pdf"
     wrapped = type("UploadLike", (), {"read": lambda self: pdf_bytes, "name": filename})()
+    save_kwargs: dict = {}
+    if output_category == LibraryFile.CATEGORY_SITE_RECORD:
+        from apps.core.library_file_service import (
+            InspectionSubmitBatchStorage,
+            library_batch_timestamp,
+        )
+
+        save_kwargs["site_record_batch"] = InspectionSubmitBatchStorage(
+            "unknown",
+            library_batch_timestamp(),
+        )
     created, skipped = save_library_binary_uploads(
         request.user,
         [wrapped],
         output_category,
+        **save_kwargs,
     )
     if skipped and not created:
         return JsonResponse({"error": "保存PDF失败"}, status=500)

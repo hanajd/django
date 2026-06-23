@@ -33,7 +33,11 @@ from apps.core.models import (
     LibraryFile,
     LibraryTask,
 )
-from utils.pdf_merge import extract_modality_abbr_from_title, merged_device_phrase_for_evaluation
+from utils.pdf_merge import (
+    build_single_report_cover_title_line,
+    extract_modality_abbr_from_title,
+    merged_device_phrase_for_evaluation,
+)
 from utils.report_fill_helpers import merge_number_tokens_from_source, split_contact_name_phone
 
 # 报告质控区 steps 常把「检测条件/检测结果」绑到 testResult.test3、field30、testResult2 等 legacy 键；
@@ -98,6 +102,89 @@ def _parse_loose_datetime_for_submit(val: object) -> datetime | None:
     except (TypeError, ValueError, OverflowError):
         return None
     return None
+
+
+def _submit_text_looks_like_date_or_datetime(s: str) -> bool:
+    """ISO/纯日期字符串不能当作受检单位等机构名称。"""
+    t = (s or "").strip()
+    if not t:
+        return False
+    if _parse_loose_datetime_for_submit(t) is not None:
+        if re.match(r"^\d{4}-\d{2}-\d{2}", t):
+            return True
+        if "T" in t and re.search(r"\d{4}-\d{2}-\d{2}T", t):
+            return True
+    if re.fullmatch(r"\d{4}年\d{1,2}月\d{1,2}日?", t):
+        return True
+    return False
+
+
+def _is_plausible_inspected_unit_name(s: str) -> bool:
+    t = (s or "").strip()
+    if not t:
+        return False
+    if _submit_text_looks_like_date_or_datetime(t):
+        return False
+    return True
+
+
+def _iter_site_template_fields(parsed: dict | None):
+    """遍历现场记录 unified_form_template steps 下全部栏位。"""
+    if not isinstance(parsed, dict):
+        return
+    steps = parsed.get("steps")
+    if not isinstance(steps, list):
+        form = parsed.get("formSchema") or parsed.get("form_schema")
+        if isinstance(form, dict):
+            steps = form.get("steps")
+    if not isinstance(steps, list):
+        return
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        fl = step.get("fields")
+        if isinstance(fl, list):
+            for f in fl:
+                if isinstance(f, dict):
+                    yield f
+        for sec in step.get("sections") or []:
+            if not isinstance(sec, dict):
+                continue
+            fl2 = sec.get("fields")
+            if isinstance(fl2, list):
+                for f in fl2:
+                    if isinstance(f, dict):
+                        yield f
+            m = sec.get("matrix") if isinstance(sec.get("matrix"), dict) else {}
+            for hf in m.get("headerFields") or []:
+                if isinstance(hf, dict):
+                    yield hf
+            for row in m.get("rows") or []:
+                if not isinstance(row, dict):
+                    continue
+                cells = row.get("cells") if isinstance(row.get("cells"), dict) else {}
+                for cell in cells.values():
+                    if isinstance(cell, dict):
+                        yield cell
+
+
+def _inspected_unit_pdf_field_ids_from_site_template(parsed: dict | None) -> list[str]:
+    """现场模板 hierarchyKey/label 为「受检单位」的 pdfFieldId（JS009→f6，JS001→f3）。"""
+    if not isinstance(parsed, dict):
+        return []
+    ids: list[str] = []
+    seen: set[str] = set()
+    for fld in _iter_site_template_fields(parsed):
+        hk = str(fld.get("hierarchyKey") or "").strip()
+        label = str(fld.get("label") or fld.get("title") or fld.get("id") or "").strip()
+        if hk not in ("受检单位", "受检单位名称") and label not in ("受检单位", "受检单位名称"):
+            continue
+        pid = str(fld.get("pdfFieldId") or fld.get("id") or "").strip().lower()
+        if not re.fullmatch(r"f\d+", pid, flags=re.I) or pid in seen:
+            continue
+        seen.add(pid)
+        ids.append(pid)
+    return ids
 
 
 def _coerce_iso_datetime_value_for_date_part_key(key: str, val: object) -> object:
@@ -286,8 +373,19 @@ def _normalize_iso_strings_in_test_date_part_slots(value_mapping: dict) -> None:
                 value_mapping[sk] = str(dt.day)
 
 
-_PREFERRED_INSPECTED_UNIT_PDF_FIELD_IDS = ("f6", "f5", "f4", "f3", "f2")
-_PREFERRED_INSPECTED_ADDRESS_PDF_FIELD_IDS = ("f8", "f9", "f7")
+_PREFERRED_INSPECTED_UNIT_PDF_FIELD_IDS = ("f6", "f5", "f4", "f2")
+_PREFERRED_INSPECTED_ADDRESS_PDF_FIELD_IDS = ("f8", "f9", "f10", "f3", "f22")
+_NON_ADDRESS_LITERALS = frozenset(
+    {
+        "委托单位",
+        "同受检单位",
+        "验收检测",
+        "状态检测",
+        "定期检测",
+        "现场检测",
+        "委托检测",
+    }
+)
 
 
 def _scalar_submit_text_value(v: object) -> str:
@@ -302,13 +400,13 @@ def _inspected_unit_from_pdf_field_slots(blob: dict, *, preferred_ids: tuple[str
         return ""
     for pid in preferred_ids:
         s = _scalar_submit_text_value(blob.get(pid))
-        if s:
+        if s and _is_plausible_inspected_unit_name(s):
             return s
     for k in sorted(blob.keys()):
         if not isinstance(k, str) or not re.fullmatch(r"f\d+", k, flags=re.IGNORECASE):
             continue
         s = _scalar_submit_text_value(blob.get(k))
-        if s:
+        if s and _is_plausible_inspected_unit_name(s):
             return s
     return ""
 
@@ -343,14 +441,229 @@ def _hospital_info_inspected_unit_name(hi: dict) -> str:
     return _inspected_unit_from_pdf_field_slots(hi, preferred_ids=_PREFERRED_INSPECTED_UNIT_PDF_FIELD_IDS)
 
 
-def _resolve_inspected_unit_name_from_submit(source_data: dict) -> str:
+def _resolve_inspected_unit_name_from_submit(
+    source_data: dict,
+    *,
+    site_template_parsed: dict | None = None,
+) -> str:
+    hi = source_data.get("hospitalInfo") if isinstance(source_data.get("hospitalInfo"), dict) else {}
+    dd = source_data.get("dynamicData") if isinstance(source_data.get("dynamicData"), dict) else {}
+    template_pids = _inspected_unit_pdf_field_ids_from_site_template(site_template_parsed)
+    for pid in template_pids:
+        for blob in (dd, hi):
+            s = _scalar_submit_text_value(blob.get(pid))
+            if _is_plausible_inspected_unit_name(s):
+                return s
+    for blob in (dd, hi):
+        for key in ("受检单位", "受检单位名称", "f6", "f7", "f5", "f4", "f2", "f3"):
+            v = blob.get(key)
+            if isinstance(v, str) and v.strip():
+                s = v.strip()
+                if _is_plausible_inspected_unit_name(s):
+                    return s
+            if v not in (None, "") and not isinstance(v, (dict, list)):
+                s = str(v).strip()
+                if _is_plausible_inspected_unit_name(s):
+                    return s
+        name = _hospital_info_inspected_unit_name(blob)
+        if name and _is_plausible_inspected_unit_name(name):
+            return name
+    return ""
+
+
+def _is_plausible_inspected_unit_address(text: str) -> bool:
+    s = (text or "").strip()
+    if not s or s in _NON_ADDRESS_LITERALS:
+        return False
+    if re.match(r"^\d{4}-\d{2}-\d{2}", s) or re.search(r"\d{4}-\d{2}-\d{2}T", s):
+        return False
+    # 含地址常见字样优先判定为地址（避免被下方「像单位名称」启发式误杀）
+    if any(ch in s for ch in "路街巷号村镇区市县省园楼室栋层"):
+        return True
+    if len(s) < 4:
+        return False
+    # 无街道/行政区划线索且整段像单位名称 → 非地址
+    if _is_plausible_inspected_unit_name(s) and len(s) <= 40:
+        return False
+    return len(s) >= 6
+
+
+def _inspected_address_from_pdf_field_slots(blob: dict, *, preferred_ids: tuple[str, ...]) -> str:
+    if not isinstance(blob, dict):
+        return ""
+    for pid in preferred_ids:
+        s = _scalar_submit_text_value(blob.get(pid))
+        if s and _is_plausible_inspected_unit_address(s):
+            return s
+    for k in sorted(blob.keys()):
+        if not isinstance(k, str) or not re.fullmatch(r"f\d+", k, flags=re.IGNORECASE):
+            continue
+        s = _scalar_submit_text_value(blob.get(k))
+        if s and _is_plausible_inspected_unit_address(s):
+            return s
+    return ""
+
+
+def _looks_like_contact_cell_text(text: str) -> bool:
+    s = (text or "").strip()
+    if not s or s in _NON_ADDRESS_LITERALS:
+        return False
+    if re.search(r"\d{7,}", s):
+        return True
+    if re.search(r"[\d\-]{6,}", s) and re.search(r"[\u4e00-\u9fff]", s):
+        return True
+    return len(s) <= 36 and bool(re.search(r"\d", s)) and bool(re.search(r"[\u4e00-\u9fff]", s))
+
+
+def _resolve_commission_contact_from_submit(source_data: dict) -> tuple[str, str]:
+    """从现场记录「委托单位联系人/电话」整格拆分为联系人姓名与联系电话。"""
+    if not isinstance(source_data, dict):
+        return "", ""
     hi = source_data.get("hospitalInfo") if isinstance(source_data.get("hospitalInfo"), dict) else {}
     dd = source_data.get("dynamicData") if isinstance(source_data.get("dynamicData"), dict) else {}
     for blob in (hi, dd):
-        name = _hospital_info_inspected_unit_name(blob)
-        if name:
-            return name
+        ccp = str(blob.get("commissionContactPhone") or "").strip()
+        if ccp:
+            return split_contact_name_phone(ccp, "")
+        for key in ("f7", "委托单位联系人/电话", "委托单位联系人电话"):
+            raw = blob.get(key)
+            if raw not in (None, ""):
+                text = str(raw).strip()
+                if _looks_like_contact_cell_text(text) or key != "f7":
+                    return split_contact_name_phone(text, "")
+    for dk, dv in (dd or {}).items():
+        sk = str(dk or "")
+        if "委托单位联系人" in sk and "电话" in sk and dv not in (None, ""):
+            return split_contact_name_phone(str(dv).strip(), "")
+    return "", ""
+
+
+def _sanitize_inspected_unit_address_mapping(value_mapping: dict) -> None:
+    if not isinstance(value_mapping, dict):
+        return
+    for key in ("受检单位地址", "单位地址", "地址", "inspectionAddress", "hospitalAddress"):
+        raw = value_mapping.get(key)
+        if not isinstance(raw, str):
+            continue
+        s = raw.strip()
+        if not s or s in _NON_ADDRESS_LITERALS or _is_plausible_inspected_unit_name(s):
+            value_mapping.pop(key, None)
+            continue
+        if not _is_plausible_inspected_unit_address(s):
+            value_mapping.pop(key, None)
+
+
+_REPORT_DECORATIVE_FIELD_IDS = frozenset(
+    {"下划线", "下划线2", "下划线3", "年月日", "栏位26", "栏位27", "栏位28"}
+)
+_REPORT_BASIC_INFO_SLOT_SEMANTICS: dict[str, tuple[str, ...]] = {
+    "f1": ("委托编号", "commissionNo"),
+    "f20": ("委托编号", "commissionNo"),
+    "f2": ("受检单位名称", "受检单位"),
+    "f21": ("受检单位名称", "受检单位"),
+    "f3": ("受检单位地址", "单位地址", "地址"),
+    "f22": ("受检单位地址", "单位地址", "地址"),
+    "f4": ("联系人",),
+    "f23": ("联系人",),
+    "f5": ("联系电话", "联系人电话"),
+    "f24": ("联系电话", "联系人电话"),
+    "f6": ("主要检测人员", "testman"),
+    "f7": ("委托单位名称", "commissionOrganization"),
+    "f26": ("委托单位名称", "commissionOrganization"),
+}
+_REPORT_BASIC_INFO_CONTACT_PIDS = frozenset({"f4", "f5", "f23", "f24"})
+_REPORT_BASIC_INFO_ADDRESS_PIDS = frozenset({"f3", "f22"})
+
+
+def _pdf_field_id_numeric(pid: str) -> int:
+    m = re.fullmatch(r"f(\d+)", str(pid or "").strip(), flags=re.IGNORECASE)
+    return int(m.group(1)) if m else 10**9
+
+
+def _semantic_text_from_value_mapping(value_mapping: dict, keys: tuple[str, ...]) -> str:
+    if not isinstance(value_mapping, dict):
+        return ""
+    for key in keys:
+        raw = value_mapping.get(key)
+        if raw in (None, "") or isinstance(raw, (dict, list, bool)):
+            continue
+        s = str(raw).strip()
+        if s:
+            return s
     return ""
+
+
+def _reconcile_report_basic_info_value_mapping(
+    value_mapping: dict,
+    source_data: dict,
+    report_template_fields: list | None,
+    *,
+    task_obj=None,
+) -> None:
+    """
+    报告基本情况页：现场 dynamicData 的 f 号与报告 pdfFieldId 语义不同（如现场 f7=联系人、报告 f7=委托单位名称）。
+    在映射末尾按语义键回写 f 槽，并清空装饰栏位，避免串位与页底乱字。
+    """
+    if not _is_report_output_task(task_obj) or not isinstance(value_mapping, dict):
+        return
+
+    contact_name, contact_phone = _resolve_commission_contact_from_submit(source_data)
+    for key in ("委托单位联系人/电话", "委托单位联系人电话", "commissionContactPhone"):
+        ccp = _semantic_text_from_value_mapping(value_mapping, (key,))
+        if ccp:
+            n2, p2 = split_contact_name_phone(ccp, "")
+            contact_name = (contact_name or n2).strip()
+            contact_phone = (contact_phone or p2).strip()
+    if contact_name or contact_phone:
+        value_mapping["联系人"] = contact_name
+        value_mapping["联系电话"] = contact_phone
+        value_mapping["联系人电话"] = contact_phone
+
+    addr = _resolve_inspected_unit_address_from_submit(source_data)
+    if addr:
+        value_mapping["受检单位地址"] = addr
+
+    insp_type = _resolve_inspection_type_display(source_data, report_task=task_obj)
+    if insp_type:
+        value_mapping["检测类型"] = insp_type
+
+    flat: list = []
+    if isinstance(report_template_fields, list):
+        _walk_template_field_dicts(report_template_fields, flat)
+    decorative_pids: set[str] = set()
+    for fld in flat:
+        fid = str(fld.get("id") or "").strip()
+        pid = _field_pdf_id(fld)
+        if fid in _REPORT_DECORATIVE_FIELD_IDS and pid:
+            decorative_pids.add(pid)
+            value_mapping.pop(pid, None)
+
+    site_f7 = value_mapping.get("f7")
+    if site_f7 not in (None, "") and _looks_like_contact_cell_text(str(site_f7)):
+        value_mapping.pop("f7", None)
+
+    for pid, sem_keys in _REPORT_BASIC_INFO_SLOT_SEMANTICS.items():
+        if pid in decorative_pids:
+            continue
+        if pid in _REPORT_BASIC_INFO_CONTACT_PIDS:
+            continue
+        val = _semantic_text_from_value_mapping(value_mapping, sem_keys)
+        if not val:
+            if pid in _REPORT_BASIC_INFO_ADDRESS_PIDS:
+                value_mapping.pop(pid, None)
+            continue
+        if pid in _REPORT_BASIC_INFO_ADDRESS_PIDS:
+            if not _is_plausible_inspected_unit_address(val):
+                value_mapping.pop(pid, None)
+                continue
+        value_mapping[pid] = val
+
+    if contact_name:
+        value_mapping["f4"] = contact_name
+        value_mapping["f23"] = contact_name
+    if contact_phone:
+        value_mapping["f5"] = contact_phone
+        value_mapping["f24"] = contact_phone
 
 
 def _hospital_info_inspected_unit_address(hi: dict) -> str:
@@ -370,7 +683,9 @@ def _hospital_info_inspected_unit_address(hi: dict) -> str:
             s = str(v).strip()
             if s:
                 return s
-    return _inspected_unit_from_pdf_field_slots(hi, preferred_ids=_PREFERRED_INSPECTED_ADDRESS_PDF_FIELD_IDS)
+    return _inspected_address_from_pdf_field_slots(
+        hi, preferred_ids=_PREFERRED_INSPECTED_ADDRESS_PDF_FIELD_IDS
+    )
 
 
 def _resolve_inspected_unit_address_from_submit(source_data: dict) -> str:
@@ -383,23 +698,79 @@ def _resolve_inspected_unit_address_from_submit(source_data: dict) -> str:
     return ""
 
 
-def _resolve_inspection_type_display(source_data: dict, project=None) -> str:
+def _inspection_type_from_report_task(report_task=None) -> str | None:
+    """从报告任务 name/code 推断检测类型（状态/验收报告模板）。"""
+    if report_task is None:
+        return None
+    name = str(getattr(report_task, "name", "") or "").strip()
+    code = str(getattr(report_task, "code", "") or "").strip().lower()
+    blob = f"{name} {code}"
+    if "状态检测" in name or "-status-" in code or code.endswith("-status-report"):
+        return "状态检测"
+    if "验收检测" in name or "-accept-" in code or code.endswith("-accept-report"):
+        return "验收检测"
+    if "定期检测" in name or "periodic" in code:
+        return "定期检测"
+    if "状态" in blob and "验收" not in blob:
+        return "状态检测"
+    if "验收" in blob:
+        return "验收检测"
+    return None
+
+
+def _resolve_inspection_type_display(
+    source_data: dict,
+    project=None,
+    report_task=None,
+) -> str:
     """从现场记录 radio 槽或 reportInfo 解析检测类型展示文案。"""
     hi = source_data.get("hospitalInfo") if isinstance(source_data.get("hospitalInfo"), dict) else {}
     dd = source_data.get("dynamicData") if isinstance(source_data.get("dynamicData"), dict) else {}
     ri = source_data.get("reportInfo") if isinstance(source_data.get("reportInfo"), dict) else {}
-    for blob in (hi, dd):
-        if blob.get("f610") is True:
+
+    def _truthy(v) -> bool:
+        return v is True or str(v or "").strip().lower() in ("true", "1", "yes", "是")
+
+    blobs = (hi, dd)
+    if any(_truthy(b.get("f613")) for b in blobs):
+        return "定期检测"
+    status_keys = (
+        "f501",
+        "f502",
+        "f609",
+        "f42",
+        "检测类型_状态检测",
+        "状态检测",
+    )
+    accept_keys = (
+        "f504",
+        "f610",
+        "f43",
+        "检测类型_验收检测",
+        "验收检测",
+    )
+    status_hit = any(_truthy(b.get(k)) for b in blobs for k in status_keys)
+    accept_hit = any(_truthy(b.get(k)) for b in blobs for k in accept_keys)
+    if status_hit and not accept_hit:
+        return "状态检测"
+    if accept_hit and not status_hit:
+        return "验收检测"
+    if status_hit and accept_hit:
+        from_task = _inspection_type_from_report_task(report_task)
+        if from_task:
+            return from_task
+    for blob in blobs:
+        tt = str(blob.get("testType") or blob.get("f504") or "").strip().lower()
+        if tt in {"acceptance", "验收", "验收检测"}:
             return "验收检测"
-        if blob.get("f609") is True:
+        if tt in {"status", "状态", "状态检测"}:
             return "状态检测"
-        if blob.get("f613") is True:
-            return "定期检测"
     for raw in (
         ri.get("inspectionType"),
         ri.get("reportType"),
         hi.get("testType"),
         dd.get("f86"),
+        dd.get("检测类型"),
     ):
         t = str(raw or "").strip()
         if not t:
@@ -415,6 +786,9 @@ def _resolve_inspection_type_display(source_data: dict, project=None) -> str:
             return "状态检测"
         if "验收" in t:
             return "验收检测"
+    from_task = _inspection_type_from_report_task(report_task)
+    if from_task:
+        return from_task
     proj_name = str(getattr(project, "name", "") if project is not None else "").strip()
     return "状态检测" if "状态" in proj_name else "验收检测"
 
@@ -499,6 +873,8 @@ def _build_submit_derived_value_mapping(
     inspection_case=None,
     *,
     manual_device_count: int | None = None,
+    has_radiation_protection: bool = False,
+    site_template_parsed: dict | None = None,
 ):
     from apps.api.inspection_pdf_service import _display_project_id, _display_task_no, display_inspected_no_for_fill
 
@@ -509,9 +885,13 @@ def _build_submit_derived_value_mapping(
     hospital_info = source_data.get("hospitalInfo") or {}
     equipment_info = source_data.get("equipmentInfo") or {}
     test_result = source_data.get("testResult") or {}
-    hospital_name = _resolve_inspected_unit_name_from_submit(source_data)
-    model = str(equipment_info.get("model") or "")
-    device_name = str(equipment_info.get("deviceName") or "")
+    hospital_name = _resolve_inspected_unit_name_from_submit(
+        source_data,
+        site_template_parsed=site_template_parsed,
+    )
+    _eq_sem = _equipment_semantics_from_pdf_slots(equipment_info, test_result)
+    model = _eq_sem["model"]
+    device_name = _eq_sem["deviceName"]
     year = str(report_info.get("year") or "").strip()
     month = str(report_info.get("month") or "").strip()
     day = str(report_info.get("day") or "").strip()
@@ -568,14 +948,17 @@ def _build_submit_derived_value_mapping(
                 return _s(block.get(k))
         return ""
 
-    if manual_device_count is not None:
-        try:
-            device_count = max(0, int(manual_device_count))
-        except (TypeError, ValueError):
-            device_count = 0
-    else:
-        # 单份报告对应一台受检设备，默认台数为 1；多案合成导出由调用方传入 manual_device_count。
-        device_count = 1
+    is_report = bool(
+        task_obj is not None and getattr(task_obj, "output_target", None) == LibraryTask.OUTPUT_REPORT
+    )
+    from apps.api.inspection_pdf_service import resolve_report_device_count_for_project
+
+    device_count = resolve_report_device_count_for_project(
+        project,
+        task_no=task_no,
+        report_task=task_obj if is_report else None,
+        manual_override=manual_device_count,
+    )
 
     submitter_name = _resolve_submitter_display_name(inspection_case, project, task_no, source_data)
     if not submitter_name and project is not None:
@@ -591,9 +974,6 @@ def _build_submit_derived_value_mapping(
     project_code = _display_project_id(project)
     inspected_display = display_inspected_no_for_fill(inspection_case, project, task_no)
 
-    is_report = bool(
-        task_obj is not None and getattr(task_obj, "output_target", None) == LibraryTask.OUTPUT_REPORT
-    )
     report_template_name = (task_obj.name or "").strip() if is_report else ""
     project_title = ""
     if is_report and (hospital_name or report_template_name):
@@ -602,17 +982,49 @@ def _build_submit_derived_value_mapping(
     n_eval = max(1, int(device_count)) if device_count else 1
     title_for_abbr = report_template_name or device_name or model or ""
     ab = extract_modality_abbr_from_title(title_for_abbr) or (device_name or model or "设备").strip()[:32] or "设备"
-    dev_eval = merged_device_phrase_for_evaluation([ab] * n_eval, n_eval)
     org_for_eval = (hospital_name or "").strip()
-    assessment = (
-        f"应委托方要求，依据相关检测标准，对{org_for_eval}{dev_eval}进行了质量控制检测，结果表明：\n"
-        f"所检设备的质量控制相关参数均符合相关标准要求。"
-    )
+    if is_report:
+        try:
+            from radiation_detection_report.report_pdf_postprocess import report_task_is_qc_performance_overlay
 
-    contact_name, contact_phone = split_contact_name_phone(
-        str(hospital_info.get("contactPerson") or ""),
-        str(hospital_info.get("contactPhone") or ""),
-    )
+            qc_task = report_task_is_qc_performance_overlay(task_obj)
+            qc_with_rp = has_radiation_protection and qc_task
+        except Exception:
+            qc_task = False
+            qc_with_rp = False
+        cover_line = build_single_report_cover_title_line(
+            ab,
+            has_radiation_protection=has_radiation_protection,
+            qc_with_radiation_protection=qc_with_rp,
+        )
+        from utils.pdf_merge import build_single_report_evaluation_body
+
+        insp_type = _resolve_inspection_type_display(source_data, project, report_task=task_obj)
+        assessment = build_single_report_evaluation_body(
+            org_for_eval,
+            ab,
+            has_radiation_protection=has_radiation_protection,
+            qc_with_radiation_protection=qc_with_rp,
+            has_fail=False,
+            inspection_type=insp_type,
+        )
+    else:
+        from utils.pdf_merge import format_qc_detection_for_evaluation
+
+        dev_eval = merged_device_phrase_for_evaluation([ab] * n_eval, n_eval)
+        insp_type = _resolve_inspection_type_display(source_data, project, report_task=task_obj)
+        qc_phrase = format_qc_detection_for_evaluation(insp_type)
+        assessment = (
+            f"应委托方要求，依据相关检测标准，对{org_for_eval}{dev_eval}进行了{qc_phrase}，结果表明：\n"
+            f"所检设备的质量控制相关参数均符合相关标准要求。"
+        )
+
+    contact_name, contact_phone = _resolve_commission_contact_from_submit(source_data)
+    if not contact_name and not contact_phone:
+        contact_name, contact_phone = split_contact_name_phone(
+            str(hospital_info.get("contactPerson") or ""),
+            str(hospital_info.get("contactPhone") or ""),
+        )
     ccp_combined = str(hospital_info.get("commissionContactPhone") or "").strip()
     if ccp_combined:
         if not contact_phone:
@@ -634,10 +1046,10 @@ def _build_submit_derived_value_mapping(
     contact_name = (contact_name or str(hospital_info.get("contactPerson") or "")).strip()
     contact_phone = (contact_phone or str(hospital_info.get("contactPhone") or "")).strip()
     addr = _resolve_inspected_unit_address_from_submit(source_data)
-    rated = str(equipment_info.get("ratedParams") or "")
-    mfr = str(equipment_info.get("manufacturer") or "")
-    serial = str(equipment_info.get("serialNo") or "")
-    loc = str(equipment_info.get("location") or "")
+    rated = _eq_sem["ratedParams"]
+    mfr = _eq_sem["manufacturer"]
+    serial = _eq_sem["serialNo"]
+    loc = _eq_sem["location"]
 
     derived: dict = {
         "projectId": project_code,
@@ -648,6 +1060,9 @@ def _build_submit_derived_value_mapping(
         "inspectedNo": inspected_display,
         "受检编号": inspected_display,
         "testnumber": inspected_display,
+        "编号1": inspected_display,
+        "编号2": inspected_display,
+        "编号3": inspected_display,
         "deviceCount": str(device_count),
         "testman": testman,
         "assessment": assessment,
@@ -680,7 +1095,12 @@ def _build_submit_derived_value_mapping(
     derived["联系人"] = contact_name
     derived["联系电话"] = contact_phone
     derived["联系人电话"] = contact_phone
-    derived["受检设备台数"] = f"{device_count}台"
+    _ccp_out = ccp_combined or (f"{contact_name}{contact_phone}".strip() if (contact_name or contact_phone) else "")
+    if _ccp_out:
+        derived["委托单位联系人/电话"] = _ccp_out
+        derived["commissionContactPhone"] = _ccp_out
+    if not is_report:
+        derived["受检设备台数"] = f"{device_count}台"
     derived["设备名称"] = device_name
     derived["设备型号"] = model
     derived["额定参数"] = rated
@@ -688,7 +1108,8 @@ def _build_submit_derived_value_mapping(
     derived["设备编号"] = serial
     derived["设备所在场所"] = loc
     derived["主要检测人员"] = submitter_name
-    derived["评价"] = assessment
+    if not is_report:
+        derived["评价"] = assessment
     if year_yyyy:
         derived["检测年"] = year_yyyy
         derived["检测日期_年"] = year_yyyy
@@ -699,7 +1120,7 @@ def _build_submit_derived_value_mapping(
         derived["检测日期_月"] = month_z
         derived["检测日期_日"] = day_z
 
-    if project_title:
+    if project_title and not is_report:
         derived["项目名称"] = project_title
         derived["projectTitle"] = project_title
 
@@ -721,7 +1142,7 @@ def _build_submit_derived_value_mapping(
         derived["委托单位_委托单位名称"] = _corg
         derived["commissionOrganization"] = _corg
 
-    derived["检测类型"] = _resolve_inspection_type_display(source_data, project)
+    derived["检测类型"] = _resolve_inspection_type_display(source_data, project, report_task=task_obj)
 
     if is_report:
         now = timezone.localtime()
@@ -730,12 +1151,16 @@ def _build_submit_derived_value_mapping(
         derived["报告年"] = ry
         derived["报告月"] = rm
         derived["报告日"] = rd
-        # 签发日期：与报告生成日一致（模板常见「签发日期」与「报告日期」分列）
-        derived["签发日期"] = derived["报告日期"]
-        derived["签发年"] = ry
-        derived["签发月"] = rm
-        derived["签发日"] = rd
-        derived["报告签发日期"] = derived["报告日期"]
+        from utils.pdf_merge import format_gan_jcy_institute_report_no
+
+        report_no = format_gan_jcy_institute_report_no(
+            project_code,
+            has_radiation_protection=has_radiation_protection,
+        )
+        derived["报告编号"] = report_no
+        derived["report_no_display"] = report_no
+        derived["f1"] = report_no
+        derived["f33"] = report_no
 
     return derived
 
@@ -778,6 +1203,7 @@ def _fill_template_fields_with_submit(
     template_enums: dict | None = None,
     template_lookup_tables: dict | None = None,
     ordered_submit_payloads: Sequence[dict] | None = None,
+    source_pdf_path: str | None = None,
 ):
     # 允许通过环境变量强制使用旧版回填逻辑，便于问题回滚定位。
     if str(os.environ.get("INSPECTION_FILL_USE_LEGACY", "0")).strip().lower() in {"1", "true", "yes", "on"}:
@@ -807,6 +1233,7 @@ def _fill_template_fields_with_submit(
         template_enums=template_enums,
         template_lookup_tables=template_lookup_tables,
         ordered_submit_payloads=ordered_submit_payloads,
+        source_pdf_path=source_pdf_path,
     )
 
 
@@ -892,12 +1319,14 @@ def _fill_template_fields_with_submit_legacy(
             source_data,
             _merged_site_steps_for_instrument_backfill(task_no, project, task_obj),
             task_obj=task_obj,
+            fill_font_pt=_htmlpdf_fill_font_pt(task_obj),
         ),
     )
     _inject_instrument_scope_pdf_field_ids(
         value_mapping,
         source_data,
         _merged_site_steps_for_instrument_backfill(task_no, project, task_obj),
+        fill_font_pt=_htmlpdf_fill_font_pt(task_obj),
     )
     _normalize_iso_strings_in_test_date_part_slots(value_mapping)
     signature_map = {}
@@ -955,6 +1384,188 @@ def _build_field_to_pdf_reverse_index(bindings: dict[str, object] | None) -> dic
             if key:
                 out[key] = field_id
     return out
+
+
+_REPORT_SUMMARY_OVERLAY_MANAGED_KEYS = frozenset(
+    {
+        "项目名称",
+        "评价",
+        "受检设备台数",
+        "受检工作场所",
+        "projectTitle",
+        "assessment",
+        "deviceCount",
+        "医院名称1",
+        "设备类型1",
+        "医院名称2",
+        "设备类型2",
+        "设备类型2_2",
+    }
+)
+# 勿按 pdfFieldId 判定签字保留：f 号随模板变化（如 ct-1 报告 f13–f16 为设备型号/额定参数等，非签字栏）。
+_REPORT_PRESERVE_ORIGINAL_LABELS = frozenset(
+    {"编制人", "审核人", "授权签字人", "签发日期", "年月日", "检测类别", "检测项目"}
+)
+
+# 基本情况表取值列左界（与 cbct-linac 等报告模板实测一致，评价叠印/擦除不得侵入左侧标签列）
+_REPORT_BASIC_INFO_VALUE_X0_PT = 176.0
+
+
+def _report_semantic_key_is_preserve_original(ks: str) -> bool:
+    """报告 PDF 须保持模板原样的栏位（含签发日期1/2/3 等变体 id）。"""
+    s = (ks or "").strip()
+    if not s:
+        return False
+    if s in _REPORT_PRESERVE_ORIGINAL_LABELS:
+        return True
+    if s.startswith("签发日期"):
+        return True
+    return False
+
+
+def _report_semantic_key_is_overlay_managed(ks: str) -> bool:
+    """报告 PDF 由终稿叠印写入、HTMLPDF 阶段须留空的栏位。"""
+    s = (ks or "").strip()
+    if not s:
+        return False
+    if s in _REPORT_SUMMARY_OVERLAY_MANAGED_KEYS:
+        return True
+    if "受检设备台数" in s or s in ("设备台数", "受检工作场所"):
+        return True
+    if s.startswith("项目名称"):
+        return True
+    if s in ("项目基本情况 名称", "项目基本情况名称"):
+        return True
+    if s.startswith("评价"):
+        return True
+    if s in ("医院名称2", "设备类型2", "设备类型2_2"):
+        return True
+    return False
+
+
+def _equipment_semantics_from_pdf_slots(ei: dict, tr: dict | None = None) -> dict[str, str]:
+    """从 equipmentInfo 的 f11–f16 PDF 槽或语义键解析设备信息（与现场 JS009 等模板对齐）。"""
+    if not isinstance(ei, dict):
+        ei = {}
+    if not isinstance(tr, dict):
+        tr = {}
+
+    def _pick(*keys: str) -> str:
+        for key in keys:
+            v = ei.get(key)
+            if v not in (None, ""):
+                return str(v).strip()
+        return ""
+
+    device_name = _pick("deviceName", "name", "f11")
+    model = _pick("model", "deviceModel", "f12")
+    serial = _pick("serialNo", "noDevice", "f15")
+    mfr = _pick("manufacturer", "manufacturerProduction", "f16")
+    rated = _pick("ratedParams")
+    if not rated:
+        kv = ei.get("kv")
+        if kv in (None, ""):
+            kv = ei.get("f13")
+        if kv in (None, ""):
+            kv = tr.get("kv")
+        ma = ei.get("ma")
+        if ma in (None, ""):
+            ma = ei.get("f14")
+        if ma in (None, ""):
+            ma = tr.get("ma")
+        if kv not in (None, "") and ma not in (None, ""):
+            rated = f"{kv}kV/{ma}mA"
+        elif kv not in (None, ""):
+            rated = f"{kv}kV"
+        elif ma not in (None, ""):
+            rated = f"{ma}mA"
+    kv_s = _pick("kv", "f13") or (str(ei.get("f13")).strip() if ei.get("f13") not in (None, "") else "")
+    ma_s = _pick("ma", "f14") or (str(ei.get("f14")).strip() if ei.get("f14") not in (None, "") else "")
+    if not kv_s and tr.get("kv") not in (None, ""):
+        kv_s = str(tr.get("kv")).strip()
+    if not ma_s and tr.get("ma") not in (None, ""):
+        ma_s = str(tr.get("ma")).strip()
+    return {
+        "deviceName": device_name,
+        "model": model,
+        "serialNo": serial,
+        "manufacturer": mfr,
+        "ratedParams": rated,
+        "location": _pick("location", "f17"),
+        "kv": kv_s,
+        "ma": ma_s,
+    }
+
+
+def _is_report_preserve_original_pdf_field(field: dict, *, task_obj=None) -> bool:
+    """报告 PDF 签字/日期栏保持模板原样，不做映射、回填或叠印（仅 report 任务）。"""
+    if not _is_report_output_task(task_obj):
+        return False
+    ft = (field.get("fieldType") or "").lower()
+    for k in _field_semantic_candidate_keys(field):
+        ks = (k or "").strip()
+        if _report_semantic_key_is_preserve_original(ks):
+            return True
+    if ft == "signature" and any(
+        x in _REPORT_PRESERVE_ORIGINAL_LABELS
+        for x in _field_semantic_candidate_keys(field)
+    ):
+        return True
+    return False
+
+
+def _is_report_output_task(task_obj) -> bool:
+    from apps.core.models import LibraryTask
+
+    return (
+        task_obj is not None
+        and getattr(task_obj, "output_target", None) == LibraryTask.OUTPUT_REPORT
+    )
+
+
+def _htmlpdf_fill_font_pt(task_obj=None) -> float:
+    """现场记录五号 10.5pt；报告小四 12pt。"""
+    return (
+        htmlpdf_service.REPORT_FILL_FONT_PT
+        if _is_report_output_task(task_obj)
+        else htmlpdf_service.DEFAULT_FONT_PT
+    )
+
+
+def _is_report_summary_overlay_managed_field(field: dict, *, task_obj=None) -> bool:
+    """
+    报告 PDF 基本情况页由叠印写入的栏位：回填阶段须留空。
+    仅对 output_target=report 生效；现场记录模板即使 f 号相同也不得走此分支。
+    """
+    if not _is_report_output_task(task_obj):
+        return False
+    for k in _field_semantic_candidate_keys(field):
+        ks = (k or "").strip()
+        if not ks:
+            continue
+        if _report_semantic_key_is_overlay_managed(ks):
+            return True
+    return False
+
+
+def _strip_report_summary_overlay_keys_from_mapping(value_mapping: dict) -> None:
+    for k in list(value_mapping.keys()):
+        ks = str(k or "").strip()
+        if _report_semantic_key_is_overlay_managed(ks):
+            value_mapping.pop(k, None)
+            continue
+        if _report_semantic_key_is_preserve_original(ks):
+            value_mapping.pop(k, None)
+            continue
+
+
+def _strip_report_preserve_original_keys_from_mapping(value_mapping: dict) -> None:
+    """签字/日期/检测项目等栏保持模板 PDF 原样：从语义映射中剔除，避免回填叠字。"""
+    if not isinstance(value_mapping, dict):
+        return
+    for k in list(value_mapping.keys()):
+        if _report_semantic_key_is_preserve_original(str(k or "").strip()):
+            value_mapping.pop(k, None)
 
 
 def _field_semantic_candidate_keys(field: dict) -> list[str]:
@@ -1073,6 +1684,8 @@ def _field_semantic_text_has_circled_number(field: dict) -> bool:
 
 def _is_single_item_verdict_text_field(field: dict) -> bool:
     """单项判定格：值应在制作报告时由标准+检测结果计算，不用现场记录 JSON 直接回填。"""
+    if field.get("_syntheticQcVerdict"):
+        return True
     if str(field.get("type") or "").lower() == "verdict":
         return True
     if str(field.get("rule") or "").strip():
@@ -1105,7 +1718,7 @@ def _patch_report_evaluation_field_after_verdicts(template_fields: list | None) 
     if not isinstance(template_fields, list):
         return
     ok_tail = "所检设备的质量控制相关参数均符合相关标准要求。"
-    fail_tail = "所检设备的质量控制相关参数有部分不合格，请仔细核对或重新检测。"
+    fail_tail = "存在参数不符合相关标准。"
     flat: list = []
     _walk_template_field_dicts(template_fields, flat)
     for f in flat:
@@ -1421,6 +2034,34 @@ def _backfill_use_strict_pdf_field_id_only(task_obj=None, field: dict | None = N
     return False
 
 
+def _format_protection_numeric_pdf_text(field: dict, picked, *, task_obj=None) -> str:
+    """现场记录第五章数值格：PDF 展示统一三位小数。"""
+    if picked is None or isinstance(picked, bool):
+        return "" if picked is None else str(picked)
+    text = picked if isinstance(picked, str) else str(picked)
+    text = text.strip()
+    if not text or text == "/":
+        return text
+    if task_obj is not None and getattr(task_obj, "output_target", None) != LibraryTask.OUTPUT_SITE_RECORD:
+        return text
+    try:
+        from radiation_detection_report.chapter5_field_sync import (
+            PROTECTION_NUMBER_PRECISION,
+            field_is_protection_chapter_numeric_cell,
+            format_protection_numeric_display,
+        )
+
+        if not field_is_protection_chapter_numeric_cell(field):
+            return text
+        try:
+            prec = int(field.get("precision") or PROTECTION_NUMBER_PRECISION)
+        except (TypeError, ValueError):
+            prec = PROTECTION_NUMBER_PRECISION
+        return format_protection_numeric_display(text, precision=prec)
+    except ImportError:
+        return text
+
+
 def _attach_step_schema_to_pdf_fields(fields: list | None, steps: list | None) -> None:
     """
     统一模板里 submitPath 在 steps 的字段上，而 pdf.fields 只有 id/rect/pdfFieldId。
@@ -1515,7 +2156,7 @@ def _inject_verdict_criteria_from_form_constants(value_mapping: dict, constants:
     if not isinstance(value_mapping, dict) or not isinstance(constants, dict):
         return
     rules: list[tuple[str, tuple[str, ...], str]] = [
-        ("highContrastResolutionLimit", ("高对比度分辨力",), "≥{v}"),
+        ("highContrastResolutionLimit", ("高对比度分辨力", "高对比分辨力"), "≥{v}"),
         ("imageUniformityLimit", ("图像均匀性",), "≤{v}"),
         ("distanceErrorLimit", ("测距误差",), "≤{v}"),
         ("kapDeviationLimit", ("KAP指示偏离",), "≤{v}"),
@@ -1778,7 +2419,27 @@ def _apply_computed_fields_from_steps_to_mapping(
                 res = None
             if res is None:
                 continue
-            value_mapping[fid] = res if isinstance(res, str) else str(res)
+            if isinstance(res, str):
+                out_val = res
+            else:
+                try:
+                    from radiation_detection_report.chapter5_field_sync import (
+                        PROTECTION_NUMBER_PRECISION,
+                        field_is_protection_chapter_numeric_cell,
+                        format_protection_numeric_display,
+                    )
+
+                    if field_is_protection_chapter_numeric_cell(f):
+                        try:
+                            prec = int(f.get("precision") or PROTECTION_NUMBER_PRECISION)
+                        except (TypeError, ValueError):
+                            prec = PROTECTION_NUMBER_PRECISION
+                        out_val = format_protection_numeric_display(res, precision=prec)
+                    else:
+                        out_val = str(res)
+                except ImportError:
+                    out_val = str(res)
+            value_mapping[fid] = out_val
             changed += 1
         if not changed:
             break
@@ -2076,23 +2737,14 @@ def _scoped_instrument_lists_from_items(items: list | None) -> dict[str, list[di
     return out
 
 
-def _estimate_chars_per_line_for_field(field: dict | None) -> int:
-    """按 PDF 文本域宽度估算每行可容纳字符数（中文约 5.5pt/字）。"""
-    if not isinstance(field, dict):
-        return 96
-    rect = None
-    anchor = field.get("pdfAnchor") if isinstance(field.get("pdfAnchor"), dict) else {}
-    if isinstance(anchor.get("rect"), (list, tuple)) and len(anchor["rect"]) >= 4:
-        rect = anchor["rect"]
-    elif isinstance(field.get("rect"), (list, tuple)) and len(field["rect"]) >= 4:
-        rect = field["rect"]
-    if rect is not None:
-        try:
-            width = abs(float(rect[2]) - float(rect[0]))
-            return max(28, int(width / 5.5))
-        except (TypeError, ValueError):
-            pass
-    return 96
+def _estimate_chars_per_line_for_field(
+    field: dict | None,
+    *,
+    fill_font_pt: float | None = None,
+) -> int:
+    """按 PDF 文本域宽度与回填字号估算每行可容纳汉字数。"""
+    fs = fill_font_pt if fill_font_pt is not None else htmlpdf_service.DEFAULT_FONT_PT
+    return htmlpdf_service.estimate_pdf_field_chars_per_line(field, font_size=fs)
 
 
 def _pack_instrument_display_lines(
@@ -2161,6 +2813,7 @@ def _instrument_packed_text_for_scope(
     *,
     field: dict | None = None,
     raw_list: list | None = None,
+    fill_font_pt: float | None = None,
 ) -> str:
     """现场记录仪器栏：按 scope 全套拼接，尽量单行多机，必要时换行。"""
     lines = _collect_instrument_display_lines_for_scope(
@@ -2170,7 +2823,7 @@ def _instrument_packed_text_for_scope(
         return ""
     return _pack_instrument_display_lines(
         lines,
-        max_chars_per_line=_estimate_chars_per_line_for_field(field),
+        max_chars_per_line=_estimate_chars_per_line_for_field(field, fill_font_pt=fill_font_pt),
     )
 
 
@@ -2179,6 +2832,7 @@ def _collect_instrument_scope_merged_lines_from_submit_list(
     raw_list: list | None = None,
     *,
     field_by_slot: dict[int, dict] | None = None,
+    fill_font_pt: float | None = None,
 ) -> dict[int, str]:
     """
     从 instruments[] 按 instrumentScope 分组，质控→槽位1、防护→槽位2；
@@ -2191,6 +2845,7 @@ def _collect_instrument_scope_merged_lines_from_submit_list(
         _INSTRUMENT_SCOPE_QC,
         field=field_by_slot.get(1),
         raw_list=raw_list,
+        fill_font_pt=fill_font_pt,
     )
     if qc_text:
         out[1] = qc_text
@@ -2199,6 +2854,7 @@ def _collect_instrument_scope_merged_lines_from_submit_list(
         _INSTRUMENT_SCOPE_RP,
         field=field_by_slot.get(2),
         raw_list=raw_list,
+        fill_font_pt=fill_font_pt,
     )
     if rp_text:
         out[2] = rp_text
@@ -2209,6 +2865,8 @@ def _inject_instrument_scope_pdf_field_ids(
     value_mapping: dict,
     source_data: dict,
     site_steps_merged: list | None,
+    *,
+    fill_font_pt: float | None = None,
 ) -> None:
     """严格 pdfFieldId 回填：根级 instruments[] 全套按 scope 紧凑写入 instrument_select 对应 f 号。"""
     if not isinstance(value_mapping, dict) or not isinstance(source_data, dict):
@@ -2229,7 +2887,9 @@ def _inject_instrument_scope_pdf_field_ids(
                 scope = _INSTRUMENT_SCOPE_RP
             else:
                 continue
-        text = _instrument_packed_text_for_scope(source_data, scope, field=fld).strip()
+        text = _instrument_packed_text_for_scope(
+            source_data, scope, field=fld, fill_font_pt=fill_font_pt
+        ).strip()
         if not text:
             continue
         pid = _field_pdf_id(fld)
@@ -3013,7 +3673,10 @@ def _try_fill_instrument_slots_from_dd_f_key_rows(
 
 
 def _collect_instrument_slot_lines_from_submit(
-    source_data: dict, site_steps_merged: list | None = None
+    source_data: dict,
+    site_steps_merged: list | None = None,
+    *,
+    fill_font_pt: float | None = None,
 ) -> dict[int, str]:
     """
     按槽位下标（1-based）收集检测仪器展示行：合并根级 instruments[] 与 dynamicData 中
@@ -3024,7 +3687,9 @@ def _collect_instrument_slot_lines_from_submit(
     """
     if not isinstance(source_data, dict):
         return {}
-    scope_merged = _collect_instrument_scope_merged_lines_from_submit_list(source_data)
+    scope_merged = _collect_instrument_scope_merged_lines_from_submit_list(
+        source_data, fill_font_pt=fill_font_pt
+    )
     dd = source_data.get("dynamicData")
     if not isinstance(dd, dict):
         dd = {}
@@ -3226,7 +3891,11 @@ def _instrument_guard_scalar_tokens(source_data: dict) -> frozenset[str]:
 
 
 def _build_instrument_text_aliases_from_submit(
-    source_data: dict, site_steps_merged: list | None = None, task_obj=None
+    source_data: dict,
+    site_steps_merged: list | None = None,
+    task_obj=None,
+    *,
+    fill_font_pt: float | None = None,
 ) -> dict[str, str]:
     """
     为 PDF 占位符补缺：检测仪器1/仪器1…，以及「检测仪器列表」「检测仪器汇总」合并串（中文分号，二者同文）。
@@ -3246,7 +3915,10 @@ def _build_instrument_text_aliases_from_submit(
             if inst2:
                 sd = dict(source_data)
                 sd["instruments"] = inst2
-    slot_lines = _collect_instrument_slot_lines_from_submit(sd, site_steps_merged)
+    fp = fill_font_pt if fill_font_pt is not None else _htmlpdf_fill_font_pt(task_obj)
+    slot_lines = _collect_instrument_slot_lines_from_submit(
+        sd, site_steps_merged, fill_font_pt=fp
+    )
     for idx, line in sorted(slot_lines.items()):
         out[f"检测仪器{idx}"] = line
         out[f"仪器{idx}"] = line
@@ -3306,7 +3978,13 @@ def _resolve_instrument_id_display(source_data: dict, iid: str) -> str:
     return ""
 
 
-def _maybe_instrument_select_display(field: dict, source_data: dict, picked: str) -> str:
+def _maybe_instrument_select_display(
+    field: dict,
+    source_data: dict,
+    picked: str,
+    *,
+    fill_font_pt: float | None = None,
+) -> str:
     """instrument_select：已是全套拼接串则原样；单 id 时解析为展示行。"""
     if str(field.get("type") or "").lower() != "instrument_select":
         return picked
@@ -3321,7 +3999,9 @@ def _maybe_instrument_select_display(field: dict, source_data: dict, picked: str
         scope = (
             _INSTRUMENT_SCOPE_QC if sp.endswith("qualityControl") else _INSTRUMENT_SCOPE_RP
         )
-        packed = _instrument_packed_text_for_scope(source_data, scope, field=field).strip()
+        packed = _instrument_packed_text_for_scope(
+            source_data, scope, field=field, fill_font_pt=fill_font_pt
+        ).strip()
         if packed:
             return packed
     resolved = _resolve_instrument_id_display(source_data, ps)
@@ -3449,28 +4129,19 @@ def _inject_hospital_equipment_cn_aliases(value_mapping: dict, source_data: dict
         ["委托单位名称", "委托单位_委托单位名称", "commissionOrganization"],
         _org,
     )
+    _eq_sem = _equipment_semantics_from_pdf_slots(ei, tr)
     put(
         ["设备型号", "型号", "设备规格型号", "model"],
-        ei.get("deviceModel") or ei.get("model"),
+        _eq_sem["model"],
     )
-    serial = ei.get("serialNo")
-    if serial in (None, ""):
-        serial = ei.get("noDevice")
-    put(["设备编号", "序列号", "SN", "产品编号", "设备序列号"], serial)
-    mfr = ei.get("manufacturer")
-    if mfr in (None, ""):
-        mfr = ei.get("manufacturerProduction")
-    put(["生产厂家", "制造商", "生产厂", "企业名称", "manufacturer"], mfr)
-    put(["设备所在场所", "所在场所", "场所", "安装地点", "使用场所"], ei.get("location"))
-    put(["设备名称", "仪器名称"], ei.get("deviceName"))
-    put(["额定参数", "额定"], ei.get("ratedParams"))
+    put(["设备编号", "序列号", "SN", "产品编号", "设备序列号"], _eq_sem["serialNo"])
+    put(["生产厂家", "制造商", "生产厂", "企业名称", "manufacturer"], _eq_sem["manufacturer"])
+    put(["设备所在场所", "所在场所", "场所", "安装地点", "使用场所"], _eq_sem["location"])
+    put(["设备名称", "仪器名称"], _eq_sem["deviceName"])
+    put(["额定参数", "额定"], _eq_sem["ratedParams"])
     # 报告 PDF 常见域名「额定参数_kV/_mA」；f14/f15 与 schema 中 kv/ma 复用会被判为 ambiguous，dynamicData 直挂被跳过
-    rated_kv = ei.get("kv")
-    if rated_kv in (None, ""):
-        rated_kv = tr.get("kv")
-    rated_ma = ei.get("ma")
-    if rated_ma in (None, ""):
-        rated_ma = tr.get("ma")
+    rated_kv = _eq_sem["kv"]
+    rated_ma = _eq_sem["ma"]
     put(
         [
             "额定参数_kV",
@@ -5311,6 +5982,596 @@ def _fuzzy_criterion_text_for_verdict_key(verdict_key: str, value_mapping: dict)
     return ""
 
 
+def _normalize_pass_fail_verdict_text(val: object) -> str | None:
+    """从现场/报告提交值中提取「合格」或「不合格」。"""
+    if val is None or isinstance(val, (dict, list, bool)):
+        return None
+    s = str(val).strip()
+    if not s:
+        return None
+    if "不合格" in s:
+        return "不合格"
+    if s == "合格" or (s.endswith("合格") and "不合格" not in s):
+        return "合格"
+    return None
+
+
+def _resolve_submit_payload_for_site_task(
+    site_task,
+    *,
+    source_data: dict,
+    ordered_submit_payloads: Sequence[dict] | None,
+) -> dict:
+    """多份现场提交合并导出报告时，按现场任务模板匹配对应那份 payload。"""
+    if not ordered_submit_payloads:
+        return source_data
+    if site_task is None:
+        return source_data
+    from apps.core.library_task_template_binding_service import get_task_template_pair
+
+    _pdf, json_lf = get_task_template_pair(site_task)
+    want_name = (json_lf.original_name or "").strip() if json_lf else ""
+    task_name = (getattr(site_task, "name", None) or "").strip()
+
+    def _template_bind_key(name: str) -> str:
+        s = (name or "").strip().lower()
+        if s.endswith(".json"):
+            s = s[:-5]
+        for token in ("-状态终", "-验收终", "-状态", "-验收", "-终"):
+            if s.endswith(token):
+                s = s[: -len(token)]
+                break
+        return "".join(s.split())
+
+    want_key = _template_bind_key(want_name)
+    for pay in ordered_submit_payloads:
+        if not isinstance(pay, dict):
+            continue
+        ptid = str(pay.get("templateId") or "").strip()
+        if not ptid:
+            continue
+        if want_key and _template_bind_key(ptid) == want_key:
+            return pay
+        if want_key and want_key in _template_bind_key(ptid):
+            return pay
+        if task_name and task_name in ptid:
+            return pay
+    return source_data
+
+
+_QC_VERDICT_SYNTH_PAGES = frozenset({5, 6, 7})
+_QC_VERDICT_COL_X0 = 489.0
+_QC_VERDICT_COL_X1 = 515.0
+_QC_VERDICT_COL_WIDTH = 26.0
+_QC_RESULT_VALUE_SUFFIXES = ("_检测结果", "_报出值", "_计算结果", "_检测值")
+
+
+def _pdf_field_page_xyxy(field: dict) -> tuple[int, float, float, float, float] | None:
+    """从 materialized 栏位（x/y/w/h、x0..y1 或 rect）解析 page 与 xyxy 盒。"""
+    if not isinstance(field, dict):
+        return None
+    try:
+        page = int(field.get("page") or 0)
+    except (TypeError, ValueError):
+        page = 0
+    if all(k in field for k in ("x0", "y0", "x1", "y1")):
+        try:
+            x0, y0, x1, y1 = (
+                float(field["x0"]),
+                float(field["y0"]),
+                float(field["x1"]),
+                float(field["y1"]),
+            )
+            if x1 > x0 and y1 > y0:
+                return (page or 1, x0, y0, x1, y1)
+        except (TypeError, ValueError):
+            pass
+    if all(k in field for k in ("x", "y", "w", "h")):
+        try:
+            x, y, w, h = (
+                float(field["x"]),
+                float(field["y"]),
+                float(field["w"]),
+                float(field["h"]),
+            )
+            if w > 0 and h > 0:
+                return (page or 1, x, y, x + w, y + h)
+        except (TypeError, ValueError):
+            pass
+    rect = field.get("rect")
+    if isinstance(rect, (list, tuple)) and len(rect) >= 5:
+        try:
+            p = int(rect[0])
+            x, y, w, h = float(rect[1]), float(rect[2]), float(rect[3]), float(rect[4])
+            if w > 0 and h > 0:
+                return (p, x, y, x + w, y + h)
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def _resolve_library_template_pdf_path(template_file_id: int | None) -> str | None:
+    """报告空白 PDF 绝对路径（用于检索「单项判定」列静态合格/不合格字）。"""
+    if template_file_id in (None, ""):
+        return None
+    try:
+        pk = int(template_file_id)
+    except (TypeError, ValueError):
+        return None
+    lf = LibraryFile.objects.filter(pk=pk).first()
+    if lf is None or not lf.relative_path:
+        return None
+    try:
+        path = pipeline_service.library_absolute_path(lf.relative_path)
+    except Exception:
+        return None
+    return str(path) if path.is_file() else None
+
+
+def _pdf_page_qc_verdict_layout(page) -> dict:
+    """
+    扫描 PDF 页质控表「单项判定」列：表头 x 界与各行静态 合格/不合格 字 bbox。
+    """
+    header_x0 = header_x1 = None
+    cells: list[tuple[float, float, float, float]] = []
+    d = page.get_text("dict") or {}
+    for block in d.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            t = re.sub(r"\s+", "", "".join(str(s.get("text") or "") for s in line.get("spans") or []))
+            bb = line.get("bbox")
+            if not bb or len(bb) < 4:
+                continue
+            x0, y0, x1, y1 = float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])
+            if "单项判定" in t:
+                header_x0 = x0 if header_x0 is None else min(header_x0, x0)
+                header_x1 = x1 if header_x1 is None else max(header_x1, x1)
+            elif t in ("合格", "不合格"):
+                cells.append((x0, y0, x1, y1))
+    col_x0 = header_x0
+    col_x1 = header_x1
+    if cells:
+        cx0 = min(c[0] for c in cells)
+        cx1 = max(c[2] for c in cells)
+        if col_x0 is None:
+            col_x0, col_x1 = cx0, cx1
+        else:
+            col_x0 = min(col_x0, cx0)
+            col_x1 = max(col_x1, cx1)
+    return {"column": (col_x0, col_x1), "cells": cells}
+
+
+def _pdf_qc_verdict_cell_rect_for_row(
+    layout: dict,
+    y0: float,
+    y1: float,
+    *,
+    page: int,
+    result_x1: float | None = None,
+) -> tuple[float, float, float, float]:
+    """在「单项判定」列内定位同行应擦写替换的 合格/不合格 单元格。"""
+    cells = layout.get("cells") if isinstance(layout.get("cells"), list) else []
+    col = layout.get("column")
+    col_x0, col_x1 = col if isinstance(col, (list, tuple)) and len(col) == 2 else (None, None)
+
+    best: tuple[float, float, float, float] | None = None
+    best_overlap = 0.0
+    mid_y = (float(y0) + float(y1)) * 0.5
+    for cell in cells:
+        cx0, cy0, cx1, cy1 = cell
+        overlap = min(float(y1), cy1) - max(float(y0), cy0)
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best = (cx0, cy0, cx1, cy1)
+        elif best is None and cy0 <= mid_y <= cy1:
+            best = (cx0, cy0, cx1, cy1)
+    if best is not None and best_overlap > 1.0:
+        cx0, cy0, cx1, cy1 = best
+        if col_x0 is not None and col_x1 is not None and float(col_x1) > float(col_x0):
+            return (float(col_x0), cy0, float(col_x1), cy1)
+        return best
+    if best is not None:
+        cx0, cy0, cx1, cy1 = best
+        if col_x0 is not None and col_x1 is not None and float(col_x1) > float(col_x0):
+            return (float(col_x0), cy0, float(col_x1), cy1)
+        return best
+
+    if col_x0 is not None and col_x1 is not None and float(col_x1) > float(col_x0):
+        return (float(col_x0), float(y0), float(col_x1), float(y1))
+
+    if result_x1 is not None and float(result_x1) >= 430.0:
+        vx0 = float(result_x1) + 1.5
+        return (vx0, float(y0), vx0 + _QC_VERDICT_COL_WIDTH, float(y1))
+    if page in (5, 6):
+        return (_QC_VERDICT_COL_X0, float(y0), _QC_VERDICT_COL_X1, float(y1))
+    return (391.0, float(y0), 391.0 + _QC_VERDICT_COL_WIDTH, float(y1))
+
+
+def _load_pdf_qc_verdict_layouts(source_pdf_path: str | None) -> dict[int, dict]:
+    """按 1-based 页码缓存质控表单项判定列布局。"""
+    if not source_pdf_path:
+        return {}
+    try:
+        import fitz
+    except ImportError:
+        return {}
+    layouts: dict[int, dict] = {}
+    try:
+        doc = fitz.open(source_pdf_path)
+        for p1 in _QC_VERDICT_SYNTH_PAGES:
+            if p1 < 1 or p1 > len(doc):
+                continue
+            layouts[int(p1)] = _pdf_page_qc_verdict_layout(doc[int(p1) - 1])
+        doc.close()
+    except Exception:
+        return {}
+    return layouts
+
+
+def _synthetic_verdict_col_rect(
+    field: dict,
+    *,
+    page: int,
+    result_x1: float | None = None,
+) -> tuple[float, float]:
+    """
+    单项判定列紧挨同行「检测结果」列右侧（各页表格宽度不同，不可统一用 x=489）。
+    第 7 页（如 1.3 CBCT 节）结果列约止于 x≈390，静态「合格」在 391–420；写至 489 会漏覆盖。
+    """
+    rx1 = result_x1
+    if rx1 is None:
+        layout = _pdf_field_page_xyxy(field)
+        if layout is not None:
+            rx1 = layout[3]
+    if rx1 is None:
+        try:
+            rx1 = float(field.get("x1") or 0)
+        except (TypeError, ValueError):
+            rx1 = 0.0
+    if rx1 and float(rx1) > 0:
+        vx0 = float(rx1) + 1.5
+        return vx0, vx0 + _QC_VERDICT_COL_WIDTH
+    if page in (5, 6):
+        return _QC_VERDICT_COL_X0, _QC_VERDICT_COL_X1
+    return 391.0, 391.0 + _QC_VERDICT_COL_WIDTH
+
+
+def _qc_result_row_base_from_field(field: dict) -> str:
+    """从报告「检测结果/报出值」栏位 id/placeholder 提取行前缀，供单项判定配对。"""
+    for k in _field_semantic_candidate_keys(field):
+        ks = str(k or "").strip()
+        if not ks:
+            continue
+        for suf in _QC_RESULT_VALUE_SUFFIXES:
+            if suf in ks:
+                base = ks.split(suf, 1)[0].rstrip("_").strip()
+                if base:
+                    return base
+        if ks.endswith("检测结果") and len(ks) > len("检测结果"):
+            return ks[: -len("检测结果")].rstrip("_")
+    return ""
+
+
+def _inject_synthetic_qc_verdict_pdf_fields(
+    flat_fields: list,
+    *,
+    qc_pages: frozenset[int] | set[int] | None = None,
+    result_col_max_x: float = 440.0,
+    source_pdf_path: str | None = None,
+) -> int:
+    """
+    报告 PDF 质控表「单项判定」列常为模板静态「合格」字、未划框；
+    按 PDF 文本层检索单项判定列内同行 合格/不合格 位置合成可回填域（直接替换，非在检测结果旁叠字）。
+    """
+    pages = qc_pages if qc_pages is not None else _QC_VERDICT_SYNTH_PAGES
+    verdict_layouts = _load_pdf_qc_verdict_layouts(source_pdf_path)
+    existing = {_field_pdf_id(f) for f in flat_fields if isinstance(f, dict)}
+    existing_verdict_cell: set[tuple[int, float]] = set()
+    added = 0
+    for f in flat_fields:
+        if not isinstance(f, dict):
+            continue
+        if f.get("_syntheticQcVerdict"):
+            continue
+        layout = _pdf_field_page_xyxy(f)
+        if layout is None:
+            continue
+        page, x0, y0, x1, y1 = layout
+        if page not in pages:
+            continue
+        if x0 > result_col_max_x:
+            continue
+        base = _qc_result_row_base_from_field(f)
+        if not base:
+            continue
+        peer_pid = _field_pdf_id(f)
+        syn_pid = f"_synVerdict_{peer_pid}"
+        if syn_pid in existing:
+            continue
+        if y1 <= y0:
+            continue
+        vk = f"{base}_单项判定"
+        page_layout = verdict_layouts.get(int(page), {})
+        vx0, vy0, vx1, vy1 = _pdf_qc_verdict_cell_rect_for_row(
+            page_layout,
+            y0,
+            y1,
+            page=int(page),
+            result_x1=x1,
+        )
+        cell_key = (int(page), round((float(vy0) + float(vy1)) * 0.5, 1))
+        if cell_key in existing_verdict_cell:
+            continue
+        flat_fields.append(
+            {
+                "id": vk,
+                "placeholder": vk,
+                "title": vk,
+                "pdfFieldId": syn_pid,
+                "page": page,
+                "x": vx0,
+                "y": vy0,
+                "w": max(1.0, vx1 - vx0),
+                "h": max(1.0, vy1 - vy0),
+                "x0": vx0,
+                "y0": vy0,
+                "x1": vx1,
+                "y1": vy1,
+                "fieldType": "text",
+                "content": "",
+                "_syntheticQcVerdict": True,
+                "_peerResultPdfFieldId": peer_pid,
+            }
+        )
+        existing.add(syn_pid)
+        existing_verdict_cell.add(cell_key)
+        added += 1
+    return added
+
+
+def _site_checkbox_is_checked(val: object) -> bool:
+    if val is True:
+        return True
+    if val is False or val is None:
+        return False
+    if isinstance(val, (int, float)):
+        return int(val) != 0
+    s = str(val).strip().lower()
+    return s in ("1", "true", "yes", "on", "是", "开", "y")
+
+
+def _site_field_row_bases_for_yesno_match(site_key: str) -> list[str]:
+    sk = str(site_key or "").strip()
+    if not sk:
+        return []
+    for suffix in ("_否", "_是"):
+        if sk.endswith(suffix):
+            base = sk[: -len(suffix)].rstrip("_")
+            return _verdict_row_bases_for_peer_match(f"{base}_单项判定") if base else []
+    if sk.endswith("否") and not sk.endswith("_否"):
+        base = sk[:-1].rstrip("_")
+        return _verdict_row_bases_for_peer_match(f"{base}_单项判定") if base else []
+    if sk.endswith("是") and not sk.endswith("_是"):
+        base = sk[:-1].rstrip("_")
+        return _verdict_row_bases_for_peer_match(f"{base}_单项判定") if base else []
+    return []
+
+
+def _pick_site_yes_no_verdict_for_row_bases(
+    row_bases: Sequence[str],
+    *,
+    site_chain: Sequence[tuple] | None,
+    source_data: dict,
+    ordered_submit_payloads: Sequence[dict] | None,
+) -> str | None:
+    """现场记录用「是/否」勾选项表示合格性时，读取同行结论。"""
+    if not row_bases or not site_chain:
+        return None
+    want = [str(b or "").strip() for b in row_bases if str(b or "").strip()]
+    if not want:
+        return None
+    fail_hit = False
+    pass_hit = False
+    for site_task, parsed in site_chain:
+        if not isinstance(parsed, dict):
+            continue
+        payload = _resolve_submit_payload_for_site_task(
+            site_task,
+            source_data=source_data,
+            ordered_submit_payloads=ordered_submit_payloads,
+        )
+        dd = payload.get("dynamicData") if isinstance(payload.get("dynamicData"), dict) else {}
+        steps = _parsed_template_steps_list(parsed)
+        for sf in _flatten_unified_form_steps_to_fields(steps):
+            ftype = str(sf.get("type") or "").lower()
+            if ftype not in ("boolean", "check"):
+                continue
+            sk = str(sf.get("label") or sf.get("hierarchyKey") or sf.get("id") or "").strip()
+            if not sk:
+                continue
+            sf_bases = _site_field_row_bases_for_yesno_match(sk)
+            if not sf_bases:
+                continue
+            matched = any(
+                wb == sb or (wb and sb and (wb in sb or sb in wb))
+                for wb in want
+                for sb in sf_bases
+            )
+            if not matched:
+                continue
+            raw = None
+            sp = str(sf.get("submitPath") or (sf.get("source") or {}).get("submitPath") or "").strip()
+            if sp:
+                raw = _nested_get_for_submit_with_rated_fallback(payload, sp)
+            if raw is None:
+                pid = str(sf.get("pdfFieldId") or (sf.get("source") or {}).get("pdfFieldId") or "").strip()
+                if pid and pid in dd:
+                    raw = dd.get(pid)
+            if not _site_checkbox_is_checked(raw):
+                continue
+            if sk.endswith("_否") or sk.endswith("否"):
+                fail_hit = True
+            elif sk.endswith("_是") or sk.endswith("是"):
+                pass_hit = True
+    if fail_hit:
+        return "不合格"
+    if pass_hit:
+        return "合格"
+    return None
+
+
+def _site_verdict_row_keys_for_report_verdict(verdict_key: str) -> list[str]:
+    """现场记录「单项判定」列在 value_mapping / dynamicData 中可能的语义键。"""
+    seen: set[str] = set()
+    out: list[str] = []
+    for base in _verdict_row_bases_for_peer_match(verdict_key):
+        for suffix in ("_单项判定", "单项判定"):
+            cand = f"{base}{suffix}"
+            if cand and cand not in seen:
+                seen.add(cand)
+                out.append(cand)
+    return out
+
+
+def _pick_site_record_row_verdict_label(
+    report_verdict_field: dict,
+    *,
+    value_mapping: dict,
+    source_data: dict,
+    site_chain: Sequence[tuple] | None = None,
+    ordered_submit_payloads: Sequence[dict] | None = None,
+    flat_report_fields: Sequence[dict] | None = None,
+) -> str | None:
+    """
+    现场记录同行若已判定（存库单项判定，或测量值相对判定标准不合格），返回合格/不合格。
+    仅用于报告回填时优先继承现场结论，尤其保证「现场已不合格 → 报告单项判定不合格」。
+    """
+    vkey = ""
+    for k in _field_candidate_keys(report_verdict_field):
+        if "单项判定" in str(k or ""):
+            vkey = str(k).strip()
+            break
+    row_bases = _verdict_row_bases_for_peer_match(vkey) if vkey else []
+    if not row_bases:
+        peer_pid = str(report_verdict_field.get("_peerResultPdfFieldId") or "").strip()
+        if peer_pid and flat_report_fields:
+            for pf in flat_report_fields:
+                if not isinstance(pf, dict):
+                    continue
+                if _field_pdf_id(pf) != peer_pid:
+                    continue
+                base = _qc_result_row_base_from_field(pf)
+                if base:
+                    row_bases = _verdict_row_bases_for_peer_match(f"{base}_单项判定")
+                    vkey = vkey or f"{base}_单项判定"
+                break
+    if not vkey and row_bases:
+        vkey = f"{row_bases[0]}_单项判定"
+
+    for ck in _site_verdict_row_keys_for_report_verdict(vkey) if vkey else []:
+        vv = _normalize_pass_fail_verdict_text(value_mapping.get(ck))
+        if vv:
+            return vv
+
+    if site_chain:
+        for site_task, parsed in site_chain:
+            if not isinstance(parsed, dict):
+                continue
+            payload = _resolve_submit_payload_for_site_task(
+                site_task,
+                source_data=source_data,
+                ordered_submit_payloads=ordered_submit_payloads,
+            )
+            steps = _parsed_template_steps_list(parsed)
+            for sf in _flatten_unified_form_steps_to_fields(steps):
+                sk = str(sf.get("label") or sf.get("hierarchyKey") or sf.get("id") or "")
+                if "单项判定" not in sk:
+                    continue
+                sf_base = _verdict_base_from_field_key(sk)
+                matched = False
+                match_bases = row_bases if row_bases else _verdict_row_bases_for_peer_match(vkey)
+                for rb in match_bases:
+                    if sf_base == rb or (sf_base and rb and (sf_base in rb or rb in sf_base)):
+                        matched = True
+                        break
+                if not matched:
+                    continue
+                sp = str(sf.get("submitPath") or (sf.get("source") or {}).get("submitPath") or "").strip()
+                if sp:
+                    vv = _normalize_pass_fail_verdict_text(
+                        _nested_get_for_submit_with_rated_fallback(payload, sp)
+                    )
+                    if vv:
+                        return vv
+                pid = str(sf.get("pdfFieldId") or (sf.get("source") or {}).get("pdfFieldId") or "").strip()
+                dd = payload.get("dynamicData") if isinstance(payload.get("dynamicData"), dict) else {}
+                if pid and dd:
+                    vv = _normalize_pass_fail_verdict_text(dd.get(pid))
+                    if vv:
+                        return vv
+
+    if row_bases and site_chain:
+        yn = _pick_site_yes_no_verdict_for_row_bases(
+            row_bases,
+            site_chain=site_chain,
+            source_data=source_data,
+            ordered_submit_payloads=ordered_submit_payloads,
+        )
+        if yn:
+            return yn
+
+    if not vkey:
+        return None
+
+    try:
+        from utils.verdict_from_criterion import parse_first_number, verdict_from_measurement
+    except ImportError:
+        return None
+
+    peer_measured = ""
+    peer_pid = str(report_verdict_field.get("_peerResultPdfFieldId") or "").strip()
+    if peer_pid and flat_report_fields:
+        for pf in flat_report_fields:
+            if not isinstance(pf, dict) or _field_pdf_id(pf) != peer_pid:
+                continue
+            mc = str(pf.get("content") or "").strip()
+            if mc and not _normalize_pass_fail_verdict_text(mc):
+                peer_measured = mc
+            break
+
+    for base in _verdict_row_bases_for_peer_match(vkey):
+        measured = peer_measured or _pick_primary_measurement_for_site_row(base, value_mapping)
+        if not measured:
+            for rk in _verdict_measurement_placeholder_key_candidates(f"{base}_单项判定"):
+                mv = value_mapping.get(rk)
+                if mv in (None, "") or isinstance(mv, (dict, list)):
+                    continue
+                ms = str(mv).strip()
+                if not ms or ms == rk or _normalize_pass_fail_verdict_text(ms):
+                    continue
+                if parse_first_number(ms) is not None:
+                    measured = ms
+                    break
+        if not measured:
+            continue
+        crit = _shield_zone_criterion_text_for_verdict_field(f"{base}_单项判定", value_mapping)
+        if not crit:
+            crit = _fuzzy_criterion_text_for_verdict_key(f"{base}_单项判定", value_mapping)
+        if not crit:
+            for suffix in ("_判定标准", "_验收标准", "_限值"):
+                cv = value_mapping.get(f"{base}{suffix}")
+                if cv not in (None, "") and not isinstance(cv, (dict, list)):
+                    crit = str(cv).strip()
+                    break
+        if not crit:
+            continue
+        auto = verdict_from_measurement(str(measured), crit)
+        if auto in ("合格", "不合格"):
+            return auto
+    return None
+
+
 def _placeholder_text_looks_like_criterion(s: str) -> bool:
     t = str(s or "").strip()
     if len(t) < 3:
@@ -5506,10 +6767,10 @@ def _get_judgment_criterion_text(
         crit = _shield_zone_criterion_text_for_verdict_field(ks, vm)
         if crit:
             return crit
+        crit = _fuzzy_criterion_text_for_verdict_key(ks, vm)
+        if crit:
+            return crit
         if _backfill_fuzzy_match_enabled():
-            crit = _fuzzy_criterion_text_for_verdict_key(ks, vm)
-            if crit:
-                return crit
             for base in _verdict_row_bases_for_peer_match(ks):
                 for ck in (
                     f"{base}_判定标准",
@@ -5553,7 +6814,7 @@ def _library_media_url_to_relative(url: str) -> str:
     ):
         if s.startswith(prefix):
             return s[len(prefix) :].lstrip("/")
-    if s.startswith("inspection_submits/"):
+    if s.startswith("inspection_submits/") or s.startswith("site_records/"):
         return s
     return ""
 
@@ -6118,6 +7379,7 @@ def _fill_template_fields_with_submit_enhanced(
     template_enums: dict | None = None,
     template_lookup_tables: dict | None = None,
     ordered_submit_payloads: Sequence[dict] | None = None,
+    source_pdf_path: str | None = None,
 ):
     """
     增强回填逻辑（以 submitted JSON 为主）：
@@ -6162,6 +7424,11 @@ def _fill_template_fields_with_submit_enhanced(
         template_constants=template_constants if isinstance(template_constants, dict) else {},
         ordered_submit_payloads=ordered_submit_payloads,
     )
+    site_chain_for_verdict: list = []
+    if task_obj is not None and project is not None:
+        site_chain_for_verdict = list(
+            _iter_parsed_templates_for_backfill(task_no, project, task_obj)
+        )
     _apply_computed_fields_from_steps_to_mapping(
         value_mapping,
         report_template_steps if isinstance(report_template_steps, list) else None,
@@ -6180,6 +7447,14 @@ def _fill_template_fields_with_submit_enhanced(
     reverse_field_map = _build_field_to_pdf_reverse_index(bindings)
     flat_report_fields: list = []
     _walk_template_field_dicts(template_fields, flat_report_fields)
+    if (
+        task_obj is not None
+        and getattr(task_obj, "output_target", None) == LibraryTask.OUTPUT_REPORT
+    ):
+        _inject_synthetic_qc_verdict_pdf_fields(
+            flat_report_fields,
+            source_pdf_path=source_pdf_path,
+        )
 
     try:
         from utils.verdict_from_criterion import verdict_from_measurement
@@ -6197,6 +7472,8 @@ def _fill_template_fields_with_submit_enhanced(
 
     def _pick_value_for_field(field: dict):
         if _is_single_item_verdict_text_field(field):
+            return ""
+        if _is_report_preserve_original_pdf_field(field, task_obj=task_obj):
             return ""
         ft = (field.get("fieldType") or "text").lower()
         deferred_raw_sp = None
@@ -6232,7 +7509,10 @@ def _fill_template_fields_with_submit_enhanced(
                     else _INSTRUMENT_SCOPE_RP
                 )
                 scoped_line = _instrument_packed_text_for_scope(
-                    source_data, scope, field=field
+                    source_data,
+                    scope,
+                    field=field,
+                    fill_font_pt=_htmlpdf_fill_font_pt(task_obj),
                 ).strip()
                 if scoped_line:
                     if ft == "check":
@@ -6242,7 +7522,11 @@ def _fill_template_fields_with_submit_enhanced(
             # submitPath=instruments 绑定整表时，_nested_get 得到 list，原先会跳过并误用同 pdfFieldId 的委托编号等。
             if str(sp_direct) == "instruments" and not _field_is_commission_or_inspection_no_slot(field):
                 site_merged = report_template_steps if isinstance(report_template_steps, list) else None
-                slot_lines = _collect_instrument_slot_lines_from_submit(source_data, site_merged)
+                slot_lines = _collect_instrument_slot_lines_from_submit(
+                    source_data,
+                    site_merged,
+                    fill_font_pt=_htmlpdf_fill_font_pt(task_obj),
+                )
                 fid_raw = str(field.get("fieldId") or field.get("id") or "")
                 m_slot = re.search(r"(?:仪器|instrument|testInstrument)(\d+)", fid_raw, re.I)
                 # 仅当 id 含「仪器2」等下标时按槽位取单行；泛化「检测仪器」大区不得默认 idx=1 否则只填第一台。
@@ -6420,7 +7704,7 @@ def _fill_template_fields_with_submit_enhanced(
                 return "" if got is None else got
         if "项目名称" in joined:
             return value_mapping.get("项目名称") or value_mapping.get("projectTitle") or ""
-        if "受检设备台数" in joined:
+        if "受检设备台数" in joined or "受检工作场所" in joined:
             return value_mapping.get("受检设备台数") or value_mapping.get("deviceCount") or ""
         if "签发" in joined and "日期" in joined:
             return (
@@ -6515,6 +7799,12 @@ def _fill_template_fields_with_submit_enhanced(
             return ""
         if _value_looks_like_unresolved_qc_domain_id(picked_s):
             return ""
+        # 栏位 id/placeholder 即为「CBCT功能_检测结果1」类语义名时，末尾数字是栏位序号而非 PDF 多测量位模板。
+        if tmpl and (
+            _value_is_field_label_echo(field, tmpl)
+            or any(tmpl == k or tmpl.rstrip("：:") == k.rstrip("：:") for k in keys)
+        ):
+            return picked_s
         # 术者位防护区：PDF 占位符常为整段域 id（含 60/120/141 等多段数字），做数字位替换会把现场值打乱或拟合成“假占位符”。
         if "透视防护区" in joined and "术者位" in joined:
             return picked_s
@@ -6527,6 +7817,22 @@ def _fill_template_fields_with_submit_enhanced(
         优先：模板 steps 上 type=verdict 的 `rule` 表达式（与前端动态表单一致）求布尔值 → passLabel/failLabel。
         否则：模板字段含判定标准（judgmentCriterionText 等）时，按同行测量值与标准句走 verdict_from_criterion。
         """
+        site_row_verdict = None
+        if (
+            task_obj is not None
+            and getattr(task_obj, "output_target", None) == LibraryTask.OUTPUT_REPORT
+        ):
+            site_row_verdict = _pick_site_record_row_verdict_label(
+                field,
+                value_mapping=value_mapping,
+                source_data=source_data,
+                site_chain=site_chain_for_verdict,
+                ordered_submit_payloads=ordered_submit_payloads,
+                flat_report_fields=flat_report_fields,
+            )
+            if site_row_verdict == "不合格":
+                return str(field.get("failLabel") or "不合格").strip()
+
         rule_fe = str(field.get("rule") or "").strip()
         if rule_fe:
             try:
@@ -6548,6 +7854,8 @@ def _fill_template_fields_with_submit_enhanced(
                 return str(field.get("passLabel") or "合格").strip()
             if vb is False:
                 return str(field.get("failLabel") or "不合格").strip()
+        if site_row_verdict == "合格":
+            return str(field.get("passLabel") or "合格").strip()
         if not verdict_from_measurement:
             return picked
         try:
@@ -6579,9 +7887,11 @@ def _fill_template_fields_with_submit_enhanced(
             return picked
         measured = ""
         vpid = _field_pdf_id(field)
-        peer_pid = _peer_result_pdf_field_id_for_verdict(
-            vpid, report_template_steps if isinstance(report_template_steps, list) else None
-        )
+        peer_pid = str(field.get("_peerResultPdfFieldId") or "").strip()
+        if not peer_pid:
+            peer_pid = _peer_result_pdf_field_id_for_verdict(
+                vpid, report_template_steps if isinstance(report_template_steps, list) else None
+            )
         if peer_pid:
             pm = _find_template_field_by_pdf_field_id(template_fields, peer_pid)
             if pm:
@@ -6594,8 +7904,8 @@ def _fill_template_fields_with_submit_enhanced(
                     measured = ""
                 else:
                     measured = mpid
-        if not measured and _backfill_fuzzy_match_enabled():
-            peer_keys = _verdict_measurement_placeholder_key_candidates(vkey)
+        peer_keys = _verdict_measurement_placeholder_key_candidates(vkey)
+        if not measured:
             for rk in peer_keys:
                 peer = _find_template_field_by_semantic_key(template_fields, rk)
                 if peer:
@@ -6603,35 +7913,24 @@ def _fill_template_fields_with_submit_enhanced(
                     if mc and not _value_is_field_label_echo(peer, mc):
                         measured = mc
                         break
-            if not measured:
-                seen_rk: set[str] = set()
-                for rk in peer_keys:
-                    for cand in (rk, *tuple(_shield_zone_placeholder_key_variants(rk))):
-                        ck = str(cand or "").strip()
-                        if not ck or ck in seen_rk:
-                            continue
-                        seen_rk.add(ck)
-                        mv = value_mapping.get(ck)
-                        if mv not in (None, "") and not isinstance(mv, (dict, list)):
-                            pseudo_pf = {
-                                "id": ck,
-                                "placeholder": ck,
-                                "originalPlaceholder": ck,
-                                "fieldType": "text",
-                            }
-                            if not _value_is_field_label_echo(pseudo_pf, mv):
-                                measured = str(mv).strip()
-                                break
-                    if measured not in (None, ""):
-                        break
-            if not measured:
-                for rk in peer_keys:
-                    peer = _find_template_field_by_semantic_key(template_fields, rk)
-                    if peer:
-                        measured = _pick_value_for_field(peer) or ""
-                    if measured not in (None, ""):
-                        break
-        if _backfill_fuzzy_match_enabled():
+        if not measured:
+            for rk in peer_keys:
+                mv = value_mapping.get(rk)
+                if mv in (None, "") or isinstance(mv, (dict, list)):
+                    continue
+                ms = str(mv).strip()
+                if not ms or ms == rk or _normalize_pass_fail_verdict_text(ms):
+                    continue
+                pseudo_pf = {
+                    "id": rk,
+                    "placeholder": rk,
+                    "originalPlaceholder": rk,
+                    "fieldType": "text",
+                }
+                if not _value_is_field_label_echo(pseudo_pf, mv):
+                    measured = ms
+                    break
+        if not measured and _backfill_fuzzy_match_enabled():
             if not measured:
                 for rk in peer_keys:
                     syn_m = {
@@ -6668,20 +7967,28 @@ def _fill_template_fields_with_submit_enhanced(
                 if pk and measured_s == str(pk).strip():
                     return picked
         if measured_s in ("合格", "不合格"):
-            return measured_s
+            if measured_s == "不合格":
+                return str(field.get("failLabel") or "不合格").strip()
+            measured = ""
+            measured_s = ""
         if _placeholder_text_looks_like_criterion(measured_s):
             return picked
-        if _v_parse_num is not None and _v_parse_num(measured_s) is None:
-            return picked
-        auto = verdict_from_measurement(str(measured), crit)
-        if auto:
-            return auto
+        if _v_parse_num is not None and measured_s and _v_parse_num(measured_s) is None:
+            if not re.search(r"[≤≥≦≧＜＞<>]", measured_s):
+                return picked
+        auto = verdict_from_measurement(str(measured), crit) if measured_s else ""
+        if auto == "不合格":
+            return str(field.get("failLabel") or "不合格").strip()
+        if auto == "合格":
+            return str(field.get("passLabel") or "合格").strip()
         sp_ver = str((field.get("source") or {}).get("submitPath") or "").strip()
         if sp_ver:
             fb = _nested_get_for_submit_with_rated_fallback(source_data, sp_ver)
             if fb not in (None, "") and not isinstance(fb, (dict, list)):
                 fbs = str(fb).strip()
-                if fbs in ("合格", "不合格") and not _value_is_field_label_echo(field, fb):
+                if fbs == "不合格" and not _value_is_field_label_echo(field, fb):
+                    return fbs
+                if fbs == "合格" and not _value_is_field_label_echo(field, fb) and not auto:
                     return fbs
         return picked
 
@@ -6715,8 +8022,20 @@ def _fill_template_fields_with_submit_enhanced(
     for field in flat_report_fields:
         if not isinstance(field, dict):
             continue
+        if _is_report_preserve_original_pdf_field(field, task_obj=task_obj):
+            ft_preserve = (field.get("fieldType") or "text").lower()
+            if ft_preserve == "text":
+                field["content"] = ""
+            elif ft_preserve == "check":
+                field["checked"] = False
+            elif ft_preserve == "image":
+                field["imageData"] = ""
+            continue
         field_type = (field.get("fieldType") or "").lower()
         if field_type == "text":
+            if _is_report_summary_overlay_managed_field(field, task_obj=task_obj):
+                field["content"] = ""
+                continue
             if _is_single_item_verdict_text_field(field):
                 field["content"] = ""
             else:
@@ -6732,7 +8051,24 @@ def _fill_template_fields_with_submit_enhanced(
                     picked = ""
                 elif picked is not None and not isinstance(picked, str):
                     picked = str(picked).strip()
-                picked = _maybe_instrument_select_display(field, source_data, picked)
+                picked = _format_protection_numeric_pdf_text(field, picked, task_obj=task_obj)
+                if (
+                    _is_report_output_task(task_obj)
+                    and isinstance(picked, str)
+                    and picked.strip()
+                ):
+                    joined_addr = " ".join(_field_semantic_candidate_keys(field))
+                    if "受检单位地址" in joined_addr or (
+                        "单位地址" in joined_addr and "名称" not in joined_addr
+                    ):
+                        if not _is_plausible_inspected_unit_address(picked):
+                            picked = ""
+                picked = _maybe_instrument_select_display(
+                    field,
+                    source_data,
+                    picked,
+                    fill_font_pt=_htmlpdf_fill_font_pt(task_obj),
+                )
                 field["content"] = picked or ""
             continue
         if field_type == "check":
@@ -6763,13 +8099,14 @@ def _fill_template_fields_with_submit_enhanced(
         field["content"] = _auto_verdict_text_if_applicable(
             field, "" if c0 is None else str(c0)
         )
-    if task_obj is not None and getattr(task_obj, "output_target", None) == LibraryTask.OUTPUT_REPORT:
-        if any(
-            _report_template_field_shows_fail_verdict(f)
-            for f in flat_report_fields
-            if isinstance(f, dict)
-        ):
-            _patch_report_evaluation_field_after_verdicts(template_fields)
+    if (
+        task_obj is not None
+        and getattr(task_obj, "output_target", None) == LibraryTask.OUTPUT_REPORT
+    ):
+        for field in flat_report_fields:
+            if isinstance(field, dict) and field.get("_syntheticQcVerdict"):
+                template_fields.append(field)
+        _patch_report_evaluation_field_after_verdicts(template_fields)
     return template_fields
 
 
@@ -6982,6 +8319,7 @@ def _build_filled_template_fields_for_task(
         task_obj, project, task_no, template_bindings if isinstance(template_bindings, dict) else {}
     )
     payload_eff = merge_task_template_bound_instruments_into_payload(payload, task_obj)
+    source_pdf_path = _resolve_library_template_pdf_path(source_pdf_template_id)
     return (
         _fill_template_fields_with_submit(
             payload_eff,
@@ -6998,6 +8336,7 @@ def _build_filled_template_fields_for_task(
             template_enums=tpl_enums,
             template_lookup_tables=tpl_lookup,
             ordered_submit_payloads=ordered_submit_payloads,
+            source_pdf_path=source_pdf_path,
         ),
         source_pdf_template_id,
         "",
@@ -7226,6 +8565,28 @@ def _prepare_backfill_value_mapping(
     _merge_mapping_fill_empty(value_mapping, _build_dynamic_data_semantic_mapping(source_data))
     _merge_dynamic_data_pdf_field_ids_into_value_mapping(value_mapping, source_data)
     _inject_test_date_split_pdf_field_aliases(value_mapping, source_data)
+    is_report_output = (
+        task_obj is not None
+        and getattr(task_obj, "output_target", None) == LibraryTask.OUTPUT_REPORT
+    )
+    has_radiation_protection = False
+    if is_report_output:
+        try:
+            from radiation_detection_report.report_pdf_integrator import probe_has_radiation_protection_from_submit
+            from radiation_detection_report.report_pdf_postprocess import resolve_report_overlay_radiation_protection
+
+            has_radiation_protection = probe_has_radiation_protection_from_submit(
+                source_data,
+                project=project,
+                case=inspection_case,
+                report_task=task_obj,
+                task_no=task_no,
+            )
+            has_radiation_protection = resolve_report_overlay_radiation_protection(
+                task_obj, has_radiation_protection
+            )
+        except Exception:
+            has_radiation_protection = False
     # 派生字段仅补缺：避免覆盖现场模板 submitPath 已写入的词条（如 JS-117 受检单位在 inspection，
     # JS-001 在 inspection2；统一用「模板先写、派生后补」避免互相压错）。
     _merge_mapping_fill_empty(
@@ -7237,6 +8598,7 @@ def _prepare_backfill_value_mapping(
             task_obj=task_obj,
             inspection_case=inspection_case,
             manual_device_count=manual_device_count,
+            has_radiation_protection=has_radiation_protection,
         ),
     )
     if isinstance(report_template_fields, list):
@@ -7261,6 +8623,7 @@ def _prepare_backfill_value_mapping(
             report_parsed_template={
                 "fields": report_template_fields if isinstance(report_template_fields, list) else []
             },
+            ordered_submit_payloads=ordered_submit_payloads,
         )
     _inject_hospital_equipment_cn_aliases(value_mapping, source_data)
     _inject_radio_enum_slug_checkbox_aliases(value_mapping, source_data)
@@ -7303,19 +8666,56 @@ def _prepare_backfill_value_mapping(
     if _ins_merged:
         value_mapping["检测仪器"] = _ins_merged
     # 与检测仪器同槽 f1 时，仪器合并串可能写入 f1，覆盖委托编号；用提交中的委托编号恢复。
+    # 报告模板 f1 为「报告编号」（赣检测院FJ-ZK/FJ-FH），不得写入委托编号。
     ri0 = source_data.get("reportInfo") if isinstance(source_data.get("reportInfo"), dict) else {}
     dd0 = source_data.get("dynamicData") if isinstance(source_data.get("dynamicData"), dict) else {}
     com_fill = str(ri0.get("commissionNo") or dd0.get("f1") or "").strip()
     if com_fill and "；" not in com_fill:
         value_mapping.setdefault("委托编号", com_fill)
         value_mapping.setdefault("commissionNo", com_fill)
-        vf1 = str(value_mapping.get("f1") or "").strip()
-        if not vf1:
-            value_mapping["f1"] = com_fill
-        elif vf1 != com_fill and ("；" in vf1 or len(vf1) > len(com_fill) + 8):
-            value_mapping["f1"] = com_fill
+        if not is_report_output:
+            vf1 = str(value_mapping.get("f1") or "").strip()
+            if not vf1:
+                value_mapping["f1"] = com_fill
+            elif vf1 != com_fill and ("；" in vf1 or len(vf1) > len(com_fill) + 8):
+                value_mapping["f1"] = com_fill
+    if is_report_output:
+        from utils.pdf_merge import format_gan_jcy_institute_report_no
+
+        com_for_rn = str(
+            value_mapping.get("委托编号")
+            or value_mapping.get("commissionNo")
+            or com_fill
+            or ""
+        ).strip()
+        report_no = format_gan_jcy_institute_report_no(
+            com_for_rn,
+            has_radiation_protection=has_radiation_protection,
+        )
+        if report_no:
+            value_mapping["报告编号"] = report_no
+            value_mapping["report_no_display"] = report_no
+            from apps.core.report_template_profiles import get_report_template_profile
+
+            _prof = get_report_template_profile(task_obj)
+            if _prof.f1_slot == "report_no":
+                value_mapping["f1"] = report_no
+                value_mapping["f33"] = report_no
+            elif _prof.f1_slot == "commission_no" and com_fill:
+                value_mapping["f1"] = com_fill
     # KAP 单位：须在 value_mapping 全部合并后再注入，避免后续 _merge 或步骤别名用 f56 串值覆盖布尔/长键。
     _normalize_iso_strings_in_test_date_part_slots(value_mapping)
+    if is_report_output:
+        _strip_report_summary_overlay_keys_from_mapping(value_mapping)
+        _strip_report_preserve_original_keys_from_mapping(value_mapping)
+    _sanitize_inspected_unit_address_mapping(value_mapping)
+    if is_report_output:
+        _reconcile_report_basic_info_value_mapping(
+            value_mapping,
+            source_data,
+            report_template_fields if isinstance(report_template_fields, list) else [],
+            task_obj=task_obj,
+        )
     return value_mapping
 
 
@@ -7326,14 +8726,24 @@ def _resolve_report_task_for_case(task_no: str, project):
     return resolve_report_task_for_case(task_no, project)
 
 
-def _normalize_fields_for_htmlpdf(fields):
+def _normalize_fields_for_htmlpdf(fields, *, task_obj=None):
     """扁平化嵌套 fields，并按页码、纵坐标、横坐标排序，减少叠字顺序导致的乱序。"""
     normalized = []
     skipped = 0
+    report_output = _is_report_output_task(task_obj)
 
     def _append_one(f: dict) -> None:
         nonlocal skipped
         if not isinstance(f, dict):
+            skipped += 1
+            return
+        if report_output and str(f.get("id") or "").strip() in _REPORT_DECORATIVE_FIELD_IDS:
+            skipped += 1
+            return
+        if report_output and (
+            _is_report_summary_overlay_managed_field(f, task_obj=task_obj)
+            or _is_report_preserve_original_pdf_field(f, task_obj=task_obj)
+        ):
             skipped += 1
             return
         page = f.get("page")
@@ -7374,7 +8784,7 @@ def _normalize_fields_for_htmlpdf(fields):
             "y0": y0,
             "x1": x1,
             "y1": y1,
-            "fieldType": (f.get("fieldType") or "text"),
+            "fieldType": (f.get("fieldType") or f.get("type") or "text"),
             "value": text_val or "",
             "checked": bool(f.get("checked", False)),
             "imageData": f.get("imageData") or "",
@@ -7384,6 +8794,8 @@ def _normalize_fields_for_htmlpdf(fields):
             v = f.get(k)
             if isinstance(v, str) and v.strip():
                 row[k] = v.strip()
+        if f.get("_syntheticQcVerdict"):
+            row["_syntheticQcVerdict"] = True
         normalized.append(row)
 
     def _walk(rows):
@@ -7405,6 +8817,32 @@ def _normalize_fields_for_htmlpdf(fields):
         return (p, float(r.get("y0") or 0), float(r.get("x0") or 0))
 
     normalized.sort(key=_sort_key)
+
+    if report_output and normalized:
+        deduped: list = []
+        best_by_rect: dict[tuple, dict] = {}
+        for row in normalized:
+            rect_key = (
+                int(row.get("page") or 0),
+                round(float(row.get("x0") or 0), 1),
+                round(float(row.get("y0") or 0), 1),
+                round(float(row.get("x1") or 0), 1),
+                round(float(row.get("y1") or 0), 1),
+            )
+            prev = best_by_rect.get(rect_key)
+            if prev is None:
+                best_by_rect[rect_key] = row
+                deduped.append(row)
+                continue
+            prev_pid = str(prev.get("pdfFieldId") or "")
+            cur_pid = str(row.get("pdfFieldId") or "")
+            if _pdf_field_id_numeric(cur_pid) < _pdf_field_id_numeric(prev_pid):
+                deduped.remove(prev)
+                best_by_rect[rect_key] = row
+                deduped.append(row)
+        deduped.sort(key=_sort_key)
+        normalized = deduped
+
     return normalized, skipped
 
 
@@ -7488,16 +8926,22 @@ def _persist_filled_pdf_from_submit(
     template_json_name: str = "",
     task_obj=None,
     source_payload: dict | None = None,
+    manual_device_count: int | None = None,
+    *,
+    site_record_batch=None,
+    source_submit_relative_path: str | None = None,
 ):
     from apps.api.inspection_pdf_service import _resolve_library_task_for_task_no
 
     if not isinstance(filled_fields, list) or not filled_fields:
         return False, "无可用填充字段", None
-    normalized_fields, skipped_fields = _normalize_fields_for_htmlpdf(filled_fields)
-    if not normalized_fields:
-        return False, "模板字段缺少有效页码或坐标（支持 x/y/w/h 或 x0/y0/x1/y1）", None
     if task_obj is None:
         task_obj = _resolve_library_task_for_task_no(task_no, project)
+    normalized_fields, skipped_fields = _normalize_fields_for_htmlpdf(
+        filled_fields, task_obj=task_obj
+    )
+    if not normalized_fields:
+        return False, "模板字段缺少有效页码或坐标（支持 x/y/w/h 或 x0/y0/x1/y1）", None
     if task_obj is None:
         return False, "未找到对应任务模板，无法导出", None
     template_pdf_lf = None
@@ -7521,7 +8965,11 @@ def _persist_filled_pdf_from_submit(
         template_pdf_lf = template_pdf_rows[0]
     try:
         source_pdf = pipeline_service.library_absolute_path(template_pdf_lf.relative_path)
-        pdf_bytes = htmlpdf_service.build_filled_pdf(normalized_fields, source_pdf)
+        pdf_bytes = htmlpdf_service.build_filled_pdf(
+            normalized_fields,
+            source_pdf,
+            fill_font_pt=_htmlpdf_fill_font_pt(task_obj),
+        )
         if (
             task_obj is not None
             and task_obj.output_target == LibraryTask.OUTPUT_REPORT
@@ -7539,7 +8987,7 @@ def _persist_filled_pdf_from_submit(
                 case=case,
                 report_task=task_obj,
                 task_no=task_no,
-                manual_device_count=None,
+                manual_device_count=manual_device_count,
             )
     except Exception as exc:
         return False, f"PDF 渲染失败: {exc}", None
@@ -7548,11 +8996,30 @@ def _persist_filled_pdf_from_submit(
         project, task_obj, task_no, output_category=output_category
     )
     wrapped = type("UploadLike", (), {"read": lambda self: pdf_bytes, "name": filename})()
+    save_kwargs: dict = {
+        "link_entity": LibraryFile.LINK_ENTITY_INSPECTION_CASE,
+        "link_object_id": case.pk,
+        "project_ids": [project.pk],
+        "enforce_storage_quota": False,
+    }
+    if output_category == LibraryFile.CATEGORY_REPORT:
+        save_kwargs["report_project"] = project
+        save_kwargs["report_library_task"] = task_obj
+    else:
+        from apps.core.library_file_service import (
+            resolve_site_record_batch_storage,
+        )
+
+        save_kwargs["site_record_batch"] = site_record_batch or resolve_site_record_batch_storage(
+            project=project,
+            case=case,
+            task_no=task_no,
+            source_payload=source_payload,
+            source_submit_relative_path=source_submit_relative_path,
+        )
     created, _ = save_library_binary_uploads(
         user, [wrapped], output_category,
-        link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
-        link_object_id=case.pk, project_ids=[project.pk],
-        enforce_storage_quota=False,
+        **save_kwargs,
     )
     if not created:
         return False, "PDF 保存失败（save_library_binary_uploads 未创建记录）", None

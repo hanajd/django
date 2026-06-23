@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+import re
+from typing import Any, Sequence
 
 from apps.core.htmlpdf_service import parse_template_json
 from apps.core.library_access import (
@@ -96,6 +97,96 @@ def _normalize_label_key(text: str) -> str:
     return "".join(str(text or "").split()).lower()
 
 
+def _canonical_pdf_field_id_casing(site_parsed: dict, pid: str) -> str:
+    """返回模板中 pdfFieldId 的原始大小写（多为 fNN）。"""
+    want = str(pid or "").strip()
+    if not want:
+        return want
+    want_l = want.lower()
+    for sf in site_parsed.get("fields") or []:
+        if not isinstance(sf, dict):
+            continue
+        raw = str(sf.get("pdfFieldId") or "").strip()
+        if raw.lower() == want_l:
+            return raw
+    return want
+
+
+def _resolve_site_pdf_field_id_by_label(
+    site_parsed: dict,
+    site_pid: str,
+    expected_label: str,
+) -> str:
+    """
+    显式映射的 sitePdfFieldId 可能与现场模板 pdfFieldId 编号不一致（label 正确、ID 错位）。
+    若配置 label 与 site_pid 处字段 id/label 不符，则按 label 在现场模板中重查 pdfFieldId。
+    """
+    site_pid = str(site_pid or "").strip()
+    expected = str(expected_label or "").strip()
+    if not site_pid or not expected or not isinstance(site_parsed, dict):
+        return site_pid
+    want = _normalize_label_key(expected)
+    if not want:
+        return site_pid
+
+    pid_label_keys: dict[str, set[str]] = {}
+
+    def _add(pid: str, *texts: str) -> None:
+        p = str(pid or "").strip()
+        if not p:
+            return
+        pk = p.lower() if p.lower().startswith("f") and p[1:].isdigit() else p
+        bucket = pid_label_keys.setdefault(pk, set())
+        for t in texts:
+            nk = _normalize_label_key(t)
+            if nk:
+                bucket.add(nk)
+
+    for sf in site_parsed.get("fields") or []:
+        if not isinstance(sf, dict):
+            continue
+        _add(
+            str(sf.get("pdfFieldId") or "").strip(),
+            str(sf.get("id") or ""),
+            str(sf.get("placeholder") or ""),
+            str(sf.get("title") or ""),
+        )
+
+    for pid, meta in _build_pdf_field_meta_index(site_parsed).items():
+        _add(
+            pid,
+            str(meta.get("label") or ""),
+            str(meta.get("placeholder") or ""),
+            str(meta.get("title") or ""),
+        )
+
+    try:
+        from apps.api.inspection_report_make import (
+            _flatten_unified_form_steps_to_fields,
+            _parsed_template_steps_list,
+        )
+
+        for sf in _flatten_unified_form_steps_to_fields(_parsed_template_steps_list(site_parsed)):
+            if not isinstance(sf, dict):
+                continue
+            _add(
+                str(sf.get("pdfFieldId") or (sf.get("source") or {}).get("pdfFieldId") or "").strip(),
+                str(sf.get("label") or ""),
+                str(sf.get("hierarchyKey") or ""),
+                str(sf.get("id") or ""),
+            )
+    except Exception:
+        pass
+
+    cur_key = site_pid.lower() if site_pid.lower().startswith("f") and site_pid[1:].isdigit() else site_pid
+    if want in pid_label_keys.get(cur_key, ()):
+        return site_pid
+    for pk, keys in pid_label_keys.items():
+        if want in keys:
+            return _canonical_pdf_field_id_casing(site_parsed, pk)
+    return site_pid
+
+
 def _normalize_source_row(row: dict, *, default_slot: str = "") -> dict[str, Any] | None:
     if not isinstance(row, dict):
         return None
@@ -122,6 +213,31 @@ def _coerce_value_template(raw: Any) -> str:
     if raw is None:
         return ""
     return str(raw).replace("\r\n", "\n").replace("\r", "\n")
+
+
+_VALUE_TEMPLATE_PLACEHOLDER_RE = re.compile(r"\{[^{}]+\}")
+
+
+def _value_template_has_slot_placeholders(template: str) -> bool:
+    """valueTemplate 须含 {1}/{2}/{f28} 等占位；纯 label 文本不能当作模板。"""
+    return bool(_VALUE_TEMPLATE_PLACEHOLDER_RE.search(str(template or "")))
+
+
+def _compose_report_site_field_final_value(
+    picked_parts: list[str],
+    slot_values: dict[str, str],
+    template: str,
+) -> str:
+    """
+    多来源合并：有合法占位模板则渲染；否则按 slot 顺序拼接实测值。
+    旧版映射常把现场 label 误存为 valueTemplate，须忽略以免报告格显示 label 而非数值。
+    """
+    tpl = _coerce_value_template(template)
+    if tpl.strip() and _value_template_has_slot_placeholders(tpl):
+        return render_report_value_template(tpl, slot_values)
+    if len(picked_parts) == 1:
+        return picked_parts[0]
+    return "\n".join(picked_parts)
 
 
 def normalize_report_site_field_configs(rows: list) -> list[dict[str, Any]]:
@@ -540,6 +656,7 @@ def apply_report_site_field_map_to_value_mapping(
     bindings: dict | None,
     *,
     report_parsed_template: dict | None = None,
+    ordered_submit_payloads: Sequence[dict] | None = None,
 ) -> None:
     """
     报告回填：显式映射优先于名称模糊匹配。
@@ -556,6 +673,8 @@ def apply_report_site_field_map_to_value_mapping(
     from apps.api.inspection_report_make import (
         _apply_template_field_sources_to_mapping,
         _field_semantic_candidate_keys,
+        _is_report_preserve_original_pdf_field,
+        _REPORT_SUMMARY_OVERLAY_MANAGED_KEYS,
     )
 
     report_by_pdf: dict[str, dict] = {}
@@ -566,14 +685,65 @@ def apply_report_site_field_map_to_value_mapping(
                 if pid:
                     report_by_pdf[pid] = f
 
-    site_parsed_cache: dict[int, dict | None] = {}
+    site_parsed_cache: dict[tuple[int, str], dict | None] = {}
+    site_payload_cache: dict[int, dict] = {}
 
-    def _parsed_for_site_task(site_task_id: int) -> dict | None:
-        if site_task_id in site_parsed_cache:
-            return site_parsed_cache[site_task_id]
-        task = LibraryTask.objects.filter(pk=site_task_id).first()
+    def _resolve_site_library_task(site_tid: int, site_code: str = ""):
+        task = LibraryTask.objects.filter(pk=site_tid).first() if site_tid > 0 else None
+        code = (site_code or "").strip()
+        if task is None and code:
+            task = LibraryTask.objects.filter(code=code).first()
+        return task
+
+    def _submit_payload_for_site_task(site_tid: int, site_code: str = "") -> dict:
+        cache_key = site_tid if site_tid > 0 else hash(site_code)
+        if cache_key in site_payload_cache:
+            return site_payload_cache[cache_key]
+        if not ordered_submit_payloads:
+            site_payload_cache[cache_key] = source_data
+            return source_data
+        task = _resolve_site_library_task(site_tid, site_code)
         if task is None:
-            site_parsed_cache[site_task_id] = None
+            site_payload_cache[cache_key] = source_data
+            return source_data
+        _pdf, json_lf = _first_template_files_for_task(task)
+        want_name = (json_lf.original_name or "").strip() if json_lf else ""
+        task_name = (task.name or "").strip()
+
+        def _template_bind_key(name: str) -> str:
+            s = (name or "").strip().lower()
+            if s.endswith(".json"):
+                s = s[:-5]
+            for token in ("-状态终", "-验收终", "-状态", "-验收", "-终"):
+                if s.endswith(token):
+                    s = s[: -len(token)]
+                    break
+            return "".join(s.split())
+
+        want_key = _template_bind_key(want_name)
+        for pay in ordered_submit_payloads:
+            if not isinstance(pay, dict):
+                continue
+            ptid = str(pay.get("templateId") or "").strip()
+            if not ptid:
+                continue
+            pt_key = _template_bind_key(ptid)
+            if want_key and pt_key and (want_key == pt_key or want_key in pt_key or pt_key in want_key):
+                site_payload_cache[cache_key] = pay
+                return pay
+            if task_name and task_name in ptid:
+                site_payload_cache[cache_key] = pay
+                return pay
+        site_payload_cache[cache_key] = source_data
+        return source_data
+
+    def _parsed_for_site_task(site_task_id: int, site_task_code: str = "") -> dict | None:
+        cache_key = (int(site_task_id or 0), (site_task_code or "").strip().lower())
+        if cache_key in site_parsed_cache:
+            return site_parsed_cache[cache_key]
+        task = _resolve_site_library_task(int(site_task_id or 0), site_task_code)
+        if task is None:
+            site_parsed_cache[cache_key] = None
             return None
         _pdf, json_lf = _first_template_files_for_task(task)
         if json_lf is None:
@@ -581,28 +751,51 @@ def apply_report_site_field_map_to_value_mapping(
             return None
         try:
             path = pipeline_service.library_absolute_path(json_lf.relative_path)
-            site_parsed_cache[site_task_id] = parse_template_json(
+            site_parsed_cache[cache_key] = parse_template_json(
                 path.read_text(encoding="utf-8", errors="replace")
             )
         except Exception:
-            site_parsed_cache[site_task_id] = None
-        return site_parsed_cache[site_task_id]
+            site_parsed_cache[cache_key] = None
+        return site_parsed_cache[cache_key]
 
-    def _pick_site_field_value(site_parsed: dict, site_pid: str) -> str | None:
-        dd = source_data.get("dynamicData") if isinstance(source_data.get("dynamicData"), dict) else {}
+    def _pick_site_field_value(
+        site_parsed: dict, site_pid: str, *, site_tid: int, site_code: str = ""
+    ) -> str | None:
+        payload = _submit_payload_for_site_task(site_tid, site_code)
+        dd = payload.get("dynamicData") if isinstance(payload.get("dynamicData"), dict) else {}
         raw_dd = dd.get(site_pid)
         if raw_dd not in (None, "") and not isinstance(raw_dd, (dict, list)):
             return str(raw_dd).strip()
+        meta = _build_pdf_field_meta_index(site_parsed).get(
+            site_pid.lower() if site_pid.lower().startswith("f") and site_pid[1:].isdigit() else site_pid
+        )
+        if meta and meta.get("submitPath"):
+            from apps.api.inspection_report_make import _nested_get_for_submit_with_rated_fallback
+
+            raw_sp = _nested_get_for_submit_with_rated_fallback(payload, str(meta["submitPath"]))
+            if raw_sp not in (None, "") and not isinstance(raw_sp, (dict, list)):
+                return str(raw_sp).strip()
         site_field = None
         for sf in site_parsed.get("fields") or []:
             if isinstance(sf, dict) and str(sf.get("pdfFieldId") or "").strip() == site_pid:
                 site_field = sf
                 break
         if site_field is None:
+            from apps.api.inspection_report_make import (
+                _flatten_unified_form_steps_to_fields,
+                _parsed_template_steps_list,
+            )
+
+            for sf in _flatten_unified_form_steps_to_fields(_parsed_template_steps_list(site_parsed)):
+                pid = str(sf.get("pdfFieldId") or (sf.get("source") or {}).get("pdfFieldId") or "").strip()
+                if pid == site_pid:
+                    site_field = sf
+                    break
+        if site_field is None:
             return None
         site_slice: dict = {}
         _apply_template_field_sources_to_mapping(
-            site_slice, source_data, [site_field], pdf_field_id_only=True
+            site_slice, payload, [site_field], pdf_field_id_only=True
         )
         if site_pid in site_slice and site_slice[site_pid] not in (None, ""):
             return str(site_slice[site_pid]).strip()
@@ -621,6 +814,17 @@ def apply_report_site_field_map_to_value_mapping(
                     break
         if report_field is None:
             continue
+        if _is_report_preserve_original_pdf_field(report_field):
+            continue
+        if any(
+            (k or "").strip() in _REPORT_SUMMARY_OVERLAY_MANAGED_KEYS
+            or "受检设备台数" in (k or "")
+            or (k or "").strip() in ("受检工作场所",)
+            or str(k or "").startswith("项目名称")
+            or (k or "").strip() in ("医院名称2", "设备类型2", "设备类型2_2")
+            for k in _field_semantic_candidate_keys(report_field)
+        ):
+            continue
 
         slot_values: dict[str, str] = {}
         picked_parts: list[str] = []
@@ -628,13 +832,21 @@ def apply_report_site_field_map_to_value_mapping(
             if not isinstance(src, dict):
                 continue
             site_tid = int(src.get("siteTaskId") or 0)
+            site_code = str(src.get("siteTaskCode") or "").strip()
             site_pid = str(src.get("sitePdfFieldId") or "").strip()
-            if site_tid <= 0 or not site_pid:
+            if (site_tid <= 0 and not site_code) or not site_pid:
                 continue
-            site_parsed = _parsed_for_site_task(site_tid)
+            site_parsed = _parsed_for_site_task(site_tid, site_code)
             if not site_parsed:
                 continue
-            val = _pick_site_field_value(site_parsed, site_pid)
+            site_pid = _resolve_site_pdf_field_id_by_label(
+                site_parsed,
+                site_pid,
+                str(src.get("label") or "").strip(),
+            )
+            val = _pick_site_field_value(
+                site_parsed, site_pid, site_tid=site_tid, site_code=site_code
+            )
             if val is None:
                 continue
             slot = str(src.get("slot") or str(i)).strip() or str(i)
@@ -646,12 +858,7 @@ def apply_report_site_field_map_to_value_mapping(
         if not picked_parts:
             continue
         template = _coerce_value_template(cfg.get("valueTemplate") or cfg.get("value_template"))
-        if template.strip():
-            final_value = render_report_value_template(template, slot_values)
-        elif len(picked_parts) == 1:
-            final_value = picked_parts[0]
-        else:
-            final_value = "\n".join(picked_parts)
+        final_value = _compose_report_site_field_final_value(picked_parts, slot_values, template)
 
         for key in _field_semantic_candidate_keys(report_field):
             if key:

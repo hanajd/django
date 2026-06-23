@@ -30,6 +30,7 @@ def revoke_user_refresh_tokens(user) -> int:
     """
     吊销该用户已签发的 JWT refresh（OutstandingToken 加入黑名单）。
     在平板 App 使用「账号密码登录换 token」时调用，使仅保留最后一次平板登录的 refresh 链。
+    test 沙箱账号由 jwt_auth_service.should_revoke_prior_refresh_tokens_on_login 跳过。
     若未安装 token_blacklist，则跳过并返回 0。
     """
     try:

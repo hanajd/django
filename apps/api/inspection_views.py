@@ -304,6 +304,20 @@ def _resolve_payload_value_at_path(
         )
         if sem not in (None, ""):
             return sem
+    if isinstance(field, dict):
+        src = field.get("source") if isinstance(field.get("source"), dict) else {}
+        pid = str(
+            src.get("pdfFieldId") or field.get("pdfFieldId") or field.get("id") or ""
+        ).strip()
+        dd = payload.get("dynamicData")
+        if pid and isinstance(dd, dict):
+            dv = dd.get(pid)
+            if dv not in (None, ""):
+                return dv
+        if path_s.startswith("testResult."):
+            leaf = path_s.split(".", 1)[-1]
+            if leaf and isinstance(dd, dict) and dd.get(leaf) not in (None, ""):
+                return dd.get(leaf)
     return val
 
 
@@ -1775,6 +1789,7 @@ def execute_inspection_submit_for_task(
             template_json_name=template_json_name,
             task_obj=task_obj,
             source_payload=storage_payload if task_obj.output_target == LibraryTask.OUTPUT_REPORT else None,
+            site_record_batch=submit_batch if task_obj.output_target == LibraryTask.OUTPUT_SITE_RECORD else None,
         )
         generation_results.append(
             {
@@ -1964,6 +1979,7 @@ class InspectionTaskFrontendJsonExportAPIView(_InspectionTaskAccessMixin, APIVie
                 project=project,
                 library_task=task_obj,
                 display_task_no=display_task_no,
+                case=case,
             )
         except InspectionFrontendExportError as exc:
             return _fail(str(exc), status.HTTP_409_CONFLICT)
@@ -2737,11 +2753,40 @@ class InspectionProjectTaskFrontendJsonExportAPIView(InspectionTaskFrontendJsonE
         library_task = self._resolve_project_task_by_no(project, task_no)
         if library_task is None:
             return _fail("taskNo 无效", status.HTTP_404_NOT_FOUND)
-        return super().get(
-            request,
-            case.case_no,
-            display_task_no=task_no,
+        assignment = self._get_project_task_assignment(
+            project=project,
+            library_task=library_task,
+            user=request.user,
         )
+        try:
+            frontend_obj = build_runtime_frontend_for_inspection_export(
+                request,
+                project=project,
+                library_task=library_task,
+                display_task_no=task_no,
+                case=case,
+                assignment=assignment,
+            )
+        except InspectionFrontendExportError as exc:
+            return _fail(str(exc), status.HTTP_409_CONFLICT)
+
+        export_mode = str(request.GET.get("mode") or request.GET.get("export_mode") or "runtime").strip().lower()
+        if export_mode == "editor":
+            ts = timezone.localtime().strftime("%Y%m%d%H%M%S")
+            filename = f"{task_no}_frontend_{ts}.json".replace("/", "_")
+            raw = json_std.dumps(frontend_obj, ensure_ascii=False, indent=2).encode("utf-8")
+            resp = FileResponse(
+                io.BytesIO(raw),
+                as_attachment=True,
+                filename=filename,
+                content_type="application/json",
+            )
+            resp["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
+            return resp
+
+        from utils.frontend_runtime_export import build_runtime_json_http_response
+
+        return build_runtime_json_http_response(frontend_obj, request=request, task_no=task_no)
 
 
 class InspectionProjectTaskManualExportReportAPIView(InspectionTaskManualExportReportAPIView):

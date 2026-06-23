@@ -4,7 +4,6 @@ API 路由配置
 """
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import TokenRefreshView
 from apps.api.api_views import (
     AuthAPIView,
     LibraryFileDownloadAPIView,

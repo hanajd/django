@@ -179,9 +179,22 @@ class FieldRecordTableBuilder:
         self._id_counter += 1
         return str(self._id_counter)
 
+    def _insert_page_watermark(self) -> None:
+        if self.page is None:
+            return
+        try:
+            from utils.pdf_merge import insert_report_page_watermark_bottom_layer
+
+            insert_report_page_watermark_bottom_layer(
+                self.page, self.layout.page_width, self.layout.page_height
+            )
+        except Exception:
+            pass
+
     def _new_page(self, *, continuation: bool) -> None:
         self.page_index += 1
         self.page = self.doc.new_page(width=self.layout.page_width, height=self.layout.page_height)
+        self._insert_page_watermark()
         self.fonts = _register_fonts(self.page, self.font_base)
         if continuation:
             self.y = self.layout.continuation_y_top

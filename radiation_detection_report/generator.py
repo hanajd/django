@@ -17,6 +17,7 @@ FONT_SIZE_XIAO_SI = 12.0
 FONT_SIZE_WU_HAO = 10.5
 CELL_PAD_X = 2.0
 CELL_PAD_Y = 2.0
+PAGE_MARGIN_CM = 2.8
 
 HAS_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 LATIN_RE = re.compile(r"[A-Za-z0-9]")
@@ -29,6 +30,44 @@ DEFAULT_LAYOUT_PATH = os.path.join(PACKAGE_DIR, "layout", "default_layout.json")
 
 def default_layout_path() -> str:
     return DEFAULT_LAYOUT_PATH
+
+
+def _cm_to_pt(cm: float) -> float:
+    return float(cm) * 72.0 / 2.54
+
+
+def page_left_margin_pt(cm: float = PAGE_MARGIN_CM) -> float:
+    """页面左边距（pt），与 A4 页面设置「距左侧 2.8cm」一致。"""
+    return _cm_to_pt(cm)
+
+
+def _default_header_labels() -> Dict[str, str]:
+    return {
+        "point_id": "检测点\n编号",
+        "location": "检测点位置",
+        "result": "检测结果\n（μSv/h）",
+        "standard": "标准要求\n（μSv/h）",
+        "evaluation": "结果\n评价",
+    }
+
+
+def _three_cjk_column_width_pt(fonts: FontResources, fontsize: float = FONT_SIZE_XIAO_SI) -> float:
+    """三汉字（小四）列宽 + 单元格内边距。"""
+    sample = "汉" * 3
+    return _measure_text(sample, fonts, fontsize) + 2 * CELL_PAD_X
+
+
+def _evaluation_column_width_pt(fonts: FontResources, fontsize: float = FONT_SIZE_XIAO_SI) -> float:
+    return _three_cjk_column_width_pt(fonts, fontsize)
+
+
+def _format_section_title_text(title: str) -> str:
+    """章节标题：序号与正文之间保留一个空格，如 1.4 工作场所…。"""
+    t = str(title or "").strip()
+    m = re.match(r"^(\d+\.\d+)\s*(.+)$", t)
+    if m:
+        return f"{m.group(1)} {m.group(2).strip()}"
+    return t
 
 
 def _first_existing(paths: Sequence[str]) -> Optional[str]:
@@ -50,10 +89,10 @@ def _insert_font(page: fitz.Page, fontname: str, fontfile: str) -> bool:
 class TableLayout:
     page_width: float = 595.3
     page_height: float = 841.9
-    section_title: str = "1.1工作场所放射防护检测结果"
-    title_x_left: float = 79.44
+    section_title: str = "1.1 工作场所放射防护检测结果"
+    title_x_left: float = 79.37
     title_x_right: float = 244.44
-    title_y_top: float = 76.13
+    title_y_top: float = 80.0
     title_height: float = 14.0
     table_x_left: float = 70.73
     table_x_right: float = 524.57
@@ -111,7 +150,7 @@ class TableLayout:
             page_width=float(data.get("page_size", {}).get("width", 595.3)),
             page_height=page_h,
             section_title=str(st.get("text", "1.1工作场所放射防护检测结果")),
-            title_x_left=float(st.get("x_left", 79.44)),
+            title_x_left=float(st.get("x_left", page_left_margin_pt())),
             title_x_right=float(st.get("x_right", 244.44)),
             title_y_top=float(st.get("y_top", 76.13)),
             table_x_left=float(t.get("x_left", 70.73)),
@@ -485,14 +524,32 @@ class RadiationTableBuilder:
         self.y: float = 0.0
         self.page_index = 0
         self.title_drawn = False
+        self._apply_layout_overrides()
+
+    def _apply_layout_overrides(self) -> None:
+        """表题左距 2.8cm；编号/评价列三汉字宽；位置列随编号列收窄后加宽。"""
+        L = self.layout
+        L.title_x_left = page_left_margin_pt()
+        pid_x0 = float(L.table_x_left)
+        pid_w = _three_cjk_column_width_pt(self.font_base, FONT_SIZE_XIAO_SI)
+        pid_x1 = pid_x0 + pid_w
+        L.col_point_id = (pid_x0, pid_x1)
+        L.col_location_main = (pid_x1, float(L.col_location_main[1]))
+        L.col_location_full = (pid_x1, float(L.col_location_sub[1]))
+        eval_w = _evaluation_column_width_pt(self.font_base, FONT_SIZE_XIAO_SI)
+        ev_x1 = float(L.table_x_right)
+        ev_x0 = ev_x1 - eval_w
+        L.col_evaluation = (ev_x0, ev_x1)
+        if float(L.col_standard[1]) > ev_x0 + 0.5:
+            L.col_standard = (float(L.col_standard[0]), ev_x0)
 
     def _insert_page_watermark(self) -> None:
         if self.page is None:
             return
         try:
-            from utils.pdf_merge import _merged_report_insert_watermark_bottom_layer
+            from utils.pdf_merge import insert_report_page_watermark_bottom_layer
 
-            _merged_report_insert_watermark_bottom_layer(
+            insert_report_page_watermark_bottom_layer(
                 self.page, self.layout.page_width, self.layout.page_height
             )
         except Exception:
@@ -523,10 +580,55 @@ class RadiationTableBuilder:
     def _draw_section_title(self) -> None:
         assert self.page is not None
         L = self.layout
-        rect = fitz.Rect(L.title_x_left, L.title_y_top, L.table_x_right, L.title_y_top + L.title_height)
-        _draw_cell_content(
-            self.page, rect, L.section_title, self.fonts, FONT_SIZE_XIAO_SI, align="left"
+        title = _format_section_title_text(L.section_title)
+        x = float(L.table_x_left)
+        baseline = float(L.title_y_top) + _text_ascent(FONT_SIZE_XIAO_SI)
+        inner = fitz.Rect(x, L.title_y_top, L.table_x_right, L.title_y_top + L.title_height)
+        _draw_line(self.page, title, baseline, inner, self.fonts, FONT_SIZE_XIAO_SI, "left")
+
+    def _location_full_inner_width(self) -> float:
+        L = self.layout
+        return max(8.0, float(L.col_location_full[1] - L.col_location_full[0]) - 2 * CELL_PAD_X)
+
+    def _location_sub_inner_width(self) -> float:
+        L = self.layout
+        return max(8.0, float(L.col_location_sub[1] - L.col_location_sub[0]) - 2 * CELL_PAD_X)
+
+    def _location_main_inner_width(self) -> float:
+        L = self.layout
+        return max(8.0, float(L.col_location_main[1] - L.col_location_main[0]) - 2 * CELL_PAD_X)
+
+    def _simple_row_height(self, point: Dict[str, Any]) -> float:
+        loc = str(point.get("location", "") or "")
+        return _autofit_row_height(
+            loc,
+            self._location_full_inner_width(),
+            self.fonts,
+            FONT_SIZE_XIAO_SI,
+            min_height=self.layout.h_simple,
         )
+
+    def _complex_row_plan(self, point: Dict[str, Any]) -> Tuple[float, List[float]]:
+        subs = point.get("sub_rows") or []
+        L = self.layout
+        sub_heights: List[float] = []
+        for sub in subs:
+            sub_h = _autofit_row_height(
+                str(sub.get("location_sub", "") or ""),
+                self._location_sub_inner_width(),
+                self.fonts,
+                FONT_SIZE_XIAO_SI,
+                min_height=L.h_complex_sub,
+            )
+            sub_heights.append(sub_h)
+        main_h = _autofit_row_height(
+            resolve_complex_location(point),
+            self._location_main_inner_width(),
+            self.fonts,
+            FONT_SIZE_XIAO_SI,
+            min_height=L.h_simple,
+        )
+        return max(sum(sub_heights), main_h), sub_heights
 
     def _col_rect(self, y0: float, y1: float, col: Tuple[float, float]) -> fitz.Rect:
         return fitz.Rect(col[0], y0, col[1], y1)
@@ -535,19 +637,13 @@ class RadiationTableBuilder:
         self._ensure_space(self.layout.h_header)
         y0, y1 = self.y, self.y + self.layout.h_header
         L = self.layout
-        labels = L.header_labels or {
-            "point_id": "检测点\n编号",
-            "location": "检测点位置",
-            "result": "检测结果\n(μSv/h)",
-            "standard": "标准要求\n(μSv/h)",
-            "evaluation": "结果\n评价",
-        }
+        labels = {**_default_header_labels(), **(L.header_labels or {})}
         cells = [
             (self._col_rect(y0, y1, L.col_point_id), labels.get("point_id", "检测点\n编号"), "center"),
             (fitz.Rect(L.col_location_full[0], y0, L.col_location_full[1], y1), labels.get("location", "检测点位置"), "left"),
-            (self._col_rect(y0, y1, L.col_result), labels.get("result", "检测结果\n(μSv/h)"), "center"),
-            (self._col_rect(y0, y1, L.col_standard), labels.get("standard", "标准要求\n(μSv/h)"), "center"),
-            (self._col_rect(y0, y1, L.col_evaluation), labels.get("evaluation", "结果\n评价"), "center"),
+            (self._col_rect(y0, y1, L.col_result), labels.get("result", "检测结果\n（μSv/h）"), "center"),
+            (self._col_rect(y0, y1, L.col_standard), labels.get("standard", "标准要求\n（μSv/h）"), "center"),
+            (self._col_rect(y0, y1, L.col_evaluation), labels.get("evaluation", "结果评价"), "center"),
         ]
         for rect, text, align in cells:
             _draw_cell_border(self.page, rect)
@@ -567,8 +663,9 @@ class RadiationTableBuilder:
         self.y = y1
 
     def _draw_simple_row(self, point: Dict[str, Any]) -> None:
-        self._ensure_space(self.layout.h_simple)
-        y0, y1 = self.y, self.y + self.layout.h_simple
+        row_h = self._simple_row_height(point)
+        self._ensure_space(row_h)
+        y0, y1 = self.y, self.y + row_h
         L = self.layout
         cells = [
             (self._col_rect(y0, y1, L.col_point_id), str(point.get("id", "")), "center"),
@@ -586,39 +683,31 @@ class RadiationTableBuilder:
         self.y = y1
 
     def _complex_group_height(self, point: Dict[str, Any], sub_count: int) -> float:
-        L = self.layout
-        location = resolve_complex_location(point)
-        main_w = max(8.0, L.col_location_main[1] - L.col_location_main[0] - 2 * CELL_PAD_X)
-        lines = _cell_lines(location, main_w, self.fonts, FONT_SIZE_XIAO_SI)
-        main_need = _text_block_height(len(lines), FONT_SIZE_XIAO_SI) + 2 * CELL_PAD_Y
-        subs_need = sub_count * L.h_complex_sub
-        return max(subs_need, main_need)
+        total_h, _ = self._complex_row_plan(point)
+        return total_h
 
     def _draw_complex_point(self, point: Dict[str, Any]) -> None:
         subs = point.get("sub_rows") or []
         if not subs:
             self._draw_simple_row(point)
             return
-        total_h = self._complex_group_height(point, len(subs))
+        total_h, sub_heights = self._complex_row_plan(point)
         self._ensure_space(total_h)
         y0 = self.y
         y1 = y0 + total_h
         L = self.layout
 
-        group_id = str(point.get("id", ""))
-        id_rect = fitz.Rect(L.col_point_id[0], y0, L.col_point_id[1], y1)
         main_rect = fitz.Rect(L.col_location_main[0], y0, L.col_location_main[1], y1)
-        _draw_cell_border(self.page, id_rect)
         _draw_cell_border(self.page, main_rect)
-        _draw_cell_content(self.page, id_rect, group_id, self.fonts, FONT_SIZE_XIAO_SI, align="center")
         location_text = resolve_complex_location(point)
         _draw_cell_content(self.page, main_rect, location_text, self.fonts, FONT_SIZE_XIAO_SI, align="left")
 
-        sub_h = total_h / len(subs)
+        cy = y0
         for i, sub in enumerate(subs):
-            sy0 = y0 + i * sub_h
-            sy1 = y0 + (i + 1) * sub_h
+            sh = sub_heights[i]
+            sy0, sy1 = cy, cy + sh
             cells = [
+                (self._col_rect(sy0, sy1, L.col_point_id), str(sub.get("id", "")), "center"),
                 (fitz.Rect(L.col_location_sub[0], sy0, L.col_location_sub[1], sy1), str(sub.get("location_sub", "")), "left"),
                 (self._col_rect(sy0, sy1, L.col_result), str(sub.get("result", "")), "center"),
                 (self._col_rect(sy0, sy1, L.col_standard), str(sub.get("standard", "≤2.5")), "center"),
@@ -630,18 +719,19 @@ class RadiationTableBuilder:
                 _draw_cell_content(
                     self.page, rect, text, self.fonts, FONT_SIZE_XIAO_SI, align=align, text_color=color
                 )
+            cy = sy1
         self.y = y1
 
     def _draw_background_row(self, bg: Dict[str, Any]) -> None:
-        h = self.layout.h_simple
+        L = self.layout
+        label = str(bg.get("label", "本底值（μSv/h）"))
+        label_w = max(8.0, float(L.col_location_sub[1] - L.col_point_id[0]) - 2 * CELL_PAD_X)
+        h = _autofit_row_height(label, label_w, self.fonts, FONT_SIZE_XIAO_SI, min_height=L.h_simple)
         self._ensure_space(h)
         y0, y1 = self.y, self.y + h
-        L = self.layout
         label_rect = fitz.Rect(L.col_point_id[0], y0, L.col_location_sub[1], y1)
-        result_rect = self._col_rect(y0, y1, L.col_result)
-        standard_rect = self._col_rect(y0, y1, L.col_standard)
-        evaluation_rect = self._col_rect(y0, y1, L.col_evaluation)
-        for rect in (label_rect, result_rect, standard_rect, evaluation_rect):
+        value_rect = fitz.Rect(L.col_result[0], y0, L.col_evaluation[1], y1)
+        for rect in (label_rect, value_rect):
             _draw_cell_border(self.page, rect)
         _draw_cell_content(
             self.page,
@@ -653,7 +743,7 @@ class RadiationTableBuilder:
         )
         _draw_cell_content(
             self.page,
-            result_rect,
+            value_rect,
             str(bg.get("value", "")),
             self.fonts,
             FONT_SIZE_XIAO_SI,
@@ -675,6 +765,22 @@ class RadiationTableBuilder:
         _draw_cell_content(self.page, rect, text, self.fonts, FONT_SIZE_WU_HAO, align="left")
         self.y = y1
 
+    def _draw_points(self, points: Sequence[Dict[str, Any]]) -> None:
+        for point in points:
+            if point.get("type", "simple") == "complex":
+                subs = [
+                    sub
+                    for sub in (point.get("sub_rows") or [])
+                    if str(sub.get("result", "") or "").strip()
+                ]
+                if not subs:
+                    continue
+                if len(subs) != len(point.get("sub_rows") or []):
+                    point = {**point, "sub_rows": subs}
+                self._draw_complex_point(point)
+            elif str(point.get("result", "") or "").strip():
+                self._draw_simple_row(point)
+
     def build(self) -> fitz.Document:
         self._new_page(continuation=False)
         if self.layout.condition_on_first_page_only:
@@ -682,11 +788,13 @@ class RadiationTableBuilder:
             if cond:
                 self._draw_condition_row(cond)
         self._draw_header_row()
-        for point in self.data.get("points", []):
-            if point.get("type", "simple") == "complex":
-                self._draw_complex_point(point)
-            else:
-                self._draw_simple_row(point)
+        self._draw_points(self.data.get("points") or [])
+        points_group2 = self.data.get("points_group2") or []
+        if points_group2:
+            cond2 = self.data.get("condition_group2", "")
+            if cond2:
+                self._draw_condition_row(cond2)
+            self._draw_points(points_group2)
         bg = self.data.get("background")
         if bg:
             self._draw_background_row(bg)

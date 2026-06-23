@@ -45,6 +45,26 @@ def resolve_manual_report_device_count(distinct_inspection_case_count: int) -> i
     return max(0, int(distinct_inspection_case_count))
 
 
+def resolve_report_device_count_for_project(
+    project,
+    *,
+    task_no: str = "",
+    report_task=None,
+    manual_override: int | None = None,
+) -> int:
+    """
+    单份报告「受检设备台数 / 受检工作场所」：
+    - 多案合并导出：``manual_override``（不同案件数）；
+    - 单份现场记录生成：固定 1 台（对应当前提交所关联的一台委托设备）。
+    """
+    if manual_override is not None:
+        try:
+            return max(0, int(manual_override))
+        except (TypeError, ValueError):
+            return 0
+    return 1
+
+
 def site_record_name_for_submit_storage(task_no: str, project) -> str:
     """
     检测提交 JSON/签名落库文件名前缀：优先当前 taskNo 解析到的文件库任务名称，
@@ -628,6 +648,41 @@ def _dedupe_inspection_cases_preserve_order(cases: Sequence[InspectionCase]) -> 
     return out
 
 
+_ASSIGNMENT_CASE_PREFIX = "ASG-"
+
+
+def _cases_for_report_site_record_lookup(
+    cases: Sequence[InspectionCase],
+    project,
+    report_task=None,
+) -> list[InspectionCase]:
+    """
+    报告合并现场记录 JSON 时，除当前 case 外，纳入本项目内各 report_source 现场任务
+    assignment 对应 case（ASG-<id>），以便报告 taskNo 与现场 taskNo 分属不同 case 时仍能读到提交。
+    """
+    from apps.api.inspection_report_make import _report_site_record_source_tasks
+    from apps.core.models import LibraryTask, LibraryTaskAssignment
+
+    case_list = _dedupe_inspection_cases_preserve_order(cases)
+    if (
+        report_task is None
+        or project is None
+        or getattr(report_task, "output_target", None) != LibraryTask.OUTPUT_REPORT
+    ):
+        return case_list
+    seen = {int(c.pk) for c in case_list}
+    for st in _report_site_record_source_tasks(project, report_task):
+        for ass in LibraryTaskAssignment.objects.filter(project=project, library_task=st).only("pk"):
+            case = InspectionCase.objects.filter(
+                case_no=f"{_ASSIGNMENT_CASE_PREFIX}{ass.pk}"
+            ).first()
+            if case is None or int(case.pk) in seen:
+                continue
+            seen.add(int(case.pk))
+            case_list.append(case)
+    return case_list
+
+
 def _load_site_record_json_merged_only(
     cases: Sequence[InspectionCase],
     project,
@@ -646,7 +701,7 @@ def _load_site_record_json_merged_only(
     返回 (merged, any_loaded, missing_task_codes, load_hint)。
     load_hint 为给人看的说明（非错误码）。
     """
-    cases_list = _dedupe_inspection_cases_preserve_order(cases)
+    cases_list = _cases_for_report_site_record_lookup(cases, project, report_task)
     if not cases_list:
         return {}, False, [], ""
     case_pks = [int(c.pk) for c in cases_list]
@@ -737,6 +792,105 @@ def _normalize_submit_payload_for_fill(data: dict | None) -> dict | None:
     return consolidate_submit_signatures(data)
 
 
+def _payload_dict_from_inspection_submission(sub, project) -> dict | None:
+    if sub is None:
+        return None
+    raw = sub.raw_payload if isinstance(sub.raw_payload, dict) else {}
+    if raw and SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(raw.keys()):
+        return _normalize_submit_payload_for_fill(raw)
+    fb = {
+        "taskNo": sub.task_no,
+        "projectId": getattr(project, "code", "") or "",
+        "reportInfo": sub.report_info or {},
+        "hospitalInfo": sub.hospital_info or {},
+        "equipmentInfo": sub.equipment_info or {},
+        "testResult": sub.test_result or {},
+        "conclusion": sub.conclusion or {},
+        "signatures": {},
+        "instruments": [],
+    }
+    if sub.submitted_at:
+        fb["submittedAt"] = sub.submitted_at.isoformat()
+    if SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(fb.keys()):
+        return _normalize_submit_payload_for_fill(fb)
+    return None
+
+
+def _load_submit_json_from_library_files(
+    case: InspectionCase,
+    project,
+    *,
+    user=None,
+    scope_by_user: bool = False,
+) -> dict | None:
+    """从文件库 inspection_submits 读取案件关联提交 JSON；可选仅当前用户上传的文件。"""
+    lf_qs = LibraryFile.objects.filter(
+        category=LibraryFile.CATEGORY_INSPECTION_SUBMIT,
+        link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
+        link_object_id=case.pk,
+        projects=project,
+    )
+    if scope_by_user and user is not None:
+        lf_qs = lf_qs.filter(created_by=user)
+    for lf in lf_qs.order_by("-created_at", "-id").distinct():
+        if not (lf.original_name or "").lower().endswith(".json"):
+            continue
+        try:
+            p = pipeline_service.library_absolute_path(lf.relative_path)
+            data = json_std.loads(p.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            continue
+        if isinstance(data, dict) and SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(data.keys()):
+            return _normalize_submit_payload_for_fill(data)
+    return None
+
+
+def resolve_submit_payload_for_site_export(
+    case: InspectionCase,
+    project,
+    task_no: str,
+    *,
+    user=None,
+) -> tuple[dict | None, InspectionSubmission | None]:
+    """
+    现场记录 export-frontend-json：按案件解析提交正文，默认仅当前检测员自己的数据，
+    避免多人在同项目同任务模板下 defaultValue 交叉污染。
+    """
+    from apps.core.library_access import library_user_can_assign_tasks_to_participants
+
+    tn = (task_no or "").strip()
+    scope_by_user = user is not None and not library_user_can_assign_tasks_to_participants(user)
+
+    sub_qs = InspectionSubmission.objects.filter(
+        task_no=tn, case_id=case.pk, project_id=project.pk
+    )
+    if scope_by_user:
+        sub_qs = sub_qs.filter(created_by=user)
+    submission = sub_qs.order_by("-updated_at_remote", "-updated_at", "-id").first()
+
+    if submission is None and scope_by_user:
+        submission = (
+            InspectionSubmission.objects.filter(
+                task_no=tn,
+                case_id=case.pk,
+                project_id=project.pk,
+                created_by__isnull=True,
+            )
+            .order_by("-updated_at_remote", "-updated_at", "-id")
+            .first()
+        )
+
+    if submission is not None:
+        payload = _payload_dict_from_inspection_submission(submission, project)
+        if payload:
+            return payload, submission
+
+    file_payload = _load_submit_json_from_library_files(
+        case, project, user=user, scope_by_user=scope_by_user
+    )
+    return file_payload, None
+
+
 def resolve_submit_payload_for_report(task_no: str, case: InspectionCase, project) -> dict | None:
     """
     解析用于报告回填的检测提交正文：优先同 taskNo 的 InspectionSubmission，其次同案件最新检测提交 .json 文件。
@@ -749,42 +903,10 @@ def resolve_submit_payload_for_report(task_no: str, case: InspectionCase, projec
             .first()
         )
         if sub is not None:
-            raw = sub.raw_payload if isinstance(sub.raw_payload, dict) else {}
-            if raw and SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(raw.keys()):
-                return _normalize_submit_payload_for_fill(raw)
-            fb = {
-                "taskNo": sub.task_no,
-                "projectId": getattr(project, "code", "") or "",
-                "reportInfo": sub.report_info or {},
-                "hospitalInfo": sub.hospital_info or {},
-                "equipmentInfo": sub.equipment_info or {},
-                "testResult": sub.test_result or {},
-                "conclusion": sub.conclusion or {},
-            }
-            if sub.submitted_at:
-                fb["submittedAt"] = sub.submitted_at.isoformat()
-            if SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(fb.keys()):
-                return _normalize_submit_payload_for_fill(fb)
-    for lf in (
-        LibraryFile.objects.filter(
-            category=LibraryFile.CATEGORY_INSPECTION_SUBMIT,
-            link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
-            link_object_id=case.pk,
-            projects=project,
-        )
-        .order_by("-created_at", "-id")
-        .distinct()
-    ):
-        if not (lf.original_name or "").lower().endswith(".json"):
-            continue
-        try:
-            p = pipeline_service.library_absolute_path(lf.relative_path)
-            data = json_std.loads(p.read_text(encoding="utf-8", errors="replace"))
-        except Exception:
-            continue
-        if isinstance(data, dict) and SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(data.keys()):
-            return _normalize_submit_payload_for_fill(data)
-    return None
+            got = _payload_dict_from_inspection_submission(sub, project)
+            if got:
+                return got
+    return _load_submit_json_from_library_files(case, project)
 
 
 def _single_valid_submit_json_payload_for_case(case: InspectionCase, project) -> dict | None:
