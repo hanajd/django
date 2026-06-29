@@ -436,6 +436,63 @@ def _infer_instrument_scope_from_text(*texts: str) -> str | None:
     return None
 
 
+def _is_bare_main_instrument_label(*texts: str) -> bool:
+    """旧版单格「主要检测仪器」（无 _质控/_防护 后缀）。"""
+    for raw in texts:
+        norm = normalize_field_text_by_underscore_rules(str(raw or "").strip())
+        if norm == "主要检测仪器":
+            return True
+    return False
+
+
+def _build_bare_main_instrument_select_pair(field_obj: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    旧版 PDF 仅有一个「主要检测仪器」大格时，导出为质控/防护两个 instrument_select（与任务模板绑定一致）。
+    质控栏保留 pdfFieldId / pdfAnchor 供叠印回填；防护栏仅前端选择，PDF 合并串由提交层处理。
+    """
+    src = field_obj.get("source") if isinstance(field_obj.get("source"), dict) else {}
+    pdf_id = str(src.get("pdfFieldId") or field_obj.get("pdfFieldId") or field_obj.get("id") or "").strip()
+    anchor = field_obj.get("pdfAnchor")
+    order = field_obj.get("__order")
+    bbox = field_obj.get("__bbox")
+    out: List[Dict[str, Any]] = []
+    for scope, slot, label in (
+        ("qualityControl", 1, "主要检测仪器_质量控制（性能）检测"),
+        ("radiationProtection", 2, "主要检测仪器_工作场所放射防护检测"),
+    ):
+        fo: Dict[str, Any] = {
+            "id": pdf_id if slot == 1 and pdf_id else f"instrumentSelect{slot}",
+            "type": "instrument_select",
+            "label": label,
+            "instrumentScope": scope,
+            "registrySlot": slot,
+            "submitBucket": "instruments",
+            "submitPath": f"instruments.{scope}",
+            "width": "full",
+            "source": {
+                "submitBucket": "instruments",
+                "submitPath": f"instruments.{scope}",
+                "hierarchyKey": label,
+                "anchorType": str(src.get("anchorType") or "text"),
+            },
+        }
+        if order is not None:
+            fo["__order"] = order
+        if bbox is not None:
+            fo["__bbox"] = bbox
+        if slot == 1:
+            if pdf_id:
+                fo["pdfFieldId"] = pdf_id
+                fo["source"]["pdfFieldId"] = pdf_id
+            if isinstance(anchor, dict):
+                fo["pdfAnchor"] = copy.deepcopy(anchor)
+            page = src.get("page")
+            if page is not None:
+                fo["source"]["page"] = page
+        out.append(fo)
+    return out
+
+
 def _apply_scoped_instrument_select_field(field_obj: Dict[str, Any]) -> bool:
     """将分章节「主要检测仪器_*」标为 instrument_select，并写入 instruments.{scope} 提交路径。"""
     if not isinstance(field_obj, dict):
@@ -548,6 +605,10 @@ def _assign_submit_bucket(field_obj: Dict[str, Any]) -> Dict[str, str]:
         return {"bucket": "instruments", "path": "instruments.radiationProtection"}
 
     section_key = _field_template_section_key(field_obj)
+    if section_key == "site_instruments_staff" and _is_bare_main_instrument_label(
+        label, fid, hierarchy_key
+    ):
+        return {"bucket": "instruments", "path": "instruments"}
 
     if ft == "instrument_select":
         return {
@@ -2064,6 +2125,18 @@ def _compact_single_form_field(
                 k: normalize_logic_connectors_for_frontend_export(v)
                 for k, v in compact_jct.items()
             }
+    jsets = field.get("judgmentRuleSets")
+    if not isinstance(jsets, dict) or not jsets:
+        jsets = src.get("judgmentRuleSets")
+    if isinstance(jsets, dict) and jsets:
+        try:
+            from utils.conditional_field_rules import export_judgment_rule_sets_for_frontend
+
+            exported_sets = export_judgment_rule_sets_for_frontend(jsets)
+            if exported_sets:
+                out["judgmentRuleSets"] = exported_sets
+        except Exception:
+            pass
     if field.get("judgmentCriteriaManual") or src.get("judgmentCriteriaManual"):
         out["judgmentCriteriaManual"] = True
     if field.get("fieldFormulaUserOverride") or src.get("fieldFormulaUserOverride"):
@@ -3741,9 +3814,12 @@ def _extract_instrument_index(field: Dict[str, Any]) -> int:
                 return int(m.group(1))
             except Exception:
                 continue
-    # 兜底：从末尾数字推断
+    # 兜底：从末尾数字推断（勿把 pdfFieldId 如 f18 当成「仪器 18」）
     for text in (label, pdf_id, fid):
-        m = re.search(r"([0-9]+)$", text)
+        token = str(text or "").strip()
+        if re.fullmatch(r"f\d+", token, re.IGNORECASE):
+            continue
+        m = re.search(r"([0-9]+)$", token)
         if m:
             try:
                 return int(m.group(1))
@@ -5077,6 +5153,13 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
         field_obj["source"]["submitBucket"] = submit_binding["bucket"]
         field_obj["source"]["submitPath"] = submit_binding["path"]
         _apply_scoped_instrument_select_field(field_obj)
+        if (
+            pdf_section_key == "site_instruments_staff"
+            and str(field_obj.get("type") or "").lower() != "instrument_select"
+            and _is_bare_main_instrument_label(field_label, field_id, hierarchy_key)
+        ):
+            sec["fields"].extend(_build_bare_main_instrument_select_pair(field_obj))
+            continue
         # 约束：归到 testResult 的输入统一按 number 渲染与提交。
         if submit_binding["bucket"] == "testResult":
             field_obj["type"] = "number"

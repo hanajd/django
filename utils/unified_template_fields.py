@@ -316,6 +316,9 @@ def _field_dict_to_compact_row(mf: Dict[str, Any]) -> Dict[str, Any]:
     jct = mf.get("judgmentCriteriaByTestType")
     if isinstance(jct, dict) and jct:
         out["judgmentCriteriaByTestType"] = jct
+    jsets = mf.get("judgmentRuleSets")
+    if isinstance(jsets, dict) and jsets:
+        out["judgmentRuleSets"] = jsets
     if mf.get("judgmentCriteriaManual") is True:
         out["judgmentCriteriaManual"] = True
     fv = mf.get("fieldVerdict")

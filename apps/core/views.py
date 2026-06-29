@@ -69,6 +69,7 @@ from apps.core.library_access import (
     library_upload_blocked_revoked_projects,
     library_user_may_browse_shared_library_templates,
     library_user_can_assign_tasks_to_participants,
+    library_user_can_delete_library_project,
     library_user_may_access_hospital_info_nav,
     library_user_is_project_primary_responsible,
     library_user_may_assign_on_project,
@@ -150,10 +151,10 @@ from apps.core.task_template_ui_service import (
     task_library_page_url,
 )
 from apps.core.commission_management_service import (
+    build_commission_message_center,
     commission_may_view_user_stats,
     commission_overview_for_viewer,
     commission_project_rows,
-    commission_user_summary_rows,
     commission_visible_subject_users,
     library_user_may_access_commission_manage,
 )
@@ -2301,6 +2302,62 @@ def library_projects(request):
                 messages.success(request, f"已将任务 {sub.task_no} 从 submitted 回退为 pending。")
             return redirect(reverse("library_projects") + f"?project_id={proj.pk}&tab=submissions")
 
+        if action == "delete_submission":
+            post_raw = request.POST.get("project_id", "").strip()
+            try:
+                post_pid = int(post_raw) if post_raw else None
+            except ValueError:
+                post_pid = None
+            proj = LibraryProject.objects.filter(pk=post_pid).first() if post_pid else None
+            if proj is None:
+                proj = selected_project
+            if proj is None:
+                messages.error(request, "请选择项目")
+                return redirect(reverse("library_projects"))
+            if not library_user_may_mutate_project_workbench(request.user, proj):
+                messages.error(request, "无权删除检测提交")
+                return redirect(reverse("library_projects") + f"?project_id={proj.pk}&tab=submissions")
+            try:
+                sid = int(request.POST.get("submission_id", "") or 0)
+            except ValueError:
+                sid = 0
+            sub = InspectionSubmission.objects.filter(pk=sid, project=proj).first() if sid else None
+            if sub is None:
+                messages.error(request, "提交记录不存在或不属于当前项目")
+            else:
+                task_no = sub.task_no
+                sub.delete()
+                messages.success(request, f"已删除检测提交 {task_no}。")
+            return redirect(reverse("library_projects") + f"?project_id={proj.pk}&tab=submissions")
+
+        if action == "deactivate_project":
+            post_raw = request.POST.get("project_id", "").strip()
+            try:
+                post_pid = int(post_raw) if post_raw else None
+            except ValueError:
+                post_pid = None
+            proj = LibraryProject.objects.filter(pk=post_pid).first() if post_pid else None
+            if proj is None:
+                messages.error(request, "项目不存在")
+                return redirect(reverse("library_projects"))
+            if not library_user_can_delete_library_project(request.user, proj):
+                messages.error(request, "当前角色无权停用项目")
+                return redirect(reverse("library_projects") + f"?project_id={proj.pk}")
+            if not proj.is_active:
+                messages.error(request, "项目已停用")
+                return redirect(reverse("library_projects") + f"?project_id={proj.pk}")
+            from apps.core.instrument_inventory_service import auto_checkin_on_commission_end
+
+            n_in = auto_checkin_on_commission_end(proj, user=request.user)
+            proj.is_active = False
+            proj.save(update_fields=["is_active", "updated_at"])
+            label = f"{proj.code} · {proj.name}"
+            if n_in:
+                messages.success(request, f"已停用项目：{label}；已自动入库 {n_in} 台仪器")
+            else:
+                messages.success(request, f"已停用项目：{label}")
+            return redirect(reverse("library_projects") + f"?project_id={proj.pk}")
+
         if action in ("add_workflow_member", "remove_workflow_member"):
             post_raw = request.POST.get("project_id", "").strip()
             try:
@@ -2372,14 +2429,7 @@ def library_projects(request):
             if proj is None:
                 messages.error(request, "项目不存在")
                 return redirect(reverse("library_projects"))
-            can_delete = library_user_can_assign_tasks_to_participants(request.user)
-            if (
-                not can_delete
-                and role_has(request.user, "perm_create_library_project")
-                and getattr(proj, "created_by_id", None) == request.user.id
-            ):
-                can_delete = True
-            if not can_delete:
+            if not library_user_can_delete_library_project(request.user, proj):
                 messages.error(request, "当前角色无权删除项目")
                 return redirect(reverse("library_projects"))
             label = f"{proj.code} · {proj.name}"
@@ -2391,7 +2441,7 @@ def library_projects(request):
             except ProtectedError:
                 messages.error(
                     request,
-                    "项目删除失败：该项目已被检测提交等记录引用，请先清理关联数据后再删除。",
+                    "项目删除失败：该项目仍有关联的检测提交，请先在「进度跟踪」中删除全部提交后再试。",
                 )
                 return redirect(reverse("library_projects") + f"?project_id={proj.pk}")
             messages.success(request, f"已删除项目：{label}")
@@ -2711,16 +2761,13 @@ def library_projects(request):
     workbench_projects_limited_to_task_assignments = bool(
         library_scope_own_files_only(request.user) and not can_assign_tasks
     )
-    can_delete_selected_project = False
-    if selected_project:
-        if library_user_can_assign_tasks_to_participants(request.user):
-            can_delete_selected_project = True
-        elif library_user_is_project_primary_responsible(request.user, selected_project):
-            can_delete_selected_project = True
-        elif role_has(request.user, "perm_create_library_project") and getattr(
-            selected_project, "created_by_id", None
-        ) == request.user.id:
-            can_delete_selected_project = True
+    can_delete_selected_project = bool(
+        selected_project
+        and library_user_can_delete_library_project(request.user, selected_project)
+    )
+    can_deactivate_selected_project = bool(
+        can_delete_selected_project and selected_project and selected_project.is_active
+    )
 
     project_commission_equipment_cards: list[dict] = []
     project_available_equipment_rows: list[dict] = []
@@ -2829,6 +2876,7 @@ def library_projects(request):
             "participant_assign_self_only": participant_assign_self_only,
             "workbench_projects_limited_to_task_assignments": workbench_projects_limited_to_task_assignments,
             "can_delete_selected_project": can_delete_selected_project,
+            "can_deactivate_selected_project": can_deactivate_selected_project,
             "workbench_tab": workbench_tab,
             "app_users_for_assign": app_users_for_assign,
             "project_scoped_assignment_records": project_scoped_assignment_records,
@@ -2993,6 +3041,12 @@ def commission_manage(request):
         q_parts = []
         if subject_user:
             q_parts.append(f"user_id={subject_user.pk}")
+        for key in ("scope", "status", "search"):
+            val = (request.POST.get(key) or request.GET.get(key) or "").strip()
+            if val:
+                from urllib.parse import quote
+
+                q_parts.append(f"{key}={quote(val)}")
         tab_q = ("?" + "&".join(q_parts)) if q_parts else ""
 
         if project is None:
@@ -3083,6 +3137,33 @@ def commission_manage(request):
             else:
                 n, _ = LibraryTaskAssignment.objects.filter(project=project, assignee=assignee).delete()
                 messages.success(request, f"已撤回 {assignee.username} 在项目「{project.name}」上的 {n} 条分配")
+        elif action == "advance_workflow":
+            from apps.core.commission_management_service import commission_accessible_project_ids
+            from apps.core.commission_workflow_progress import apply_manual_workflow_advance
+
+            if project.pk not in commission_accessible_project_ids(request.user):
+                messages.error(request, "无权操作该委托")
+                return redirect(redir + tab_q)
+            task_no = (request.POST.get("task_no") or "").strip()
+            target_stage = (request.POST.get("target_stage") or "").strip()
+            sub = (
+                InspectionSubmission.objects.filter(project=project, task_no=task_no)
+                .select_related("case", "case__workflow_state")
+                .first()
+            )
+            if sub is None:
+                messages.error(request, "未找到对应检测提交")
+            else:
+                ok, msg = apply_manual_workflow_advance(
+                    user=request.user,
+                    project=project,
+                    submission=sub,
+                    target_stage=target_stage,
+                )
+                if ok:
+                    messages.success(request, msg)
+                else:
+                    messages.error(request, msg)
         else:
             messages.error(request, "未知操作")
         return redirect(redir + tab_q)
@@ -3090,20 +3171,20 @@ def commission_manage(request):
     status_filter = (request.GET.get("status") or "").strip()
     if status_filter not in ("", "completed", "incomplete"):
         status_filter = ""
+    scope_filter = (request.GET.get("scope") or "").strip()
+    if scope_filter not in ("", "mine", "manage"):
+        scope_filter = ""
     search = (request.GET.get("search") or "").strip()
 
     visible_users = list(commission_visible_subject_users(request.user))
-    show_user_table = len(visible_users) > 1 or library_user_can_assign_tasks_to_participants(request.user)
-    user_summary_rows = commission_user_summary_rows(request.user) if show_user_table else []
-    overview = commission_overview_for_viewer(
-        request.user, subject_user=subject_user or request.user
-    )
-    if subject_user is None and not show_user_table:
-        subject_user = request.user
+    show_user_table = False
+    overview = commission_overview_for_viewer(request.user, subject_user=subject_user)
+    message_center = build_commission_message_center(request.user)
     project_rows = commission_project_rows(
         request.user,
         subject_user=subject_user,
         status_filter=status_filter,
+        scope_filter=scope_filter,
         search=search,
     )
     app_users_for_assign = list(
@@ -3120,10 +3201,11 @@ def commission_manage(request):
             "subject_user": subject_user,
             "visible_users": visible_users,
             "show_user_table": show_user_table,
-            "user_summary_rows": user_summary_rows,
+            "message_center": message_center,
             "overview": overview,
             "project_rows": project_rows,
             "status_filter": status_filter,
+            "scope_filter": scope_filter,
             "search": search,
             "app_users_for_assign": app_users_for_assign,
             "can_assign_globally": can_assign_globally,
@@ -6212,11 +6294,22 @@ def htmlpdf_api_export_json(request):
         form_schema = data.get("formSchema") if isinstance(data.get("formSchema"), dict) else {}
     schema_extras = _form_schema_extra_payload(data, form_schema)
     bindings = data.get("bindings") if isinstance(data.get("bindings"), dict) else {}
-    raw_map = data.get("report_site_field_map") or data.get("reportSiteFieldMap")
-    if isinstance(raw_map, list):
-        from apps.core.htmlpdf_report_mapping_service import merge_report_site_map_into_bindings
+    from apps.core.htmlpdf_report_mapping_service import (
+        merge_report_site_map_into_bindings,
+        sync_bindings_report_site_field_sections,
+    )
 
+    raw_configs = (
+        bindings.get("report_site_field_configs")
+        or data.get("report_site_field_configs")
+        or data.get("reportSiteFieldConfigs")
+    )
+    raw_map = data.get("report_site_field_map") or data.get("reportSiteFieldMap")
+    if isinstance(raw_configs, list) and raw_configs:
+        bindings = merge_report_site_map_into_bindings(bindings, raw_configs)
+    elif isinstance(raw_map, list) and raw_map:
         bindings = merge_report_site_map_into_bindings(bindings, raw_map)
+    bindings = sync_bindings_report_site_field_sections(bindings)
     template_meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
     report_type = str(data.get("report_type") or "").strip()
     standard = str(data.get("standard") or "").strip()

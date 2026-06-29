@@ -70,6 +70,22 @@ def apply_field_logic_connectors_for_frontend_export(field: Dict[str, Any]) -> N
         for k in ("acceptance", "status"):
             if jct.get(k):
                 jct[k] = normalize_logic_connectors_for_frontend_export(jct[k])
+    jsets = field.get("judgmentRuleSets")
+    if isinstance(jsets, dict):
+        for key in ("acceptance", "status"):
+            block = jsets.get(key)
+            if not isinstance(block, dict):
+                continue
+            if block.get("logicExpression"):
+                block["logicExpression"] = normalize_logic_connectors_for_frontend_export(
+                    block["logicExpression"]
+                )
+            for rule in block.get("rules") or []:
+                if not isinstance(rule, dict):
+                    continue
+                for rk in ("condition", "expression", "formula"):
+                    if rule.get(rk):
+                        rule[rk] = normalize_logic_connectors_for_frontend_export(rule[rk])
     fv = field.get("fieldVerdict")
     if isinstance(fv, dict) and fv.get("rule"):
         fv["rule"] = normalize_logic_connectors_for_frontend_export(fv["rule"])
@@ -209,12 +225,175 @@ def compile_judgment_criteria_text(rule_set: Mapping[str, Any]) -> str:
     if logic_expr:
         return logic_expr
     rules = normalize_rule_list(rule_set.get("rules"))
-    exprs = [_norm(r.get("expression")) for r in rules if _norm(r.get("expression"))]
+    exprs = [
+        _norm(r.get("expression"))
+        for r in rules
+        if _norm(r.get("expression")) and not _norm(r.get("condition"))
+    ]
+    if not exprs:
+        exprs = [_norm(r.get("expression")) for r in rules if _norm(r.get("expression"))]
     if not exprs:
         return ""
     combine = _norm(rule_set.get("combine") or "and").lower()
     sep = " 且 " if combine == "and" else " 或 "
     return sep.join(exprs)
+
+
+def judgment_rule_set_has_auto_conditions(rule_set: Mapping[str, Any] | None) -> bool:
+    if not isinstance(rule_set, dict):
+        return False
+    for row in normalize_rule_list(rule_set.get("rules")):
+        if row.get("condition") and row.get("expression"):
+            return True
+    return False
+
+
+def judgment_rule_sets_have_auto_conditions(rule_sets: Mapping[str, Any] | None) -> bool:
+    if not isinstance(rule_sets, dict):
+        return False
+    for key in ("acceptance", "status"):
+        if judgment_rule_set_has_auto_conditions(rule_sets.get(key)):
+            return True
+    return False
+
+
+def judgment_criteria_bucket_from_inspection_type(inspection_type: str) -> str:
+    """
+    检测类型展示文案 / testType 枚举 → judgmentCriteriaByTestType 键。
+    验收现场记录模板仅使用 acceptance；状态现场记录仅使用 status。
+    """
+    t = str(inspection_type or "").strip()
+    tl = t.lower()
+    if tl in {"acceptance", "accept", "验收", "验收检测"}:
+        return "acceptance"
+    if tl in {"status", "状态", "状态检测"}:
+        return "status"
+    if "验收" in t and "状态" not in t.replace("验收", "", 1):
+        return "acceptance"
+    if "状态" in t:
+        return "status"
+    return ""
+
+
+def _judgment_bucket_from_inspection_type(inspection_type: str) -> str:
+    bucket = judgment_criteria_bucket_from_inspection_type(inspection_type)
+    return bucket if bucket else "acceptance"
+
+
+def resolve_judgment_block_for_eval(
+    rule_set: Mapping[str, Any] | None,
+    *,
+    value_mapping: Mapping[str, Any] | None = None,
+    constants: Mapping[str, Any] | None = None,
+    enums: Mapping[str, Any] | None = None,
+    lookup_tables: Mapping[str, Any] | None = None,
+) -> str:
+    """按条件选取单条判定标准串；无自动条件时编译为兼容字符串。"""
+    if not isinstance(rule_set, dict):
+        return ""
+    logic_expr = _norm(rule_set.get("logicExpression"))
+    if logic_expr:
+        return logic_expr
+    rules = normalize_rule_list(rule_set.get("rules"))
+    if not rules:
+        return ""
+    vm = value_mapping if isinstance(value_mapping, dict) else {}
+    const = constants if isinstance(constants, dict) else {}
+    enums_d = enums if isinstance(enums, dict) else {}
+    lts = lookup_tables if isinstance(lookup_tables, dict) else {}
+    fallback = ""
+    try:
+        from utils.dynamic_form_expression import eval_computed_formula
+    except ImportError:
+        eval_computed_formula = None  # type: ignore[assignment]
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        expr = _norm(rule.get("expression") or rule.get("formula"))
+        if not expr:
+            continue
+        cond = _norm(rule.get("condition"))
+        if not cond:
+            if not fallback:
+                fallback = expr
+            continue
+        if eval_computed_formula is None:
+            continue
+        try:
+            if eval_computed_formula(
+                cond,
+                vm,
+                constants=const,
+                enums=enums_d,
+                lookup_tables=lts,
+            ) is True:
+                return expr
+        except Exception:
+            continue
+    if fallback:
+        return fallback
+    return compile_judgment_criteria_text(rule_set)
+
+
+def resolve_judgment_criteria_for_eval(
+    field: Mapping[str, Any],
+    *,
+    inspection_type: str = "",
+    value_mapping: Mapping[str, Any] | None = None,
+    constants: Mapping[str, Any] | None = None,
+    enums: Mapping[str, Any] | None = None,
+    lookup_tables: Mapping[str, Any] | None = None,
+) -> str:
+    """解析栏位在指定检测类型下应使用的判定标准串。"""
+    if not isinstance(field, dict):
+        return ""
+    bucket = judgment_criteria_bucket_from_inspection_type(inspection_type)
+    if not bucket:
+        return ""
+    sets = field.get("judgmentRuleSets")
+    if isinstance(sets, dict):
+        block = sets.get(bucket)
+        if isinstance(block, dict) and normalize_rule_list(block.get("rules")):
+            resolved = resolve_judgment_block_for_eval(
+                block,
+                value_mapping=value_mapping,
+                constants=constants,
+                enums=enums,
+                lookup_tables=lookup_tables,
+            )
+            if resolved:
+                return resolved
+    jct = field.get("judgmentCriteriaByTestType")
+    if isinstance(jct, dict) and jct:
+        preferred = str(jct.get(bucket) or "").strip()
+        if preferred:
+            return preferred
+    for k in ("judgmentCriterionText", "judgmentCriterion", "criterionText", "判定标准"):
+        t = str(field.get(k) or "").strip()
+        if t:
+            return t
+    return ""
+
+
+def export_judgment_rule_sets_for_frontend(rule_sets: Mapping[str, Any]) -> Dict[str, Any]:
+    sets = normalize_judgment_rule_sets(rule_sets)
+    out: Dict[str, Any] = {}
+    for key in ("acceptance", "status"):
+        block = sets.get(key) or {}
+        rules = export_formula_rules_list(block.get("rules"))
+        if not rules:
+            continue
+        combine = _norm(block.get("combine") or "and").lower()
+        if combine not in ("and", "or"):
+            combine = "and"
+        out[key] = {
+            "combine": combine,
+            "logicExpression": normalize_logic_connectors_for_frontend_export(
+                block.get("logicExpression") or ""
+            ),
+            "rules": rules,
+        }
+    return out
 
 
 def export_formula_rules_meta(rules: List[Mapping[str, Any]]) -> Dict[str, Any]:
@@ -365,9 +544,11 @@ def apply_judgment_rules_to_field_dict(field: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _migrate_judgment_rule_sets_to_criteria(field: Dict[str, Any]) -> None:
-    """旧版 judgmentRuleSets 迁移为 judgmentCriteriaByTestType 单行字符串。"""
+    """无自动判断条件时，将 judgmentRuleSets 压平为 judgmentCriteriaByTestType。"""
     sets = field.get("judgmentRuleSets")
     if not isinstance(sets, dict):
+        return
+    if judgment_rule_sets_have_auto_conditions(sets):
         return
     existing = field.get("judgmentCriteriaByTestType")
     if not isinstance(existing, dict):
@@ -377,10 +558,8 @@ def _migrate_judgment_rule_sets_to_criteria(field: Dict[str, Any]) -> None:
         if not isinstance(block, dict):
             continue
         compiled = compile_judgment_criteria_text(block)
-        if compiled and not str(existing.get(key) or "").strip():
-            existing[key] = compiled
-    if existing:
-        field["judgmentCriteriaByTestType"] = existing
+        existing[key] = compiled if compiled else ""
+    field["judgmentCriteriaByTestType"] = existing
     field.pop("judgmentRuleSets", None)
     field.pop("judgmentSelectionMode", None)
     field.pop("requiresManualJudgmentSelection", None)
@@ -401,6 +580,7 @@ def enrich_frontend_field_with_conditional_rules(
         field["judgmentRuleSets"] = copy.deepcopy(src["judgmentRuleSets"])
     _migrate_judgment_rule_sets_to_criteria(field)
     apply_formula_rules_to_field_dict(field, substituter=substituter)
+    apply_judgment_rules_to_field_dict(field)
     strip_legacy_field_expression_rules_list_key(field)
     apply_field_logic_connectors_for_frontend_export(field)
     return field

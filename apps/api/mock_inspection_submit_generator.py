@@ -375,6 +375,236 @@ def _field_is_verdict(field: dict) -> bool:
     return "单项判定" in label or label.strip() in ("判定", "合格", "不合格")
 
 
+def _field_label_blob(field: dict) -> str:
+    return " ".join(
+        str(field.get(k) or "")
+        for k in ("label", "hierarchyKey", "id", "submitPath")
+    )
+
+
+def _is_commission_contact_phone_field(field: dict) -> bool:
+    """「委托单位联系人/电话」整格：模拟为姓名+手机号，不含斜杠。"""
+    compact = _field_label_blob(field).replace(" ", "")
+    if "委托单位联系人" in compact and "电话" in compact:
+        return True
+    submit_path = str(field.get("submitPath") or "")
+    if "commissionContactPhone" in submit_path:
+        return True
+    return False
+
+
+def _looks_like_contact_cell_text(text: str) -> bool:
+    s = str(text or "").strip()
+    if not s or s == _SLASH:
+        return False
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
+        return False
+    if re.search(r"1\d{10}", s) and re.search(r"[\u4e00-\u9fff]", s):
+        return True
+    if "联系人" in s and re.search(r"\d{7,}", s):
+        return True
+    return False
+
+
+def _collect_commission_contact_fields(frontend_obj: dict) -> list[dict]:
+    out: list[dict] = []
+    seen: set[str] = set()
+    for field in _iter_all_template_fields(frontend_obj):
+        if not isinstance(field, dict) or not _is_commission_contact_phone_field(field):
+            continue
+        pid = str(field.get("pdfFieldId") or field.get("id") or "").strip().lower()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        out.append(field)
+    return out
+
+
+def _resolve_commission_contact_combined(
+    payload: dict,
+    frontend_obj: dict,
+) -> str:
+    hi = payload.get("hospitalInfo") if isinstance(payload.get("hospitalInfo"), dict) else {}
+    ccp = str(hi.get("commissionContactPhone") or "").strip()
+    if _looks_like_contact_cell_text(ccp):
+        return ccp
+    contact_fields = _collect_commission_contact_fields(frontend_obj)
+    contact_pids = [
+        str(f.get("pdfFieldId") or f.get("id") or "").strip().lower()
+        for f in contact_fields
+    ]
+    for bucket_name in ("dynamicData", "testResult", "hospitalInfo"):
+        bucket = payload.get(bucket_name)
+        if not isinstance(bucket, dict):
+            continue
+        for pid in contact_pids:
+            cand = str(bucket.get(pid) or "").strip()
+            if _looks_like_contact_cell_text(cand):
+                return cand
+        for key in ("委托单位联系人/电话", "commissionContactPhone"):
+            cand = str(bucket.get(key) or "").strip()
+            if _looks_like_contact_cell_text(cand):
+                return cand
+    return ""
+
+
+def _is_environment_temperature_field(field: dict) -> bool:
+    blob = _field_label_blob(field)
+    compact = blob.replace(" ", "")
+    if "%RH" in blob or "环境湿度" in blob:
+        return False
+    if "环境温度" in compact or "environmentTemp" in blob.lower():
+        return True
+    if "°C" in blob or blob.endswith("_°C"):
+        return True
+    return False
+
+
+def _is_environment_humidity_field(field: dict) -> bool:
+    blob = _field_label_blob(field)
+    compact = blob.replace(" ", "")
+    if "%RH" in blob or "环境湿度" in blob or "humidity" in blob.lower():
+        return True
+    if "环境温度/湿度" in compact and ("RH" in blob or "湿度" in blob):
+        return True
+    return False
+
+
+def _collect_environment_fields(frontend_obj: dict) -> tuple[list[dict], list[dict]]:
+    temp_fields: list[dict] = []
+    hum_fields: list[dict] = []
+    seen: set[str] = set()
+    for field in _iter_all_template_fields(frontend_obj):
+        if not isinstance(field, dict):
+            continue
+        pid = str(field.get("pdfFieldId") or field.get("id") or "").strip().lower()
+        if not pid or pid in seen:
+            continue
+        if _is_environment_temperature_field(field):
+            seen.add(pid)
+            temp_fields.append(field)
+        elif _is_environment_humidity_field(field):
+            seen.add(pid)
+            hum_fields.append(field)
+    return temp_fields, hum_fields
+
+
+def _mock_contact_name_phone(rng: random.Random) -> str:
+    """模拟联系人整格：中文姓名 + 11 位手机号（无 / 分隔）。"""
+    surnames = ("张", "李", "王", "赵", "刘", "陈", "杨", "黄")
+    given = ("伟", "芳", "娜", "敏", "静", "磊", "洋", "杰")
+    name = f"{rng.choice(surnames)}{rng.choice(given)}"
+    phone = "1" + rng.choice("3456789") + "".join(str(rng.randint(0, 9)) for _ in range(9))
+    return f"{name}{phone}"
+
+
+def _sync_mock_hospital_contact_fields(
+    payload: dict,
+    frontend_obj: Optional[dict] = None,
+) -> None:
+    """将整格联系人/电话同步到 hospitalInfo 与模板定义的联系人栏位；勿误写 f4 日期或 f7 湿度。"""
+    from utils.report_fill_helpers import split_contact_name_phone
+
+    frontend_obj = frontend_obj if isinstance(frontend_obj, dict) else {}
+    combined = _resolve_commission_contact_combined(payload, frontend_obj)
+    if not combined:
+        return
+
+    if ("/" in combined or "／" in combined) and not re.search(r"1\d{10}", combined):
+        combined = _mock_contact_name_phone(random.Random(hash(combined) & 0xFFFFFFFF))
+
+    name, phone = split_contact_name_phone(combined, "")
+    hi = payload.get("hospitalInfo")
+    if not isinstance(hi, dict):
+        hi = {}
+        payload["hospitalInfo"] = hi
+    hi["commissionContactPhone"] = combined
+    if name:
+        hi["contactPerson"] = name
+    if phone:
+        hi["contactPhone"] = phone
+
+    for field in _collect_commission_contact_fields(frontend_obj):
+        _write_field_value_to_payload(payload, field, combined)
+
+
+def _sync_mock_environment_fields(payload: dict, frontend_obj: dict) -> None:
+    """温湿度写入 testResult/reportInfo 别名，便于 PDF 回填互认。"""
+    temp_fields, hum_fields = _collect_environment_fields(frontend_obj)
+
+    def _first_value(fields: list[dict]) -> Any:
+        for bucket_name in ("dynamicData", "reportInfo", "testResult", "equipmentInfo"):
+            bucket = payload.get(bucket_name)
+            if not isinstance(bucket, dict):
+                continue
+            for field in fields:
+                pid = str(field.get("pdfFieldId") or field.get("id") or "").strip().lower()
+                val = bucket.get(pid)
+                if val not in (None, "", _SLASH):
+                    return val
+        return None
+
+    temp = _first_value(temp_fields)
+    hum = _first_value(hum_fields)
+    if temp not in (None, ""):
+        tr = payload.setdefault("testResult", {})
+        ri = payload.setdefault("reportInfo", {})
+        if isinstance(tr, dict) and tr.get("temperature") in (None, ""):
+            tr["temperature"] = temp
+        if isinstance(ri, dict) and ri.get("environmentTempC") in (None, ""):
+            ri["environmentTempC"] = temp
+    if hum not in (None, ""):
+        tr = payload.setdefault("testResult", {})
+        ri = payload.setdefault("reportInfo", {})
+        if isinstance(tr, dict) and tr.get("humidity") in (None, ""):
+            tr["humidity"] = hum
+        if isinstance(ri, dict) and ri.get("environmentHumidity") in (None, ""):
+            ri["environmentHumidity"] = hum
+
+
+def _inject_mock_rp_condition_line(payload: dict) -> bool:
+    """模拟提交：第五章报告表首行检测条件（供 report_data_builder 扫描）。"""
+    if not isinstance(payload, dict):
+        return False
+    line = (
+        "检测条件：曝光模式（部位：腹部），球管朝管球向下照射，"
+        "120kV 200mA 0.5s（100 mAs）。"
+    )
+    for bucket in ("dynamicData", "testResult"):
+        node = payload.get(bucket)
+        if not isinstance(node, dict):
+            continue
+        for val in node.values():
+            if isinstance(val, str) and "检测条件" in val and "kV" in val and len(val) > 24:
+                return False
+        node["_mockRpConditionLine"] = line
+    return True
+
+
+def _field_is_personnel_signature_field(field: dict) -> bool:
+    """人员名单/陪同人/校核员签字格：模拟提交不写随机数。"""
+    blob = " ".join(
+        str(field.get(key) or "")
+        for key in ("label", "hierarchyKey", "id", "placeholder", "title")
+    ).strip()
+    if not blob:
+        return False
+    if "主要检测仪器" in blob:
+        return False
+    if any(
+        tok in blob
+        for tok in (
+            "参与主要检测人员",
+            "人员名单",
+            "受检单位陪同人",
+            "校核员及校核",
+            "校核员",
+        )
+    ):
+        return True
+    return "参与主要检测" in blob and ("签字" in blob or "名单" in blob)
+
+
 def _field_should_skip_mock_fill(field: dict) -> bool:
     ftype = str(field.get("type") or "text").strip().lower()
     if ftype in (
@@ -387,6 +617,8 @@ def _field_should_skip_mock_fill(field: dict) -> bool:
         "image",
         "table",
     ):
+        return True
+    if _field_is_personnel_signature_field(field):
         return True
     return _field_has_formula(field) or _field_is_verdict(field)
 
@@ -443,6 +675,10 @@ def _mock_random_number(rng: random.Random, field: dict) -> float | int:
                     ]
                 )
             return _format_mock_field_value(field, v)
+    if _is_environment_temperature_field(field):
+        return _format_mock_field_value(field, rng.uniform(18.0, 28.0))
+    if _is_environment_humidity_field(field):
+        return _format_mock_field_value(field, rng.uniform(40.0, 75.0))
     upper = label.upper()
     if "KV" in upper:
         return rng.randint(90, 140)
@@ -496,6 +732,8 @@ def _mock_scalar_for_field(
             return None
         if pid in ("f2",) or "受检编号" in label:
             return None
+        if _is_commission_contact_phone_field(field):
+            return _mock_contact_name_phone(rng)
         if "编号" in label and "委托" not in label:
             return f"SN-{rng.randint(10000, 99999)}"
         if "名称" in label or "单位" in label:
@@ -537,6 +775,51 @@ def _is_background_level_field(field: dict) -> bool:
         for k in ("label", "hierarchyKey", "id", "submitPath")
     )
     return "本底" in blob or "本底水平" in blob
+
+
+_BG_RANGE_SLOT_RE = re.compile(r"^本底水平及范围_\d+$", re.I)
+
+
+def _is_background_range_slot_field(field: dict) -> bool:
+    """本底行下方「本底水平及范围_1…10」列格（非检测点表格读数）。"""
+    if not isinstance(field, dict):
+        return False
+    for key in ("label", "hierarchyKey", "id", "placeholder", "title"):
+        text = str(field.get(key) or "").strip()
+        if text and _BG_RANGE_SLOT_RE.match(text):
+            return True
+    return False
+
+
+def _field_is_rp_background_mock_cell(field: dict) -> bool:
+    if not isinstance(field, dict):
+        return False
+    if _is_background_level_field(field) or _is_background_range_slot_field(field):
+        return True
+    try:
+        from radiation_detection_report.chapter5_field_sync import is_background_reading_pdf_field
+
+        return is_background_reading_pdf_field(field)
+    except ImportError:
+        return False
+
+
+def _binding_uses_background_mock_cells(
+    binding: dict,
+    pid_to_field: dict[str, dict],
+) -> bool:
+    if not isinstance(binding, dict):
+        return False
+    if _is_rp_background_binding(binding):
+        return True
+    for key in _RP_BINDING_DATA_KEYS:
+        pid = str(binding.get(key) or "").strip().lower()
+        if not pid:
+            continue
+        field = pid_to_field.get(pid)
+        if isinstance(field, dict) and _field_is_rp_background_mock_cell(field):
+            return True
+    return False
 
 
 def _field_pdf_anchor_rect(field: dict) -> tuple[int, float, float]:
@@ -596,12 +879,103 @@ def _is_rp_table_seq_field(field: dict) -> bool:
 
 
 def _is_rp_preface_factor_field(field: dict) -> bool:
-    """第五章表前区：校准因子 k1/k2、修正系数等（参与报出值公式，不是表格序号）。"""
-    hk = str(field.get("hierarchyKey") or field.get("label") or "")
+    """第五章表前区：校准因子 k1/k2、修正系数、探测下限等（不含表格序号列）。"""
+    if _is_rp_table_seq_field(field):
+        return False
+    hk = str(field.get("hierarchyKey") or field.get("label") or field.get("id") or "")
     if any(tok in hk for tok in ("校准因子", "修正系数", "探测下限", "响应时间", "仪器校准因子")):
         return True
-    label = str(field.get("label") or "").strip()
-    if re.match(r"^序号_r\d+", label, re.IGNORECASE) and not _is_rp_table_seq_field(field):
+    return False
+
+
+_FACTOR_MUL_REF_RE = re.compile(r"\*f(\d+)", re.I)
+_PREF_CALIB_FACTOR_PIDS = ("f106", "f113", "f208", "f927", "f109", "f982")
+
+
+def _collect_rp_formula_factor_pids(frontend_obj: dict) -> set[str]:
+    """从防护章报出值/本底公式中收集校准因子 f 号（如 JS-001 的 f106）。"""
+    pids: set[str] = set()
+    for item in _merged_pdf_field_items(frontend_obj):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("templateSectionKey") or "").strip() != _RP_CHAPTER_SECTION_KEY:
+            continue
+        blob = " ".join(
+            str(item.get(k) or "")
+            for k in ("fieldExpression", "formula", "id", "title")
+        )
+        if not _FACTOR_MUL_REF_RE.search(blob):
+            continue
+        for m in _FACTOR_MUL_REF_RE.finditer(blob):
+            pids.add(f"f{m.group(1).lower()}")
+    for field in _iter_all_template_fields(frontend_obj):
+        if not isinstance(field, dict):
+            continue
+        blob = " ".join(
+            str(field.get(k) or "")
+            for k in ("fieldExpression", "formula", "label", "hierarchyKey")
+        )
+        if not _FACTOR_MUL_REF_RE.search(blob):
+            continue
+        for m in _FACTOR_MUL_REF_RE.finditer(blob):
+            pids.add(f"f{m.group(1).lower()}")
+    return pids
+
+
+def _primary_rp_calibration_factor_pid(frontend_obj: dict) -> str:
+    factors = _collect_rp_formula_factor_pids(frontend_obj)
+    for pref in _PREF_CALIB_FACTOR_PIDS:
+        if pref in factors:
+            return pref
+    return sorted(factors)[0] if factors else ""
+
+
+def _collect_rp_chapter_preface_pids(frontend_obj: dict) -> set[str]:
+    pids: set[str] = set()
+    for field in _iter_all_template_fields(frontend_obj):
+        if not isinstance(field, dict) or not _is_rp_preface_factor_field(field):
+            continue
+        pid = str(field.get("pdfFieldId") or field.get("id") or "").strip().lower()
+        if pid and _F_ID_RE.match(pid):
+            pids.add(pid)
+    pids.update(_collect_rp_formula_factor_pids(frontend_obj))
+    return pids
+
+
+def _collect_background_level_pids(frontend_obj: dict) -> set[str]:
+    pids: set[str] = set()
+    for field in _iter_all_template_fields(frontend_obj):
+        if not isinstance(field, dict):
+            continue
+        if not (
+            _is_background_level_field(field)
+            or _is_background_range_slot_field(field)
+            or _field_is_rp_background_mock_cell(field)
+        ):
+            continue
+        pid = str(field.get("pdfFieldId") or field.get("id") or "").strip().lower()
+        if pid and _F_ID_RE.match(pid):
+            pids.add(pid)
+    return pids
+
+
+def _rp_numeric_field_needs_mock_fill(cur: Any) -> bool:
+    if cur in (None, ""):
+        return True
+    if cur == _SLASH:
+        return True
+    if isinstance(cur, bool):
+        return False
+    text = str(cur).strip()
+    if not text:
+        return True
+    if text.startswith("模拟_") or text.lower().startswith("mock_"):
+        return True
+    try:
+        num = float(text)
+    except (TypeError, ValueError):
+        return False
+    if num > 2.5:
         return True
     return False
 
@@ -799,6 +1173,18 @@ def _is_rp_table_managed_field(
     )
     if _is_background_level_field(merged) or _is_rp_preface_factor_field(merged):
         return False
+    label = str(merged.get("hierarchyKey") or merged.get("label") or merged.get("id") or "")
+    sk = str(merged.get("templateSectionKey") or merged.get("sectionKey") or "").strip()
+    if (
+        sk == _RP_CHAPTER_SECTION_KEY
+        and not re.search(r"_r\d+", label, re.I)
+        and not any(
+            tok in label for tok in ("测量读数", "报出值", "测量均值", "检测点位置", "序号_r")
+        )
+        and not _is_rp_table_seq_field(merged)
+        and not _is_rp_location_field(merged)
+    ):
+        return False
     if _is_rp_table_seq_field(merged):
         return True
     pid = str(merged.get("pdfFieldId") or merged.get("id") or "").strip().lower()
@@ -811,7 +1197,6 @@ def _is_rp_table_managed_field(
             return True
         if _is_rp_location_field(merged):
             return True
-    label = str(merged.get("hierarchyKey") or merged.get("label") or "")
     if _is_rp_location_field(merged):
         return True
     if "检测点位置" in label and re.search(r"_r\d+", label, re.I):
@@ -822,11 +1207,7 @@ def _is_rp_table_managed_field(
         )
     if _is_rp_table_data_field(merged, pid_to_field=pid_to_field, rp_pdf_pids=rp_pdf_pids):
         return True
-    return _is_protection_section_field(
-        merged,
-        pid_to_field=pid_to_field,
-        rp_pdf_pids=rp_pdf_pids,
-    )
+    return False
 
 
 def _fill_rp_preface_factor_fields(
@@ -834,21 +1215,319 @@ def _fill_rp_preface_factor_fields(
     frontend_obj: dict,
     rng: random.Random,
 ) -> int:
-    """填写 k1/k2 等表前因子，供报出值公式 f223*f208 等使用。"""
+    """填写表前校准因子及报出值公式引用的 k1 等（如 JS-001 的 f106）。"""
     filled = 0
-    seen: set[str] = set()
-    for field in _iter_all_template_fields(frontend_obj):
-        if not isinstance(field, dict) or not _is_rp_preface_factor_field(field):
+    pid_to_field = _index_fields_by_pdf_field_id(frontend_obj)
+    for pid in sorted(_collect_rp_chapter_preface_pids(frontend_obj)):
+        field = pid_to_field.get(pid)
+        if not isinstance(field, dict):
             continue
-        pid = str(field.get("pdfFieldId") or field.get("id") or "").strip().lower()
-        if pid and pid in seen:
+        if not _rp_numeric_field_needs_mock_fill(_payload_pid_value(payload, pid)):
             continue
-        if pid:
-            seen.add(pid)
-        val = _format_mock_field_value(field, rng.uniform(0.85, 1.35))
+        val = _format_mock_field_value(field, rng.uniform(0.85, 1.15))
         _write_field_value_to_payload(payload, field, val)
         filled += 1
     return filled
+
+
+def _fill_rp_chapter_non_table_scalars(
+    payload: dict,
+    frontend_obj: dict,
+    rng: random.Random,
+    *,
+    managed_pids: set[str],
+    rp_pdf_pids: set[str],
+    pid_to_field: dict[str, dict],
+) -> int:
+    """第五章表头/表前区非表格数值格（不受随机行选择影响，始终填写）。"""
+    enums = frontend_obj.get("enums") if isinstance(frontend_obj.get("enums"), dict) else {}
+    filled = 0
+    for field in _iter_all_template_fields(frontend_obj):
+        if not isinstance(field, dict):
+            continue
+        if _field_should_skip_mock_fill(field) or _field_has_formula(field):
+            continue
+        if _field_is_rp_background_mock_cell(field) or _is_rp_preface_factor_field(field):
+            continue
+        if _is_rp_table_managed_field(
+            field,
+            managed_pids=managed_pids,
+            rp_pdf_pids=rp_pdf_pids,
+            pid_to_field=pid_to_field,
+        ):
+            continue
+        merged = _resolve_field_protection_meta(
+            field,
+            pid_to_field=pid_to_field,
+            rp_pdf_pids=rp_pdf_pids,
+        )
+        sk = str(merged.get("templateSectionKey") or merged.get("sectionKey") or "").strip()
+        page, _, _ = _field_pdf_anchor_rect(merged)
+        if sk != _RP_CHAPTER_SECTION_KEY and page < 5:
+            continue
+        pid = str(merged.get("pdfFieldId") or merged.get("id") or "").strip().lower()
+        if not pid or not _F_ID_RE.match(pid):
+            continue
+        if not _rp_numeric_field_needs_mock_fill(_payload_pid_value(payload, pid)):
+            continue
+        mock_val = _mock_scalar_for_field(merged, enums=enums, rng=rng)
+        if mock_val is None:
+            continue
+        _write_field_value_to_payload(payload, merged, mock_val)
+        filled += 1
+    return filled
+
+
+def _fill_rp_background_level_mock(
+    payload: dict,
+    frontend_obj: dict,
+    rng: random.Random,
+) -> int:
+    """本底行 ①–⑩ 读数、及范围列/汇总格（模拟小读数 + min~max×k）。"""
+    try:
+        from radiation_detection_report.chapter5_field_sync import (
+            _background_reading_fields_sorted,
+            background_range_expression,
+            is_background_range_pdf_field,
+            is_background_reading_pdf_field,
+            resolve_background_calibration_factor_pid,
+        )
+        from utils.dynamic_form_expression import eval_computed_formula
+    except ImportError:
+        return 0
+
+    filled = 0
+    pid_to_field = _index_fields_by_pdf_field_id(frontend_obj)
+    fields = [f for f in pid_to_field.values() if isinstance(f, dict)]
+    reading_rows = _background_reading_fields_sorted(fields)
+    if not reading_rows:
+        for field in fields:
+            if not is_background_reading_pdf_field(field):
+                continue
+            pid = str(field.get("pdfFieldId") or field.get("id") or "").strip().lower()
+            if pid:
+                reading_rows.append({"pid": pid, "field": field})
+
+    for row in reading_rows:
+        pid = str(row.get("pid") or "").strip().lower()
+        field = pid_to_field.get(pid) or row.get("field")
+        if not isinstance(field, dict) or not pid:
+            continue
+        if not _rp_numeric_field_needs_mock_fill(_payload_pid_value(payload, pid)):
+            continue
+        base = rng.uniform(0.06, 0.12)
+        jitter = rng.uniform(-0.015, 0.015)
+        val = round(max(0.01, base + jitter), _field_precision(field))
+        val = _format_mock_field_value(field, val)
+        _write_pid_value_to_payload(payload, pid, val, field=field)
+        filled += 1
+
+    chapter = _radiation_protection_chapter_config(frontend_obj)
+    factor_pid = resolve_background_calibration_factor_pid(chapter, fields) or _primary_rp_calibration_factor_pid(
+        frontend_obj
+    )
+    if not factor_pid:
+        return filled
+
+    reading_pids = [str(r.get("pid") or "") for r in reading_rows if str(r.get("pid") or "")]
+    range_slots: list[dict] = []
+    for field in fields:
+        if not isinstance(field, dict) or not _is_background_range_slot_field(field):
+            continue
+        pid = str(field.get("pdfFieldId") or field.get("id") or "").strip().lower()
+        if not pid:
+            continue
+        page, x0, y0 = _field_pdf_anchor_rect(field)
+        range_slots.append({"pid": pid, "field": field, "page": page, "x0": x0, "y0": y0})
+    range_slots.sort(key=lambda r: (r["page"], r["y0"], r["x0"], r["pid"]))
+
+    if range_slots and reading_pids:
+        for idx, slot in enumerate(range_slots):
+            pid = slot["pid"]
+            field = slot["field"]
+            if not _rp_numeric_field_needs_mock_fill(_payload_pid_value(payload, pid)):
+                continue
+            src_pid = reading_pids[min(idx, len(reading_pids) - 1)]
+            src_val = _payload_pid_value(payload, src_pid)
+            try:
+                num = float(src_val)
+            except (TypeError, ValueError):
+                continue
+            try:
+                fac = float(_payload_pid_value(payload, factor_pid))
+            except (TypeError, ValueError):
+                fac = 1.0
+            out = round(num * fac, _field_precision(field))
+            _write_pid_value_to_payload(payload, pid, _format_mock_field_value(field, out), field=field)
+            filled += 1
+
+    if len(reading_pids) < 2:
+        return filled
+    expr = background_range_expression(reading_pids, factor_pid)
+    if not expr:
+        return filled
+    constants = frontend_obj.get("constants") if isinstance(frontend_obj.get("constants"), dict) else {}
+    enums = frontend_obj.get("enums") if isinstance(frontend_obj.get("enums"), dict) else {}
+    lookup_tables = (
+        frontend_obj.get("lookupTables") if isinstance(frontend_obj.get("lookupTables"), dict) else {}
+    )
+    vm = _build_mock_formula_value_mapping(payload, frontend_obj)
+    try:
+        res = eval_computed_formula(
+            expr,
+            vm,
+            constants=constants,
+            enums=enums,
+            lookup_tables=lookup_tables,
+        )
+    except Exception:
+        res = None
+    if res is not None:
+        for field in fields:
+            if not isinstance(field, dict):
+                continue
+            label = str(field.get("label") or field.get("hierarchyKey") or field.get("id") or "")
+            if label == "本底水平报出值" or is_background_range_pdf_field(field):
+                pid = str(field.get("pdfFieldId") or field.get("id") or "").strip().lower()
+                cur = _payload_pid_value(payload, pid)
+                if not _rp_numeric_field_needs_mock_fill(cur) and cur and "~" in str(cur):
+                    continue
+                formatted = _format_mock_field_value(field, res)
+                _write_field_value_to_payload(payload, field, formatted)
+                filled += 1
+    return filled
+
+
+def _finalize_rp_chapter_supplemental_values(
+    payload: dict,
+    frontend_obj: dict,
+    rng: random.Random,
+    bindings: list[dict],
+) -> dict[str, int]:
+    """在防护表 / 划除逻辑之后补全校准因子、本底与报出值公式。"""
+    stats: dict[str, int] = {}
+    stats["prefaceFactors"] = _fill_rp_preface_factor_fields(payload, frontend_obj, rng)
+    stats["background"] = _fill_rp_background_level_mock(payload, frontend_obj, rng)
+    stats["conditionLine"] = int(_inject_mock_rp_condition_line(payload))
+    stats["bindingDerived"] = _apply_rp_binding_derived_values(payload, frontend_obj, bindings)
+    stats["formulas"] = _apply_mock_formula_fields(payload, frontend_obj)
+    stats["bindingDerived"] += _apply_rp_binding_derived_values(payload, frontend_obj, bindings)
+    stats["formulaOutputsEnsured"] = _ensure_rp_formula_outputs_filled(
+        payload, frontend_obj, bindings
+    )
+    return stats
+
+
+def _ensure_rp_formula_outputs_filled(
+    payload: dict,
+    frontend_obj: dict,
+    bindings: list[dict],
+) -> int:
+    """读数已填时补全仍为 / 的均值、报出值（gapSlashed 之后兜底）。"""
+    from utils.conditional_field_rules import resolve_field_formula_for_eval
+    from utils.dynamic_form_expression import eval_computed_formula
+
+    if not bindings:
+        return 0
+    chapter = _radiation_protection_chapter_config(frontend_obj)
+    constants = frontend_obj.get("constants") if isinstance(frontend_obj.get("constants"), dict) else {}
+    enums = frontend_obj.get("enums") if isinstance(frontend_obj.get("enums"), dict) else {}
+    lookup_tables = (
+        frontend_obj.get("lookupTables") if isinstance(frontend_obj.get("lookupTables"), dict) else {}
+    )
+    pid_to_field = _index_fields_by_pdf_field_id(frontend_obj)
+    dual_mode = _rp_bindings_indicate_dual_group(bindings, frontend_obj)
+    factor_pid = _primary_rp_calibration_factor_pid(frontend_obj) or "f927"
+    fixed = 0
+
+    for binding in bindings:
+        if not isinstance(binding, dict) or _is_rp_background_binding(binding):
+            continue
+        groups = (1, 2) if dual_mode and _binding_is_dual_capable(binding) else (1,)
+        for group in groups:
+            if not _binding_group_has_active_readings(payload, binding, group=group):
+                continue
+            nums = _binding_group_reading_numbers(payload, binding, group=group)
+            if not nums:
+                continue
+            mean_key = "mean_m" if group == 1 else "mean_m_2"
+            report_key = "report_d" if group == 1 else "report_d_2"
+            mean_pid = str(binding.get(mean_key) or "").strip().lower()
+            report_pid = str(binding.get(report_key) or "").strip().lower()
+            mean_field = pid_to_field.get(mean_pid) if mean_pid else None
+            report_field = pid_to_field.get(report_pid) if report_pid else None
+            mean_prec = _field_precision(mean_field if isinstance(mean_field, dict) else None)
+
+            mean_cur = _payload_pid_value(payload, mean_pid) if mean_pid else None
+            if mean_pid and str(mean_cur or "").strip() in ("", _SLASH):
+                mean_val = round(sum(nums) / len(nums), mean_prec)
+                _write_pid_value_to_payload(
+                    payload,
+                    mean_pid,
+                    _format_mock_field_value(mean_field, mean_val),
+                    field=mean_field if isinstance(mean_field, dict) else None,
+                )
+                fixed += 1
+                mean_cur = mean_val
+
+            if not report_pid or str(_payload_pid_value(payload, report_pid) or "").strip() not in (
+                "",
+                _SLASH,
+            ):
+                continue
+
+            vm = _build_mock_formula_value_mapping(payload, frontend_obj)
+            formula = ""
+            if isinstance(report_field, dict):
+                formula = resolve_field_formula_for_eval(
+                    report_field,
+                    vm,
+                    constants=constants,
+                    enums=enums,
+                    lookup_tables=lookup_tables,
+                )
+            if not formula and mean_pid:
+                try:
+                    from radiation_detection_report.chapter5_field_sync import (
+                        manual_report_value_rules_for_binding,
+                    )
+
+                    rules = (
+                        chapter.get("reportValueRules")
+                        if isinstance(chapter.get("reportValueRules"), list)
+                        else []
+                    )
+                    manual = manual_report_value_rules_for_binding(
+                        rules, binding, report_group=group
+                    )
+                    if manual:
+                        formula = str(manual[0].get("expression") or "").strip()
+                except ImportError:
+                    formula = ""
+            if not formula and mean_pid:
+                formula = f"{mean_pid}*{factor_pid}"
+            if not formula:
+                continue
+            try:
+                res = eval_computed_formula(
+                    formula,
+                    vm,
+                    constants=constants,
+                    enums=enums,
+                    lookup_tables=lookup_tables,
+                )
+            except Exception:
+                res = None
+            if res is None:
+                continue
+            _write_pid_value_to_payload(
+                payload,
+                report_pid,
+                _format_mock_field_value(report_field, res),
+                field=report_field if isinstance(report_field, dict) else None,
+            )
+            fixed += 1
+    return fixed
 
 
 def _row_index_from_radiation_point(point: str) -> int:
@@ -915,6 +1594,8 @@ def _binding_radiation_point_usable(point: str) -> bool:
 
 def _is_valid_rp_data_binding(binding: dict, pid_to_field: dict[str, dict]) -> bool:
     if not isinstance(binding, dict) or _is_rp_background_binding(binding):
+        return False
+    if _binding_uses_background_mock_cells(binding, pid_to_field):
         return False
     if _binding_has_background_cells(binding, pid_to_field):
         return False
@@ -1015,9 +1696,15 @@ def _collect_rp_data_field_pids(
             if _is_rp_location_pdf_field(item):
                 continue
             field = pid_to_field.get(pid) or _field_from_pdf_entry(item)
-            if _is_rp_preface_factor_field(field) or _is_background_level_field(field):
+            if _is_rp_preface_factor_field(field) or _field_is_rp_background_mock_cell(field):
                 continue
             if _is_rp_table_seq_field(field):
+                continue
+            if not _is_rp_table_data_field(
+                field,
+                pid_to_field=pid_to_field,
+                rp_pdf_pids=rp_pdf_pids,
+            ) and not _is_rp_location_field(field):
                 continue
             pids.add(pid)
     for field in _iter_all_template_fields(frontend_obj):
@@ -1052,7 +1739,6 @@ def _collect_rp_managed_pids(
             rp_pdf_pids=rp_pdf_pids,
         )
     )
-    pids.update(rp_pdf_pids)
     for binding in bindings:
         seq_field = _seq_field_for_binding(binding, pid_to_field, frontend_obj)
         if isinstance(seq_field, dict):
@@ -1223,17 +1909,18 @@ def _seq_field_for_binding(
     pid_to_field: dict[str, dict],
     frontend_obj: dict,
 ) -> dict | None:
-    """优先 fieldBindings.seq_no；否则按读数格 PDF 位置匹配序号栏。"""
-    seq_pid = str(binding.get("seq_no") or "").strip().lower()
-    if seq_pid and _F_ID_RE.match(seq_pid):
-        field = pid_to_field.get(seq_pid)
-        if isinstance(field, dict):
-            return field
-    from radiation_detection_report.chapter5_field_sync import seq_field_for_binding_row
+    """按第五章表结构（列带 + radiationPoint 行坐标）匹配序号栏。"""
+    from radiation_detection_report.chapter5_field_sync import (
+        resolve_chapter5_layout_for_fields,
+        seq_field_for_binding_from_table_layout,
+    )
 
     fields = [f for f in _iter_form_fields(frontend_obj) if isinstance(f, dict)]
-    matched = seq_field_for_binding_row(binding, fields, pid_to_field)
-    return dict(matched) if isinstance(matched, dict) else None
+    layout = resolve_chapter5_layout_for_fields(fields, template_payload=frontend_obj)
+    matched = seq_field_for_binding_from_table_layout(binding, fields, layout)
+    if isinstance(matched, dict):
+        return dict(matched)
+    return None
 
 
 def _location_fields_by_row_index(frontend_obj: dict) -> dict[int, dict]:
@@ -1337,8 +2024,22 @@ def _mock_rp_reading_value(rng: random.Random) -> float:
     return round(rng.uniform(0.12, 0.38), PROTECTION_NUMBER_PRECISION)
 
 
-def _bindings_share_seq_merge(prev_binding: dict, next_binding: dict) -> bool:
-    """表格顺序相邻两行是否属于同一跨行序号单元（同主检测点且带分表头）。"""
+def _bindings_share_seq_merge(
+    prev_binding: dict,
+    next_binding: dict,
+    *,
+    pid_to_field: dict[str, dict] | None = None,
+    frontend_obj: dict | None = None,
+) -> bool:
+    """表格顺序相邻两行是否属于同一跨行序号单元（同序号格 / 同主检测点分表头）。"""
+    if pid_to_field is not None and frontend_obj is not None:
+        sf1 = _seq_field_for_binding(prev_binding, pid_to_field, frontend_obj)
+        sf2 = _seq_field_for_binding(next_binding, pid_to_field, frontend_obj)
+        if isinstance(sf1, dict) and isinstance(sf2, dict):
+            p1 = str(sf1.get("pdfFieldId") or sf1.get("id") or "").strip().lower()
+            p2 = str(sf2.get("pdfFieldId") or sf2.get("id") or "").strip().lower()
+            if p1 and p1 == p2:
+                return True
     prev_pt = str(prev_binding.get("radiationPoint") or "")
     next_pt = str(next_binding.get("radiationPoint") or "")
     if not (_has_sub_location_in_point(prev_pt) and _has_sub_location_in_point(next_pt)):
@@ -1353,46 +2054,9 @@ def _assign_rp_sequence_numbers(
     pid_to_field: dict[str, dict],
     frontend_obj: dict,
 ) -> int:
-    """按表格顺序为已填行编序号 1、2、3…；跨行合并格写 n~m。"""
-    assigned = 0
-    seq_no = 1
-    i = 0
-    n = len(bindings)
-    while i < n:
-        if i not in selected:
-            i += 1
-            continue
-        group = [i]
-        j = i + 1
-        while j < n and j in selected and _bindings_share_seq_merge(bindings[j - 1], bindings[j]):
-            group.append(j)
-            j += 1
-        if len(group) > 1:
-            seq_text = f"{seq_no}~{seq_no + len(group) - 1}"
-            seq_no += len(group)
-        else:
-            seq_text = str(seq_no)
-            seq_no += 1
-        first_seq_field = _seq_field_for_binding(bindings[group[0]], pid_to_field, frontend_obj)
-        first_seq_pid = ""
-        if isinstance(first_seq_field, dict):
-            first_seq_pid = str(
-                first_seq_field.get("pdfFieldId") or first_seq_field.get("id") or ""
-            ).strip().lower()
-            _write_field_value_to_payload(payload, first_seq_field, seq_text)
-            assigned += 1
-        if len(group) > 1:
-            for gi in group[1:]:
-                extra_seq = _seq_field_for_binding(bindings[gi], pid_to_field, frontend_obj)
-                if not isinstance(extra_seq, dict):
-                    continue
-                extra_pid = str(
-                    extra_seq.get("pdfFieldId") or extra_seq.get("id") or ""
-                ).strip().lower()
-                if extra_pid and extra_pid != first_seq_pid:
-                    _write_field_value_to_payload(payload, extra_seq, _SLASH)
-        i = j
-    return assigned
+    """序号在 _finalize_rp_location_and_seq_fields 中统一写入，避免重复 normalize。"""
+    del payload, bindings, selected, pid_to_field, frontend_obj
+    return 0
 
 
 def _binding_cell_pids(binding: dict, *, group: int | None = None) -> list[str]:
@@ -1450,12 +2114,20 @@ def _binding_row_has_active_data(payload: dict, binding: dict) -> bool:
     return False
 
 
-def _active_rp_binding_indices(payload: dict, bindings: list[dict]) -> set[int]:
-    return {
-        bi
-        for bi, binding in enumerate(bindings)
-        if isinstance(binding, dict) and _binding_row_has_active_data(payload, binding)
-    }
+def _active_rp_binding_indices(
+    payload: dict,
+    bindings: list[dict],
+    *,
+    frontend_obj: dict | None = None,
+) -> set[int]:
+    from radiation_detection_report.chapter5_field_sync import active_rp_binding_indices
+
+    fields = (
+        [f for f in _iter_form_fields(frontend_obj) if isinstance(f, dict)]
+        if isinstance(frontend_obj, dict)
+        else None
+    )
+    return active_rp_binding_indices(payload, bindings, fields)
 
 
 def _finalize_rp_location_and_seq_fields(
@@ -1466,8 +2138,16 @@ def _finalize_rp_location_and_seq_fields(
     frontend_obj: dict,
     location_fields: dict[int, dict] | None = None,
 ) -> int:
-    """非空行保留序号；空行的序号/检测点位置写 /；清除误填的模拟位置文案。"""
-    active = _active_rp_binding_indices(payload, bindings)
+    """空行检测点位置写 /；序号由 normalize_site_record_rp_sequence 统一处理。"""
+    from radiation_detection_report.chapter5_field_sync import (
+        active_rp_binding_indices,
+        normalize_site_record_rp_sequence,
+    )
+
+    fields = [f for f in _iter_form_fields(frontend_obj) if isinstance(f, dict)]
+    active = active_rp_binding_indices(payload, bindings, fields)
+    normalize_site_record_rp_sequence(payload, bindings, fields, active_indices=active)
+
     slashed = 0
     for bi, binding in enumerate(bindings):
         if not isinstance(binding, dict):
@@ -1477,17 +2157,15 @@ def _finalize_rp_location_and_seq_fields(
             row_idx = _row_index_from_radiation_point(str(binding.get("radiationPoint") or ""))
             loc_field = location_fields.get(row_idx) if row_idx else None
         if bi not in active:
-            seq_field = _seq_field_for_binding(binding, pid_to_field, frontend_obj)
-            if isinstance(seq_field, dict):
-                _write_field_value_to_payload(payload, seq_field, _SLASH)
             if isinstance(loc_field, dict):
                 _write_field_value_to_payload(payload, loc_field, _SLASH)
             slashed += 1
-        elif isinstance(loc_field, dict):
-            loc_pid = str(loc_field.get("pdfFieldId") or loc_field.get("id") or "").strip().lower()
-            cur = str(_payload_pid_value(payload, loc_pid) or "").strip()
-            if cur.startswith("模拟_") or cur.startswith("mock_"):
-                _write_field_value_to_payload(payload, loc_field, _SLASH)
+        else:
+            if isinstance(loc_field, dict):
+                loc_pid = str(loc_field.get("pdfFieldId") or loc_field.get("id") or "").strip().lower()
+                cur = str(_payload_pid_value(payload, loc_pid) or "").strip()
+                if cur.startswith("模拟_") or cur.startswith("mock_"):
+                    _write_field_value_to_payload(payload, loc_field, _SLASH)
     return slashed
 
 
@@ -1548,9 +2226,11 @@ def _fill_rp_binding_group_readings(
     reading_pids = _binding_reading_pids(binding, group=group)
     if not reading_pids:
         return
-    val = _mock_rp_reading_value(rng)
-    for pid in reading_pids:
+    base = _mock_rp_reading_value(rng)
+    for i, pid in enumerate(reading_pids):
         field = pid_to_field.get(pid)
+        jitter = rng.uniform(-0.045, 0.045)
+        val = max(0.01, round(base + jitter, _field_precision(field if isinstance(field, dict) else None)))
         write_val = _format_mock_field_value(field, val) if isinstance(field, dict) else val
         _write_pid_value_to_payload(payload, pid, write_val, field=field)
 
@@ -1582,7 +2262,7 @@ def _apply_radiation_protection_chapter_mock(
     第五章防护表：按表格顺序、以最小数据行为单位随机填写。
     单组模板：整行填或整行 /。
     双组模板：第一组、第二组读数分别独立随机（可一组有值、另一组 /）。
-    序号从 1 起连续编号，跨多行合并格写 n~m；未填行全部写 /。
+    序号从 1 起按 PDF 表顺序编号；跨行合并格写 n~m（仅现场记录）；未填行全部写 /。
     """
     bindings = _build_rp_table_bindings(frontend_obj)
     if not bindings:
@@ -1976,8 +2656,19 @@ def _apply_rp_binding_derived_values(
                         formula = str(manual[0].get("expression") or "").strip()
                 except ImportError:
                     formula = ""
+            if not formula and mean_pid and isinstance(report_field, dict):
+                expr = str(
+                    report_field.get("fieldExpression")
+                    or report_field.get("formula")
+                    or ""
+                ).strip()
+                m = _FACTOR_MUL_REF_RE.search(expr)
+                if m:
+                    formula = f"{mean_pid}*f{m.group(1).lower()}"
             if not formula and mean_pid:
-                factor_pid = "f927" if group == 1 else "f270"
+                factor_pid = _primary_rp_calibration_factor_pid(frontend_obj)
+                if not factor_pid:
+                    factor_pid = "f927" if group == 1 else "f270"
                 formula = f"{mean_pid}*{factor_pid}"
             if not formula:
                 continue
@@ -2046,10 +2737,24 @@ def _purge_rp_orphan_mock_values(
         field = pid_to_field.get(pid)
         if isinstance(field, dict) and (
             _is_rp_preface_factor_field(field)
+            or _field_is_rp_background_mock_cell(field)
             or _is_rp_table_seq_field(field)
             or _is_rp_location_field(field)
         ):
             continue
+        if isinstance(field, dict):
+            merged = _resolve_field_protection_meta(field, pid_to_field=pid_to_field)
+            label = str(merged.get("hierarchyKey") or merged.get("label") or merged.get("id") or "")
+            sk = str(merged.get("templateSectionKey") or merged.get("sectionKey") or "").strip()
+            if (
+                sk == _RP_CHAPTER_SECTION_KEY
+                and not re.search(r"_r\d+", label, re.I)
+                and not any(
+                    tok in label
+                    for tok in ("测量读数", "报出值", "测量均值", "检测点位置", "序号_r")
+                )
+            ):
+                continue
         cur = _payload_pid_value(payload, pid)
         if cur in (None, "", _SLASH):
             continue
@@ -2087,6 +2792,9 @@ def _slash_unfilled_rp_table_cells(
     dd = payload.get("dynamicData") if isinstance(payload.get("dynamicData"), dict) else {}
     tr = payload.get("testResult") if isinstance(payload.get("testResult"), dict) else {}
     pid_to_field = _index_fields_by_pdf_field_id(frontend_obj)
+    skip_pids = _collect_rp_chapter_preface_pids(frontend_obj) | _collect_background_level_pids(
+        frontend_obj
+    )
     formula_output_pids: set[str] = set()
     for binding in bindings:
         if not isinstance(binding, dict):
@@ -2104,6 +2812,8 @@ def _slash_unfilled_rp_table_cells(
     slashed = 0
     for pid in sorted(managed_pids):
         if not pid or not _F_ID_RE.match(pid):
+            continue
+        if pid in skip_pids:
             continue
         cur = dd.get(pid)
         if cur is None or cur == "":
@@ -2245,19 +2955,23 @@ def _apply_mock_formula_fields(payload: dict, frontend_obj: dict) -> int:
     return applied
 
 
-def _resolve_judgment_criterion_text(field: dict, report_type: str = "") -> str:
-    jct = field.get("judgmentCriteriaByTestType")
-    if isinstance(jct, dict):
-        for key in ("acceptance", "status"):
-            if report_type and key not in str(report_type).lower() and len(jct) > 1:
-                continue
-            text = str(jct.get(key) or "").strip()
-            if text:
-                return text
-        for text in jct.values():
-            s = str(text or "").strip()
-            if s:
-                return s
+def _resolve_judgment_criterion_text(
+    field: dict,
+    report_type: str = "",
+    *,
+    payload: dict | None = None,
+    value_mapping: dict | None = None,
+) -> str:
+    from apps.api.inspection_report_make import _judgment_criterion_text_from_field_meta
+
+    crit = _judgment_criterion_text_from_field_meta(
+        field,
+        inspection_type=report_type,
+        value_mapping=value_mapping,
+        source_data=payload,
+    )
+    if crit:
+        return crit
     return str(field.get("judgmentCriterionText") or "").strip()
 
 
@@ -2286,7 +3000,18 @@ def _find_peer_measurement_field(verdict_field: dict, frontend_obj: dict) -> dic
     return candidates[0]
 
 
-def _apply_mock_verdict_fields(payload: dict, frontend_obj: dict) -> int:
+def _mock_inspection_type_display(payload: dict, library_task=None) -> str:
+    from apps.api.inspection_report_make import _resolve_inspection_type_display
+
+    return _resolve_inspection_type_display(payload, site_task=library_task)
+
+
+def _apply_mock_verdict_fields(
+    payload: dict,
+    frontend_obj: dict,
+    *,
+    library_task=None,
+) -> int:
     from utils.dynamic_form_expression import evaluate_verdict_rule
     from utils.verdict_from_criterion import verdict_from_measurement
 
@@ -2295,7 +3020,7 @@ def _apply_mock_verdict_fields(payload: dict, frontend_obj: dict) -> int:
     lookup_tables = (
         frontend_obj.get("lookupTables") if isinstance(frontend_obj.get("lookupTables"), dict) else {}
     )
-    report_type = str(payload.get("reportType") or "").strip()
+    insp_type = _mock_inspection_type_display(payload, library_task)
     vm = _build_mock_formula_value_mapping(payload, frontend_obj)
     applied = 0
     for field in _iter_form_fields(frontend_obj):
@@ -2324,11 +3049,15 @@ def _apply_mock_verdict_fields(payload: dict, frontend_obj: dict) -> int:
             peer = _find_peer_measurement_field(field, frontend_obj)
             if peer is not None:
                 measured = _read_field_value_from_payload(payload, peer)
-                crit = _resolve_judgment_criterion_text(peer, report_type)
+                crit = _resolve_judgment_criterion_text(
+                    peer, insp_type, payload=payload, value_mapping=vm
+                )
                 if crit and measured not in (None, ""):
                     verdict_text = verdict_from_measurement(str(measured), crit)
             if verdict_text is None:
-                crit = _resolve_judgment_criterion_text(field, report_type)
+                crit = _resolve_judgment_criterion_text(
+                    field, insp_type, payload=payload, value_mapping=vm
+                )
                 if crit:
                     measured = _read_field_value_from_payload(payload, field)
                     if measured not in (None, ""):
@@ -2340,7 +3069,12 @@ def _apply_mock_verdict_fields(payload: dict, frontend_obj: dict) -> int:
     return applied
 
 
-def apply_mock_derived_values(payload: dict, frontend_obj: dict) -> dict[str, int]:
+def apply_mock_derived_values(
+    payload: dict,
+    frontend_obj: dict,
+    *,
+    library_task=None,
+) -> dict[str, int]:
     """公式栏位按表达式计算；条件判定栏位按标准推断合格/不合格（不随机填）。"""
     from apps.api.inspection_report_make import _apply_computed_fields_from_steps_to_mapping
 
@@ -2370,7 +3104,9 @@ def apply_mock_derived_values(payload: dict, frontend_obj: dict) -> dict[str, in
             _write_field_value_to_payload(payload, field, val)
             stats["computedSteps"] += 1
     stats["formulas"] = _apply_mock_formula_fields(payload, frontend_obj)
-    stats["verdicts"] = _apply_mock_verdict_fields(payload, frontend_obj)
+    stats["verdicts"] = _apply_mock_verdict_fields(
+        payload, frontend_obj, library_task=library_task
+    )
     return stats
 
 
@@ -2568,6 +3304,18 @@ def build_mock_submit_from_frontend_template(
     payload["dynamicData"]["f1"] = project_id
     payload["dynamicData"]["f2"] = task_no
 
+    if library_task is not None:
+        from apps.api.inspection_report_make import (
+            _inspection_type_from_library_task,
+            _test_type_enum_from_inspection_type,
+        )
+
+        insp = _inspection_type_from_library_task(library_task)
+        if insp:
+            hi = payload.setdefault("hospitalInfo", {})
+            if not str(hi.get("testType") or "").strip():
+                hi["testType"] = _test_type_enum_from_inspection_type(insp)
+
     rp_bindings = _build_rp_table_bindings(frontend_obj)
     rp_pdf_pids = _collect_rp_pdf_section_pids(frontend_obj, rp_bindings)
     pid_to_field = _index_fields_by_pdf_field_id(frontend_obj)
@@ -2601,11 +3349,10 @@ def build_mock_submit_from_frontend_template(
         ):
             continue
 
-        if _is_rp_chapter_managed_field(
-            field,
-            pid_to_field=pid_to_field,
-            rp_pdf_pids=rp_pdf_pids,
-        ):
+        if _is_background_level_field(field) or _field_is_rp_background_mock_cell(field):
+            continue
+
+        if _is_rp_preface_factor_field(field):
             continue
 
         if _field_should_skip_mock_fill(field):
@@ -2628,7 +3375,11 @@ def build_mock_submit_from_frontend_template(
         frontend_obj,
         rp_bindings,
     )
-    derived_stats = apply_mock_derived_values(payload, frontend_obj)
+    derived_stats = apply_mock_derived_values(
+        payload, frontend_obj, library_task=library_task
+    )
+    _sync_mock_hospital_contact_fields(payload, frontend_obj)
+    _sync_mock_environment_fields(payload, frontend_obj)
     _finalize_rp_slashed_bindings(
         payload,
         frontend_obj,
@@ -2640,11 +3391,10 @@ def build_mock_submit_from_frontend_template(
         rp_bindings,
     )
     location_fields = _location_fields_by_row_index(frontend_obj)
-    active_indices = _active_rp_binding_indices(payload, rp_bindings)
     rp_stats["seqAssigned"] = _assign_rp_sequence_numbers(
         payload,
         rp_bindings,
-        active_indices,
+        set(),
         pid_to_field,
         frontend_obj,
     )
@@ -2667,6 +3417,24 @@ def build_mock_submit_from_frontend_template(
         managed_pids=rp_managed_pids,
         bindings=rp_bindings,
     )
+    rp_stats["background"] = _fill_rp_background_level_mock(payload, frontend_obj, rng)
+    rp_stats["nonTableScalars"] = _fill_rp_chapter_non_table_scalars(
+        payload,
+        frontend_obj,
+        rng,
+        managed_pids=rp_managed_pids,
+        rp_pdf_pids=rp_pdf_pids,
+        pid_to_field=pid_to_field,
+    )
+    supplemental = _finalize_rp_chapter_supplemental_values(
+        payload, frontend_obj, rng, rp_bindings
+    )
+    rp_stats.update(supplemental)
+    if "background" in supplemental:
+        rp_stats["background"] = max(
+            int(rp_stats.get("background") or 0),
+            int(supplemental.get("background") or 0),
+        )
 
     payload["_mockMeta"] = {
         "generator": "mock_inspection_submit",

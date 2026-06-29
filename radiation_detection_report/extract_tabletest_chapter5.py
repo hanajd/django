@@ -298,6 +298,73 @@ def _group_complex_points(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return groups
 
 
+def _condition_red_anchor_y(page: fitz.Page) -> Optional[float]:
+    """定位「（2）、检测条件」行 y（JS-009 实测约在 180–190，非版式 JSON 中的 89）。"""
+    anchor_y: Optional[float] = None
+    for block in page.get_text("dict").get("blocks") or []:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines") or []:
+            for span in line.get("spans") or []:
+                text = str(span.get("text") or "")
+                if "（2）、检测条件" in text or "曝光模式（部位" in text:
+                    bbox = span.get("bbox") or [0, 0, 0, 0]
+                    cy = (float(bbox[1]) + float(bbox[3])) / 2.0
+                    if anchor_y is None or cy < anchor_y:
+                        anchor_y = cy
+    return anchor_y
+
+
+def _assign_condition_red_slot(x: float) -> str:
+    """按 x 坐标将红字落入曝光模式/部位/kV/mA/s 等槽位。"""
+    if x < 215:
+        return "prefix"
+    if x < 340:
+        return "body_part"
+    if x < 480:
+        return "tube"
+    if x < 538:
+        return "kv"
+    if x < 610:
+        return "ma"
+    if x < 665:
+        return "s"
+    return "mas"
+
+
+def extract_condition_slots_from_page(page: fitz.Page) -> Dict[str, str]:
+    """从现场记录 PDF 检测条件行红字提取各槽位填写值。"""
+    anchor_y = _condition_red_anchor_y(page)
+    if anchor_y is None:
+        return {}
+    landscape = float(page.rect.width) > float(page.rect.height)
+    if landscape:
+        y_min, y_max = anchor_y + 18.0, anchor_y + 55.0
+    else:
+        y_min, y_max = anchor_y - 4.0, anchor_y + 8.0
+    red_color = 16711680
+    slots: Dict[str, str] = {}
+    for block in page.get_text("dict").get("blocks") or []:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines") or []:
+            for span in line.get("spans") or []:
+                if span.get("color") != red_color:
+                    continue
+                bbox = span.get("bbox") or [0, 0, 0, 0]
+                cy = (float(bbox[1]) + float(bbox[3])) / 2.0
+                if cy < y_min or cy > y_max:
+                    continue
+                if float(bbox[0]) < 40:
+                    continue
+                text = str(span.get("text") or "").strip()
+                if not text or text == "/":
+                    continue
+                slot = _assign_condition_red_slot(float(bbox[0]))
+                slots[slot] = text
+    return slots
+
+
 def _extract_preface(page: fitz.Page) -> Dict[str, Any]:
     words = page.get_text("words")
     title = _find_title_block(words)
@@ -320,6 +387,7 @@ def _extract_preface(page: fitz.Page) -> Dict[str, Any]:
         elif mode == "condition":
             condition_lines.append(s)
 
+    anchor_y = _condition_red_anchor_y(page)
     return {
         "section_title": title,
         "instrument_info": {
@@ -329,8 +397,9 @@ def _extract_preface(page: fitz.Page) -> Dict[str, Any]:
         },
         "condition": {
             "label": "（2）、检测条件",
-            "y_top": round(_find_block_y(words, "（2）、") or 89.0, 2),
+            "y_top": round(anchor_y or _find_block_y(words, "（2）、") or 89.0, 2),
             "text": _normalize_text(" ".join(condition_lines)),
+            "slots": extract_condition_slots_from_page(page),
         },
     }
 

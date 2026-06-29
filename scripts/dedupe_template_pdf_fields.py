@@ -124,6 +124,117 @@ def remap_field_metadata(field: Dict[str, Any], id_map: Dict[str, str]) -> None:
                 fv[sub] = remap_expression(fv[sub], id_map)
 
 
+def form_field_pdf_id(field: Dict[str, Any]) -> str:
+    src = field.get("source") if isinstance(field.get("source"), dict) else {}
+    return normalize_pdf_field_id(
+        str(field.get("pdfFieldId") or src.get("pdfFieldId") or "")
+    )
+
+
+def form_field_has_pdf_binding(field: Dict[str, Any]) -> bool:
+    if not isinstance(field, dict):
+        return False
+    if field.get("pdfAnchor") or field.get("rect"):
+        return True
+    src = field.get("source") if isinstance(field.get("source"), dict) else {}
+    pb = src.get("pdfBinding")
+    return isinstance(pb, dict) and bool(pb.get("rect") or pb.get("page"))
+
+
+def form_field_score(field: Dict[str, Any]) -> int:
+    score = field_score(
+        {
+            "fieldExpression": field.get("fieldExpression"),
+            "pdfFieldExpression": field.get("pdfFieldExpression"),
+            "judgmentCriteriaByTestType": field.get("judgmentCriteriaByTestType"),
+            "judgmentCriteriaManual": field.get("judgmentCriteriaManual"),
+            "fieldVerdict": field.get("fieldVerdict"),
+            "fieldVerdictPlan": field.get("fieldVerdictPlan"),
+            "fieldType": field.get("type") or field.get("fieldType"),
+            "id": field.get("id") or field.get("label"),
+        }
+    )
+    if str(field.get("submitPath") or "").strip():
+        score += 50
+    if str(field.get("schemaKey") or "").strip():
+        score += 30
+    return score
+
+
+def dedupe_form_schema_fields(data: Dict[str, Any]) -> int:
+    fs = data.get("formSchema")
+    if not isinstance(fs, dict):
+        return 0
+
+    locations: List[Tuple[List[Any], int, Dict[str, Any], str]] = []
+
+    def collect_from_list(fields: List[Any]) -> None:
+        if not isinstance(fields, list):
+            return
+        for i, field in enumerate(fields):
+            if not isinstance(field, dict) or not form_field_has_pdf_binding(field):
+                continue
+            pid = form_field_pdf_id(field)
+            if pid:
+                locations.append((fields, i, field, pid))
+
+    for step in fs.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        for section in step.get("sections") or []:
+            if not isinstance(section, dict):
+                continue
+            collect_from_list(section.get("fields"))
+            matrix = section.get("matrix")
+            if not isinstance(matrix, dict):
+                continue
+            collect_from_list(matrix.get("headerFields"))
+            for row in matrix.get("rows") or []:
+                if not isinstance(row, dict):
+                    continue
+                cells = row.get("cells")
+                if isinstance(cells, dict):
+                    for key, cell in cells.items():
+                        if isinstance(cell, dict) and form_field_has_pdf_binding(cell):
+                            pid = form_field_pdf_id(cell)
+                            if pid:
+                                locations.append((cells, key, cell, pid))  # type: ignore[arg-type]
+
+    by_pid: Dict[str, List[Tuple[Any, Any, Dict[str, Any], str]]] = defaultdict(list)
+    for loc in locations:
+        by_pid[loc[3]].append(loc)
+
+    to_remove_list: List[Tuple[List[Any], int]] = []
+    to_remove_dict: List[Tuple[Dict[str, Any], str]] = []
+    for locs in by_pid.values():
+        if len(locs) <= 1:
+            continue
+        best_loc = max(locs, key=lambda t: (form_field_score(t[2]), str(t[1])))
+        for loc in locs:
+            if loc is best_loc:
+                continue
+            parent, key = loc[0], loc[1]
+            if isinstance(parent, dict):
+                to_remove_dict.append((parent, str(key)))
+            elif isinstance(parent, list) and isinstance(key, int):
+                to_remove_list.append((parent, key))
+
+    removed = 0
+    by_list: Dict[int, List[Tuple[List[Any], int]]] = defaultdict(list)
+    for plist, idx in to_remove_list:
+        by_list[id(plist)].append((plist, idx))
+    for items in by_list.values():
+        plist = items[0][0]
+        for _, idx in sorted(items, key=lambda x: -x[1]):
+            plist.pop(idx)
+            removed += 1
+    for parent, key in to_remove_dict:
+        if key in parent:
+            parent.pop(key)
+            removed += 1
+    return removed
+
+
 def remap_json_tree(node: Any, id_map: Dict[str, str]) -> Any:
     if isinstance(node, dict):
         for k, v in list(node.items()):
@@ -227,12 +338,15 @@ def dedupe_template(data: Dict[str, Any], *, tol: float = 0.5) -> Tuple[Dict[str
     remap_json_tree(data.get("formSchema"), id_map)
     remap_json_tree(data.get("steps"), id_map)
 
+    form_schema_removed = dedupe_form_schema_fields(data)
+
     stats = {
         "before": len(materialized),
         "after": len(compact),
         "removed": len(materialized) - len(compact),
         "duplicate_groups": sum(1 for v in groups.values() if len(v) > 1),
         "with_formula_or_judgment_kept": sum(1 for r in compact if field_score(materialize_unified_pdf_fields([r])[0]) >= 500),
+        "form_schema_fields_removed": form_schema_removed,
     }
     return data, stats
 

@@ -36,6 +36,29 @@ def split_contact_name_phone(contact_person: str, contact_phone: str) -> Tuple[s
     return cp, ""
 
 
+def format_commission_contact_combined(contact_person: str, contact_phone: str) -> str:
+    """「委托单位联系人/电话」整格：姓名与号码直接拼接（无斜杠）。"""
+    name = (contact_person or "").strip()
+    phone = (contact_phone or "").strip()
+    if name and phone:
+        return f"{name}{phone}"
+    return name or phone
+
+
+_QC_CONDITION_UNIT_MARKERS_RE = re.compile(
+    r"(kV|mA|mAs|mm|mGy|HU|lp/cm|%)",
+    re.IGNORECASE,
+)
+
+
+def qc_condition_text_has_unit_markers(text: str) -> bool:
+    """valueTemplate 渲染或带单位的多槽拼接结果（如 104kV，91mA）。"""
+    s = str(text or "").strip()
+    if not s:
+        return False
+    return bool(_QC_CONDITION_UNIT_MARKERS_RE.search(s))
+
+
 def merge_number_tokens_from_source(template: str, source: str) -> str:
     """
     将 template 中从左到右的数字串，按顺序替换为 source 中提取的数字串（现场记录）。

@@ -206,6 +206,11 @@ def build_runtime_frontend_schema(
         if isinstance(instrument_root, dict):
             payload = {**payload, **instrument_root}
         if payload:
+            from apps.core.site_record_hospital_prefill import (
+                enrich_payload_hospital_info_from_frontend_chapter,
+            )
+
+            enrich_payload_hospital_info_from_frontend_chapter(payload, frontend_obj)
             frontend_obj = _inject_frontend_payload_defaults(frontend_obj, payload)
         frontend_obj = _inject_instruments_root_into_frontend_export(
             frontend_obj, payload, task_obj=task_obj, project_obj=project_obj

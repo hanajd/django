@@ -560,6 +560,14 @@
         .conditional-rules-editor {
             margin-bottom: 12px;
         }
+        .judgment-test-type-block {
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #eef2f8;
+        }
+        .judgment-test-type-block:last-of-type {
+            border-bottom: none;
+        }
         .conditional-rule-card {
             margin-bottom: 10px;
             padding: 10px;
@@ -3297,6 +3305,17 @@
             ['formulaRules', 'fieldExpressionRules'].forEach(key => {
                 remapPdfFieldRefsOnConditionalRules(f[key], remap);
             });
+            const jsets = f.judgmentRuleSets;
+            if (jsets && typeof jsets === 'object') {
+                ['acceptance', 'status'].forEach(key => {
+                    const block = jsets[key];
+                    if (!block || typeof block !== 'object') return;
+                    if (block.logicExpression) {
+                        block.logicExpression = remapFormulaPdfFieldRefs(block.logicExpression, remap);
+                    }
+                    remapPdfFieldRefsOnConditionalRules(block.rules, remap);
+                });
+            }
             const j = f.judgmentCriteriaByTestType;
             if (j && typeof j === 'object') {
                 if (j.acceptance) j.acceptance = remapFormulaPdfFieldRefs(j.acceptance, remap);
@@ -3431,6 +3450,7 @@
         let selectedFieldId = null;
         let formulaModalOpen = false;
         let formulaModalChapterMode = false;
+        let formulaPanelCommitFn = null;
 
         function openFormulaModal(id) {
             const f = getFieldById(id);
@@ -3456,9 +3476,14 @@
         }
 
         function closeFormulaModal() {
+            // 先关闭 PDF 选栏浮层且不回写 overlay（避免用打开时的旧公式覆盖刚编辑的判定）
+            closeFormulaFieldPicker({ applyOverlay: false });
+            if (typeof formulaPanelCommitFn === 'function') {
+                formulaPanelCommitFn();
+            }
+            formulaPanelCommitFn = null;
             formulaModalOpen = false;
             formulaModalChapterMode = false;
-            closeFormulaFieldPicker();
             if (formulaModalBackdrop) {
                 formulaModalBackdrop.classList.remove('open');
                 formulaModalBackdrop.setAttribute('aria-hidden', 'true');
@@ -3473,6 +3498,105 @@
             const j = f.judgmentCriteriaByTestType;
             j.acceptance = j.acceptance != null ? String(j.acceptance) : '';
             j.status = j.status != null ? String(j.status) : '';
+        }
+
+        function defaultJudgmentRuleSets() {
+            return {
+                acceptance: { combine: 'and', logicExpression: '', rules: [] },
+                status: { combine: 'and', logicExpression: '', rules: [] }
+            };
+        }
+
+        function ensureJudgmentRuleSetsStructure(f) {
+            if (!f) return defaultJudgmentRuleSets();
+            if (!f.judgmentRuleSets || typeof f.judgmentRuleSets !== 'object') {
+                f.judgmentRuleSets = defaultJudgmentRuleSets();
+            }
+            ['acceptance', 'status'].forEach(key => {
+                const block = f.judgmentRuleSets[key];
+                if (!block || typeof block !== 'object') {
+                    f.judgmentRuleSets[key] = { combine: 'and', logicExpression: '', rules: [] };
+                    return;
+                }
+                if (!Array.isArray(block.rules)) block.rules = [];
+                block.combine = block.combine === 'or' ? 'or' : 'and';
+                block.logicExpression = block.logicExpression != null ? String(block.logicExpression) : '';
+                block.rules = block.rules.map((r, i) => normalizeConditionalRuleRow(r, i));
+            });
+            ensureJudgmentObj(f);
+            return f.judgmentRuleSets;
+        }
+
+        function hydrateJudgmentRulesFromFlatIfEmpty(f) {
+            if (!f) return;
+            ensureJudgmentRuleSetsStructure(f);
+            ['acceptance', 'status'].forEach(key => {
+                const block = f.judgmentRuleSets[key];
+                const flat = String(f.judgmentCriteriaByTestType[key] || '').trim();
+                const hasRuleExpr = (block.rules || []).some(r => String(r.expression || r.formula || '').trim());
+                if (!hasRuleExpr && flat) {
+                    block.rules.push({
+                        id: newConditionalRuleId(),
+                        label: '默认',
+                        condition: '',
+                        expression: flat,
+                        formula: flat
+                    });
+                }
+            });
+        }
+
+        function ensureJudgmentRuleSets(f) {
+            ensureJudgmentRuleSetsStructure(f);
+            hydrateJudgmentRulesFromFlatIfEmpty(f);
+            ['acceptance', 'status'].forEach(key => {
+                const block = f.judgmentRuleSets[key];
+                const hasRuleExpr = (block.rules || []).some(r => String(r.expression || r.formula || '').trim());
+                if (hasRuleExpr && !judgmentBlockHasConditions(block)) {
+                    const compiled = compileJudgmentRuleSetToText(block);
+                    f.judgmentCriteriaByTestType[key] = compiled
+                        ? normalizeJudgmentCriteriaInput(compiled)
+                        : '';
+                }
+            });
+            return f.judgmentRuleSets;
+        }
+
+        function judgmentBlockHasConditions(block) {
+            const rules = (block && block.rules) || [];
+            return rules.some(r => String(r.condition || '').trim()
+                && String(r.expression || r.formula || '').trim());
+        }
+
+        function judgmentRuleSetsHaveConditions(sets) {
+            if (!sets || typeof sets !== 'object') return false;
+            return ['acceptance', 'status'].some(key => judgmentBlockHasConditions(sets[key]));
+        }
+
+        function syncJudgmentCriteriaFromRuleSets(f, options) {
+            if (!f) return;
+            ensureJudgmentObj(f);
+            const skipFlatHydrate = !!(options && options.skipFlatHydrate);
+            if (skipFlatHydrate) {
+                ensureJudgmentRuleSetsStructure(f);
+            } else {
+                ensureJudgmentRuleSets(f);
+            }
+            ['acceptance', 'status'].forEach(key => {
+                const block = f.judgmentRuleSets[key];
+                if (judgmentBlockHasConditions(block)) {
+                    return;
+                }
+                const compiled = compileJudgmentRuleSetToText(block);
+                f.judgmentCriteriaByTestType[key] = compiled
+                    ? normalizeJudgmentCriteriaInput(compiled)
+                    : '';
+            });
+            if (hasFieldJudgment(f)) {
+                f.judgmentCriteriaManual = true;
+            } else {
+                f.judgmentCriteriaManual = false;
+            }
         }
 
         function newConditionalRuleId() {
@@ -3513,7 +3637,13 @@
             const logic = String(block.logicExpression || '').trim();
             if (logic) return logic;
             const rules = Array.isArray(block.rules) ? block.rules : [];
-            const exprs = rules.map(r => String((r && (r.expression || r.formula)) || '').trim()).filter(Boolean);
+            let exprs = rules
+                .filter(r => !String((r && r.condition) || '').trim())
+                .map(r => String((r && (r.expression || r.formula)) || '').trim())
+                .filter(Boolean);
+            if (!exprs.length) {
+                exprs = rules.map(r => String((r && (r.expression || r.formula)) || '').trim()).filter(Boolean);
+            }
             if (!exprs.length) return '';
             const sep = block.combine === 'or' ? ' 或 ' : ' 且 ';
             return exprs.join(sep);
@@ -3530,15 +3660,16 @@
 
         function migrateJudgmentRuleSetsToCriteria(f) {
             if (!f || !f.judgmentRuleSets || typeof f.judgmentRuleSets !== 'object') return;
+            if (judgmentRuleSetsHaveConditions(f.judgmentRuleSets)) return;
             ensureJudgmentObj(f);
             const acc = compileJudgmentRuleSetToText(f.judgmentRuleSets.acceptance);
             const st = compileJudgmentRuleSetToText(f.judgmentRuleSets.status);
-            if (acc && !String(f.judgmentCriteriaByTestType.acceptance || '').trim()) {
-                f.judgmentCriteriaByTestType.acceptance = acc;
-            }
-            if (st && !String(f.judgmentCriteriaByTestType.status || '').trim()) {
-                f.judgmentCriteriaByTestType.status = st;
-            }
+            f.judgmentCriteriaByTestType.acceptance = acc
+                ? normalizeJudgmentCriteriaInput(acc)
+                : '';
+            f.judgmentCriteriaByTestType.status = st
+                ? normalizeJudgmentCriteriaInput(st)
+                : '';
             delete f.judgmentRuleSets;
             delete f.formulaSelectionMode;
             delete f.requiresManualFormulaSelection;
@@ -3638,6 +3769,31 @@
                         syncRuleMeta();
                         if (cfg.onChange) cfg.onChange();
                     });
+                    exprIn.addEventListener('blur', () => {
+                        let val = String(exprIn.value || '');
+                        if (typeof cfg.normalizeExpression === 'function') {
+                            val = cfg.normalizeExpression(val);
+                            exprIn.value = val;
+                        }
+                        rule.expression = val;
+                        rule.formula = val;
+                        syncRuleMeta();
+                        if (cfg.onChange) cfg.onChange();
+                    });
+                    if (Array.isArray(cfg.commitHooks)) {
+                        cfg.commitHooks.push(() => {
+                            rule.label = String(labelIn.value || '');
+                            rule.condition = String(condIn.value || '');
+                            let val = String(exprIn.value || '');
+                            if (typeof cfg.normalizeExpression === 'function') {
+                                val = cfg.normalizeExpression(val);
+                                exprIn.value = val;
+                            }
+                            rule.expression = val;
+                            rule.formula = val;
+                            syncRuleMeta();
+                        });
+                    }
                     card.appendChild(labelLbl);
                     card.appendChild(labelIn);
                     card.appendChild(condLbl);
@@ -3768,6 +3924,15 @@
         function hasFieldJudgment(f) {
             if (!f) return false;
             ensureJudgmentObj(f);
+            ensureJudgmentRuleSets(f);
+            if (judgmentRuleSetsHaveConditions(f.judgmentRuleSets)) return true;
+            const sets = f.judgmentRuleSets;
+            if (['acceptance', 'status'].some(key => {
+                const rules = (sets[key] && sets[key].rules) || [];
+                return rules.some(r => String(r.expression || r.formula || '').trim());
+            })) {
+                return true;
+            }
             return !!(String(f.judgmentCriteriaByTestType.acceptance || '').trim()
                 || String(f.judgmentCriteriaByTestType.status || '').trim());
         }
@@ -3945,10 +4110,11 @@
         function validateJudgmentText(raw) {
             const s = normalizeJudgmentCriteriaInput(raw);
             if (!s) return { level: 'warn', message: '未填写判定标准。没有合格判定的栏位可以留空。' };
-            const ok = /^(<=|>=|<|>|=)(f\d+|\d+(?:\.\d+)?)$/i.test(s)
-                || /^(f\d+|\d+(?:\.\d+)?)±\d+(?:\.\d+)?$/i.test(s)
-                || /^±\d+(?:\.\d+)?$/i.test(s)
-                || /^\d+(?:\.\d+)?-\d+(?:\.\d+)?$/.test(s);
+            const num = String.raw`(?:f\d+|\d+(?:\.\d+)?%?)`;
+            const ok = new RegExp(`^(<=|>=|<|>|=)${num}$`, 'i').test(s)
+                || new RegExp(`^${num}±\\d+(?:\\.\\d+)?%?$`, 'i').test(s)
+                || /^±\d+(?:\.\d+)?%?$/i.test(s)
+                || /^\d+(?:\.\d+)?%?-\d+(?:\.\d+)?%?$/.test(s);
             if (ok) {
                 const desc = describeJudgmentCriterion(s);
                 return { level: 'ok', message: '已识别：' + (desc || s) + '。' };
@@ -4103,9 +4269,12 @@
             document.body.classList.toggle('map-mode-open', !!open);
         }
 
-        function closeFormulaFieldPicker() {
+        function closeFormulaFieldPicker(options) {
+            const applyOverlay = !(options && options.applyOverlay === false);
             if (formulaPickSession) {
-                pushFormulaPickEditorToModal();
+                if (applyOverlay) {
+                    pushFormulaPickEditorToModal();
+                }
                 setFormulaPickCanvasHighlight(formulaPickSession.excludeFieldId, false);
             }
             formulaPickSession = null;
@@ -4354,6 +4523,7 @@
         function renderFormulaPanel() {
             const host = document.getElementById('fieldFormulaPanel');
             if (!host) return;
+            formulaPanelCommitFn = null;
             host.innerHTML = '';
             if (formulaModalChapterMode) {
                 renderRadiationProtectionChapterFormulaPanel(host, null);
@@ -4368,9 +4538,11 @@
                 return;
             }
             ensureJudgmentObj(f);
+            hydrateJudgmentRulesFromFlatIfEmpty(f);
             const currentIndex = fields.indexOf(f);
             const pid = getFieldFormulaId(f, currentIndex) || 'f?';
             const fieldName = getFieldShortName(f);
+            const panelCommitHooks = [];
             if (formulaModalSubtitle) {
                 formulaModalSubtitle.textContent = pid + ' · ' + fieldName;
             }
@@ -4406,6 +4578,7 @@
                 expressionLabel: '公式',
                 expressionPlaceholder: '例：avg(f1,f2,f3)、min(f1,f2)~max(f1,f2)、round({mean},2)',
                 setActiveExpressionInput: (el) => { activeFormulaExprInput = el; },
+                commitHooks: panelCommitHooks,
                 onChange: () => {
                     markFieldFormulaUserOverride(f);
                     updateFieldRowIndicators(f.id);
@@ -4451,6 +4624,13 @@
                     markFieldFormulaUserOverride(f);
                 }
                 syncFormulaUi();
+            });
+            panelCommitHooks.push(() => {
+                f.fieldExpression = normalizeFieldExpressionInput(t1.value, pid);
+                t1.value = String(f.fieldExpression || '');
+                if (String(f.fieldExpression || '').trim()) {
+                    markFieldFormulaUserOverride(f);
+                }
             });
             formulaSection.appendChild(formulaLabel);
             formulaSection.appendChild(t1);
@@ -4548,60 +4728,108 @@
             host.appendChild(formulaSection);
             syncFormulaUi();
 
-            const judgmentSection = createFormulaSection(2, '合格判定', '按检测类型填写是否合格；多条判定直接写在同一行，用「且」取交集、「或」取并集。');
+            const judgmentSection = createFormulaSection(
+                2,
+                '合格判定',
+                '验收/状态两套标准分别维护；回填时按现场记录模板所属检测类型自动选用对应一套。'
+            );
+            ensureJudgmentRuleSets(f);
+            let activeJudgmentExprInput = null;
+
             const judgmentHint = document.createElement('p');
             judgmentHint.className = 'formula-judgment-hint';
-            judgmentHint.textContent = '支持：不超过/<=25、不低于/>=10、±2、100±5、10-20；复杂组合例：±5% 且 ±5000、<=25 或 >=10、(±5% 且 ±5000)。';
+            judgmentHint.textContent = '第一层：验收现场记录模板仅用「验收检测」规则，状态现场记录仅用「状态检测」规则（由模板路径 001/002 或关联报告任务判定）。第二层：同一检测类型内可按栏位条件（如 f588、f505）切换判定公式。';
             judgmentSection.appendChild(judgmentHint);
 
-            const row2 = document.createElement('div');
-            row2.className = 'row2';
-            const accWrap = document.createElement('div');
-            const la = document.createElement('div');
-            la.className = 'formula-input-label';
-            const laText = document.createElement('span');
-            laText.textContent = '验收检测';
-            la.appendChild(laText);
-            const acceptanceInput = document.createElement('input');
-            acceptanceInput.type = 'text';
-            acceptanceInput.value = f.judgmentCriteriaByTestType.acceptance;
-            acceptanceInput.placeholder = '例：不超过25、>=10、+-2、100±5';
-            accWrap.appendChild(la);
-            accWrap.appendChild(acceptanceInput);
-            const stWrap = document.createElement('div');
-            const ls = document.createElement('div');
-            ls.className = 'formula-input-label';
-            const lsText = document.createElement('span');
-            lsText.textContent = '状态检测';
-            ls.appendChild(lsText);
-            const statusInput = document.createElement('input');
-            statusInput.type = 'text';
-            statusInput.value = f.judgmentCriteriaByTestType.status;
-            statusInput.placeholder = '可与验收相同';
-            stWrap.appendChild(ls);
-            stWrap.appendChild(statusInput);
-            row2.appendChild(accWrap);
-            row2.appendChild(stWrap);
-            judgmentSection.appendChild(row2);
+            function buildJudgmentTestTypeBlock(testTypeKey, title) {
+                const blockWrap = document.createElement('div');
+                blockWrap.className = 'judgment-test-type-block';
+                const titleEl = document.createElement('div');
+                titleEl.className = 'formula-input-label';
+                titleEl.textContent = title + (testTypeKey === 'acceptance'
+                    ? '（验收现场记录运行时选用）'
+                    : '（状态现场记录运行时选用）');
+                blockWrap.appendChild(titleEl);
+                const ruleBlock = f.judgmentRuleSets[testTypeKey];
+                const rulesEditor = createConditionalRulesEditor({
+                    rules: ruleBlock.rules,
+                    expressionLabel: '判定标准',
+                    expressionPlaceholder: '例：<=25、>=10、100±5、f33±2',
+                    conditionPlaceholder: '例：f588、f588==true、f505',
+                    normalizeExpression: normalizeJudgmentCriteriaInput,
+                    commitHooks: panelCommitHooks,
+                    setActiveExpressionInput: (el) => { activeJudgmentExprInput = el; },
+                    onChange: () => {
+                        syncJudgmentUi();
+                    }
+                });
+                blockWrap.appendChild(rulesEditor);
+                const fallbackLbl = document.createElement('div');
+                fallbackLbl.className = 'formula-input-label';
+                fallbackLbl.textContent = '默认/兜底判定（可选，条件均不满足时使用）';
+                const fallbackInput = document.createElement('input');
+                fallbackInput.type = 'text';
+                fallbackInput.value = String(ruleBlock.logicExpression || '');
+                fallbackInput.placeholder = '可留空；多条无条件判定时取第一条';
+                fallbackInput.addEventListener('focus', () => { activeJudgmentExprInput = fallbackInput; });
+                fallbackInput.addEventListener('input', () => {
+                    ruleBlock.logicExpression = fallbackInput.value;
+                    syncJudgmentUi();
+                });
+                fallbackInput.addEventListener('blur', () => {
+                    fallbackInput.value = normalizeJudgmentCriteriaInput(fallbackInput.value);
+                    ruleBlock.logicExpression = fallbackInput.value;
+                    syncJudgmentUi();
+                });
+                panelCommitHooks.push(() => {
+                    fallbackInput.value = normalizeJudgmentCriteriaInput(fallbackInput.value);
+                    ruleBlock.logicExpression = fallbackInput.value;
+                });
+                blockWrap.appendChild(fallbackLbl);
+                blockWrap.appendChild(fallbackInput);
+                return blockWrap;
+            }
+
+            judgmentSection.appendChild(buildJudgmentTestTypeBlock('acceptance', '验收检测'));
+            judgmentSection.appendChild(buildJudgmentTestTypeBlock('status', '状态检测'));
 
             const judgmentStatus = document.createElement('div');
             judgmentStatus.className = 'formula-status warn';
-            let lastFocusedJudgmentInput = acceptanceInput;
-            acceptanceInput.addEventListener('focus', () => { lastFocusedJudgmentInput = acceptanceInput; });
-            statusInput.addEventListener('focus', () => { lastFocusedJudgmentInput = statusInput; });
 
             const syncJudgmentUi = () => {
-                const acceptanceValue = normalizeJudgmentCriteriaInput(acceptanceInput.value);
-                const statusValue = normalizeJudgmentCriteriaInput(statusInput.value);
-                f.judgmentCriteriaByTestType.acceptance = acceptanceValue;
-                f.judgmentCriteriaByTestType.status = statusValue;
-                const acc = validateJudgmentText(acceptanceValue);
-                const st = validateJudgmentText(statusValue);
-                if (acceptanceValue || statusValue) {
-                    if (acc.level === 'ok' && (!statusValue || st.level === 'ok')) {
+                ensureJudgmentRuleSets(f);
+                syncJudgmentCriteriaFromRuleSets(f);
+                let hasAny = false;
+                let allOk = true;
+                let warnMsg = '';
+                ['acceptance', 'status'].forEach(key => {
+                    const block = f.judgmentRuleSets[key];
+                    const rules = block.rules || [];
+                    rules.forEach((rule, idx) => {
+                        const expr = normalizeJudgmentCriteriaInput(String(rule.expression || rule.formula || ''));
+                        if (!expr) return;
+                        hasAny = true;
+                        const v = validateJudgmentText(expr);
+                        if (v.level !== 'ok') {
+                            allOk = false;
+                            if (!warnMsg) warnMsg = v.message;
+                        }
+                    });
+                    const fb = normalizeJudgmentCriteriaInput(String(block.logicExpression || ''));
+                    if (fb) {
+                        hasAny = true;
+                        const v = validateJudgmentText(fb);
+                        if (v.level !== 'ok') {
+                            allOk = false;
+                            if (!warnMsg) warnMsg = v.message;
+                        }
+                    }
+                });
+                if (hasAny) {
+                    if (allOk) {
                         setFormulaStatus(judgmentStatus, { level: 'ok', message: '判定标准可保存。' });
                     } else {
-                        setFormulaStatus(judgmentStatus, { level: 'warn', message: acc.level !== 'ok' ? acc.message : st.message });
+                        setFormulaStatus(judgmentStatus, { level: 'warn', message: warnMsg || '判定标准格式需检查。' });
                     }
                 } else {
                     setFormulaStatus(judgmentStatus, { level: 'warn', message: '未填写判定标准。没有合格判定的栏位可以留空。' });
@@ -4616,18 +4844,46 @@
             copyBtn.className = 'primary';
             copyBtn.textContent = '状态同验收';
             copyBtn.addEventListener('click', () => {
-                const v = normalizeJudgmentCriteriaInput(acceptanceInput.value);
-                statusInput.value = v;
-                acceptanceInput.value = v;
-                syncJudgmentUi();
+                const src = f.judgmentRuleSets.acceptance;
+                const dst = f.judgmentRuleSets.status;
+                dst.combine = src.combine;
+                dst.logicExpression = src.logicExpression;
+                dst.rules = (src.rules || []).map((r, i) => {
+                    const norm = normalizeConditionalRuleRow(r, i);
+                    return {
+                        id: newConditionalRuleId(),
+                        label: norm.label,
+                        condition: norm.condition,
+                        expression: norm.expression,
+                        formula: norm.expression
+                    };
+                });
+                renderFormulaPanel();
             });
             copyRow.appendChild(copyBtn);
             judgmentSection.appendChild(copyRow);
 
+            const judgmentPickRow = document.createElement('div');
+            judgmentPickRow.className = 'formula-actions';
+            const judgmentPickBtn = document.createElement('button');
+            judgmentPickBtn.type = 'button';
+            judgmentPickBtn.className = 'primary';
+            judgmentPickBtn.textContent = '在 PDF 上选栏位';
+            judgmentPickBtn.title = '向当前判定的条件或标准中插入栏位编号';
+            judgmentPickBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const targetInput = activeJudgmentExprInput;
+                if (!targetInput) return;
+                openFormulaFieldPicker(judgmentPickBtn, targetInput, f.id, { pid: pid, syncFormulaUi: syncJudgmentUi });
+            });
+            judgmentPickRow.appendChild(judgmentPickBtn);
+            judgmentSection.appendChild(judgmentPickRow);
+
             const quickTemplates = document.createElement('div');
             quickTemplates.className = 'formula-chip-row';
             const insertJudgmentSnippet = (snippet) => {
-                const input = lastFocusedJudgmentInput || acceptanceInput;
+                const input = activeJudgmentExprInput;
+                if (!input) return;
                 input.focus();
                 insertTextAtCursor(input, snippet, { cursorOffset: String(snippet).length });
                 syncJudgmentUi();
@@ -4645,24 +4901,23 @@
                 btn.type = 'button';
                 btn.className = 'formula-chip';
                 btn.textContent = label;
-                btn.title = '在光标处插入 ' + snippet + '，后面可继续输入数字或栏位编号';
+                btn.title = '在光标处插入 ' + snippet;
                 btn.addEventListener('click', () => insertJudgmentSnippet(snippet));
                 quickTemplates.appendChild(btn);
             });
             judgmentSection.appendChild(quickTemplates);
-
-            const normalizeJudgmentInputsOnBlur = () => {
-                acceptanceInput.value = normalizeJudgmentCriteriaInput(acceptanceInput.value);
-                statusInput.value = normalizeJudgmentCriteriaInput(statusInput.value);
-                syncJudgmentUi();
-            };
-            acceptanceInput.addEventListener('input', syncJudgmentUi);
-            acceptanceInput.addEventListener('blur', normalizeJudgmentInputsOnBlur);
-            statusInput.addEventListener('input', syncJudgmentUi);
-            statusInput.addEventListener('blur', normalizeJudgmentInputsOnBlur);
             judgmentSection.appendChild(judgmentStatus);
             host.appendChild(judgmentSection);
             syncJudgmentUi();
+
+            formulaPanelCommitFn = () => {
+                panelCommitHooks.forEach(hook => {
+                    try { hook(); } catch (err) { console.warn('formula panel commit hook', err); }
+                });
+                syncFormulaUi();
+                syncJudgmentCriteriaFromRuleSets(f, { skipFlatHydrate: true });
+                updateFieldRowIndicators(f.id);
+            };
 
             const clearRow = document.createElement('div');
             clearRow.className = 'formula-actions';
@@ -4686,6 +4941,7 @@
                 f.formulaRules = [];
                 clearFieldFormulaUserOverride(f);
                 f.judgmentCriteriaByTestType = { acceptance: '', status: '' };
+                f.judgmentRuleSets = defaultJudgmentRuleSets();
                 f.judgmentCriteriaManual = false;
                 renderFormulaPanel();
                 updateFieldRowIndicators(f.id);
@@ -6753,12 +7009,20 @@
                         status: f.judgmentCriteriaByTestType.status != null ? String(f.judgmentCriteriaByTestType.status) : ''
                     }
                     : { acceptance: '', status: '' },
+                judgmentRuleSets: (f.judgmentRuleSets && typeof f.judgmentRuleSets === 'object')
+                    ? JSON.parse(JSON.stringify(f.judgmentRuleSets))
+                    : null,
                 judgmentCriteriaManual: !!f.judgmentCriteriaManual,
                 title: f.title != null ? String(f.title) : ''
                 };
             }).map(item => {
                 migrateLegacyFormulaRuleMeta(item);
-                migrateJudgmentRuleSetsToCriteria(item);
+                if (item.judgmentRuleSets && typeof item.judgmentRuleSets === 'object') {
+                    ensureJudgmentRuleSets(item);
+                } else {
+                    migrateJudgmentRuleSetsToCriteria(item);
+                    ensureJudgmentRuleSets(item);
+                }
                 return normalizeFieldSize(item);
             });
             fields.forEach(item => {
@@ -6991,9 +7255,75 @@
             if (e.key === 'Escape' && formulaModalOpen) closeFormulaModal();
         });
 
+        function syncTemplateContextStepsJudgmentFromFields() {
+            const steps = templateContext.steps;
+            if (!Array.isArray(steps) || !steps.length) return;
+            const byPid = {};
+            fields.forEach(f => {
+                const pid = String(f.pdfFieldId || f.id || '').trim().toLowerCase();
+                if (pid) byPid[pid] = f;
+            });
+            const syncField = (fld) => {
+                if (!fld || typeof fld !== 'object') return;
+                const src = (fld.source && typeof fld.source === 'object') ? fld.source : {};
+                const pid = String(fld.pdfFieldId || src.pdfFieldId || '').trim().toLowerCase();
+                const mem = pid ? byPid[pid] : null;
+                if (!mem) return;
+                const fe = String(mem.fieldExpression || '').trim();
+                if (fe) {
+                    fld.formula = fe;
+                    fld.fieldExpression = fe;
+                    src.pdfFieldExpression = fe;
+                }
+                ensureJudgmentObj(mem);
+                ensureJudgmentRuleSets(mem);
+                syncJudgmentCriteriaFromRuleSets(mem);
+                const jct = mem.judgmentCriteriaByTestType;
+                const acc = String(jct.acceptance || '').trim();
+                const st = String(jct.status || '').trim();
+                if (acc || st) {
+                    fld.judgmentCriteriaByTestType = {
+                        acceptance: acc,
+                        status: st
+                    };
+                    src.judgmentCriteriaByTestType = { ...fld.judgmentCriteriaByTestType };
+                } else {
+                    delete fld.judgmentCriteriaByTestType;
+                    delete src.judgmentCriteriaByTestType;
+                }
+                if (mem.judgmentRuleSets && typeof mem.judgmentRuleSets === 'object') {
+                    fld.judgmentRuleSets = JSON.parse(JSON.stringify(mem.judgmentRuleSets));
+                } else {
+                    delete fld.judgmentRuleSets;
+                    delete src.judgmentRuleSets;
+                }
+                if (mem.judgmentCriteriaManual) {
+                    fld.judgmentCriteriaManual = true;
+                    src.judgmentCriteriaManual = true;
+                } else {
+                    delete fld.judgmentCriteriaManual;
+                    delete src.judgmentCriteriaManual;
+                }
+                fld.source = src;
+            };
+            steps.forEach(step => {
+                (step.sections || []).forEach(sec => {
+                    (sec.fields || []).forEach(syncField);
+                    const matrix = sec.matrix;
+                    if (matrix && typeof matrix === 'object') {
+                        (matrix.headerFields || []).forEach(syncField);
+                        (matrix.valueColumns || []).forEach(col => {
+                            (col && col.fields || []).forEach(syncField);
+                        });
+                    }
+                });
+            });
+        }
+
         function buildFieldsPayload() {
             applyPdfFieldIdRenumber(false);
             applyMeanFormulasToFields();
+            syncTemplateContextStepsJudgmentFromFields();
             return fields.map(i => {
                 const row = {
                     id: i.id,
@@ -7042,7 +7372,46 @@
                     row.formulaRules = formulaRules;
                 }
                 ensureJudgmentObj(i);
-                migrateJudgmentRuleSetsToCriteria(i);
+                ensureJudgmentRuleSetsStructure(i);
+                syncJudgmentCriteriaFromRuleSets(i, { skipFlatHydrate: true });
+                const jsets = i.judgmentRuleSets;
+                if (jsets && typeof jsets === 'object' && !judgmentRuleSetsHaveConditions(jsets)) {
+                    const hasRules = ['acceptance', 'status'].some(key => {
+                        const rules = (jsets[key] && jsets[key].rules) || [];
+                        return rules.some(r => String(r.expression || r.formula || '').trim()
+                            || String(r.condition || '').trim());
+                    });
+                    if (!hasRules) {
+                        delete i.judgmentRuleSets;
+                    }
+                }
+                if (i.judgmentRuleSets && typeof i.judgmentRuleSets === 'object') {
+                    const exportedSets = {};
+                    ['acceptance', 'status'].forEach(key => {
+                        const block = i.judgmentRuleSets[key];
+                        if (!block || typeof block !== 'object') return;
+                        const rules = (block.rules || []).map((r, idx) => {
+                            const norm = normalizeConditionalRuleRow(r, idx);
+                            return {
+                                id: norm.id,
+                                label: norm.label,
+                                condition: norm.condition,
+                                expression: normalizeJudgmentCriteriaInput(norm.expression),
+                                formula: normalizeJudgmentCriteriaInput(norm.expression)
+                            };
+                        }).filter(r => r.expression || r.condition || r.label);
+                        const logicExpression = normalizeJudgmentCriteriaInput(String(block.logicExpression || ''));
+                        if (!rules.length && !logicExpression) return;
+                        exportedSets[key] = {
+                            combine: block.combine === 'or' ? 'or' : 'and',
+                            logicExpression: logicExpression,
+                            rules: rules
+                        };
+                    });
+                    if (Object.keys(exportedSets).length) {
+                        row.judgmentRuleSets = exportedSets;
+                    }
+                }
                 const acc = String(i.judgmentCriteriaByTestType.acceptance || '').trim();
                 const st = String(i.judgmentCriteriaByTestType.status || '').trim();
                 if (acc || st) {
@@ -7159,8 +7528,7 @@
                         radiationProtectionChapter: getRadiationProtectionChapterPayload(false)
                     },
                     radiationProtectionChapter: getRadiationProtectionChapterPayload(false),
-                    bindings: buildBindingsForExport(),
-                    report_site_field_map: reportTaskContext.reportSiteFieldMap || []
+                    bindings: buildBindingsForExport()
                 })
             }).then(async r => {
                 const d = await parseJsonResponseOrThrow(r, '保存坐标模板失败');
@@ -7252,8 +7620,7 @@
                         taskNo: displayTaskNo,
                         displayTaskNo: displayTaskNo
                     },
-                    bindings: buildBindingsForExport(),
-                    report_site_field_map: reportTaskContext.reportSiteFieldMap || []
+                    bindings: buildBindingsForExport()
                 })
             }).then(async r => {
                 const d = await parseJsonResponseOrThrow(r, '保存前端规则 JSON 失败');

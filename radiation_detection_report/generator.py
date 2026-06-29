@@ -9,7 +9,7 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import fitz
 
@@ -18,6 +18,8 @@ FONT_SIZE_WU_HAO = 10.5
 CELL_PAD_X = 2.0
 CELL_PAD_Y = 2.0
 PAGE_MARGIN_CM = 2.8
+TABLE_BORDER_WIDTH = 0.9
+TABLE_BORDER_COLOR = (0.0, 0.0, 0.0)
 
 HAS_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 LATIN_RE = re.compile(r"[A-Za-z0-9]")
@@ -47,6 +49,7 @@ def _default_header_labels() -> Dict[str, str]:
         "location": "检测点位置",
         "result": "检测结果\n（μSv/h）",
         "standard": "标准要求\n（μSv/h）",
+        "annual_dose": "年剂量估算\n（mSv）",
         "evaluation": "结果\n评价",
     }
 
@@ -59,6 +62,90 @@ def _three_cjk_column_width_pt(fonts: FontResources, fontsize: float = FONT_SIZE
 
 def _evaluation_column_width_pt(fonts: FontResources, fontsize: float = FONT_SIZE_XIAO_SI) -> float:
     return _three_cjk_column_width_pt(fonts, fontsize)
+
+
+def _annual_dose_column_width_pt(fonts: FontResources, fontsize: float = FONT_SIZE_XIAO_SI) -> float:
+    """年剂量估算列表头宽 + 内边距。"""
+    return _header_column_width_pt("年剂量估算\n（mSv）", fonts, fontsize)
+
+
+def _header_column_width_pt(
+    label: str,
+    fonts: FontResources,
+    fontsize: float = FONT_SIZE_XIAO_SI,
+) -> float:
+    """按表头各行最大字宽计算列宽（含单元格内边距）。"""
+    text = str(label or "").strip()
+    if not text:
+        return 0.0
+    lines = text.split("\n")
+    max_w = max(_measure_text(line, fonts, fontsize) for line in lines)
+    return max_w + 2 * CELL_PAD_X
+
+
+def _relayout_columns_with_annual_dose(
+    layout: TableLayout,
+    fonts: FontResources,
+    labels: Mapping[str, str],
+) -> None:
+    """双组表含年剂量列：收窄位置列，按表头为检测结果/标准要求/年剂量估算分配列宽。"""
+    L = layout
+    pid_x1 = float(L.col_point_id[1])
+    table_right = float(L.table_x_right)
+    min_loc_w = max(72.0, _cm_to_pt(2.5))
+
+    result_w = _header_column_width_pt(labels.get("result", "检测结果\n（μSv/h）"), fonts)
+    standard_w = _header_column_width_pt(labels.get("standard", "标准要求\n（μSv/h）"), fonts)
+    annual_w = _header_column_width_pt(labels.get("annual_dose", "年剂量估算\n（mSv）"), fonts)
+    eval_w = _evaluation_column_width_pt(fonts, FONT_SIZE_XIAO_SI)
+
+    ev_x1 = table_right
+    ev_x0 = ev_x1 - eval_w
+    annual_x1 = ev_x0
+    annual_x0 = annual_x1 - annual_w
+    standard_x1 = annual_x0
+    standard_x0 = standard_x1 - standard_w
+    result_x1 = standard_x0
+    result_x0 = result_x1 - result_w
+    loc_x1 = result_x0
+
+    if loc_x1 - pid_x1 < min_loc_w:
+        loc_x1 = pid_x1 + min_loc_w
+        result_x0 = loc_x1
+        result_x1 = result_x0 + result_w
+        standard_x0 = result_x1
+        standard_x1 = standard_x0 + standard_w
+        annual_x0 = standard_x1
+        annual_x1 = annual_x0 + annual_w
+        ev_x0 = annual_x1
+        if ev_x0 + eval_w > table_right + 0.5:
+            overflow = ev_x0 + eval_w - table_right
+            shrink = result_w + standard_w + annual_w
+            if shrink > 0 and overflow > 0:
+                scale = max(0.85, (shrink - overflow) / shrink)
+                result_w *= scale
+                standard_w *= scale
+                annual_w *= scale
+                ev_x0 = table_right - eval_w
+                annual_x1 = ev_x0
+                annual_x0 = annual_x1 - annual_w
+                standard_x1 = annual_x0
+                standard_x0 = standard_x1 - standard_w
+                result_x1 = standard_x0
+                result_x0 = result_x1 - result_w
+                loc_x1 = result_x0
+
+    main_right = min(float(L.col_location_main[1]), loc_x1)
+    if main_right <= pid_x1 + 8.0:
+        main_right = pid_x1 + min(68.0, max(0.0, loc_x1 - pid_x1))
+
+    L.col_location_main = (pid_x1, main_right)
+    L.col_location_sub = (main_right, loc_x1)
+    L.col_location_full = (pid_x1, loc_x1)
+    L.col_result = (result_x0, result_x1)
+    L.col_standard = (standard_x0, standard_x1)
+    L.col_annual_dose = (annual_x0, annual_x1)
+    L.col_evaluation = (ev_x0, ev_x1)
 
 
 def _format_section_title_text(title: str) -> str:
@@ -106,6 +193,7 @@ class TableLayout:
     col_location_full: Tuple[float, float] = (120.60, 326.00)
     col_result: Tuple[float, float] = (326.00, 410.80)
     col_standard: Tuple[float, float] = (410.80, 489.10)
+    col_annual_dose: Optional[Tuple[float, float]] = None
     col_evaluation: Tuple[float, float] = (489.10, 524.57)
     h_condition: float = 33.57
     h_header: float = 40.50
@@ -289,20 +377,34 @@ def _measure_text(text: str, fonts: FontResources, fontsize: float) -> float:
     return sum(_char_width(ch, fonts, fontsize) for ch in text)
 
 
+def _protect_unit_tokens_for_wrap(text: str) -> str:
+    """数字与单位之间插入 Word Joiner，避免「30」与「cm」拆到两行。"""
+    joiner = "\u2060"
+    return re.sub(
+        r"(\d)(cm|mm|mA|mAs|kV)\b",
+        lambda m: m.group(1) + joiner + m.group(2),
+        str(text or ""),
+        flags=re.I,
+    )
+
+
 def _wrap_text_lines(text: str, max_width: float, fonts: FontResources, fontsize: float) -> List[str]:
     if not text:
         return [""]
     lines: List[str] = []
     current = ""
-    for ch in text.replace("\n", ""):
+    for ch in _protect_unit_tokens_for_wrap(text).replace("\n", ""):
+        if ch == "\u2060":
+            current += ch
+            continue
         trial = current + ch
         if current and _measure_text(trial, fonts, fontsize) > max_width:
-            lines.append(current)
+            lines.append(current.replace("\u2060", ""))
             current = ch
         else:
             current = trial
     if current:
-        lines.append(current)
+        lines.append(current.replace("\u2060", ""))
     return lines or [""]
 
 
@@ -397,7 +499,40 @@ def resolve_complex_location(point: Dict[str, Any]) -> str:
 
 
 def _draw_cell_border(page: fitz.Page, rect: fitz.Rect) -> None:
-    page.draw_rect(rect, color=(0, 0, 0), width=0.6)
+    """现场记录表等仍按单元格描边；报告表改用统一网格线。"""
+    page.draw_rect(rect, color=TABLE_BORDER_COLOR, width=TABLE_BORDER_WIDTH)
+
+
+def _stroke_hline(page: fitz.Page, y: float, x0: float, x1: float) -> None:
+    if x1 <= x0:
+        return
+    pad = TABLE_BORDER_WIDTH * 0.5
+    page.draw_line(
+        (x0 - pad, y),
+        (x1 + pad, y),
+        color=TABLE_BORDER_COLOR,
+        width=TABLE_BORDER_WIDTH,
+    )
+
+
+def _stroke_vline(page: fitz.Page, x: float, y0: float, y1: float) -> None:
+    if y1 <= y0:
+        return
+    pad = TABLE_BORDER_WIDTH * 0.5
+    page.draw_line(
+        (x, y0 - pad),
+        (x, y1 + pad),
+        color=TABLE_BORDER_COLOR,
+        width=TABLE_BORDER_WIDTH,
+    )
+
+
+def _unique_sorted_xs(xs: Sequence[float]) -> List[float]:
+    out: List[float] = []
+    for x in sorted(float(v) for v in xs):
+        if not out or abs(x - out[-1]) > 0.05:
+            out.append(x)
+    return out
 
 
 def _inner_rect(rect: fitz.Rect) -> fitz.Rect:
@@ -524,24 +659,37 @@ class RadiationTableBuilder:
         self.y: float = 0.0
         self.page_index = 0
         self.title_drawn = False
+        self._table_section_needs_top = True
         self._apply_layout_overrides()
 
+    def _include_annual_dose_column(self) -> bool:
+        return bool(self.data.get("include_annual_dose_column"))
+
+    def _annual_dose_header_label(self) -> str:
+        labels = {**_default_header_labels(), **(self.layout.header_labels or {})}
+        return labels.get("annual_dose", "年剂量估算\n（mSv）")
+
     def _apply_layout_overrides(self) -> None:
-        """表题左距 2.8cm；编号/评价列三汉字宽；位置列随编号列收窄后加宽。"""
+        """表题左距 2.8cm；编号/评价列三汉字宽；含年剂量列时收窄位置列并重排测量列宽。"""
         L = self.layout
         L.title_x_left = page_left_margin_pt()
         pid_x0 = float(L.table_x_left)
         pid_w = _three_cjk_column_width_pt(self.font_base, FONT_SIZE_XIAO_SI)
         pid_x1 = pid_x0 + pid_w
         L.col_point_id = (pid_x0, pid_x1)
-        L.col_location_main = (pid_x1, float(L.col_location_main[1]))
-        L.col_location_full = (pid_x1, float(L.col_location_sub[1]))
+        labels = {**_default_header_labels(), **(L.header_labels or {})}
         eval_w = _evaluation_column_width_pt(self.font_base, FONT_SIZE_XIAO_SI)
         ev_x1 = float(L.table_x_right)
         ev_x0 = ev_x1 - eval_w
         L.col_evaluation = (ev_x0, ev_x1)
-        if float(L.col_standard[1]) > ev_x0 + 0.5:
-            L.col_standard = (float(L.col_standard[0]), ev_x0)
+        if self._include_annual_dose_column():
+            _relayout_columns_with_annual_dose(L, self.font_base, labels)
+        else:
+            L.col_annual_dose = None
+            L.col_location_main = (pid_x1, float(L.col_location_main[1]))
+            L.col_location_full = (pid_x1, float(L.col_location_sub[1]))
+            if float(L.col_standard[1]) > ev_x0 + 0.5:
+                L.col_standard = (float(L.col_standard[0]), ev_x0)
 
     def _insert_page_watermark(self) -> None:
         if self.page is None:
@@ -563,7 +711,10 @@ class RadiationTableBuilder:
         if continuation:
             self.y = self.layout.continuation_y_top
             if self.layout.repeat_header_on_new_page:
+                self._table_section_needs_top = True
                 self._draw_header_row()
+            else:
+                self._table_section_needs_top = True
         else:
             if not self.title_drawn:
                 self._draw_section_title()
@@ -598,29 +749,64 @@ class RadiationTableBuilder:
         L = self.layout
         return max(8.0, float(L.col_location_main[1] - L.col_location_main[0]) - 2 * CELL_PAD_X)
 
+    def _result_inner_width(self) -> float:
+        L = self.layout
+        return max(8.0, float(L.col_result[1] - L.col_result[0]) - 2 * CELL_PAD_X)
+
+    def _annual_dose_inner_width(self) -> float:
+        L = self.layout
+        col = L.col_annual_dose
+        if not col:
+            return 0.0
+        return max(8.0, float(col[1] - col[0]) - 2 * CELL_PAD_X)
+
     def _simple_row_height(self, point: Dict[str, Any]) -> float:
         loc = str(point.get("location", "") or "")
-        return _autofit_row_height(
+        loc_h = _autofit_row_height(
             loc,
             self._location_full_inner_width(),
             self.fonts,
             FONT_SIZE_XIAO_SI,
             min_height=self.layout.h_simple,
         )
+        result_h = _autofit_row_height(
+            str(point.get("result", "") or ""),
+            self._result_inner_width(),
+            self.fonts,
+            FONT_SIZE_XIAO_SI,
+            min_height=self.layout.h_simple,
+        )
+        annual_h = self.layout.h_simple
+        if self._include_annual_dose_column():
+            annual_h = _autofit_row_height(
+                str(point.get("annual_dose_msv", "") or ""),
+                self._annual_dose_inner_width(),
+                self.fonts,
+                FONT_SIZE_XIAO_SI,
+                min_height=self.layout.h_simple,
+            )
+        return max(loc_h, result_h, annual_h)
 
     def _complex_row_plan(self, point: Dict[str, Any]) -> Tuple[float, List[float]]:
         subs = point.get("sub_rows") or []
         L = self.layout
         sub_heights: List[float] = []
         for sub in subs:
-            sub_h = _autofit_row_height(
+            sub_loc_h = _autofit_row_height(
                 str(sub.get("location_sub", "") or ""),
                 self._location_sub_inner_width(),
                 self.fonts,
                 FONT_SIZE_XIAO_SI,
                 min_height=L.h_complex_sub,
             )
-            sub_heights.append(sub_h)
+            sub_res_h = _autofit_row_height(
+                str(sub.get("result", "") or ""),
+                self._result_inner_width(),
+                self.fonts,
+                FONT_SIZE_XIAO_SI,
+                min_height=L.h_complex_sub,
+            )
+            sub_heights.append(max(sub_loc_h, sub_res_h))
         main_h = _autofit_row_height(
             resolve_complex_location(point),
             self._location_main_inner_width(),
@@ -633,6 +819,89 @@ class RadiationTableBuilder:
     def _col_rect(self, y0: float, y1: float, col: Tuple[float, float]) -> fitz.Rect:
         return fitz.Rect(col[0], y0, col[1], y1)
 
+    def _table_column_xs_simple(self) -> List[float]:
+        L = self.layout
+        xs = [
+            L.table_x_left,
+            L.col_point_id[1],
+            L.col_location_full[1],
+            L.col_result[0],
+            L.col_standard[0],
+        ]
+        if L.col_annual_dose:
+            xs.append(L.col_annual_dose[0])
+        xs.extend([L.col_evaluation[0], L.table_x_right])
+        return _unique_sorted_xs(xs)
+
+    def _table_column_xs_complex(self) -> List[float]:
+        L = self.layout
+        xs = [
+            L.table_x_left,
+            L.col_point_id[1],
+            L.col_location_main[1],
+            L.col_location_sub[1],
+            L.col_result[0],
+            L.col_standard[0],
+        ]
+        if L.col_annual_dose:
+            xs.append(L.col_annual_dose[0])
+        xs.extend([L.col_evaluation[0], L.table_x_right])
+        return _unique_sorted_xs(xs)
+
+    def _stroke_simple_row_grid(self, y0: float, y1: float, *, draw_top: bool = False) -> None:
+        assert self.page is not None
+        xs = self._table_column_xs_simple()
+        for x in xs:
+            _stroke_vline(self.page, x, y0, y1)
+        if draw_top:
+            _stroke_hline(self.page, y0, xs[0], xs[-1])
+        _stroke_hline(self.page, y1, xs[0], xs[-1])
+
+    def _stroke_complex_group_grid(
+        self,
+        y0: float,
+        y1: float,
+        internal_ys: Sequence[float],
+        *,
+        draw_top: bool = False,
+    ) -> None:
+        assert self.page is not None
+        xs = self._table_column_xs_complex()
+        for x in xs:
+            _stroke_vline(self.page, x, y0, y1)
+        if draw_top:
+            _stroke_hline(self.page, y0, xs[0], xs[-1])
+        pid_x1 = float(self.layout.col_point_id[1])
+        main_div = float(self.layout.col_location_main[1])
+        for cy in internal_ys:
+            if y0 < float(cy) < y1:
+                _stroke_hline(self.page, float(cy), xs[0], pid_x1)
+                _stroke_hline(self.page, float(cy), main_div, xs[-1])
+        _stroke_hline(self.page, y1, xs[0], xs[-1])
+
+    def _stroke_full_width_row_grid(self, y0: float, y1: float, *, draw_top: bool = False) -> None:
+        assert self.page is not None
+        x0 = float(self.layout.table_x_left)
+        x1 = float(self.layout.table_x_right)
+        _stroke_vline(self.page, x0, y0, y1)
+        _stroke_vline(self.page, x1, y0, y1)
+        if draw_top:
+            _stroke_hline(self.page, y0, x0, x1)
+        _stroke_hline(self.page, y1, x0, x1)
+
+    def _stroke_background_row_grid(self, y0: float, y1: float, *, draw_top: bool = False) -> None:
+        assert self.page is not None
+        L = self.layout
+        x0 = float(L.table_x_left)
+        x_mid = float(L.col_location_sub[1])
+        x1 = float(L.table_x_right)
+        _stroke_vline(self.page, x0, y0, y1)
+        _stroke_vline(self.page, x_mid, y0, y1)
+        _stroke_vline(self.page, x1, y0, y1)
+        if draw_top:
+            _stroke_hline(self.page, y0, x0, x1)
+        _stroke_hline(self.page, y1, x0, x1)
+
     def _draw_header_row(self) -> None:
         self._ensure_space(self.layout.h_header)
         y0, y1 = self.y, self.y + self.layout.h_header
@@ -643,11 +912,18 @@ class RadiationTableBuilder:
             (fitz.Rect(L.col_location_full[0], y0, L.col_location_full[1], y1), labels.get("location", "检测点位置"), "left"),
             (self._col_rect(y0, y1, L.col_result), labels.get("result", "检测结果\n（μSv/h）"), "center"),
             (self._col_rect(y0, y1, L.col_standard), labels.get("standard", "标准要求\n（μSv/h）"), "center"),
-            (self._col_rect(y0, y1, L.col_evaluation), labels.get("evaluation", "结果评价"), "center"),
         ]
+        if L.col_annual_dose:
+            cells.append(
+                (self._col_rect(y0, y1, L.col_annual_dose), self._annual_dose_header_label(), "center")
+            )
+        cells.append(
+            (self._col_rect(y0, y1, L.col_evaluation), labels.get("evaluation", "结果评价"), "center")
+        )
         for rect, text, align in cells:
-            _draw_cell_border(self.page, rect)
             _draw_cell_content(self.page, rect, text, self.fonts, FONT_SIZE_XIAO_SI, align=align)
+        self._stroke_simple_row_grid(y0, y1, draw_top=self._table_section_needs_top)
+        self._table_section_needs_top = False
         self.y = y1
 
     def _draw_condition_row(self, text: str) -> None:
@@ -658,8 +934,9 @@ class RadiationTableBuilder:
         self._ensure_space(row_h)
         y0, y1 = self.y, self.y + row_h
         rect = fitz.Rect(self.layout.table_x_left, y0, self.layout.table_x_right, y1)
-        _draw_cell_border(self.page, rect)
         _draw_cell_content(self.page, rect, text, self.fonts, FONT_SIZE_XIAO_SI, align="left")
+        self._stroke_full_width_row_grid(y0, y1, draw_top=self._table_section_needs_top)
+        self._table_section_needs_top = False
         self.y = y1
 
     def _draw_simple_row(self, point: Dict[str, Any]) -> None:
@@ -672,14 +949,25 @@ class RadiationTableBuilder:
             (fitz.Rect(L.col_location_full[0], y0, L.col_location_full[1], y1), str(point.get("location", "")), "left"),
             (self._col_rect(y0, y1, L.col_result), str(point.get("result", "")), "center"),
             (self._col_rect(y0, y1, L.col_standard), str(point.get("standard", "≤2.5")), "center"),
-            (self._col_rect(y0, y1, L.col_evaluation), str(point.get("evaluation", "合格")), "center"),
         ]
+        if L.col_annual_dose:
+            cells.append(
+                (
+                    self._col_rect(y0, y1, L.col_annual_dose),
+                    str(point.get("annual_dose_msv", "") or ""),
+                    "center",
+                )
+            )
+        cells.append(
+            (self._col_rect(y0, y1, L.col_evaluation), str(point.get("evaluation", "合格")), "center")
+        )
         for rect, text, align in cells:
-            _draw_cell_border(self.page, rect)
             color = _evaluation_text_color(text) if rect.x0 >= L.col_evaluation[0] - 0.5 else (0.0, 0.0, 0.0)
             _draw_cell_content(
                 self.page, rect, text, self.fonts, FONT_SIZE_XIAO_SI, align=align, text_color=color
             )
+        self._stroke_simple_row_grid(y0, y1, draw_top=self._table_section_needs_top)
+        self._table_section_needs_top = False
         self.y = y1
 
     def _complex_group_height(self, point: Dict[str, Any], sub_count: int) -> float:
@@ -698,28 +986,46 @@ class RadiationTableBuilder:
         L = self.layout
 
         main_rect = fitz.Rect(L.col_location_main[0], y0, L.col_location_main[1], y1)
-        _draw_cell_border(self.page, main_rect)
         location_text = resolve_complex_location(point)
         _draw_cell_content(self.page, main_rect, location_text, self.fonts, FONT_SIZE_XIAO_SI, align="left")
 
         cy = y0
+        internal_ys: List[float] = []
         for i, sub in enumerate(subs):
             sh = sub_heights[i]
             sy0, sy1 = cy, cy + sh
+            if i < len(subs) - 1:
+                internal_ys.append(sy1)
             cells = [
                 (self._col_rect(sy0, sy1, L.col_point_id), str(sub.get("id", "")), "center"),
                 (fitz.Rect(L.col_location_sub[0], sy0, L.col_location_sub[1], sy1), str(sub.get("location_sub", "")), "left"),
                 (self._col_rect(sy0, sy1, L.col_result), str(sub.get("result", "")), "center"),
                 (self._col_rect(sy0, sy1, L.col_standard), str(sub.get("standard", "≤2.5")), "center"),
-                (self._col_rect(sy0, sy1, L.col_evaluation), str(sub.get("evaluation", "合格")), "center"),
             ]
+            if L.col_annual_dose:
+                cells.append(
+                    (
+                        self._col_rect(sy0, sy1, L.col_annual_dose),
+                        str(sub.get("annual_dose_msv", "") or point.get("annual_dose_msv", "") or ""),
+                        "center",
+                    )
+                )
+            cells.append(
+                (self._col_rect(sy0, sy1, L.col_evaluation), str(sub.get("evaluation", "合格")), "center")
+            )
             for rect, text, align in cells:
-                _draw_cell_border(self.page, rect)
                 color = _evaluation_text_color(text) if rect.x0 >= L.col_evaluation[0] - 0.5 else (0.0, 0.0, 0.0)
                 _draw_cell_content(
                     self.page, rect, text, self.fonts, FONT_SIZE_XIAO_SI, align=align, text_color=color
                 )
             cy = sy1
+        self._stroke_complex_group_grid(
+            y0,
+            y1,
+            internal_ys,
+            draw_top=self._table_section_needs_top,
+        )
+        self._table_section_needs_top = False
         self.y = y1
 
     def _draw_background_row(self, bg: Dict[str, Any]) -> None:
@@ -731,8 +1037,6 @@ class RadiationTableBuilder:
         y0, y1 = self.y, self.y + h
         label_rect = fitz.Rect(L.col_point_id[0], y0, L.col_location_sub[1], y1)
         value_rect = fitz.Rect(L.col_result[0], y0, L.col_evaluation[1], y1)
-        for rect in (label_rect, value_rect):
-            _draw_cell_border(self.page, rect)
         _draw_cell_content(
             self.page,
             label_rect,
@@ -749,6 +1053,8 @@ class RadiationTableBuilder:
             FONT_SIZE_XIAO_SI,
             align="center",
         )
+        self._stroke_background_row_grid(y0, y1, draw_top=self._table_section_needs_top)
+        self._table_section_needs_top = False
         self.y = y1
 
     def _draw_notes_row(self, notes: Sequence[str]) -> None:
@@ -761,8 +1067,9 @@ class RadiationTableBuilder:
         self._ensure_space(row_h)
         y0, y1 = self.y, self.y + row_h
         rect = fitz.Rect(self.layout.table_x_left, y0, self.layout.table_x_right, y1)
-        _draw_cell_border(self.page, rect)
         _draw_cell_content(self.page, rect, text, self.fonts, FONT_SIZE_WU_HAO, align="left")
+        self._stroke_full_width_row_grid(y0, y1, draw_top=self._table_section_needs_top)
+        self._table_section_needs_top = False
         self.y = y1
 
     def _draw_points(self, points: Sequence[Dict[str, Any]]) -> None:
@@ -781,6 +1088,11 @@ class RadiationTableBuilder:
             elif str(point.get("result", "") or "").strip():
                 self._draw_simple_row(point)
 
+    def _draw_followup_condition_row(self, condition_text: str) -> None:
+        """第二组检测条件：紧接第一组表体续写，不强制分页、不重复表头。"""
+        if condition_text:
+            self._draw_condition_row(str(condition_text))
+
     def build(self) -> fitz.Document:
         self._new_page(continuation=False)
         if self.layout.condition_on_first_page_only:
@@ -791,9 +1103,8 @@ class RadiationTableBuilder:
         self._draw_points(self.data.get("points") or [])
         points_group2 = self.data.get("points_group2") or []
         if points_group2:
-            cond2 = self.data.get("condition_group2", "")
-            if cond2:
-                self._draw_condition_row(cond2)
+            cond2 = str(self.data.get("condition_group2", "") or "").strip()
+            self._draw_followup_condition_row(cond2)
             self._draw_points(points_group2)
         bg = self.data.get("background")
         if bg:

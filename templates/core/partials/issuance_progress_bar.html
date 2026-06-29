@@ -1,0 +1,17 @@
+{# 签发流程六步进度条；需传入 progress_bar dict（build_issuance_progress_bar） #}
+{% with bar=progress_bar %}
+<div class="min-w-[10rem]">
+    <div class="flex h-2 rounded-full overflow-hidden bg-slate-100 ring-1 ring-slate-200/80" role="progressbar" aria-valuenow="{{ bar.percent }}" aria-valuemin="0" aria-valuemax="100">
+        {% for step in bar.steps %}
+        <div class="flex-1 min-w-0 {% if step.done %}bg-emerald-500{% elif step.current %}bg-indigo-500{% else %}bg-slate-200{% endif %}{% if not forloop.last %} border-r border-white/80{% endif %}" title="{{ step.full_label }}"></div>
+        {% endfor %}
+    </div>
+    {% if show_step_labels %}
+    <div class="mt-1 flex justify-between gap-0.5 text-[10px] leading-tight text-slate-500">
+        {% for step in bar.steps %}
+        <span class="flex-1 text-center truncate {% if step.current %}font-semibold text-indigo-700{% elif step.done %}text-emerald-700{% endif %}" title="{{ step.full_label }}">{{ step.short_label }}</span>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endwith %}

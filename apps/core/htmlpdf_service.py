@@ -444,7 +444,10 @@ def pick_check_font() -> Path | None:
 
 
 def contains_cjk(text: str) -> bool:
-    return re.search(r"[\u3400-\u9FFF]", text or "") is not None
+    if re.search(r"[\u3400-\u9FFF]", text or ""):
+        return True
+    # 全角标点（如质控映射「104kV，91mA」中的「，」）须走宋体，否则 Times 下逗号可能缺失
+    return re.search(r"[\u3000-\u303F\uFF00-\uFFEF]", text or "") is not None
 
 
 def wrap_text_to_width(text: str, max_width: float, font: fitz.Font, font_size: float) -> str:

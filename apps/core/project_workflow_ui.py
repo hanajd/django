@@ -1,14 +1,123 @@
 """项目工作台：检测部流程说明与界面分层（与《检测、报告编写流程表》对齐）。"""
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from apps.core.models import (
+    InspectionCaseWorkflowState,
     LibraryProject,
     LibraryProjectEquipment,
     LibraryProjectWorkflowMember,
     LibraryTaskAssignment,
 )
+from apps.core.workflow_service import stage_sequence
+
+# 签发流程六步（与 InspectionCaseWorkflowState 一致）
+ISSUANCE_PROGRESS_STAGES: List[Dict[str, str]] = [
+    {"code": InspectionCaseWorkflowState.STAGE_SITE_FILL, "short": "现场", "full": "检测员填写现场记录"},
+    {"code": InspectionCaseWorkflowState.STAGE_SITE_REVIEW, "short": "校核", "full": "校核员校核现场记录"},
+    {"code": InspectionCaseWorkflowState.STAGE_REPORT_DRAFT, "short": "编制", "full": "编制人编制报告"},
+    {"code": InspectionCaseWorkflowState.STAGE_REPORT_AUDIT, "short": "审核", "full": "审核人审核报告"},
+    {"code": InspectionCaseWorkflowState.STAGE_REPORT_SIGN, "short": "签发", "full": "授权签字人签发"},
+    {"code": InspectionCaseWorkflowState.STAGE_ISSUED, "short": "完成", "full": "已签发"},
+]
+
+_STAGE_CODE_TO_INDEX: Dict[str, int] = {
+    row["code"]: idx for idx, row in enumerate(ISSUANCE_PROGRESS_STAGES)
+}
+_STAGE_FULL_LABELS: Dict[str, str] = {row["code"]: row["full"] for row in ISSUANCE_PROGRESS_STAGES}
+
+
+def workflow_stage_index(stage_code: Optional[str]) -> int:
+    code = (stage_code or "").strip()
+    if not code:
+        return -1
+    return _STAGE_CODE_TO_INDEX.get(code, -1)
+
+
+def max_workflow_stage(a: Optional[str], b: Optional[str]) -> str:
+    ia, ib = workflow_stage_index(a), workflow_stage_index(b)
+    if ia < 0:
+        return (b or "").strip()
+    if ib < 0:
+        return (a or "").strip()
+    return (a or "") if ia >= ib else (b or "")
+
+
+def build_issuance_progress_bar(stage_code: Optional[str]) -> Dict[str, Any]:
+    """
+    构建签发流程进度条数据（六步固定顺序；stage_code 为空表示未开始）。
+    """
+    code = (stage_code or "").strip()
+    if code and code not in _STAGE_CODE_TO_INDEX:
+        valid = set(_STAGE_CODE_TO_INDEX)
+        if code not in valid:
+            code = InspectionCaseWorkflowState.STAGE_SITE_FILL
+    current_idx = _STAGE_CODE_TO_INDEX.get(code, -1)
+    total = len(ISSUANCE_PROGRESS_STAGES)
+    steps: List[Dict[str, Any]] = []
+    for idx, row in enumerate(ISSUANCE_PROGRESS_STAGES):
+        if current_idx < 0:
+            done = False
+            current = False
+        elif idx < current_idx:
+            done = True
+            current = False
+        elif idx == current_idx:
+            done = code == InspectionCaseWorkflowState.STAGE_ISSUED
+            current = True
+        else:
+            done = False
+            current = False
+        steps.append(
+            {
+                "code": row["code"],
+                "short_label": row["short"],
+                "full_label": row["full"],
+                "done": done,
+                "current": current,
+            }
+        )
+    if current_idx < 0:
+        percent = 0
+        stage_label = "未开始"
+    elif code == InspectionCaseWorkflowState.STAGE_ISSUED:
+        percent = 100
+        stage_label = _STAGE_FULL_LABELS[code]
+    else:
+        percent = max(8, round((current_idx + 0.5) / total * 100))
+        stage_label = _STAGE_FULL_LABELS.get(code, code)
+    return {
+        "stage_code": code or "",
+        "stage_label": stage_label,
+        "stage_index": current_idx + 1 if current_idx >= 0 else 0,
+        "total_steps": total,
+        "percent": percent,
+        "steps": steps,
+    }
+
+
+def aggregate_issuance_progress_bars(bars: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """多检测项目汇总：取最慢环节作为委托整体进度，并统计已签发数量。"""
+    if not bars:
+        return build_issuance_progress_bar(None)
+    seq = stage_sequence()
+    min_idx: Optional[int] = None
+    issued = 0
+    for bar in bars:
+        code = bar.get("stage_code") or ""
+        if code == InspectionCaseWorkflowState.STAGE_ISSUED:
+            issued += 1
+        idx = _STAGE_CODE_TO_INDEX.get(code, -1)
+        if idx >= 0:
+            min_idx = idx if min_idx is None else min(min_idx, idx)
+    if min_idx is None:
+        out = build_issuance_progress_bar(None)
+    else:
+        out = build_issuance_progress_bar(seq[min_idx])
+    out["issued_count"] = issued
+    out["total_items"] = len(bars)
+    return out
 
 
 # 权限从低到高（与流程表一致）

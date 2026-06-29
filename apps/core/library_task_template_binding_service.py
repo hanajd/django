@@ -141,6 +141,49 @@ def get_task_template_pair(task: LibraryTask) -> tuple[LibraryFile | None, Libra
     return pdf_lf, json_lf
 
 
+def resolve_task_export_pdf_template_id(
+    task: LibraryTask | None,
+    json_source_pdf_id: int | None = None,
+) -> int | None:
+    """
+    导出/回填所用空白 PDF：以任务当前绑定的 PDF 为准。
+
+    JSON 内 ``pdf.source_pdf.template_file_id`` 在轮换 PDF 或从其它任务复制坐标后，
+    可能仍指向旧版式（例如状态检测 JSON 仍引用验收检测 PDF），与模板编辑器不一致。
+    """
+    if task is None:
+        if json_source_pdf_id in (None, ""):
+            return None
+        try:
+            return int(json_source_pdf_id)
+        except (TypeError, ValueError):
+            return None
+    pdf_lf, _json_lf = get_task_template_pair(task)
+    if pdf_lf is not None:
+        bound_id = int(pdf_lf.pk)
+        if json_source_pdf_id not in (None, ""):
+            try:
+                stale_id = int(json_source_pdf_id)
+            except (TypeError, ValueError):
+                stale_id = None
+            if stale_id is not None and stale_id != bound_id:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "task %s export PDF: JSON source_pdf #%s overridden by bound PDF #%s",
+                    task.pk,
+                    stale_id,
+                    bound_id,
+                )
+        return bound_id
+    if json_source_pdf_id in (None, ""):
+        return None
+    try:
+        return int(json_source_pdf_id)
+    except (TypeError, ValueError):
+        return None
+
+
 def task_has_pdf_and_json_bound(task: LibraryTask) -> bool:
     pdf_lf, json_lf = get_task_template_pair(task)
     return pdf_lf is not None and json_lf is not None

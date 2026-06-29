@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from apps.core.htmlpdf_service import parse_template_json
 from apps.core.library_access import (
@@ -216,6 +216,7 @@ def _coerce_value_template(raw: Any) -> str:
 
 
 _VALUE_TEMPLATE_PLACEHOLDER_RE = re.compile(r"\{[^{}]+\}")
+_BARE_SLOT_CONCAT_TEMPLATE_RE = re.compile(r"^(\s*\{\d+\}\s*)+$")
 
 
 def _value_template_has_slot_placeholders(template: str) -> bool:
@@ -223,10 +224,167 @@ def _value_template_has_slot_placeholders(template: str) -> bool:
     return bool(_VALUE_TEMPLATE_PLACEHOLDER_RE.search(str(template or "")))
 
 
+def _is_bare_slot_concat_template(template: str) -> bool:
+    """模板仅为 {1}{2}… 连写、无字面分隔符时，不宜直接 render（会变成 10491104115）。"""
+    return bool(_BARE_SLOT_CONCAT_TEMPLATE_RE.match(str(template or "").strip()))
+
+
+def _is_implausible_mapped_site_value(val: str, label: str = "") -> bool:
+    """过滤误映射的 label 长句（非现场实测值）。"""
+    s = str(val or "").strip()
+    if not s:
+        return True
+    lab = str(label or "").strip()
+    if lab and s == lab:
+        return True
+    if len(s) > 48 and "检测条件" in s and "kV" in s and "mA" in s:
+        return True
+    return False
+
+
+def _is_boolean_site_pick_value(val: str) -> bool:
+    return str(val or "").strip().lower() in ("true", "false")
+
+
+def _should_skip_boolean_site_pick(
+    val: str,
+    *,
+    report_field_label: str = "",
+    source_label: str = "",
+) -> bool:
+    """检测结果槽误绑 checkbox/radio 时勿把 True/False 串进报告格。"""
+    if not _is_boolean_site_pick_value(val):
+        return False
+    rep = str(report_field_label or "")
+    src = str(source_label or "")
+    if "单项判定" in rep or (rep.endswith("判定") and "检测条件" not in rep):
+        return False
+    if "主要检测人员" in rep or "主要检测人员" in src:
+        return True
+    if "签字" in src or "签名" in src:
+        return True
+    if "检测结果" in rep or "计算结果" in rep or "报出值" in rep:
+        return True
+    if "检测条件" in rep:
+        return True
+    if "检测结果" in src and ("不能分辨" in src or "是否" in src):
+        return True
+    return False
+
+
+def _date_slot_part_from_label(label: str, slot: str = "") -> str | None:
+    lab = str(label or "").strip()
+    if "年月日3" in lab or (slot == "3" and "检测日期" in lab):
+        return "day"
+    if "年月日2" in lab or (slot == "2" and "检测日期" in lab):
+        return "month"
+    if "年月日" in lab and "检测日期" in lab:
+        return "year"
+    return None
+
+
+def _coerce_site_pick_value_for_date_slot(val: str, *, label: str = "", slot: str = "") -> str:
+    """现场日期三格映射：把 ISO/完整中文日期拆成年/月/日片段再写入模板槽。"""
+    s = str(val or "").strip()
+    if not s:
+        return s
+    part = _date_slot_part_from_label(label, slot)
+    if not part:
+        return s
+    try:
+        from apps.api.inspection_report_make import (
+            _format_test_date_ymd_slot_part,
+            _parse_loose_datetime_for_submit,
+        )
+    except ImportError:
+        return s
+    dt = _parse_loose_datetime_for_submit(s)
+    if dt is None:
+        if part == "year" and s.isdigit() and len(s) == 4:
+            return s
+        if part in ("month", "day") and s.isdigit() and len(s) <= 2:
+            return s
+        return s
+    return _format_test_date_ymd_slot_part(part, dt)
+
+
+def _compose_chinese_test_date_from_parts(parts: list[str]) -> str:
+    if len(parts) != 3:
+        return ""
+    y, m, d = (str(p or "").strip() for p in parts)
+    if not (y and m and d):
+        return ""
+    if "年" in y or "月" in m or "日" in d:
+        return "".join(parts)
+    try:
+        return f"{int(y):04d}年{int(m)}月{int(d)}日"
+    except (TypeError, ValueError):
+        return f"{y}年{m}月{d}日"
+
+
+def _infer_slot_unit_suffix(label: str) -> str:
+    lab = str(label or "").strip()
+    if not lab:
+        return ""
+    if lab.endswith("kV") or "算法kV" in lab or lab in ("kVmAs", "kVmAs2", "kVmAs3"):
+        return "kV"
+    if "mAs" in lab and "kV" not in lab:
+        return "mAs"
+    if "mA" in lab:
+        return "mA"
+    if "层厚" in lab or lab.endswith("mm") or "smm" in lab or "s(T)mm" in lab:
+        return "mm"
+    if lab.endswith("s") or "(mAs)s" in lab or "s(T)" in lab:
+        return "s"
+    if lab.endswith("%"):
+        return "%"
+    return ""
+
+
+def _format_bare_slot_concat_value(
+    picked_parts: list[str],
+    sources: list[dict] | None,
+    *,
+    report_field_label: str = "",
+) -> str:
+    """检测条件等多槽连写模板：按来源语义加单位/空格，避免数字粘成一串。"""
+    srcs = sources if isinstance(sources, list) else []
+    is_condition = "检测条件" in str(report_field_label or "") or any(
+        "检测条件" in str((s or {}).get("label") or "") for s in srcs
+    )
+    is_rated = "额定参数" in str(report_field_label or "") or any(
+        "额定参数" in str((s or {}).get("label") or "") for s in srcs
+    )
+    chunks: list[str] = []
+    for i, raw in enumerate(picked_parts):
+        val = str(raw or "").strip()
+        if not val:
+            continue
+        lab = str((srcs[i] if i < len(srcs) else {}).get("label") or "")
+        if _is_implausible_mapped_site_value(val, lab):
+            continue
+        if is_condition or is_rated:
+            unit = _infer_slot_unit_suffix(lab)
+            if unit and not val.endswith(unit):
+                chunks.append(f"{val}{unit}")
+            else:
+                chunks.append(val)
+        else:
+            chunks.append(val)
+    if is_rated and len(chunks) == 2:
+        return f"{chunks[0]}/{chunks[1]}"
+    if is_condition and len(chunks) >= 3:
+        return " ".join(chunks[:3])
+    return " ".join(chunks)
+
+
 def _compose_report_site_field_final_value(
     picked_parts: list[str],
     slot_values: dict[str, str],
     template: str,
+    *,
+    sources: list[dict] | None = None,
+    report_field_label: str = "",
 ) -> str:
     """
     多来源合并：有合法占位模板则渲染；否则按 slot 顺序拼接实测值。
@@ -234,6 +392,18 @@ def _compose_report_site_field_final_value(
     """
     tpl = _coerce_value_template(template)
     if tpl.strip() and _value_template_has_slot_placeholders(tpl):
+        if _is_bare_slot_concat_template(tpl):
+            formatted = _format_bare_slot_concat_value(
+                picked_parts,
+                sources,
+                report_field_label=report_field_label,
+            )
+            if formatted:
+                return formatted
+            if "检测日期" in str(report_field_label or "") and len(picked_parts) == 3:
+                date_cn = _compose_chinese_test_date_from_parts(picked_parts)
+                if date_cn:
+                    return date_cn
         return render_report_value_template(tpl, slot_values)
     if len(picked_parts) == 1:
         return picked_parts[0]
@@ -289,6 +459,17 @@ def normalize_report_site_field_configs(rows: list) -> list[dict[str, Any]]:
                 cfg["mapSource"] = str(row.get("mapSource") or row.get("map_source") or "").strip()
             if row.get("mapRuleLabel") or row.get("map_rule_label"):
                 cfg["mapRuleLabel"] = str(row.get("mapRuleLabel") or row.get("map_rule_label") or "").strip()
+            vt = _coerce_value_template(row.get("valueTemplate") or row.get("value_template"))
+            if vt:
+                cur = str(cfg.get("valueTemplate") or "").strip()
+                if not cur:
+                    cfg["valueTemplate"] = vt
+                elif _is_bare_slot_concat_template(cur) and not _is_bare_slot_concat_template(vt):
+                    cfg["valueTemplate"] = vt
+                elif not _is_bare_slot_concat_template(cur) and _is_bare_slot_concat_template(vt):
+                    pass
+                elif len(vt) > len(cur):
+                    cfg["valueTemplate"] = vt
 
     out: list[dict[str, Any]] = []
     for key in order:
@@ -650,6 +831,19 @@ def merge_report_site_map_into_bindings(
     return base
 
 
+def sync_bindings_report_site_field_sections(bindings: dict | None) -> dict:
+    """
+    以 report_site_field_configs 为权威源，重建扁平 report_site_field_map，
+    避免两节 valueTemplate 不一致（编辑器改 configs 后 flat 仍留旧 {1}{2}…）。
+    """
+    base = dict(bindings) if isinstance(bindings, dict) else {}
+    configs = parse_report_site_field_configs_from_bindings(base)
+    if configs or "report_site_field_configs" in base or "report_site_field_map" in base:
+        base["report_site_field_configs"] = configs
+        base["report_site_field_map"] = configs_to_flat_rows(configs)
+    return base
+
+
 def apply_report_site_field_map_to_value_mapping(
     value_mapping: dict,
     source_data: dict,
@@ -699,43 +893,46 @@ def apply_report_site_field_map_to_value_mapping(
         cache_key = site_tid if site_tid > 0 else hash(site_code)
         if cache_key in site_payload_cache:
             return site_payload_cache[cache_key]
+        from apps.api.inspection_report_make import (
+            _resolve_submit_payload_for_site_task,
+            normalize_template_bind_key,
+        )
+
+        task = _resolve_site_library_task(site_tid, site_code)
         if not ordered_submit_payloads:
             site_payload_cache[cache_key] = source_data
             return source_data
-        task = _resolve_site_library_task(site_tid, site_code)
-        if task is None:
-            site_payload_cache[cache_key] = source_data
-            return source_data
-        _pdf, json_lf = _first_template_files_for_task(task)
-        want_name = (json_lf.original_name or "").strip() if json_lf else ""
-        task_name = (task.name or "").strip()
+        matched = _resolve_submit_payload_for_site_task(
+            task,
+            source_data=source_data,
+            ordered_submit_payloads=ordered_submit_payloads,
+            site_task_code=site_code,
+        )
+        if matched:
+            site_payload_cache[cache_key] = matched
+            return matched
+        if site_code:
+            from apps.api.inspection_report_make import normalize_template_bind_key
 
-        def _template_bind_key(name: str) -> str:
-            s = (name or "").strip().lower()
-            if s.endswith(".json"):
-                s = s[:-5]
-            for token in ("-状态终", "-验收终", "-状态", "-验收", "-终"):
-                if s.endswith(token):
-                    s = s[: -len(token)]
-                    break
-            return "".join(s.split())
-
-        want_key = _template_bind_key(want_name)
-        for pay in ordered_submit_payloads:
-            if not isinstance(pay, dict):
-                continue
-            ptid = str(pay.get("templateId") or "").strip()
-            if not ptid:
-                continue
-            pt_key = _template_bind_key(ptid)
-            if want_key and pt_key and (want_key == pt_key or want_key in pt_key or pt_key in want_key):
-                site_payload_cache[cache_key] = pay
-                return pay
-            if task_name and task_name in ptid:
-                site_payload_cache[cache_key] = pay
-                return pay
-        site_payload_cache[cache_key] = source_data
-        return source_data
+            code_key = normalize_template_bind_key(site_code.replace("-", "").replace("_", ""))
+            code_js = ""
+            m_js = re.search(r"js\d+", site_code, re.I)
+            if m_js:
+                code_js = m_js.group(0).lower()
+            for pay in ordered_submit_payloads:
+                if not isinstance(pay, dict):
+                    continue
+                ptid = str(pay.get("templateId") or "").strip().lower()
+                pt_key = normalize_template_bind_key(ptid)
+                pt_compact = pt_key.replace("-", "")
+                if code_js and code_js in ptid:
+                    site_payload_cache[cache_key] = pay
+                    return pay
+                if code_key and (code_key in pt_compact or pt_compact in code_key):
+                    site_payload_cache[cache_key] = pay
+                    return pay
+        site_payload_cache[cache_key] = {} if len(ordered_submit_payloads) > 1 else source_data
+        return site_payload_cache[cache_key]
 
     def _parsed_for_site_task(site_task_id: int, site_task_code: str = "") -> dict | None:
         cache_key = (int(site_task_id or 0), (site_task_code or "").strip().lower())
@@ -762,10 +959,19 @@ def apply_report_site_field_map_to_value_mapping(
         site_parsed: dict, site_pid: str, *, site_tid: int, site_code: str = ""
     ) -> str | None:
         payload = _submit_payload_for_site_task(site_tid, site_code)
+        if not isinstance(payload, dict) or not payload:
+            return None
         dd = payload.get("dynamicData") if isinstance(payload.get("dynamicData"), dict) else {}
         raw_dd = dd.get(site_pid)
         if raw_dd not in (None, "") and not isinstance(raw_dd, (dict, list)):
             return str(raw_dd).strip()
+        tr = payload.get("testResult") if isinstance(payload.get("testResult"), dict) else {}
+        sp_key = f"f{site_pid[1:]}" if site_pid.lower().startswith("f") and site_pid[1:].isdigit() else site_pid
+        raw_tr = tr.get(site_pid) if site_pid in tr else tr.get(sp_key)
+        if raw_tr not in (None, "") and not isinstance(raw_tr, (dict, list)):
+            return str(raw_tr).strip()
+        if not site_parsed:
+            return None
         meta = _build_pdf_field_meta_index(site_parsed).get(
             site_pid.lower() if site_pid.lower().startswith("f") and site_pid[1:].isdigit() else site_pid
         )
@@ -837,30 +1043,96 @@ def apply_report_site_field_map_to_value_mapping(
             if (site_tid <= 0 and not site_code) or not site_pid:
                 continue
             site_parsed = _parsed_for_site_task(site_tid, site_code)
-            if not site_parsed:
-                continue
-            site_pid = _resolve_site_pdf_field_id_by_label(
-                site_parsed,
-                site_pid,
-                str(src.get("label") or "").strip(),
-            )
+            resolved_pid = site_pid
+            if site_parsed:
+                resolved_pid = _resolve_site_pdf_field_id_by_label(
+                    site_parsed,
+                    site_pid,
+                    str(src.get("label") or "").strip(),
+                )
             val = _pick_site_field_value(
-                site_parsed, site_pid, site_tid=site_tid, site_code=site_code
+                site_parsed or {},
+                resolved_pid,
+                site_tid=site_tid,
+                site_code=site_code,
             )
             if val is None:
                 continue
+            src_label = str(src.get("label") or "")
+            if _is_implausible_mapped_site_value(val, src_label):
+                continue
+            report_label = str(report_field.get("label") or report_field.get("title") or "").strip()
+            if _should_skip_boolean_site_pick(
+                val,
+                report_field_label=report_label,
+                source_label=src_label,
+            ):
+                continue
             slot = str(src.get("slot") or str(i)).strip() or str(i)
+            val = _coerce_site_pick_value_for_date_slot(val, label=src_label, slot=slot)
             slot_values[slot] = val
             slot_values[str(i)] = val
             slot_values[site_pid] = val
             picked_parts.append(val)
 
         if not picked_parts:
+            if sources and str(cfg.get("mapSource") or "").strip().lower() in ("explicit", ""):
+                placeholder = "/"
+                value_mapping[report_pid] = placeholder
+                for key in _field_semantic_candidate_keys(report_field):
+                    if key:
+                        value_mapping[key] = placeholder
             continue
         template = _coerce_value_template(cfg.get("valueTemplate") or cfg.get("value_template"))
-        final_value = _compose_report_site_field_final_value(picked_parts, slot_values, template)
+        report_label = str(report_field.get("label") or report_field.get("title") or "").strip()
+        final_value = _compose_report_site_field_final_value(
+            picked_parts,
+            slot_values,
+            template,
+            sources=sources,
+            report_field_label=report_label,
+        )
 
         for key in _field_semantic_candidate_keys(report_field):
             if key:
                 value_mapping[key] = final_value
         value_mapping[report_pid] = final_value
+
+
+def snapshot_explicit_report_site_field_mapping(
+    value_mapping: dict,
+    bindings: dict | None,
+) -> dict[str, str]:
+    """在 reconcile 等后处理前保存显式 report→site 映射写入的值。"""
+    if not isinstance(value_mapping, dict) or not isinstance(bindings, dict):
+        return {}
+    configs = parse_report_site_field_configs_from_bindings(bindings)
+    if not configs:
+        return {}
+    snap: dict[str, str] = {}
+    for cfg in configs:
+        if str(cfg.get("mapSource") or "").strip().lower() not in ("explicit", ""):
+            continue
+        pid = str(cfg.get("reportPdfFieldId") or "").strip()
+        if not pid:
+            continue
+        val = value_mapping.get(pid)
+        if val in (None, "") or isinstance(val, (dict, list, bool)):
+            continue
+        sval = str(val).strip()
+        if _is_boolean_site_pick_value(sval):
+            continue
+        snap[pid] = sval
+    return snap
+
+
+def restore_explicit_report_site_field_mapping(
+    value_mapping: dict,
+    snapshot: Mapping[str, str] | None,
+) -> None:
+    """reconcile 后恢复显式 site 映射，避免 f20–f24 等质控槽被基本情况语义覆盖。"""
+    if not isinstance(value_mapping, dict) or not isinstance(snapshot, Mapping):
+        return
+    for pid, val in snapshot.items():
+        if pid and val not in (None, ""):
+            value_mapping[str(pid)] = str(val)

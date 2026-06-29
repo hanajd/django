@@ -40,10 +40,13 @@ def _normalize_rp_phrase_spacing(text: str) -> str:
     if not s:
         return s
     s = re.sub(r"工作场所放射防\s+护", "工作场所放射防护", s)
+    s = re.sub(r"工作场所\s+放射防护", "工作场所放射防护", s)
     s = re.sub(r"放射防\s+护", "放射防护", s)
     s = re.sub(r"防\s+护检测", "防护检测", s)
+    s = re.sub(r"放射防护\s+检测", "放射防护检测", s)
+    s = re.sub(r"工作场所放射防护\s+检测", "工作场所放射防护检测", s)
     s = re.sub(r"防\s+护", "防护", s)
-    return s
+    return s.replace("\u2060", "").replace("\u200b", "")
 
 # 报告合并封面/项目名称：优先从标题中识别的设备大类（后续版本可在此元组末尾追加新类型）。
 # 正则 alternation 按「长度降序、同长按字典序」排列，避免「DR」误匹配「动态DR」等子串。
@@ -98,6 +101,26 @@ def _resolve_report_template_profile(profile: Optional["ReportTemplateProfile"] 
     from apps.core.report_template_profiles import DEFAULT_REPORT_TEMPLATE_PROFILE
 
     return profile if profile is not None else DEFAULT_REPORT_TEMPLATE_PROFILE
+
+
+def _merge_adjust_basic_info_device_count_write_rect(
+    rect: Any,
+    profile: Optional["ReportTemplateProfile"] = None,
+) -> Any:
+    """基本情况「受检设备台数」写入区平移（避免取值压单元格左线）。"""
+    if not fitz or rect is None or rect.is_empty:
+        return rect
+    prof = _resolve_report_template_profile(profile)
+    x_off = float(prof.basic_info_device_count_write_x_offset or 0.0)
+    y_off = float(prof.basic_info_device_count_write_y_offset or 0.0)
+    if not x_off and not y_off:
+        return rect
+    return fitz.Rect(
+        float(rect.x0) + x_off,
+        float(rect.y0) + y_off,
+        float(rect.x1) + x_off,
+        float(rect.y1) + y_off,
+    )
 
 
 def _merge_clamp_basic_info_value_rect(
@@ -326,6 +349,8 @@ def _summary_semantic_keys(fid: str, flabel: str) -> set[str]:
         keys.add("summary_device_count")
     if fid == "受检单位名称" or flabel == "受检单位名称":
         keys.add("summary_inspected_org_name")
+    if fid in ("f1", "委托编号") or flabel == "委托编号":
+        keys.add("summary_commission_no")
     if fid == "受检单位地址" or flabel == "受检单位地址":
         keys.add("summary_inspected_org_address")
     if fid == "评价" or flabel == "评价":
@@ -538,7 +563,7 @@ def build_report_template_overlay_rects(
         if fr_cover is not None and not fr_cover.is_empty:
             for key in _cover_semantic_keys(fid, flabel):
                 _assign_overlay_rect(out, key, fr_cover)
-            if page_no == int(cover_page_1based):
+            if _template_field_page_1based(f) == int(cover_page_1based):
                 if pid == "f1":
                     _assign_overlay_rect(out, "cover_report_no", fr_cover)
                 elif pid == "f2" and fid not in ("受检单位名称", "受检单位地址") and flabel not in (
@@ -582,7 +607,54 @@ def build_report_template_overlay_rects(
                 _union_assign_overlay_rect(out, key, fr_summary)
     if apply_fixed_summary_rects:
         _finalize_summary_template_rects(out, summary_page_1based=summary_page_1based)
+    _reconcile_cover_f4_f5_inspected_org_vs_date(
+        parsed, cover_page_1based=cover_page_1based, cover_pi=cover_pi, out=out
+    )
     return out
+
+
+def _template_field_page_1based(field: dict) -> int:
+    rect_list = field.get("rect")
+    if isinstance(rect_list, (list, tuple)) and len(rect_list) >= 1:
+        try:
+            return int(rect_list[0])
+        except (TypeError, ValueError):
+            pass
+    try:
+        return int(field.get("page") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _reconcile_cover_f4_f5_inspected_org_vs_date(
+    parsed: Optional[dict],
+    *,
+    cover_page_1based: int,
+    cover_pi: int,
+    out: Dict[str, Any],
+) -> None:
+    """
+    部分验收模板（如 dr-1）封面 f4=受检单位行、f5=报告日期；默认 pid 规则会把 f4 当作日期。
+    """
+    f4_rect = None
+    f5_rect = None
+    for f in _iter_template_pdf_fields(parsed):
+        pid = str(f.get("pdfFieldId") or "").strip().lower()
+        page_no = _template_field_page_1based(f)
+        if page_no != int(cover_page_1based):
+            continue
+        fr = _fitz_rect_from_template_field(f, cover_pi)
+        if fr is None or fr.is_empty:
+            continue
+        if pid == "f4":
+            f4_rect = fr
+        elif pid == "f5":
+            f5_rect = fr
+    if f4_rect is None or f5_rect is None:
+        return
+    if float(f5_rect.y0) > float(f4_rect.y0) + 18.0:
+        out["cover_inspected_org"] = f4_rect
+        out["cover_report_date"] = f5_rect
 
 
 def build_summary_overlay_rects_from_template(
@@ -1027,7 +1099,7 @@ def _page_report_content_bottom_y(page) -> float:
 
 
 _REPORT_LAST_PAGE_YIXIA_KONGBAI = "————以下空白————"
-_YIXIA_KONGBAI_GAP_BELOW_CONTENT_PT = 16.0
+_YIXIA_KONGBAI_GAP_BELOW_CONTENT_PT = 8.0
 
 
 def ensure_last_page_yixia_kongbai_marker(doc) -> None:
@@ -1039,8 +1111,8 @@ def ensure_last_page_yixia_kongbai_marker(doc) -> None:
 
     pw = float(page.rect.width)
     ph = float(page.rect.height)
-    fs = 10.5
-    band_h = fs * 1.6
+    fs = _MERGE_PT_XIAOSI
+    band_h = fs * 1.35
     content_bottom = _page_report_content_bottom_y(page)
     if content_bottom <= 0.0:
         content_bottom = ph * 0.45
@@ -1048,7 +1120,7 @@ def ensure_last_page_yixia_kongbai_marker(doc) -> None:
     y1 = y0 + band_h
     max_y1 = ph - 24.0
     if y1 > max_y1:
-        y0 = max(content_bottom + 8.0, max_y1 - band_h)
+        y0 = max(content_bottom + 4.0, max_y1 - band_h)
         y1 = y0 + band_h
     band = fitz.Rect(48.0, y0, pw - 48.0, y1)
     ac = int(getattr(fitz, "TEXT_ALIGN_CENTER", 1))
@@ -1117,7 +1189,27 @@ def build_single_report_cover_title_line(
         kind = "工作场所放射防护检测"
     else:
         kind = "质量控制检测"
-    return f"放射诊疗设备（{ab}）{kind}"
+    return _normalize_rp_phrase_spacing(f"放射诊疗设备（{ab}）{kind}")
+
+
+def build_single_report_toc_device_title(
+    device_name: str,
+    device_type: str,
+    device_model: str,
+) -> str:
+    """目录一级章节名：{设备名称}（{设备类型}，型号：{设备型号}）。"""
+    name = _normalize_rp_phrase_spacing((device_name or "").strip()) or "检测设备"
+    dtype_raw = (device_type or "").strip()
+    model = (device_model or "").strip()
+    abbr = extract_modality_abbr_from_title(dtype_raw or name or model) or dtype_raw
+    type_part = abbr or dtype_raw
+    if model and type_part:
+        return f"{name}（{type_part}，型号：{model}）"
+    if model:
+        return f"{name}（型号：{model}）"
+    if type_part:
+        return f"{name}（{type_part}）"
+    return name
 
 
 def normalize_inspection_type_for_evaluation(inspection_type: str = "") -> str:
@@ -1930,7 +2022,53 @@ def _collect_toc_redact_rects_from_page(page: fitz.Page) -> List[fitz.Rect]:
             if txt.count(".") >= 12 or txt.count("．") >= 6:
                 rects.append(_line_bbox_union(spans))
                 continue
+            if "未定义书签" in txt or ("错误" in txt and "书签" in txt):
+                rects.append(_line_bbox_union(spans))
+                continue
+            if re.match(r"^\d{1,4}$", tcompact):
+                rects.append(_line_bbox_union(spans))
+                continue
+            if txt.strip().startswith("）") and ("." in txt or "…" in txt or "·" in txt):
+                rects.append(_line_bbox_union(spans))
+                continue
     return rects
+
+
+def _redact_toc_body_residual_spans(page: fitz.Page, geom: Dict[str, Any]) -> int:
+    """
+    二次清扫：擦除目录标题区以下、页脚以上的全部残留文本行（含 Word「未定义书签」等），
+    再重绘「目/录」与目录行。仅作用于文字层，尽量保留底层水印图。
+    """
+    if not fitz:
+        return 0
+    h = float(page.rect.height)
+    y_header_bottom = float(geom.get("header_baseline") or 55.0) + float(
+        geom.get("header_fs") or 10.5
+    ) * 1.85
+    y_body_top = max(y_header_bottom, float(geom.get("title_baseline") or 94.0) - 14.0)
+    y_body_bottom = h - 44.0
+    pat_footer = re.compile(r"第\s*\d+\s*页\s*[/／]\s*共\s*\d+\s*页")
+    rects: List[fitz.Rect] = []
+    d = page.get_text("dict") or {}
+    for block in d.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            spans = line.get("spans") or []
+            if not spans:
+                continue
+            txt = _line_text(line)
+            if not txt.strip():
+                continue
+            bbox = _line_bbox_union(spans)
+            cy = (float(bbox.y0) + float(bbox.y1)) * 0.5
+            if cy < y_body_top or cy > y_body_bottom:
+                continue
+            tcompact = re.sub(r"\s+", "", txt)
+            if pat_footer.search(txt) or "报告编号" in tcompact:
+                continue
+            rects.append(bbox)
+    return _apply_toc_redact_rects(page, rects)
 
 
 def _apply_toc_redact_rects(page: fitz.Page, rects: List[fitz.Rect]) -> int:
@@ -1946,13 +2084,16 @@ def _apply_toc_redact_rects(page: fitz.Page, rects: List[fitz.Rect]) -> int:
     return n
 
 
-def _redact_original_toc_text_spans(page: fitz.Page) -> int:
+def _redact_original_toc_text_spans(page: fitz.Page, geom: Optional[Dict[str, Any]] = None) -> int:
     """
     仅擦除模板目录页中需替换的文字块（页眉编号行、目录标题、各目录行），尽量保留背景与水印底图。
     返回添加的红区数量。
     """
     rects = _collect_toc_redact_rects_from_page(page)
-    return _apply_toc_redact_rects(page, rects)
+    n = _apply_toc_redact_rects(page, rects)
+    if geom is not None:
+        n += _redact_toc_body_residual_spans(page, geom)
+    return n
 
 
 def _measure_header_split_geometry(page: fitz.Page) -> Optional[Dict[str, Any]]:
@@ -2339,6 +2480,36 @@ def _norm_toc_text(s: Any) -> str:
     return re.sub(r"\s+", " ", str(s or "").strip())
 
 
+_MERGE_COVER_LEFT_LABEL_MAX_X0_PT = 200.0
+
+
+def _merge_cover_field_label_rect(page, label: str) -> Optional[Any]:
+    """封面左侧字段标签（排除取值列正文中误含的「受检单位」等子串）。"""
+    if not fitz or page is None:
+        return None
+    q = re.sub(r"\s+", "", (label or "").strip())
+    if not q:
+        return None
+    best_y0: Optional[float] = None
+    best: Optional[Any] = None
+    d = page.get_text("dict") or {}
+    for block in d.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            tcompact = _merge_line_compact_text(line)
+            if tcompact != q:
+                continue
+            bb = _line_bbox_union(line.get("spans") or [])
+            if bb.is_empty or float(bb.x0) > _MERGE_COVER_LEFT_LABEL_MAX_X0_PT:
+                continue
+            y0 = float(bb.y0)
+            if best_y0 is None or y0 < best_y0:
+                best_y0 = y0
+                best = bb
+    return best
+
+
 def _merge_cover_next_field_top(page, label_rect: fitz.Rect, labels_below: Sequence[str]) -> Optional[float]:
     """取当前标签下方、最近一个封面字段标签的 y0（用于限制擦除/书写下边界）。"""
     if not fitz or label_rect is None or label_rect.is_empty:
@@ -2349,7 +2520,7 @@ def _merge_cover_next_field_top(page, label_rect: fitz.Rect, labels_below: Seque
         q = (nd or "").strip()
         if not q:
             continue
-        r = _merge_search_first(page, [q])
+        r = _merge_cover_field_label_rect(page, q)
         if r is None or r.is_empty:
             continue
         y0 = float(r.y0)
@@ -2414,6 +2585,7 @@ def _merge_cover_value_only_erase_band(
     if not fitz or label_rect is None or label_rect.is_empty:
         return fitz.Rect(0, 0, 0, 0)
     x_val0, x1 = _merge_cover_value_x_bounds(page)
+    x_val0 = max(float(x_val0), float(label_rect.x1) + 1.0)
     y0 = float(label_rect.y0) - 1.5
     y1 = float(label_rect.y1) + (20.0 if include_line_below else 2.0)
     if y1_cap is not None:
@@ -2494,13 +2666,17 @@ def _merge_erase_cover_standalone_modality_line(
     x_val0, _ = _merge_cover_value_x_bounds(page)
     prof = _resolve_report_template_profile(profile)
     residues = {re.sub(r"\s+", "", t) for t in prof.cover_modality_residue_texts if t}
+    # 模板预印「质量控制检测（状态检测）」等短行，叠印前擦除以免与第二行标题重复
+    residues.add("质量控制检测")
     d = page.get_text("dict") or {}
     for block in d.get("blocks", []):
         if block.get("type") != 0:
             continue
         for line in block.get("lines", []):
             t = re.sub(r"\s+", "", _line_text(line))
-            if t not in residues:
+            if t not in residues and not (
+                t.startswith("质量控制检测（") and len(t) <= 24
+            ):
                 continue
             bbox = _line_bbox_union(line.get("spans") or [])
             if bbox.is_empty:
@@ -2726,21 +2902,66 @@ def _apply_report_cover_overlay_by_label_search(
             x0, x1 = _merge_cover_value_x_bounds(page)
             prof = _resolve_report_template_profile(profile)
             lh = max(14.0, _MERGE_PT_SIHAO * 1.3)
-            y0 = float(r_lab.y0) - 2.0 - float(prof.cover_project_name_erase_above_pt or 0.0)
+            align_label = bool(getattr(prof, "cover_project_name_first_row_align_label", False))
+            if align_label:
+                y0 = float(r_lab.y0) - 1.5
+            else:
+                y0 = float(r_lab.y0) - 2.0 - float(prof.cover_project_name_erase_above_pt or 0.0)
             y1_cap = _merge_cover_next_field_top(page, r_lab, ("受检单位", "检测类型", "报告日期", "受检编号"))
-            y1 = min(float(page.rect.height) - 24.0, y0 + lh * 2.55)
-            if crt and len(crt) > 26:
-                y1 = min(float(page.rect.height) - 24.0, y0 + lh * 2.95)
+            # 擦除/残留清理区须覆盖「项目名称」双下划线两行取值格，直至下一标签行（受检单位）前。
             if y1_cap is not None:
-                y1 = min(y1, float(y1_cap) - 3.0)
+                y1 = min(float(page.rect.height) - 24.0, float(y1_cap) - 3.0)
+            else:
+                y1 = min(float(page.rect.height) - 24.0, y0 + lh * 2.55)
+                if crt and len(crt) > 26:
+                    y1 = min(float(page.rect.height) - 24.0, y0 + lh * 2.95)
             full_band = fitz.Rect(x0, y0, x1, y1)
             erase_band = _merge_cover_erase_band_for_label(page, r_lab, ("项目名称",), full_band=full_band)
+            underline_preserve_rect = fitz.Rect(
+                x0,
+                float(r_lab.y1) - 2.0,
+                x1,
+                min(float(y1_cap or float(r_lab.y1) + 58.0), float(page.rect.height) - 8.0),
+            )
+            saved_underlines = _merge_collect_horizontal_line_segments_in_rect(
+                page, underline_preserve_rect
+            )
             _merge_overlay_erase_transparent(page, erase_band)
             _merge_apply_redactions_overlay(page)
             _merge_erase_cover_project_name_value_residuals(page, full_band)
             _merge_erase_cover_standalone_modality_line(page, full_band, profile=profile)
             umy: Optional[float] = None
-            if prof.cover_project_name_write_below_label:
+            cover_y_off = 0.0 if align_label else float(prof.cover_project_name_write_y_offset or 0.0)
+            dual_ul_ys = _merge_sorted_underline_ys_from_segments(saved_underlines)
+            use_dual_cells = bool(prof.cover_project_name_dual_underline_cells and len(dual_ul_ys) >= 2)
+            precomputed_rows: Optional[Tuple[fitz.Rect, fitz.Rect]] = None
+            line2_gap = float(prof.cover_project_name_line2_above_underline_pt or 5.5)
+            if align_label:
+                probe_y1 = float(y1_cap or float(r_lab.y1) + 58.0)
+                _, _, umy = _merge_underline_x_bounds_in_band(
+                    page,
+                    fitz.Rect(x0, float(r_lab.y1), x1, probe_y1),
+                    r_lab,
+                    y_sub_top=float(r_lab.y1),
+                    y_sub_bot=probe_y1,
+                )
+                if umy is not None:
+                    precomputed_rows = _merge_cover_project_name_label_row_write_rects(
+                        r_lab,
+                        float(umy),
+                        x0,
+                        x1,
+                        line2_above_underline_pt=line2_gap,
+                    )
+                    write_band = fitz.Rect(
+                        x0,
+                        float(precomputed_rows[0].y0),
+                        x1,
+                        float(precomputed_rows[1].y1),
+                    )
+                else:
+                    write_band = full_band
+            elif not use_dual_cells and prof.cover_project_name_write_below_label:
                 probe_y1 = float(r_lab.y1) + 40.0
                 if y1_cap is not None:
                     probe_y1 = min(probe_y1, float(y1_cap) - 4.0)
@@ -2766,22 +2987,46 @@ def _apply_report_cover_overlay_by_label_search(
                     write_band = fitz.Rect(x0, write_y0, x1, write_y0 + 34.0)
             else:
                 write_band = full_band
-            _merge_write_cover_project_name_two_lines(
-                page,
-                r_lab,
-                write_band,
-                org_s,
-                crt,
-                align_center=ac,
-                page_index_0based=page_index_0based,
-                use_fixed_title_rect=use_fixed_title_rect,
-                underline_y=(
-                    float(umy)
-                    if prof.cover_project_name_write_below_label and umy is not None
-                    else None
-                ),
-                line2_above_underline_pt=float(prof.cover_project_name_line2_above_underline_pt or 5.5),
-            )
+            if cover_y_off:
+                write_band = fitz.Rect(
+                    float(write_band.x0),
+                    float(write_band.y0) + cover_y_off,
+                    float(write_band.x1),
+                    float(write_band.y1) + cover_y_off,
+                )
+            if use_dual_cells:
+                _merge_write_cover_project_name_dual_underline_cells(
+                    page,
+                    r_lab,
+                    x0,
+                    x1,
+                    org_s,
+                    crt,
+                    dual_ul_ys,
+                    align_center=ac,
+                    cover_y_off=cover_y_off,
+                    cell_pad=5.0,
+                )
+            else:
+                _merge_write_cover_project_name_two_lines(
+                    page,
+                    r_lab,
+                    write_band,
+                    org_s,
+                    crt,
+                    align_center=ac,
+                    page_index_0based=page_index_0based,
+                    use_fixed_title_rect=use_fixed_title_rect,
+                    underline_y=(
+                        float(umy)
+                        if prof.cover_project_name_write_below_label and umy is not None and not align_label
+                        else None
+                    ),
+                    line2_above_underline_pt=line2_gap,
+                    precomputed_rows=precomputed_rows,
+                )
+            if saved_underlines:
+                _merge_redraw_horizontal_line_segments(page, saved_underlines)
 
 
 def _merge_apply_cover_report_number(
@@ -2990,6 +3235,111 @@ def clear_report_signature_fields(doc) -> None:
                 _merge_apply_redactions_overlay(page)
 
 
+def _toc_snapshot_page_background_png(page: fitz.Page) -> Optional[bytes]:
+    """目录重绘前保留模板页底图（含水印/底纹），避免白底 redact 擦掉背景。"""
+    if not fitz or page is None:
+        return None
+    try:
+        pix = page.get_pixmap(dpi=144, alpha=False)
+        return pix.tobytes("png")
+    except Exception:
+        return None
+
+
+def _toc_restore_page_background(page: fitz.Page, png_bytes: bytes) -> None:
+    if not fitz or page is None or not png_bytes:
+        return
+    try:
+        page.insert_image(page.rect, stream=png_bytes, overlay=False)
+    except Exception:
+        pass
+
+
+def _find_single_report_results_physical_page(doc) -> Optional[int]:
+    if not fitz:
+        return None
+    for pi in range(2, doc.page_count):
+        compact = re.sub(r"\s+", "", doc[pi].get_text("text") or "")
+        if "三、检测结果" in compact or "三.检测结果" in compact:
+            return pi + 1
+    return None
+
+
+def _find_single_report_toc_subsection_physical_pages(
+    doc,
+    *,
+    results_phys: int,
+    toc_page_0based: Optional[int] = None,
+) -> Tuple[Optional[int], Optional[int]]:
+    """在「三、检测结果」页及之后定位 1.1 / 1.2 首次出现的物理页（1-based）。"""
+    if not fitz:
+        return None, None
+    qc_phys: Optional[int] = None
+    rp_phys: Optional[int] = None
+    start_pi = max(2, int(results_phys) - 1)
+    for pi in range(start_pi, doc.page_count):
+        if toc_page_0based is not None and pi == toc_page_0based:
+            continue
+        phys = pi + 1
+        for raw_line in (doc[pi].get_text("text") or "").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            m = _TOC_MINOR_LINE_RE.match(line)
+            if not m:
+                continue
+            maj, mino = int(m.group(1)), int(m.group(2))
+            rest = re.sub(r"\s+", "", m.group(3))
+            if maj == 1 and mino == 1 and "质量控制" in rest and qc_phys is None:
+                qc_phys = phys
+            if maj == 1 and mino == 2 and "工作场所放射防护" in rest and rp_phys is None:
+                rp_phys = phys
+        if qc_phys is not None and rp_phys is not None:
+            break
+    return qc_phys, rp_phys
+
+
+def _build_single_report_toc_entries_merged_style(
+    doc,
+    *,
+    device_title: str = "",
+    has_radiation_protection: bool = True,
+    toc_page_0based: Optional[int] = None,
+) -> List[Tuple[str, str, int]]:
+    """
+    单份报告目录：与合并报告一致——一级为受检设备标题，二级为 1.1 质控 / 1.2 防护。
+    """
+    if not fitz:
+        return []
+    title = _normalize_rp_phrase_spacing((device_title or "").strip())
+    results_phys = _find_single_report_results_physical_page(doc)
+    if results_phys is None:
+        return []
+    qc_phys, rp_phys = _find_single_report_toc_subsection_physical_pages(
+        doc,
+        results_phys=results_phys,
+        toc_page_0based=toc_page_0based,
+    )
+    if not title:
+        title = "检测结果"
+    main_rp = _report_body_page_from_physical_1based(results_phys)
+    entries: List[Tuple[str, str, int]] = [("major", f"一、{title}", main_rp)]
+    qc_phys_eff = qc_phys if qc_phys is not None else results_phys
+    qc_page = _report_body_page_from_physical_1based(qc_phys_eff)
+    if qc_page > 0:
+        entries.append(("minor", "1.1  质量控制检测项目及结果", qc_page))
+    if has_radiation_protection:
+        if rp_phys is not None:
+            rp_page = _report_body_page_from_physical_1based(rp_phys)
+        elif qc_phys_eff is not None:
+            rp_page = _report_body_page_from_physical_1based(qc_phys_eff + 1)
+        else:
+            rp_page = 0
+        if rp_page > 0:
+            entries.append(("minor", "1.2  工作场所放射防护检测结果", rp_page))
+    return entries
+
+
 def _collect_single_report_toc_entries(
     doc,
     *,
@@ -3058,6 +3408,8 @@ def regenerate_single_report_table_of_contents(
     *,
     report_no: str = "",
     has_radiation_protection: bool = True,
+    device_title: str = "",
+    profile: Optional["ReportTemplateProfile"] = None,
 ) -> None:
     """擦除模板目录残留，铺水印底图并重绘全部一/二级目录行。"""
     if not fitz or doc is None or doc.page_count < 4:
@@ -3074,15 +3426,34 @@ def regenerate_single_report_table_of_contents(
     page = doc[toc_idx]
     w, h = float(page.rect.width), float(page.rect.height)
     geom = _merged_toc_geometry_for_size(w, h)
-    _toc_wipe_layout_redraw_zones(page, w, h, geom)
-    _merged_report_insert_watermark_bottom_layer(page, w, h)
+    prof = _resolve_report_template_profile(profile)
+    toc_rx = prof.page_header_right_x1 or prof.basic_info_table_x1
+    if toc_rx is not None:
+        geom = dict(geom)
+        geom["num_right_x"] = float(toc_rx)
+    # 按文字块红区，保留模板页矢量底纹/水印；整块白擦会抹掉背景图
+    _redact_original_toc_text_spans(page, geom)
+    if not page.get_images():
+        _merged_report_insert_watermark_bottom_layer(page, w, h)
     font_main = _register_simsun_on_page(page)
     _draw_merged_toc_title_mu_lu(page, geom, font_main)
 
-    entries = _collect_single_report_toc_entries(
+    entries = _build_single_report_toc_entries_merged_style(
+        doc,
+        device_title=device_title,
+        has_radiation_protection=has_radiation_protection,
+        toc_page_0based=toc_idx,
+    )
+    scanned = _collect_single_report_toc_entries(
         doc,
         has_radiation_protection=has_radiation_protection,
     )
+    scanned_minors = sum(1 for e in scanned if e[0] == "minor")
+    merged_minors = sum(1 for e in entries if e[0] == "minor")
+    if scanned_minors >= max(merged_minors + 1, 3):
+        entries = scanned
+    elif not entries:
+        entries = scanned
     if not entries:
         return
 
@@ -3605,7 +3976,16 @@ def _merge_basic_info_label_row_y0(
     return float(cell.y0)
 
 
-def _merge_basic_info_device_count_value_rect(page) -> Optional[fitz.Rect]:
+def _merge_span_is_device_count_unit_label(text: str) -> bool:
+    t = re.sub(r"\s+", "", str(text or ""))
+    return t in ("台",)
+
+
+def _merge_basic_info_device_count_value_rect(
+    page,
+    *,
+    exclude_unit_span: bool = False,
+) -> Optional[fitz.Rect]:
     """基本情况表内「受检设备台数 / 受检工作场所」同行右侧取值单元格。"""
     if not fitz or page is None:
         return None
@@ -3647,6 +4027,8 @@ def _merge_basic_info_device_count_value_rect(page) -> Optional[fitz.Rect]:
         bb = sp.get("bbox")
         if not bb or len(bb) < 4:
             continue
+        if exclude_unit_span and _merge_span_is_device_count_unit_label(sp.get("text", "")):
+            continue
         sr = fitz.Rect(float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3]))
         if float(sr.x0) >= lx1 - 0.5:
             parts.append(sr)
@@ -3661,6 +4043,8 @@ def _merge_basic_info_device_count_value_rect(page) -> Optional[fitz.Rect]:
                 for sp in line.get("spans") or []:
                     bb = sp.get("bbox")
                     if not bb or len(bb) < 4:
+                        continue
+                    if exclude_unit_span and _merge_span_is_device_count_unit_label(sp.get("text", "")):
                         continue
                     sr = fitz.Rect(float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3]))
                     lmid = (float(sr.y0) + float(sr.y1)) * 0.5
@@ -3785,11 +4169,94 @@ def _merge_page_line_segments(page) -> List[Tuple[float, float, float, float]]:
         return out
     for d in drawings:
         for item in d.get("items") or []:
-            if not item or item[0] != "l":
+            if not item:
                 continue
-            p0, p1 = item[1], item[2]
-            out.append((float(p0.x), float(p0.y), float(p1.x), float(p1.y)))
+            if item[0] == "l" and len(item) >= 3:
+                p0, p1 = item[1], item[2]
+                out.append((float(p0.x), float(p0.y), float(p1.x), float(p1.y)))
+                continue
+            if item[0] == "re" and len(item) >= 2:
+                rr = item[1]
+                try:
+                    x0, y0, x1, y1 = float(rr.x0), float(rr.y0), float(rr.x1), float(rr.y1)
+                except Exception:
+                    continue
+                if abs(y1 - y0) <= 3.5 and abs(x1 - x0) >= 36.0:
+                    out.append((x0, y0, x1, y1))
     return out
+
+
+def _merge_collect_horizontal_line_segments_in_rect(
+    page,
+    rect: fitz.Rect,
+    *,
+    min_length: float = 36.0,
+) -> List[Tuple[float, float, float, float, float]]:
+    """收集与 rect 相交的水平线段 (x0, y, x1, y, width)，供擦除后重绘下划线。"""
+    if not fitz or page is None or rect is None or rect.is_empty:
+        return []
+    yt, yb = float(rect.y0), float(rect.y1)
+    xl, xr = float(rect.x0), float(rect.x1)
+    out: List[Tuple[float, float, float, float, float]] = []
+    try:
+        drawings = page.get_drawings() or []
+    except Exception:
+        return out
+    for d in drawings:
+        width = float(d.get("width") or 1.0)
+        for item in d.get("items") or []:
+            if not item:
+                continue
+            if item[0] == "l" and len(item) >= 3:
+                p0, p1 = item[1], item[2]
+                x0, y0, x1, y1 = float(p0.x), float(p0.y), float(p1.x), float(p1.y)
+                if abs(y1 - y0) > 3.5:
+                    continue
+                ym = (y0 + y1) * 0.5
+                if ym < yt - 2.0 or ym > yb + 2.0:
+                    continue
+                xa, xb = (x0, x1) if x0 <= x1 else (x1, x0)
+                if xb < xl - 12.0 or xa > xr + 12.0:
+                    continue
+                if abs(xb - xa) < min_length:
+                    continue
+                out.append((xa, ym, xb, ym, width))
+                continue
+            if item[0] == "re" and len(item) >= 2:
+                rr = item[1]
+                try:
+                    x0, y0, x1, y1 = float(rr.x0), float(rr.y0), float(rr.x1), float(rr.y1)
+                except Exception:
+                    continue
+                if abs(y1 - y0) > 3.5 or abs(x1 - x0) < min_length:
+                    continue
+                ym = (y0 + y1) * 0.5
+                if ym < yt - 2.0 or ym > yb + 2.0:
+                    continue
+                xa, xb = (x0, x1) if x0 <= x1 else (x1, x0)
+                if xb < xl - 12.0 or xa > xr + 12.0:
+                    continue
+                out.append((xa, ym, xb, ym, width))
+    return out
+
+
+def _merge_redraw_horizontal_line_segments(
+    page,
+    segments: Sequence[Tuple[float, float, float, float, float]],
+) -> None:
+    """擦除叠印后按原坐标重绘水平下划线。"""
+    if not fitz or page is None or not segments:
+        return
+    for xa, y0, xb, y1, width in segments:
+        try:
+            page.draw_line(
+                fitz.Point(xa, y0),
+                fitz.Point(xb, y1),
+                color=(0.0, 0.0, 0.0),
+                width=max(0.5, float(width or 1.0)),
+            )
+        except Exception:
+            continue
 
 
 def _merge_underline_x_bounds_in_band(
@@ -3949,6 +4416,104 @@ def _merge_cover_project_name_two_line_write_rects(
     return w_top, w_bot
 
 
+def _merge_sorted_underline_ys_from_segments(
+    segments: Sequence[Tuple[float, float, float, float, float]],
+) -> List[float]:
+    """从线段列表提取去重后的水平线 y（自上而下）。"""
+    ys = sorted({round(float(s[1]), 2) for s in segments})
+    return ys
+
+
+def _merge_cover_project_name_label_row_write_rects(
+    r_lab: fitz.Rect,
+    umy: float,
+    x0: float,
+    x1: float,
+    *,
+    line2_above_underline_pt: float = 5.5,
+) -> Tuple[fitz.Rect, fitz.Rect]:
+    """
+    单下划线封面：首行与「项目名称」标签同一行，次行紧贴模板第二格（约标签下 17pt）。
+    不改动标签列与原 PDF 下划线坐标。
+    """
+    row2_top = float(r_lab.y1) + 17.0
+    w_top = fitz.Rect(x0, float(r_lab.y0) - 1.0, x1, row2_top - 1.0)
+    bot_bot = float(umy) - float(line2_above_underline_pt or 5.5)
+    if bot_bot <= row2_top + 8.0:
+        bot_bot = row2_top + 14.0
+    w_bot = fitz.Rect(x0, row2_top, x1, bot_bot)
+    return w_top, w_bot
+
+
+def _merge_write_cover_project_name_dual_underline_cells(
+    page,
+    r_lab: fitz.Rect,
+    x0: float,
+    x1: float,
+    org_s: str,
+    crt_s: str,
+    underline_ys: Sequence[float],
+    *,
+    align_center: int,
+    cover_y_off: float = 0.0,
+    cell_pad: float = 2.0,
+) -> bool:
+    """
+    双下划线封面：第一行写在标签与第一根线之间，第二行写在两根线之间。
+    避免单行模式下整块压到第一根下划线上。
+    """
+    if not fitz or page is None or r_lab is None or len(underline_ys) < 2:
+        return False
+    org_s = _normalize_rp_phrase_spacing((org_s or "").strip())
+    crt_s = _normalize_rp_phrase_spacing((crt_s or "").strip())
+    if not org_s and not crt_s:
+        return False
+    ul1, ul2 = float(underline_ys[0]), float(underline_ys[1])
+    if ul2 <= ul1 + 6.0:
+        return False
+    pad = max(1.2, float(cell_pad))
+    y_off = float(cover_y_off or 0.0)
+    w_top = fitz.Rect(x0, float(r_lab.y1) + 0.6 + y_off, x1, ul1 - pad)
+    w_bot = fitz.Rect(x0, ul1 + pad, x1, ul2 - pad)
+    if w_top.height < 5.0 or w_bot.height < 8.0:
+        return False
+    for cell in (w_top, w_bot):
+        _merge_overlay_erase_transparent(page, cell, pad=0.5)
+    _merge_apply_redactions_overlay(page)
+    if org_s:
+        org_fs = min(10.5, max(9.5, w_top.height - 2.0))
+        use_bold = _cover_overlay_use_bold()
+        _merge_overlay_write_text_html_style(
+            page,
+            w_top,
+            org_s,
+            align=align_center,
+            preferred_fontsize=org_fs,
+            fontsize_floor=org_fs,
+            bold=use_bold,
+            valign_top=True,
+        )
+    if crt_s:
+        crt_fs = _MERGE_PT_SIHAO
+        crt_floor = _MERGE_PT_SIHAO
+        if crt_s and len(crt_s) > 32:
+            crt_fs, crt_floor = 11.0, 10.0
+        if crt_s and len(crt_s) > 34:
+            crt_fs, crt_floor = 10.5, 10.0
+        use_bold = _cover_overlay_use_bold()
+        _merge_overlay_write_text_html_style(
+            page,
+            w_bot,
+            crt_s,
+            align=align_center,
+            preferred_fontsize=crt_fs,
+            fontsize_floor=crt_floor,
+            bold=use_bold,
+            valign_top=True,
+        )
+    return True
+
+
 def _merge_write_cover_project_name_two_lines(
     page,
     r_lab: fitz.Rect,
@@ -3961,6 +4526,7 @@ def _merge_write_cover_project_name_two_lines(
     use_fixed_title_rect: bool = False,
     underline_y: Optional[float] = None,
     line2_above_underline_pt: float = 5.5,
+    precomputed_rows: Optional[Tuple[fitz.Rect, fitz.Rect]] = None,
 ) -> None:
     """封面「项目名称」两行：上单位、下设备+检测类型；文字落在上划线上方，长标题略缩小字号。"""
     if not fitz or page is None or r_lab is None or band is None:
@@ -3969,7 +4535,39 @@ def _merge_write_cover_project_name_two_lines(
     crt_s = _normalize_rp_phrase_spacing((crt_s or "").strip())
     if not org_s and not crt_s:
         return
-    if underline_y is not None:
+    if precomputed_rows is not None:
+        w_top_wr, w_bot_wr = precomputed_rows
+        use_bold = _cover_overlay_use_bold()
+        crt_fs = _MERGE_PT_SIHAO
+        crt_floor = _MERGE_PT_SIHAO
+        if crt_s and len(crt_s) > 32:
+            crt_fs, crt_floor = 11.0, 10.0
+        if crt_s and len(crt_s) > 34:
+            crt_fs, crt_floor = 10.5, 10.0
+        if org_s:
+            _merge_overlay_write_text_html_style(
+                page,
+                w_top_wr,
+                org_s,
+                align=align_center,
+                preferred_fontsize=_MERGE_PT_SIHAO,
+                fontsize_floor=_MERGE_PT_SIHAO,
+                bold=use_bold,
+                valign_top=True,
+            )
+        if crt_s:
+            _merge_overlay_write_text_html_style(
+                page,
+                w_bot_wr,
+                crt_s,
+                align=align_center,
+                preferred_fontsize=crt_fs,
+                fontsize_floor=crt_floor,
+                bold=use_bold,
+                valign_top=True,
+            )
+        return
+    elif underline_y is not None:
         pw = float(page.rect.width)
         xa, xb, _ = _merge_underline_x_bounds_in_band(page, band, r_lab)
         pad_x = 2.0
@@ -4007,8 +4605,10 @@ def _merge_write_cover_project_name_two_lines(
         )
     crt_fs = _MERGE_PT_SIHAO
     crt_floor = _MERGE_PT_SIHAO
+    if crt_s and len(crt_s) > 32:
+        crt_fs, crt_floor = 11.0, 10.0
     if crt_s and len(crt_s) > 34:
-        crt_fs, crt_floor = 12.0, 11.0
+        crt_fs, crt_floor = 10.5, 10.0
     if org_s:
         _merge_overlay_write_cover_centered_band(
             page,
@@ -5054,6 +5654,18 @@ def _merge_erase_evaluation_verdict_residuals(page, band: Any) -> None:
     _merge_apply_redactions_overlay(page)
 
 
+def _merge_expand_device_count_erase_rect(rect: Any) -> Any:
+    """台数叠印擦除区略向下扩展，覆盖模板栏位58/59（f49/f50）等红字残留。"""
+    if not fitz or rect is None or rect.is_empty:
+        return rect
+    return fitz.Rect(
+        float(rect.x0),
+        float(rect.y0) - 1.0,
+        float(rect.x1),
+        max(float(rect.y1), float(rect.y0) + 28.0),
+    )
+
+
 def _merge_write_summary_overlay_cell(
     page,
     rect: Any,
@@ -5368,6 +5980,11 @@ def _apply_summary_project_name_overlay(
     if not fitz or page is None:
         return
     pfn = (combined or f"{(org or '').strip()}{(title or '').strip()}").strip()
+    pfn = _normalize_rp_phrase_spacing(pfn)
+    prof_early = _resolve_report_template_profile(profile)
+    if pfn and len(pfn) > 36 and "及" in pfn and prof_early.basic_info_project_name_split_at_and:
+        head, tail = pfn.split("及", 1)
+        pfn = f"{head.rstrip()}\n及{tail.lstrip()}"
     if not pfn:
         return
     allow_fixed = not single_report_mode
@@ -5415,15 +6032,21 @@ def _apply_summary_project_name_overlay(
         return
     if single_report_mode:
         prof = _resolve_report_template_profile(profile)
-        write_band = _merge_clamp_basic_info_value_rect(
-            fitz.Rect(
-                max(float(write_band.x0), float(prof.basic_info_project_name_x0)),
+        y_off = float(prof.basic_info_project_name_write_y_offset or 0.0)
+        write_band = fitz.Rect(
+            max(float(write_band.x0), float(prof.basic_info_project_name_x0)),
+            float(write_band.y0) + y_off,
+            float(prof.basic_info_table_x1) - 2.0,
+            float(write_band.y1) + y_off,
+        )
+        min_h = max(40.0, _MERGE_PT_XIAOSI * 3.0)
+        if float(write_band.y1 - write_band.y0) < min_h:
+            write_band = fitz.Rect(
+                float(write_band.x0),
                 float(write_band.y0),
                 float(write_band.x1),
-                float(write_band.y1),
-            ),
-            profile=profile,
-        )
+                float(write_band.y0) + min_h,
+            )
     if not single_report_mode:
         # 合成报告定版叠印微调：右移 12pt、上移 12pt（PyMuPDF y 向下为正）
         write_band = fitz.Rect(
@@ -5480,6 +6103,8 @@ def _apply_summary_page_overlay_boxes(
 
     wrote = False
     if dcl_s and rr_dc is not None and not rr_dc.is_empty:
+        rr_dc = _merge_adjust_basic_info_device_count_write_rect(rr_dc, profile=profile)
+        rr_dc = _merge_expand_device_count_erase_rect(rr_dc)
         _merge_write_summary_overlay_cell(page, rr_dc, dcl_s, al=al, paragraph_layout=False)
         wrote = True
 
@@ -5809,11 +6434,24 @@ def apply_merged_report_merge_overlay(
             profile=profile,
         )
         if dcl and (rr_dc is None or rr_dc.is_empty):
+            prof_dc = _resolve_report_template_profile(profile)
             val_dc = _merge_basic_info_device_count_value_rect(page)
             if val_dc is not None and not val_dc.is_empty:
-                band_dc = _merge_inset_rect(val_dc, 1.0)
-                _merge_overlay_erase_transparent(page, band_dc, pad=0.15)
+                exclude_unit = not bool(prof_dc.device_count_include_unit_suffix)
+                erase_dc = _merge_basic_info_device_count_value_rect(
+                    page,
+                    exclude_unit_span=exclude_unit,
+                )
+                if erase_dc is None or erase_dc.is_empty:
+                    erase_dc = val_dc
+                erase_dc = _merge_expand_device_count_erase_rect(erase_dc)
+                _merge_overlay_erase_transparent(page, erase_dc, pad=0.35)
                 _merge_apply_redactions_overlay(page)
+                write_dc = erase_dc if exclude_unit else val_dc
+                band_dc = _merge_adjust_basic_info_device_count_write_rect(
+                    _merge_inset_rect(write_dc, 0.6),
+                    profile=profile,
+                )
                 _merge_overlay_write_text_html_style(
                     page,
                     band_dc,
@@ -5839,6 +6477,7 @@ def apply_merged_report_merge_overlay(
                     )
                     if band_dc is not None and not band_dc.is_empty:
                         band_dc.y1 = max(float(band_dc.y1), float(r_dc.y1) + 8.0)
+                        band_dc = _merge_adjust_basic_info_device_count_write_rect(band_dc, profile=profile)
                         _merge_overlay_erase_transparent(page, band_dc)
                         _merge_apply_redactions_overlay(page)
                         _merge_overlay_write_text_html_style(
@@ -5864,13 +6503,28 @@ def apply_merged_report_merge_overlay(
         prof = _resolve_report_template_profile(profile)
         skip_htmlpdf_slots = frozenset(prof.htmlpdf_basic_info_pdf_field_ids or ())
         if commission_no and "f1" not in skip_htmlpdf_slots:
-            _apply_summary_basic_info_label_row_overlay(
-                page,
-                ("委托编号",),
-                commission_no,
-                al=al,
-                profile=profile,
-            )
+            rr_comm = template_rects.get("summary_commission_no")
+            if rr_comm is not None and not rr_comm.is_empty:
+                band = _merge_inset_rect(rr_comm, 1.0)
+                band = _merge_clamp_basic_info_value_rect(band, profile=profile)
+                _merge_overlay_erase_transparent(page, band, pad=0.12)
+                _merge_apply_redactions_overlay(page)
+                _merge_overlay_write_text_html_style(
+                    page,
+                    band,
+                    commission_no,
+                    align=al,
+                    preferred_fontsize=_MERGE_PT_XIAOSI,
+                    fontsize_floor=_MERGE_PT_XIAOSI,
+                )
+            else:
+                _apply_summary_basic_info_label_row_overlay(
+                    page,
+                    ("委托编号",),
+                    commission_no,
+                    al=al,
+                    profile=profile,
+                )
         if inspected_addr and "f3" not in skip_htmlpdf_slots:
             rr_addr = template_rects.get("summary_inspected_org_address")
             if rr_addr is not None and not rr_addr.is_empty:

@@ -55,15 +55,29 @@
                         {% endif %}
                     </div>
                 </div>
-                {% if can_delete_selected_project %}
-                <form method="post" class="shrink-0" onsubmit="return confirm('确定删除该项目？不可恢复。');">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="delete_project">
-                    <input type="hidden" name="project_id" value="{{ selected_project_id }}">
-                    <button type="submit" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 border border-red-200">
-                        <i class="ri-delete-bin-line"></i> 删除项目
-                    </button>
-                </form>
+                {% if can_deactivate_selected_project or can_delete_selected_project %}
+                <div class="flex flex-wrap items-center gap-2 shrink-0">
+                    {% if can_deactivate_selected_project %}
+                    <form method="post" onsubmit="return confirm('确定停用该项目？停用后项目仍保留，委托仪器将自动入库；如需彻底移除须先删除检测提交再点「删除项目」。');">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="deactivate_project">
+                        <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                        <button type="submit" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200">
+                            <i class="ri-pause-circle-line"></i> 停用项目
+                        </button>
+                    </form>
+                    {% endif %}
+                    {% if can_delete_selected_project %}
+                    <form method="post" onsubmit="return confirm('确定删除该项目？不可恢复；若存在检测提交须先在「进度跟踪」中删除。');">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="delete_project">
+                        <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                        <button type="submit" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 border border-red-200">
+                            <i class="ri-delete-bin-line"></i> 删除项目
+                        </button>
+                    </form>
+                    {% endif %}
+                </div>
                 {% endif %}
             </div>
 
@@ -205,7 +219,7 @@
                     <div class="rounded-xl border border-slate-200 overflow-hidden">
                         <div class="px-4 py-3 bg-slate-50 border-b border-slate-200">
                             <h3 class="text-base font-semibold text-slate-900">进度跟踪</h3>
-                            <p class="text-xs text-slate-500 mt-0.5">检测提交与案件环节（现场记录→校核→编制→审核→签发）；仅支持将 submitted 回退为 pending</p>
+                            <p class="text-xs text-slate-500 mt-0.5">检测提交与案件环节（现场记录→校核→编制→审核→签发）；submitted 可回退为 pending；删除提交后可彻底删除项目</p>
                         </div>
                         <div class="overflow-x-auto">
                             <table class="min-w-full text-sm">
@@ -228,17 +242,24 @@
                                         </td>
                                         <td class="px-4 py-2 text-xs text-slate-500">{{ row.submitted_at|date:"Y-m-d H:i"|default:"-" }}</td>
                                         <td class="px-4 py-2">
-                                            {% if row.can_rollback %}
-                                            <form method="post" class="inline" onsubmit="return confirm('回退为 pending？');">
-                                                {% csrf_token %}
-                                                <input type="hidden" name="action" value="rollback_submission_to_pending">
-                                                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
-                                                <input type="hidden" name="submission_id" value="{{ row.id }}">
-                                                <button type="submit" class="text-xs px-2 py-1 rounded-lg bg-amber-600 text-white">回退</button>
-                                            </form>
-                                            {% else %}
-                                            <span class="text-xs text-slate-400">—</span>
-                                            {% endif %}
+                                            <div class="flex flex-wrap items-center gap-1.5">
+                                                {% if row.can_rollback %}
+                                                <form method="post" class="inline" onsubmit="return confirm('回退为 pending？');">
+                                                    {% csrf_token %}
+                                                    <input type="hidden" name="action" value="rollback_submission_to_pending">
+                                                    <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                                                    <input type="hidden" name="submission_id" value="{{ row.id }}">
+                                                    <button type="submit" class="text-xs px-2 py-1 rounded-lg bg-amber-600 text-white hover:bg-amber-700">回退</button>
+                                                </form>
+                                                {% endif %}
+                                                <form method="post" class="inline" onsubmit="return confirm('确定删除检测提交 {{ row.task_no }}？不可恢复。');">
+                                                    {% csrf_token %}
+                                                    <input type="hidden" name="action" value="delete_submission">
+                                                    <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                                                    <input type="hidden" name="submission_id" value="{{ row.id }}">
+                                                    <button type="submit" class="text-xs px-2 py-1 rounded-lg bg-red-600 text-white hover:bg-red-700">删除</button>
+                                                </form>
+                                            </div>
                                         </td>
                                     </tr>
                                     {% empty %}

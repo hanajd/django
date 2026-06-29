@@ -9,7 +9,7 @@
             <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">文件库</p>
             <h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-900">委托管理</h1>
             <p class="mt-1 text-sm text-slate-600 max-w-2xl">
-                查看委托项目数量与完成情况；高权限用户可查看下级角色汇总，项目负责人可管理本人负责项目的分配与撤回。
+                展示挂在你名下及你有权查看/管理的委托。顶部<strong>消息中心</strong>优先提醒待您处理的环节；小委托可展开查看各检测项目的签发流程进度；大委托（≥2 台设备）请在工作台查看明细。
             </p>
         </div>
         <div class="flex flex-wrap gap-2">
@@ -31,7 +31,7 @@
             {% if subject_user %}
             <p class="mt-1 text-xs text-slate-500">{{ subject_user.username }} 相关项目</p>
             {% else %}
-            <p class="mt-1 text-xs text-slate-500">当前筛选范围</p>
+            <p class="mt-1 text-xs text-slate-500">我可见的全部委托</p>
             {% endif %}
         </div>
         <div class="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-5 shadow-sm">
@@ -46,42 +46,61 @@
         </div>
     </div>
 
-    {% if show_user_table and user_summary_rows %}
-    <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-        <div class="px-5 py-4 border-b border-slate-100 bg-slate-50/80">
-            <h2 class="text-sm font-semibold text-slate-900">按用户汇总</h2>
-            <p class="text-xs text-slate-500 mt-0.5">点击「查看项目」进入该用户的委托列表</p>
+    <div class="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50/80 to-white shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-indigo-100 flex flex-wrap items-center justify-between gap-3">
+            <div>
+                <h2 class="text-sm font-semibold text-indigo-950 flex items-center gap-2">
+                    <i class="ri-notification-3-line text-indigo-600"></i> 消息中心
+                </h2>
+                <p class="text-xs text-slate-600 mt-0.5">相关委托与检测项目最新进度，优先展示待您处理的环节</p>
+            </div>
+            <div class="flex flex-wrap gap-2 text-xs">
+                {% if message_center.my_workflow_count %}
+                <span class="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2.5 py-1 font-medium text-rose-800">
+                    <i class="ri-alarm-warning-line"></i> 待您处理 {{ message_center.my_workflow_count }}
+                </span>
+                {% endif %}
+                {% if message_center.recent_count %}
+                <span class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
+                    近期更新 {{ message_center.recent_count }}
+                </span>
+                {% endif %}
+            </div>
         </div>
-        <div class="overflow-x-auto">
-            <table class="min-w-full text-sm">
-                <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
-                    <tr>
-                        <th class="px-4 py-3 text-left">用户</th>
-                        <th class="px-4 py-3 text-left">角色</th>
-                        <th class="px-4 py-3 text-right">总数</th>
-                        <th class="px-4 py-3 text-right">已完成</th>
-                        <th class="px-4 py-3 text-right">未完成</th>
-                        <th class="px-4 py-3 text-right"></th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100">
-                    {% for row in user_summary_rows %}
-                    <tr class="hover:bg-slate-50/80 {% if subject_user and subject_user.pk == row.user.pk %}bg-indigo-50/50{% endif %}">
-                        <td class="px-4 py-3 font-medium text-slate-900">{{ row.user.username }}</td>
-                        <td class="px-4 py-3 text-slate-600">{{ row.role_name }}</td>
-                        <td class="px-4 py-3 text-right tabular-nums">{{ row.total }}</td>
-                        <td class="px-4 py-3 text-right tabular-nums text-emerald-700">{{ row.completed }}</td>
-                        <td class="px-4 py-3 text-right tabular-nums text-amber-800">{{ row.incomplete }}</td>
-                        <td class="px-4 py-3 text-right">
-                            <a href="{% url 'commission_manage' %}?user_id={{ row.user.pk }}" class="text-indigo-600 hover:underline text-xs font-medium">查看项目</a>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+        {% if message_center.items %}
+        <ul class="divide-y divide-indigo-50/80 max-h-[28rem] overflow-y-auto">
+            {% for notice in message_center.items %}
+            <li class="px-5 py-3.5 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 {% if notice.kind == 'my_workflow' %}bg-rose-50/40{% else %}hover:bg-slate-50/60{% endif %}">
+                <div class="flex-1 min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                        {% if notice.kind == 'my_workflow' %}
+                        <span class="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide bg-rose-200 text-rose-900">待您处理</span>
+                        {% else %}
+                        <span class="inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-200 text-slate-700">进度更新</span>
+                        {% endif %}
+                        {% if notice.is_large_commission %}
+                        <span class="inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-900">大委托</span>
+                        {% endif %}
+                        <p class="text-sm font-medium text-slate-900 truncate">{{ notice.message }}</p>
+                    </div>
+                    <p class="text-xs text-slate-600 mt-0.5 truncate" title="{{ notice.detail }}">{{ notice.detail }}</p>
+                </div>
+                <div class="flex items-center gap-3 shrink-0">
+                    <span class="text-[11px] text-slate-500 tabular-nums whitespace-nowrap">{{ notice.updated_at|date:"m-d H:i" }}</span>
+                    <a href="{% url 'library_projects' %}{{ notice.workbench_url }}" class="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium {% if notice.kind == 'my_workflow' %}bg-indigo-600 text-white hover:bg-indigo-700{% else %}bg-white ring-1 ring-slate-200 text-slate-700 hover:bg-slate-50{% endif %}">
+                        前往工作台
+                    </a>
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <div class="px-5 py-10 text-center text-sm text-slate-500">
+            <i class="ri-checkbox-circle-line text-2xl text-emerald-500 block mb-2"></i>
+            暂无待办提醒；相关委托进度更新将显示在此
         </div>
+        {% endif %}
     </div>
-    {% endif %}
 
     <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div class="px-5 py-4 border-b border-slate-100 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -89,6 +108,8 @@
                 <h2 class="text-sm font-semibold text-slate-900">委托项目列表</h2>
                 {% if subject_user %}
                 <p class="text-xs text-slate-500 mt-0.5">用户：{{ subject_user.username }}</p>
+                {% else %}
+                <p class="text-xs text-slate-500 mt-0.5">按最近操作时间排序</p>
                 {% endif %}
             </div>
             <form method="get" class="flex flex-wrap items-center gap-2">
@@ -96,8 +117,13 @@
                 <input type="search" name="search" value="{{ search }}" placeholder="委托编号 260001 或名称/单位…"
                        class="rounded-xl border border-slate-200 px-3 py-2 text-sm w-56"
                        title="输入六位委托编号可精确查询；也可搜项目名称或委托单位">
+                <select name="scope" class="rounded-xl border border-slate-200 px-3 py-2 text-sm" onchange="this.form.submit()">
+                    <option value="">全部范围</option>
+                    <option value="mine" {% if scope_filter == 'mine' %}selected{% endif %}>我名下</option>
+                    <option value="manage" {% if scope_filter == 'manage' %}selected{% endif %}>我可管理</option>
+                </select>
                 <select name="status" class="rounded-xl border border-slate-200 px-3 py-2 text-sm" onchange="this.form.submit()">
-                    <option value="">全部状态</option>
+                    <option value="">全部完成度</option>
                     <option value="completed" {% if status_filter == 'completed' %}selected{% endif %}>已完成</option>
                     <option value="incomplete" {% if status_filter == 'incomplete' %}selected{% endif %}>未完成</option>
                 </select>
@@ -108,27 +134,68 @@
             <table class="min-w-full text-sm">
                 <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
                     <tr>
+                        <th class="px-2 py-3 w-8"></th>
                         <th class="px-4 py-3 text-left">委托编号</th>
                         <th class="px-4 py-3 text-left">项目名称</th>
+                        <th class="px-4 py-3 text-left">关系</th>
                         <th class="px-4 py-3 text-left">委托单位</th>
                         <th class="px-4 py-3 text-left">主要负责人</th>
                         <th class="px-4 py-3 text-center">设备</th>
-                        <th class="px-4 py-3 text-left">已分配</th>
-                        <th class="px-4 py-3 text-left">状态</th>
+                        <th class="px-4 py-3 text-left min-w-[11rem]">签发进度</th>
+                        <th class="px-4 py-3 text-left">最近更新</th>
+                        <th class="px-4 py-3 text-left">完成度</th>
                         <th class="px-4 py-3 text-right">操作</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
                     {% for row in project_rows %}
                     <tr class="align-top hover:bg-slate-50/60">
+                        <td class="px-2 py-3 text-center">
+                            {% if row.show_issuance_progress %}
+                            <button type="button" class="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-indigo-600"
+                                    data-toggle-progress="{{ row.project.pk }}" aria-expanded="false" title="展开检测项目进度">
+                                <i class="ri-arrow-right-s-line text-base transition-transform duration-200" data-progress-chevron="{{ row.project.pk }}"></i>
+                            </button>
+                            {% else %}
+                            <span class="inline-block w-7"></span>
+                            {% endif %}
+                        </td>
                         <td class="px-4 py-3 font-mono text-xs text-indigo-700">{{ row.project.code }}</td>
-                        <td class="px-4 py-3 font-medium text-slate-900">{{ row.project.name }}</td>
-                        <td class="px-4 py-3 text-slate-600 text-xs max-w-[12rem] truncate">{{ row.project.commission_organization|default:"—" }}</td>
+                        <td class="px-4 py-3 font-medium text-slate-900">
+                            {{ row.project.name }}
+                            <p class="text-[10px] font-normal text-slate-500 mt-0.5">{{ row.progress_summary }}</p>
+                        </td>
+                        <td class="px-4 py-3">
+                            <div class="flex flex-wrap gap-1">
+                                {% for rel in row.relation_labels %}
+                                <span class="inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700">{{ rel }}</span>
+                                {% empty %}
+                                <span class="text-xs text-slate-400">—</span>
+                                {% endfor %}
+                            </div>
+                        </td>
+                        <td class="px-4 py-3 text-slate-600 text-xs max-w-[9rem] truncate" title="{{ row.project.commission_organization|default:'' }}">{{ row.project.commission_organization|default:"—" }}</td>
                         <td class="px-4 py-3 text-slate-700 text-xs">
                             {% if row.project.primary_responsible %}{{ row.project.primary_responsible.username }}{% else %}<span class="text-amber-700">未指定</span>{% endif %}
                         </td>
                         <td class="px-4 py-3 text-center tabular-nums">{{ row.equipment_count }}</td>
-                        <td class="px-4 py-3 text-xs text-slate-600 max-w-[10rem]">{{ row.assignee_labels }}</td>
+                        <td class="px-4 py-3">
+                            {% if row.show_issuance_progress %}
+                            <div class="space-y-1">
+                                {% include "core/partials/issuance_progress_bar.html" with progress_bar=row.progress_bar show_step_labels=False %}
+                                <p class="text-xs font-medium text-slate-800">{{ row.progress_label }}</p>
+                            </div>
+                            {% else %}
+                            <p class="text-xs text-slate-500 leading-relaxed">多设备大委托，请在工作台查看各项目进度</p>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3 text-xs text-slate-500 whitespace-nowrap tabular-nums">
+                            {% if row.show_issuance_progress and row.progress_updated_at %}
+                            {{ row.progress_updated_at|date:"Y-m-d H:i" }}
+                            {% else %}
+                            —
+                            {% endif %}
+                        </td>
                         <td class="px-4 py-3">
                             {% if row.completion == 'completed' %}
                             <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">{{ row.completion_label }}</span>
@@ -137,16 +204,85 @@
                             {% endif %}
                         </td>
                         <td class="px-4 py-3 text-right whitespace-nowrap">
-                            <a href="{% url 'library_projects' %}{{ row.workbench_url }}" class="text-indigo-600 hover:underline text-xs">工作台</a>
+                            <a href="{% url 'library_projects' %}{{ row.workbench_url }}" class="text-indigo-600 hover:underline text-xs">详情</a>
                             {% if row.can_manage %}
                             <button type="button" class="ml-2 text-rose-700 hover:underline text-xs font-medium"
                                     data-open-manage="{{ row.project.pk }}">管理</button>
                             {% endif %}
                         </td>
                     </tr>
+                    {% if row.show_issuance_progress %}
+                    <tr id="progress-row-{{ row.project.pk }}" class="hidden bg-indigo-50/20">
+                        <td colspan="11" class="px-4 py-4">
+                            <div class="rounded-xl border border-indigo-100 bg-white/90 overflow-hidden">
+                                <div class="px-4 py-2 border-b border-indigo-50 bg-indigo-50/40 flex flex-wrap items-center justify-between gap-2">
+                                    <p class="text-xs font-semibold text-indigo-900">检测项目进度 · {{ row.project.code }}</p>
+                                    <p class="text-[10px] text-slate-500">流程：现场填写 → 校核 → 编制 → 审核 → 签发 → 已签发</p>
+                                </div>
+                                <div class="overflow-x-auto">
+                                    <table class="min-w-full text-xs">
+                                        <thead class="bg-slate-50 text-slate-500">
+                                            <tr>
+                                                <th class="px-3 py-2 text-left">受检设备</th>
+                                                <th class="px-3 py-2 text-left">任务</th>
+                                                <th class="px-3 py-2 text-left min-w-[14rem]">签发进度</th>
+                                                <th class="px-3 py-2 text-left">当前环节</th>
+                                                <th class="px-3 py-2 text-left">提交状态</th>
+                                                <th class="px-3 py-2 text-left">最近更新</th>
+                                                <th class="px-3 py-2 text-left">推进</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-slate-100">
+                                            {% for item in row.item_progress_rows %}
+                                            <tr class="hover:bg-slate-50/60">
+                                                <td class="px-3 py-3 text-slate-800 font-medium max-w-[10rem]">{{ item.equipment_title }}</td>
+                                                <td class="px-3 py-3 text-slate-600 font-mono text-[11px] max-w-[12rem]">
+                                                    {% if item.task_no %}<span class="text-indigo-700">{{ item.task_no }}</span><br>{% endif %}
+                                                    <span class="text-slate-500">{{ item.task_label }}</span>
+                                                </td>
+                                                <td class="px-3 py-3">
+                                                    {% include "core/partials/issuance_progress_bar.html" with progress_bar=item.progress_bar show_step_labels=True %}
+                                                    {% if item.has_checker_signature %}
+                                                    <p class="mt-1 text-[10px] text-teal-700">已含校核签名，校核已完成，进度至少至编制环节</p>
+                                                    {% endif %}
+                                                </td>
+                                                <td class="px-3 py-3 text-slate-800">{{ item.stage_label }}</td>
+                                                <td class="px-3 py-3 text-slate-600">{{ item.submission_status }}</td>
+                                                <td class="px-3 py-3 text-slate-500 tabular-nums whitespace-nowrap">
+                                                    {% if item.progress_updated_at %}{{ item.progress_updated_at|date:"Y-m-d H:i" }}{% else %}—{% endif %}
+                                                </td>
+                                                <td class="px-3 py-3">
+                                                    <div class="flex flex-wrap gap-1.5">
+                                                        {% for act in item.advance_actions %}
+                                                        <form method="post" class="inline">
+                                                            {% csrf_token %}
+                                                            <input type="hidden" name="action" value="advance_workflow">
+                                                            <input type="hidden" name="project_id" value="{{ row.project.pk }}">
+                                                            <input type="hidden" name="task_no" value="{{ item.task_no }}">
+                                                            <input type="hidden" name="target_stage" value="{{ act.target_stage }}">
+                                                            {% if subject_user %}<input type="hidden" name="user_id" value="{{ subject_user.pk }}">{% endif %}
+                                                            {% if scope_filter %}<input type="hidden" name="scope" value="{{ scope_filter }}">{% endif %}
+                                                            {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
+                                                            {% if search %}<input type="hidden" name="search" value="{{ search }}">{% endif %}
+                                                            <button type="submit" class="text-[11px] px-2 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 whitespace-nowrap">{{ act.label }}</button>
+                                                        </form>
+                                                        {% empty %}
+                                                        <span class="text-slate-400 text-[11px]">—</span>
+                                                        {% endfor %}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endif %}
                     {% if row.can_manage %}
                     <tr id="manage-row-{{ row.project.pk }}" class="hidden bg-slate-50/90">
-                        <td colspan="8" class="px-4 py-4">
+                        <td colspan="11" class="px-4 py-4">
                             <div class="grid gap-4 lg:grid-cols-2 max-w-4xl">
                                 <form method="post" class="rounded-xl border border-amber-100 bg-amber-50/50 p-4 space-y-3">
                                     {% csrf_token %}
@@ -202,7 +338,7 @@
                     {% endif %}
                     {% empty %}
                     <tr>
-                        <td colspan="8" class="px-4 py-12 text-center text-slate-400 text-sm">暂无委托项目</td>
+                        <td colspan="11" class="px-4 py-12 text-center text-slate-400 text-sm">暂无委托项目</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -212,6 +348,23 @@
 </div>
 
 <script>
+document.querySelectorAll('[data-toggle-progress]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        var id = btn.getAttribute('data-toggle-progress');
+        var row = document.getElementById('progress-row-' + id);
+        var chevron = document.querySelector('[data-progress-chevron="' + id + '"]');
+        if (!row) return;
+        var open = row.classList.contains('hidden');
+        document.querySelectorAll('[id^="progress-row-"]').forEach(function(r) { r.classList.add('hidden'); });
+        document.querySelectorAll('[data-progress-chevron]').forEach(function(c) { c.classList.remove('rotate-90'); });
+        document.querySelectorAll('[data-toggle-progress]').forEach(function(b) { b.setAttribute('aria-expanded', 'false'); });
+        if (open) {
+            row.classList.remove('hidden');
+            if (chevron) chevron.classList.add('rotate-90');
+            btn.setAttribute('aria-expanded', 'true');
+        }
+    });
+});
 document.querySelectorAll('[data-open-manage]').forEach(function(btn) {
     btn.addEventListener('click', function() {
         var id = btn.getAttribute('data-open-manage');

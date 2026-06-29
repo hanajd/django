@@ -38,7 +38,22 @@ def _verdict_key_looks_like_fail(key: str, value: str) -> bool:
         return True
     if re.search(r"(?i)verdict", k):
         return True
+    kl = k.lower()
+    if kl in ("conclusiontext", "结论", "检测结论") or "conclusion" in kl:
+        return True
     return v in ("不合格", "不符合", "未通过")
+
+
+def _submit_conclusion_indicates_fail(payload: Mapping[str, Any] | dict) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    c = payload.get("conclusion")
+    if isinstance(c, dict):
+        if c.get("allPassed") is False:
+            return True
+        if "不合格" in str(c.get("conclusionText") or ""):
+            return True
+    return False
 
 
 def _scan_payload_for_fail_verdict(node: Any, key_path: str = "") -> bool:
@@ -66,9 +81,19 @@ def probe_submit_has_fail_verdict(
     """现场记录/提交中是否存在单项判定「不合格」。"""
     if not isinstance(source_payload, dict) or not source_payload:
         return False
-    if _scan_payload_for_fail_verdict(source_payload.get("dynamicData")):
+    if _submit_conclusion_indicates_fail(source_payload):
         return True
-    if _scan_payload_for_fail_verdict(source_payload.get("testResult")):
+    for bucket in (
+        "dynamicData",
+        "testResult",
+        "hospitalInfo",
+        "equipmentInfo",
+        "reportInfo",
+        "rawPayload",
+    ):
+        if _scan_payload_for_fail_verdict(source_payload.get(bucket)):
+            return True
+    if _scan_payload_for_fail_verdict(source_payload):
         return True
     try:
         from radiation_detection_report.report_pdf_integrator import (
@@ -150,6 +175,7 @@ def build_single_report_overlay_from_payload(
         from utils.pdf_merge import (
             build_single_report_cover_title_line,
             build_single_report_evaluation_body,
+            build_single_report_toc_device_title,
             extract_modality_abbr_from_title,
             format_cover_report_number_line,
             format_gan_jcy_institute_report_no,
@@ -198,8 +224,22 @@ def build_single_report_overlay_from_payload(
             or derived.get("受检单位名称")
             or derived.get("受检单位")
         )
-    device = _norm(ei.get("deviceName") or ei.get("name") or derived.get("设备名称"))
-    model = _norm(ei.get("model") or ei.get("deviceModel") or derived.get("设备型号"))
+    from apps.api.inspection_report_make import _pick_ei_value_by_site_field_semantics
+
+    device = _norm(
+        _pick_ei_value_by_site_field_semantics(ei, site_template, "设备名称")
+        or ei.get("f12")
+        or ei.get("deviceName")
+        or ei.get("name")
+        or derived.get("设备名称")
+    )
+    model = _norm(
+        _pick_ei_value_by_site_field_semantics(ei, site_template, "设备型号")
+        or ei.get("f13")
+        or ei.get("model")
+        or ei.get("deviceModel")
+        or derived.get("设备型号")
+    )
     report_template_name = _norm(getattr(report_task, "name", "") if report_task is not None else "")
 
     device_type_label = ""
@@ -223,6 +263,7 @@ def build_single_report_overlay_from_payload(
         has_radiation_protection=has_radiation_protection,
         qc_with_radiation_protection=qc_with_rp,
     )
+    toc_device_title = build_single_report_toc_device_title(device, ab, model)
     project_name_combined = f"{org}{cover_title}".strip()
 
     report_date = _norm(derived.get("报告日期") or derived.get("检测日期") or derived.get("testDate"))
@@ -242,6 +283,7 @@ def build_single_report_overlay_from_payload(
         derived.get("commissionNo")
         or derived.get("委托编号")
         or ri.get("commissionNo")
+        or ri.get("f1")
         or derived.get("projectId")
         or dd.get("f1")
     )
@@ -283,6 +325,12 @@ def build_single_report_overlay_from_payload(
         report_task=report_task,
         manual_override=manual_device_count,
     )
+    from apps.core.report_template_profiles import get_report_template_profile
+
+    _prof = get_report_template_profile(report_task)
+    _dc_val = str(max(0, int(device_count)))
+    if _prof.device_count_include_unit_suffix and not _dc_val.endswith("台"):
+        _dc_val += "台"
     abbrs: list[str] = []
     rt_norm = normalize_equipment_report_task(report_task) if report_task is not None else None
     if project is not None and rt_norm is not None:
@@ -327,9 +375,10 @@ def build_single_report_overlay_from_payload(
         "cover_inspected_org": org,
         "cover_org_line": org,
         "cover_report_title": cover_title,
+        "toc_device_title": toc_device_title,
         "inspection_index_line": inspected_no or "01",
         "project_name_combined": project_name_combined,
-        "device_count_label": f"{max(0, int(device_count))} 台",
+        "device_count_label": _dc_val,
         "evaluation_body": evaluation_body,
         "cover_inspection_type": report_type,
         "summary_inspection_type": report_type,
@@ -362,7 +411,7 @@ def finalize_single_report_pdf(
     """
     if not pdf_bytes:
         return pdf_bytes
-    from apps.core.report_template_profiles import get_report_template_profile
+    from apps.core.report_template_profiles import get_report_template_profile, resolve_report_template_profile
 
     profile = get_report_template_profile(report_task)
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -394,6 +443,13 @@ def finalize_single_report_pdf(
             except Exception:
                 template_parsed = None
 
+        template_fields = None
+        if isinstance(template_parsed, dict):
+            pdf_meta = template_parsed.get("pdf")
+            if isinstance(pdf_meta, dict):
+                template_fields = pdf_meta.get("fields")
+        profile = resolve_report_template_profile(report_task, template_fields)
+
         if overlay:
             apply_merged_report_merge_overlay(
                 doc,
@@ -411,6 +467,11 @@ def finalize_single_report_pdf(
             doc,
             report_no=report_no,
             has_radiation_protection=has_radiation_protection,
+            device_title=_norm(
+                (overlay or {}).get("toc_device_title")
+                or (overlay or {}).get("cover_report_title")
+            ),
+            profile=profile,
         )
         toc_idx = _find_toc_page_index(doc)
         rewrite_merged_report_page_headers(

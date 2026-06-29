@@ -40,6 +40,7 @@ _DUAL_GROUP_SLOT_KEYS: tuple[str, ...] = (
     "mean_m_2",
     "report_d",
     "report_d_2",
+    "annual_dose_msv",
 )
 
 _SINGLE_GROUP_SLOT_KEYS: tuple[str, ...] = (
@@ -59,6 +60,7 @@ ROW_TOKEN_REPORT = "__ROW_REPORT__"
 _COLUMN_READING = "测量读数M"
 _COLUMN_MEAN = "测量均值Mbar"
 _COLUMN_REPORT = "报出值D"
+_COLUMN_ANNUAL_DOSE = "年剂量估算"
 _COLUMN_SEQ = "序号"
 _SEQ_LABEL_RE = re.compile(r"^序号_r\d+", re.I)
 _F_ID_RE = re.compile(r"^f\d+$", re.I)
@@ -67,6 +69,18 @@ PROTECTION_NUMBER_PRECISION = 3
 _HEADER_READING_RE = re.compile(r"测量读数|读数\s*M", re.I)
 _HEADER_MEAN_RE = re.compile(r"测量均值|均值\s*M", re.I)
 _HEADER_REPORT_RE = re.compile(r"报出值", re.I)
+_HEADER_ANNUAL_DOSE_RE = re.compile(r"年剂量|估算\s*mSv", re.I)
+
+
+def _is_annual_dose_field_label(text: str) -> bool:
+    compact = re.sub(r"\s+", "", str(text or ""))
+    if not compact:
+        return False
+    if "年剂量" in compact:
+        return True
+    if "估算mSv" in compact or "估算mSv" in compact.replace("（", "(").replace("）", ")"):
+        return True
+    return "估算" in compact and "mSv" in compact
 
 
 def _norm(s: Any) -> str:
@@ -119,27 +133,35 @@ _BG_READING_LABEL_RE = re.compile(
     r"^本底水平(?:及范围)?\d+$|^本底水平_[①②③④⑤⑥⑦⑧⑨⑩]_测量读数$",
     re.I,
 )
+_BG_CIRCLE_READING_LABEL_RE = re.compile(r"^本底水平_[①②③④⑤⑥⑦⑧⑨⑩]_测量读数$", re.I)
+
+
+def _background_reading_slot_label(field: Mapping[str, Any]) -> str:
+    for key in ("id", "label", "hierarchyKey", "placeholder", "title"):
+        text = _norm(field.get(key) or "")
+        if text and "序号本底" not in text and _BG_READING_LABEL_RE.match(text):
+            return text
+    return ""
 
 
 def is_background_reading_pdf_field(field: Mapping[str, Any]) -> bool:
     """本底行 ①–⑩ 填写格（非范围汇总、非均值格）。"""
     if not isinstance(field, dict) or not is_protection_pdf_field(field):
         return False
-    for key in ("id", "label", "hierarchyKey", "placeholder", "title"):
-        text = _norm(field.get(key) or "")
-        if not text or "序号本底" in text:
-            continue
-        if _BG_READING_LABEL_RE.match(text):
-            expr = _norm(
-                field.get("fieldExpression")
-                or field.get("formula")
-                or field.get("pdfFieldExpression")
-                or ""
-            )
-            if expr and ("avg(" in expr.lower() or "min(" in expr.lower()):
-                return False
-            return True
-    return False
+    text = _background_reading_slot_label(field)
+    if not text:
+        return False
+    if _BG_CIRCLE_READING_LABEL_RE.match(text):
+        return True
+    expr = _norm(
+        field.get("fieldExpression")
+        or field.get("formula")
+        or field.get("pdfFieldExpression")
+        or ""
+    )
+    if expr and ("avg(" in expr.lower() or "min(" in expr.lower()):
+        return False
+    return True
 
 
 def is_background_range_pdf_field(field: Mapping[str, Any]) -> bool:
@@ -189,6 +211,106 @@ def _background_reading_fields_sorted(fields: List[Any]) -> List[Dict[str, Any]]
     return rows
 
 
+def _background_report_field_for_readings(
+    fields: Sequence[Any],
+    readings: Sequence[Mapping[str, Any]],
+    column_layout: Mapping[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """本底报出值 D 列：与本底读数同页、落在 report_d 列带内的汇总格。"""
+    if not readings:
+        return None
+    page = int(readings[0].get("page") or 0)
+    if page < 1:
+        return None
+    y_anchor = sum(float(r.get("y0") or 0.0) for r in readings) / max(len(readings), 1)
+    candidates: List[tuple[float, Dict[str, Any]]] = []
+    for field in fields or []:
+        if not isinstance(field, dict) or not is_background_range_pdf_field(field):
+            continue
+        fp, sy0, sy1 = _field_pdf_anchor_y_bounds(field)
+        if fp != page:
+            continue
+        if not _field_in_table_column(field, "report_d", column_layout):
+            continue
+        pid = export_field_pdf_id(field)
+        if not pid:
+            continue
+        y_mid = (sy0 + sy1) / 2.0
+        dist = abs(y_mid - y_anchor)
+        candidates.append((dist, {"field": field, "pid": pid, "page": fp, "y0": sy0}))
+    if not candidates:
+        for field in fields or []:
+            if not isinstance(field, dict) or not is_background_range_pdf_field(field):
+                continue
+            fp, sy0, sy1 = _field_pdf_anchor_y_bounds(field)
+            if fp != page:
+                continue
+            pid = export_field_pdf_id(field)
+            if not pid:
+                continue
+            y_mid = (sy0 + sy1) / 2.0
+            candidates.append((abs(y_mid - y_anchor), {"field": field, "pid": pid, "page": fp, "y0": sy0}))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (item[0], item[1].get("y0") or 0.0))
+    return candidates[0][1]
+
+
+def resolve_background_row_binding(
+    fields: Sequence[Any],
+    *,
+    chapter: Optional[Mapping[str, Any]] = None,
+    layout: Optional[Mapping[str, Any]] = None,
+    template_payload: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    第五章本底行表结构绑定：①–⑩ 读数格 + 报出值 D 汇总格 + 校准因子。
+    按 PDF 表列带与行坐标定位，不扫描 placeholder 标签反查 pdfFieldId。
+    """
+    field_list = list(fields or [])
+    if not field_list and isinstance(template_payload, dict):
+        field_list = list(iter_frontend_export_fields(template_payload))
+    if not field_list:
+        return {}
+
+    if isinstance(chapter, dict):
+        saved = chapter.get("backgroundBinding")
+        if isinstance(saved, dict) and _norm(saved.get("report_d") or ""):
+            return dict(saved)
+
+    column_layout = resolve_chapter5_layout_for_fields(
+        field_list,
+        template_payload=template_payload,
+        chapter=chapter,
+    )
+    if isinstance(layout, dict) and layout.get("columns"):
+        column_layout = {**column_layout, "columns": {**(column_layout.get("columns") or {}), **layout.get("columns")}}
+
+    readings = _background_reading_fields_sorted(field_list)
+    if not readings:
+        return {}
+
+    page = int(readings[0].get("page") or 0)
+    y_vals = [float(r.get("y0") or 0.0) for r in readings]
+    row_y = round(sum(y_vals) / max(len(y_vals), 1), 1)
+    out: Dict[str, Any] = {
+        "kind": "background",
+        "radiationPoint": f"rp_p{page}_y{row_y}",
+        "report_d": "",
+        "calibration_factor": resolve_background_calibration_factor_pid(chapter, field_list),
+    }
+    for idx, row in enumerate(readings[:10], start=1):
+        pid = _norm(row.get("pid") or "")
+        if pid:
+            out[f"bg_reading_{idx}"] = pid
+
+    report = _background_report_field_for_readings(field_list, readings, column_layout)
+    if report:
+        out["report_d"] = _norm(report.get("pid") or "")
+
+    return out if _norm(out.get("report_d") or "") or any(_norm(out.get(f"bg_reading_{i}") or "") for i in range(1, 11)) else {}
+
+
 def _chapter_g1_calibration_factor_pid(chapter: Optional[Mapping[str, Any]]) -> str:
     """从章节报出值规则第一组表达式提取校准因子 f 号（如 {mean}*f927）。"""
     chapter = chapter if isinstance(chapter, dict) else {}
@@ -205,13 +327,49 @@ def _chapter_g1_calibration_factor_pid(chapter: Optional[Mapping[str, Any]]) -> 
     return ""
 
 
+def resolve_background_calibration_factor_pid(
+    chapter: Optional[Mapping[str, Any]],
+    fields: Optional[Sequence[Any]] = None,
+) -> str:
+    """本底范围公式校准因子：章节规则 → 防护表报出值公式 *fNNN → 表前「校准因子」栏。"""
+    pid = _chapter_g1_calibration_factor_pid(chapter)
+    if pid:
+        return pid
+    for field in fields or []:
+        if not isinstance(field, dict) or not is_protection_pdf_field(field):
+            continue
+        blob = _field_label_blob(field)
+        if "报出值" not in blob and "_报出值" not in blob:
+            continue
+        if "本底" in blob or "序号本底" in blob:
+            continue
+        expr = _norm(
+            field.get("fieldExpression")
+            or field.get("formula")
+            or field.get("pdfFieldExpression")
+            or ""
+        )
+        m = re.search(r"\*\s*(f\d+)\b", expr, re.I)
+        if m:
+            return m.group(1).lower()
+    for field in fields or []:
+        if not isinstance(field, dict):
+            continue
+        blob = _field_label_blob(field)
+        if "校准因子" in blob or "137Cs" in blob:
+            out = export_field_pdf_id(field) or _norm(field.get("pdfFieldId") or "")
+            if out:
+                return out.lower()
+    return ""
+
+
 def background_range_expression(reading_pids: Sequence[str], factor_pid: str) -> str:
     refs = [_norm(pid) for pid in reading_pids if _norm(pid)]
     if len(refs) < 2 or not _norm(factor_pid):
         return ""
     joined = ",".join(refs)
     factor = _norm(factor_pid)
-    return f"(min({joined}) * {factor}) ~ (max({joined}) * {factor})"
+    return f"{factor}*min({joined})~{factor}*max({joined})"
 
 
 def apply_background_formulas_to_pdf_fields(
@@ -227,7 +385,7 @@ def apply_background_formulas_to_pdf_fields(
     reading_rows = _background_reading_fields_sorted(fields)
     if len(reading_rows) < 2:
         return
-    factor_pid = _chapter_g1_calibration_factor_pid(chapter)
+    factor_pid = resolve_background_calibration_factor_pid(chapter, fields)
     if not factor_pid:
         return
     reading_pids = [str(r["pid"]) for r in reading_rows]
@@ -356,6 +514,14 @@ def _field_pdf_anchor_bounds(field: Mapping[str, Any]) -> tuple[int, float, floa
             pass
     try:
         page = int(field.get("page") or 5)
+        if all(k in field for k in ("x0", "y0", "x1", "y1")):
+            x0 = float(field.get("x0"))
+            y0 = float(field.get("y0"))
+            x1 = float(field.get("x1"))
+            y1 = float(field.get("y1"))
+            if y1 < y0:
+                y0, y1 = y1, y0
+            return page, x0, y0, y1
         x0 = float(field.get("x") or 0.0)
         y0 = float(field.get("y") or 0.0)
         height = float(field.get("h") or 0.0)
@@ -405,6 +571,8 @@ def is_rp_table_seq_field(field: Mapping[str, Any]) -> bool:
 def _column_role(sem: Mapping[str, Any], field: Mapping[str, Any]) -> str:
     col = _norm(sem.get("radiationColumn") or "")
     if col:
+        if _is_annual_dose_field_label(col):
+            return _COLUMN_ANNUAL_DOSE
         return col
     if sem.get("meanOfReadings") or field.get("mean"):
         return _COLUMN_MEAN
@@ -412,6 +580,8 @@ def _column_role(sem: Mapping[str, Any], field: Mapping[str, Any]) -> str:
     if _SEQ_LABEL_RE.match(ph):
         return _COLUMN_SEQ if is_rp_table_seq_field(field) else ""
     if "报出" in ph:
+        if _is_annual_dose_field_label(ph):
+            return _COLUMN_ANNUAL_DOSE
         return _COLUMN_REPORT
     if "均值" in ph or "平均" in ph:
         return _COLUMN_MEAN
@@ -461,6 +631,7 @@ _LAYOUT_COLUMN_BAND_KEYS = (
     "report_d",
     "mean_m_2",
     "report_d_2",
+    "annual_dose_msv",
 )
 
 _BINDING_SLOT_KEYS = frozenset(_SINGLE_GROUP_SLOT_KEYS + _DUAL_GROUP_SLOT_KEYS)
@@ -477,6 +648,7 @@ _PROTECTION_DATA_COLUMN_SLOTS = frozenset(
         "reading_3_2",
         "mean_m_2",
         "report_d_2",
+        "annual_dose_msv",
     }
 )
 
@@ -491,6 +663,7 @@ _SLOT_TO_COLUMN_ROLE: Dict[str, str] = {
     "mean_m_2": _COLUMN_MEAN,
     "report_d": _COLUMN_REPORT,
     "report_d_2": _COLUMN_REPORT,
+    "annual_dose_msv": _COLUMN_ANNUAL_DOSE,
 }
 
 
@@ -537,9 +710,10 @@ def _field_pdf_x_bounds(field: Mapping[str, Any]) -> tuple[float, float]:
     page, x0, y0, y1 = _field_pdf_anchor_bounds(field)
     del page, y0, y1
     try:
-        w = float(field.get("w") or 0.0)
-        if w > 0:
-            return x0, x0 + w
+        if all(k in field for k in ("x0", "x1")):
+            fx1 = float(field.get("x1"))
+            if fx1 > x0:
+                return x0, fx1
     except (TypeError, ValueError):
         pass
     anchor = field.get("pdfAnchor")
@@ -553,6 +727,12 @@ def _field_pdf_x_bounds(field: Mapping[str, Any]) -> tuple[float, float]:
                     return ax0, ax1
             except (TypeError, ValueError):
                 pass
+    try:
+        w = float(field.get("w") or 0.0)
+        if w > 0:
+            return x0, x0 + w
+    except (TypeError, ValueError):
+        pass
     rect = field.get("rect")
     if isinstance(rect, (list, tuple)) and len(rect) >= 4:
         try:
@@ -666,6 +846,94 @@ def _assign_dual_group_slots_by_x(items: List[Dict[str, Any]]) -> Dict[str, str]
         pid = _norm(it.get("pid") or "")
         if pid:
             out[slot] = pid
+    return out
+
+
+def _binding_item_column_role(item: Mapping[str, Any]) -> str:
+    """行内格子的列角色：优先标签语义，避免 x 列带把均值误判为读数。"""
+    role = _norm(item.get("role") or "")
+    if role in (_COLUMN_READING, _COLUMN_MEAN, _COLUMN_REPORT, _COLUMN_ANNUAL_DOSE):
+        return role
+    field = item.get("field")
+    sem = item.get("sem") if isinstance(item.get("sem"), dict) else {}
+    if isinstance(field, dict):
+        label_role = _column_role(sem, field)
+        if label_role:
+            return label_role
+    return role
+
+
+def _assign_dual_group_slots_by_role(items: List[Dict[str, Any]]) -> Dict[str, str]:
+    """
+    双组表按列角色分配槽位：读数/均值/报出分列归位，再按 x 在组内填入 reading_1…3。
+    修正「仅 2 次读数 + 均值」或「均值被 x 排序塞进 reading_3」导致的错位。
+    """
+    ordered = sorted(items, key=lambda it: float(it.get("x0") or 0.0))
+    readings: List[Dict[str, Any]] = []
+    means: List[Dict[str, Any]] = []
+    reports: List[Dict[str, Any]] = []
+    annual_reports: List[Dict[str, Any]] = []
+    for it in ordered:
+        role = _binding_item_column_role(it)
+        field = it.get("field")
+        sem = it.get("sem") if isinstance(it.get("sem"), dict) else {}
+        label_blob = ""
+        if isinstance(field, dict):
+            label_blob = f"{_field_display_label(field)} {field.get('id') or ''}"
+        if role == _COLUMN_ANNUAL_DOSE or _is_annual_dose_field_label(label_blob):
+            annual_reports.append(it)
+        elif role == _COLUMN_MEAN:
+            means.append(it)
+        elif role == _COLUMN_REPORT:
+            reports.append(it)
+        else:
+            readings.append(it)
+
+    out: Dict[str, str] = {}
+    if not readings and not means:
+        return out
+
+    split = max(1, len(readings) // 2) if readings else 0
+    g1_readings = readings[:split]
+    g2_readings = readings[split:]
+
+    for slot, it in zip(_binding_reading_keys(group=1), g1_readings):
+        pid = _norm(it.get("pid") or "")
+        if pid:
+            out[slot] = pid
+    for slot, it in zip(_binding_reading_keys(group=2), g2_readings):
+        pid = _norm(it.get("pid") or "")
+        if pid:
+            out[slot] = pid
+
+    if means:
+        pid = _norm(means[0].get("pid") or "")
+        if pid:
+            out[_binding_mean_key(group=1)] = pid
+    if len(means) > 1:
+        pid = _norm(means[-1].get("pid") or "")
+        if pid:
+            out[_binding_mean_key(group=2)] = pid
+
+    report_items = list(reports)
+    if len(report_items) > 2 and not annual_reports:
+        annual_reports = [report_items[-1]]
+        report_items = report_items[:2]
+
+    if report_items:
+        pid = _norm(report_items[0].get("pid") or "")
+        if pid:
+            out[_binding_report_key(group=1)] = pid
+    if len(report_items) > 1:
+        pid = _norm(report_items[1].get("pid") or "")
+        if pid:
+            out[_binding_report_key(group=2)] = pid
+
+    if annual_reports:
+        pid = _norm(annual_reports[-1].get("pid") or "")
+        if pid:
+            out["annual_dose_msv"] = pid
+
     return out
 
 
@@ -1314,7 +1582,10 @@ def _collect_point_data_fields(
             continue
         slot = protection_data_column_slot(field, layout)
         role = _SLOT_TO_COLUMN_ROLE.get(slot, "")
-        if role not in (_COLUMN_READING, _COLUMN_MEAN, _COLUMN_REPORT):
+        label_role = _column_role(sem, field)
+        if label_role in (_COLUMN_READING, _COLUMN_MEAN, _COLUMN_REPORT, _COLUMN_ANNUAL_DOSE):
+            role = label_role
+        if role not in (_COLUMN_READING, _COLUMN_MEAN, _COLUMN_REPORT, _COLUMN_ANNUAL_DOSE):
             if not _is_rp_measurement_data_cell(field, layout):
                 continue
             role = _COLUMN_READING
@@ -1345,6 +1616,13 @@ def _assign_slots_to_point_row(
         return {}
 
     if dual_group:
+        role_out = _assign_dual_group_slots_by_role(items)
+        if role_out.get("reading_1") and (
+            role_out.get("mean_m")
+            or role_out.get("reading_1_2")
+            or role_out.get("report_d")
+        ):
+            return role_out
         return _assign_dual_group_slots_by_x(items)
 
     out: Dict[str, str] = {}
@@ -1376,6 +1654,7 @@ def reading_anchor_field_for_binding(
         "mean_m_2",
         "report_d",
         "report_d_2",
+        "annual_dose_msv",
     )
     for key in keys:
         pid = _norm(binding.get(key) or "").lower()
@@ -1385,55 +1664,595 @@ def reading_anchor_field_for_binding(
     return None
 
 
+_RP_ROW_COORD_RE = re.compile(r"^rp_p(\d+)_y([\d.]+)$", re.I)
+_RP_SUB_ROW_RE = re.compile(r"_r(\d+)(?:_(.+))?$", re.I)
+
+
+def resolve_chapter5_layout_for_fields(
+    fields: Sequence[Mapping[str, Any]],
+    *,
+    template_payload: Optional[Mapping[str, Any]] = None,
+    chapter: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """第五章专用表结构：列带来自版式 JSON（table.columns），非模板编辑器 pdfFieldId。"""
+    layout_json: Optional[Mapping[str, Any]] = None
+    if isinstance(chapter, dict):
+        nested = chapter.get("layout")
+        layout_json = nested if isinstance(nested, dict) else chapter
+    if layout_json is None and isinstance(template_payload, dict):
+        ch = template_payload.get(SCHEMA_KEY)
+        if isinstance(ch, dict):
+            nested = ch.get("layout")
+            layout_json = nested if isinstance(nested, dict) else None
+    if layout_json is None and DEFAULT_LAYOUT_PATH.is_file():
+        try:
+            with DEFAULT_LAYOUT_PATH.open("r", encoding="utf-8") as f:
+                root = json.load(f)
+            layout_json = root.get("layout") if isinstance(root.get("layout"), dict) else root
+        except Exception:
+            layout_json = None
+    result = resolve_protection_table_layout(list(fields or []), layout_json=layout_json)
+    root = (
+        layout_json.get("layout")
+        if isinstance(layout_json, dict) and isinstance(layout_json.get("layout"), dict)
+        else layout_json
+    )
+    if isinstance(root, dict):
+        pag = root.get("pagination")
+        if isinstance(pag, dict):
+            result["pagination"] = dict(pag)
+        table = root.get("table")
+        if isinstance(table, dict):
+            result["table"] = dict(table)
+    return result
+
+
+def _simple_row_height(column_layout: Mapping[str, Any]) -> float:
+    table = column_layout.get("table")
+    if isinstance(table, dict):
+        rh = table.get("row_heights")
+        if isinstance(rh, dict) and rh.get("simple") not in (None, ""):
+            return float(rh["simple"])
+    return 18.9
+
+
+def _protection_data_row_y_min(page: int, column_layout: Mapping[str, Any]) -> float:
+    """第五章防护表数据区行心 y 下限：首页表头以下，续页重复表头以下。"""
+    table = column_layout.get("table") if isinstance(column_layout.get("table"), dict) else {}
+    pag = column_layout.get("pagination") if isinstance(column_layout.get("pagination"), dict) else {}
+    rh = table.get("row_heights") if isinstance(table.get("row_heights"), dict) else {}
+    hdr_h = float(rh.get("header") or 20.69)
+    hdr_n = int(table.get("header_row_count") or 2)
+
+    if page == 5:
+        table_top = float(
+            pag.get("table_y_top_first_page")
+            or table.get("y_top")
+            or 101.6
+        )
+        table_data_y = table_top + hdr_n * hdr_h + 0.5
+        preface = float(column_layout.get("preface_y_cutoff") or 360.0)
+        # 版式表从 y~100 起时，360 是仪器/条件区误标，应以表头下沿为准
+        if preface > table_data_y + 80.0:
+            return table_data_y
+        return max(table_data_y, preface)
+
+    cont_hdr = float(pag.get("continuation_header_y") or 61.38)
+    return cont_hdr + hdr_n * hdr_h + 0.5
+
+
+def _seq_field_reaches_data_region(
+    field: Mapping[str, Any],
+    page: int,
+    column_layout: Mapping[str, Any],
+) -> bool:
+    """序号格下沿进入数据区（续页表头合并格允许上口在表头区）。"""
+    fp, _sy0, sy1 = _field_pdf_anchor_y_bounds(field)
+    if fp != page:
+        return False
+    y_min = _protection_data_row_y_min(page, column_layout)
+    return sy1 >= y_min - 1.0
+
+
+def _point_id_field_usable_on_page(
+    field: Mapping[str, Any],
+    page: int,
+    column_layout: Mapping[str, Any],
+) -> bool:
+    """序号格下沿进入数据区；第5页上口须在表头下沿以上。"""
+    if not _seq_field_reaches_data_region(field, page, column_layout):
+        return False
+    _, sy0, _sy1 = _field_pdf_anchor_y_bounds(field)
+    y_min = _protection_data_row_y_min(page, column_layout)
+    return sy0 >= y_min - 1.0
+
+
+def _point_id_field_is_writable_data_row(
+    field: Mapping[str, Any],
+    column_layout: Mapping[str, Any],
+) -> bool:
+    if not isinstance(field, dict) or is_background_level_pdf_field(field):
+        return False
+    if not _field_in_table_column(field, "point_id", column_layout):
+        return False
+    page, _y0, _y1 = _field_pdf_anchor_y_bounds(field)
+    if page < 5:
+        return False
+    return _point_id_field_usable_on_page(field, page, column_layout)
+
+
+def binding_table_row_anchor(binding: Mapping[str, Any]) -> tuple[int, float] | None:
+    """binding 行锚点：radiationPoint 坐标键 rp_p{page}_y{y}（与第五章 fieldBindings 一致）。"""
+    m = _RP_ROW_COORD_RE.match(_norm(binding.get("radiationPoint") or ""))
+    if not m:
+        return None
+    try:
+        return int(m.group(1)), float(m.group(2))
+    except (TypeError, ValueError):
+        return None
+
+
+def _field_in_table_column(
+    field: Mapping[str, Any],
+    column_key: str,
+    column_layout: Mapping[str, Any],
+    *,
+    tol: float = 3.0,
+) -> bool:
+    cols = column_layout.get("columns") if isinstance(column_layout.get("columns"), dict) else {}
+    band = cols.get(column_key)
+    if not isinstance(band, dict):
+        return False
+    x0, x1 = _field_pdf_x_bounds(field)
+    return _x_band_contains(band, x0, x1, tol=tol)
+
+
+def _seq_cell_geometry_key(field: Mapping[str, Any]) -> tuple[int, float, float, float, float]:
+    page, ax0, ay0, ay1 = _field_pdf_anchor_bounds(field)
+    x0, x1 = _field_pdf_x_bounds(field)
+    return (
+        int(page),
+        round(float(x0), 1),
+        round(float(x1), 1),
+        round(float(ay0), 1),
+        round(float(ay1), 1),
+    )
+
+
+def field_for_table_row_column(
+    page: int,
+    row_y: float,
+    fields: Sequence[Mapping[str, Any]],
+    column_layout: Mapping[str, Any],
+    column_key: str,
+    *,
+    row_y_tolerance: float = 14.0,
+) -> Mapping[str, Any] | None:
+    """
+    按第五章表列带 + 行心 y 定位栏位（不解析 序号_r* 标签、不依赖 binding.seq_no）。
+    """
+    y_min = _protection_data_row_y_min(page, column_layout)
+    if page < 5 or row_y < y_min:
+        return None
+    cols = column_layout.get("columns") if isinstance(column_layout.get("columns"), dict) else {}
+    if column_key not in cols:
+        return None
+
+    contained: list[Mapping[str, Any]] = []
+    best: Mapping[str, Any] | None = None
+    best_dist = 1e9
+    for field in fields or []:
+        if not isinstance(field, dict):
+            continue
+        if is_background_level_pdf_field(field):
+            continue
+        if not _field_in_table_column(field, column_key, column_layout):
+            continue
+        fp, sy0, sy1 = _field_pdf_anchor_y_bounds(field)
+        if fp != page:
+            continue
+        if sy1 < y_min:
+            continue
+        if column_key == "point_id":
+            if not _point_id_field_usable_on_page(field, fp, column_layout):
+                continue
+        if sy0 <= row_y <= sy1:
+            if column_key == "point_id" and row_y < y_min:
+                continue
+            contained.append(field)
+            continue
+        dist = min(abs(row_y - sy0), abs(row_y - sy1))
+        if dist < best_dist and dist <= row_y_tolerance:
+            if column_key == "point_id" and row_y < y_min:
+                continue
+            if column_key == "point_id" and row_y < sy0 - 1.0:
+                continue
+            best_dist = dist
+            best = field
+    if contained:
+        if column_key == "point_id":
+            return min(
+                contained,
+                key=lambda f: (
+                    _seq_field_anchor_height(f),
+                    abs(_field_pdf_anchor_y_center(f)[1] - row_y),
+                ),
+            )
+        return min(contained, key=lambda f: abs(_field_pdf_anchor_y_center(f)[1] - row_y))
+    return best
+
+
+def seq_field_for_binding_from_table_layout(
+    binding: Mapping[str, Any],
+    fields: Sequence[Mapping[str, Any]],
+    column_layout: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    anchor = binding_table_row_anchor(binding)
+    if not anchor:
+        return None
+    page, row_y = anchor
+    return field_for_table_row_column(
+        page, row_y, fields, column_layout, "point_id"
+    )
+
+
+def binding_row_has_location_sub(
+    binding: Mapping[str, Any],
+    fields: Sequence[Mapping[str, Any]],
+    column_layout: Mapping[str, Any],
+) -> bool:
+    anchor = binding_table_row_anchor(binding)
+    if not anchor:
+        return False
+    sub_field = field_for_table_row_column(
+        anchor[0], anchor[1], fields, column_layout, "location_sub"
+    )
+    if not isinstance(sub_field, dict):
+        return False
+    label = _field_display_label(sub_field)
+    return bool(label) and label not in ("检测点位置", "位置细分", "检测点", "/")
+
+
+def binding_row_location_main_key(
+    binding: Mapping[str, Any],
+    fields: Sequence[Mapping[str, Any]],
+    column_layout: Mapping[str, Any],
+) -> str:
+    anchor = binding_table_row_anchor(binding)
+    if not anchor:
+        return ""
+    for col in ("location_main", "location_full"):
+        main_field = field_for_table_row_column(
+            anchor[0], anchor[1], fields, column_layout, col
+        )
+        if isinstance(main_field, dict):
+            label = _field_display_label(main_field)
+            if label and label not in ("检测点位置", "/"):
+                return label
+    return ""
+
+
 def seq_field_for_binding_row(
     binding: Mapping[str, Any],
     fields: List[Mapping[str, Any]],
     fields_by_pid: Mapping[str, Mapping[str, Any]],
 ) -> Mapping[str, Any] | None:
-    """按读数格 PDF 纵向位置匹配同行序号栏（含跨行合并序号格）。"""
-    read_field = reading_anchor_field_for_binding(binding, fields_by_pid)
-    if not isinstance(read_field, dict):
-        return None
-    read_page, read_y = _field_pdf_anchor_y_center(read_field)
-    contained: list[Mapping[str, Any]] = []
-    best: Mapping[str, Any] | None = None
-    best_dist = 1e9
-    for field in fields or []:
-        if not isinstance(field, dict) or not is_rp_table_seq_field(field):
+    """兼容入口：按第五章表结构（列带 + 行坐标）定位序号格。"""
+    del fields_by_pid
+    column_layout = resolve_chapter5_layout_for_fields(fields)
+    return seq_field_for_binding_from_table_layout(binding, fields, column_layout)
+
+
+_RP_BINDING_G1_DATA_KEYS = ("reading_1", "reading_2", "reading_3", "mean_m", "report_d")
+_RP_BINDING_G2_DATA_KEYS = ("reading_1_2", "reading_2_2", "reading_3_2", "mean_m_2", "report_d_2")
+
+
+def binding_pdf_table_sort_key(binding: Mapping[str, Any]) -> tuple[int, float, str]:
+    """防护表 binding 按 PDF 物理行（page + 行心 y）排序，勿用模板 row 序号。"""
+    pt = _norm(binding.get("radiationPoint") or "")
+    m = _RP_ROW_COORD_RE.match(pt)
+    if m:
+        try:
+            return (int(m.group(1)), float(m.group(2)), pt)
+        except (TypeError, ValueError):
+            pass
+    return (10**9, 0.0, pt)
+
+
+def _payload_cell_value(payload: Mapping[str, Any], pid: str) -> str:
+    pid = _norm(pid).lower()
+    if not pid:
+        return ""
+    dd = payload.get("dynamicData") if isinstance(payload.get("dynamicData"), dict) else {}
+    tr = payload.get("testResult") if isinstance(payload.get("testResult"), dict) else {}
+    raw = dd.get(pid)
+    if raw in (None, ""):
+        raw = tr.get(pid)
+    return _norm(raw)
+
+
+def _write_payload_pid(payload: dict, pid: str, value: Any) -> None:
+    pid = _norm(pid).lower()
+    if not pid:
+        return
+    if not isinstance(payload.get("dynamicData"), dict):
+        payload["dynamicData"] = {}
+    if not isinstance(payload.get("testResult"), dict):
+        payload["testResult"] = {}
+    payload["dynamicData"][pid] = value
+    payload["testResult"][pid] = value
+
+
+def _binding_row_has_active_data(payload: Mapping[str, Any], binding: Mapping[str, Any]) -> bool:
+    keys = _RP_BINDING_G1_DATA_KEYS + _RP_BINDING_G2_DATA_KEYS
+    for key in keys:
+        pid = _norm(binding.get(key) or "").lower()
+        if not pid:
             continue
-        page, seq_y0, seq_y1 = _field_pdf_anchor_y_bounds(field)
-        if page != read_page:
+        val = _payload_cell_value(payload, pid)
+        if val and val != "/":
+            return True
+    return False
+
+
+def binding_is_detection_point_row(
+    binding: Mapping[str, Any],
+    fields_by_pid: Mapping[str, Mapping[str, Any]] | None = None,
+    *,
+    column_layout: Mapping[str, Any] | None = None,
+    preface_y_cutoff: float = 360.0,
+) -> bool:
+    """第五章检测点数据行：排除表前区、续页表头区、本底。"""
+    del fields_by_pid
+    pt = _norm(binding.get("radiationPoint") or "")
+    if "本底" in pt or "序号本底" in pt:
+        return False
+    anchor = binding_table_row_anchor(binding)
+    if anchor:
+        page, y = anchor
+        layout = column_layout if isinstance(column_layout, dict) else {"preface_y_cutoff": preface_y_cutoff}
+        if page < 5 or y < _protection_data_row_y_min(page, layout):
+            return False
+        return True
+    return False
+
+
+def binding_qualifies_for_site_record_seq(
+    binding: Mapping[str, Any],
+    fields: Sequence[Mapping[str, Any]],
+    column_layout: Mapping[str, Any],
+) -> bool:
+    """
+    现场记录序号：数据行 + 可写序号格。
+    第5页排除跨表前合并格（f244）；续页允许表头合并格（f438/f304）为数据行写号。
+    """
+    if not binding_is_detection_point_row(binding, column_layout=column_layout):
+        return False
+    anchor = binding_table_row_anchor(binding)
+    if not anchor:
+        return False
+    page, row_y = anchor
+    y_min = _protection_data_row_y_min(page, column_layout)
+    if row_y < y_min:
+        return False
+    seq_field = field_for_table_row_column(
+        page, row_y, fields, column_layout, "point_id"
+    )
+    if not isinstance(seq_field, dict):
+        return False
+    return _point_id_field_usable_on_page(seq_field, page, column_layout)
+
+
+def active_rp_binding_indices(
+    payload: Mapping[str, Any],
+    bindings: Sequence[Mapping[str, Any]],
+    fields: Sequence[Mapping[str, Any]] | None = None,
+    *,
+    column_layout: Mapping[str, Any] | None = None,
+) -> set[int]:
+    by_pid: Dict[str, Dict[str, Any]] = {}
+    field_list = [f for f in fields or [] if isinstance(f, dict)]
+    layout = column_layout
+    if layout is None and field_list:
+        layout = resolve_chapter5_layout_for_fields(field_list)
+    for field in field_list:
+        pid = export_field_pdf_id(field)
+        if pid:
+            by_pid[pid] = dict(field)
+    if not by_pid:
+        for binding in bindings:
+            if not isinstance(binding, dict):
+                continue
+            for key in _RP_BINDING_G1_DATA_KEYS + _RP_BINDING_G2_DATA_KEYS + ("seq_no",):
+                pid = _norm(binding.get(key) or "").lower()
+                if pid:
+                    by_pid.setdefault(pid, {"pdfFieldId": pid})
+    return {
+        bi
+        for bi, binding in enumerate(bindings)
+        if isinstance(binding, dict)
+        and binding_qualifies_for_site_record_seq(binding, field_list, layout)
+        and _binding_row_has_active_data(payload, binding)
+    }
+
+
+def _location_main_from_radiation_point(point: str) -> str:
+    pt = _norm(point)
+    m = re.match(r"^(.+?)_r\d+", pt, re.I)
+    return m.group(1) if m else pt
+
+
+def _has_sub_location_in_point(point: str) -> bool:
+    m = _RP_SUB_ROW_RE.search(_norm(point))
+    return bool(m and m.group(2))
+
+
+def bindings_share_seq_merge(
+    prev_binding: Mapping[str, Any],
+    next_binding: Mapping[str, Any],
+    *,
+    fields: Sequence[Mapping[str, Any]],
+    column_layout: Mapping[str, Any],
+    fields_by_pid: Mapping[str, Mapping[str, Any]] | None = None,
+) -> bool:
+    """相邻两行是否属于同一跨行序号单元（同序号格几何 / 同 pdfFieldId / 同主位置子行）。"""
+    del fields_by_pid
+    a1 = binding_table_row_anchor(prev_binding)
+    a2 = binding_table_row_anchor(next_binding)
+    if not a1 or not a2:
+        return False
+    f1 = field_for_table_row_column(a1[0], a1[1], fields, column_layout, "point_id")
+    f2 = field_for_table_row_column(a2[0], a2[1], fields, column_layout, "point_id")
+    if isinstance(f1, dict) and isinstance(f2, dict):
+        if _seq_cell_geometry_key(f1) == _seq_cell_geometry_key(f2):
+            return True
+        p1 = export_field_pdf_id(f1)
+        p2 = export_field_pdf_id(f2)
+        if p1 and p1 == p2:
+            return True
+    prev_pt = _norm(prev_binding.get("radiationPoint") or "")
+    next_pt = _norm(next_binding.get("radiationPoint") or "")
+    if not (_has_sub_location_in_point(prev_pt) and _has_sub_location_in_point(next_pt)):
+        return False
+    return _location_main_from_radiation_point(prev_pt) == _location_main_from_radiation_point(next_pt)
+
+
+def bindings_may_use_seq_range(
+    prev_binding: Mapping[str, Any],
+    next_binding: Mapping[str, Any],
+    *,
+    fields: Sequence[Mapping[str, Any]],
+    column_layout: Mapping[str, Any],
+    fields_by_pid: Mapping[str, Mapping[str, Any]] | None = None,
+) -> bool:
+    """现场记录：相邻两行共用合并序号格时写 n~m（与 bindings_share_seq_merge 一致）。"""
+    return bindings_share_seq_merge(
+        prev_binding,
+        next_binding,
+        fields=fields,
+        column_layout=column_layout,
+        fields_by_pid=fields_by_pid,
+    )
+
+
+def normalize_site_record_rp_sequence(
+    payload: dict,
+    bindings: Sequence[Mapping[str, Any]],
+    fields: Sequence[Mapping[str, Any]],
+    *,
+    active_indices: set[int] | None = None,
+    template_payload: Optional[Mapping[str, Any]] = None,
+) -> int:
+    """
+    现场记录防护表序号：仅对已填数据行按表顺序从 1 起编；跨行合并格写 n~m。
+    未填行保持 /。单行点位（如工作人员操作位K）各写单号。
+    报告导出勿调用（见 report_data_builder，单组/双组各用独立序号列）。
+    """
+    if not isinstance(payload, dict) or not bindings:
+        return 0
+    field_list = [f for f in fields or [] if isinstance(f, dict)]
+    column_layout = resolve_chapter5_layout_for_fields(
+        field_list, template_payload=template_payload
+    )
+
+    active = (
+        active_indices
+        if active_indices is not None
+        else active_rp_binding_indices(payload, bindings, fields, column_layout=column_layout)
+    )
+    written = 0
+    indexed = [(bi, b) for bi, b in enumerate(bindings) if isinstance(b, dict)]
+    indexed.sort(key=lambda ib: binding_pdf_table_sort_key(ib[1]))
+
+    for field in field_list:
+        if not _point_id_field_is_writable_data_row(field, column_layout):
             continue
-        if seq_y0 <= read_y <= seq_y1:
-            contained.append(field)
+        pid = export_field_pdf_id(field)
+        if pid:
+            _write_payload_pid(payload, pid, "/")
+
+    for _bi, binding in indexed:
+        if binding_is_detection_point_row(binding, column_layout=column_layout):
             continue
-        dist = min(abs(read_y - seq_y0), abs(read_y - seq_y1))
-        if dist < best_dist:
-            best_dist = dist
-            best = field
-    if contained:
-        return max(contained, key=_seq_field_anchor_height)
-    return best
+        seq_field = seq_field_for_binding_from_table_layout(
+            binding, field_list, column_layout
+        )
+        if isinstance(seq_field, dict):
+            pid = export_field_pdf_id(seq_field)
+            if pid:
+                _write_payload_pid(payload, pid, "/")
+                written += 1
+
+    active_rows = [
+        (bi, binding)
+        for bi, binding in indexed
+        if bi in active
+        and binding_qualifies_for_site_record_seq(
+            binding, field_list, column_layout
+        )
+    ]
+
+    seq_no = 1
+    i = 0
+    while i < len(active_rows):
+        group: list[tuple[int, Mapping[str, Any]]] = [active_rows[i]]
+        j = i + 1
+        while j < len(active_rows) and bindings_share_seq_merge(
+            group[-1][1],
+            active_rows[j][1],
+            fields=field_list,
+            column_layout=column_layout,
+        ):
+            group.append(active_rows[j])
+            j += 1
+
+        if len(group) > 1:
+            seq_text = f"{seq_no}~{seq_no + len(group) - 1}"
+            seq_no += len(group)
+        else:
+            seq_text = str(seq_no)
+            seq_no += 1
+
+        first_field = seq_field_for_binding_from_table_layout(
+            group[0][1], field_list, column_layout
+        )
+        first_pid = export_field_pdf_id(first_field) if isinstance(first_field, dict) else ""
+        if first_pid:
+            _write_payload_pid(payload, first_pid, seq_text)
+            written += 1
+        if len(group) > 1:
+            for _gbi, row_binding in group[1:]:
+                extra_field = seq_field_for_binding_from_table_layout(
+                    row_binding, field_list, column_layout
+                )
+                extra_pid = (
+                    export_field_pdf_id(extra_field)
+                    if isinstance(extra_field, dict)
+                    else ""
+                )
+                if extra_pid and extra_pid != first_pid:
+                    _write_payload_pid(payload, extra_pid, "/")
+                    written += 1
+        i = j
+
+    return written
 
 
 def attach_seq_no_to_bindings(
     bindings: List[Dict[str, Any]],
     fields: List[Mapping[str, Any]],
+    *,
+    column_layout: Optional[Mapping[str, Any]] = None,
 ) -> None:
-    """为每行 fieldBindings 写入序号列 pdfFieldId（seq_no）。"""
+    """为每行 fieldBindings 写入序号列 pdfFieldId（按第五章表 point_id 列带 + 行坐标）。"""
     if not bindings:
         return
-    by_pid: Dict[str, Dict[str, Any]] = {}
-    for field in fields or []:
-        if not isinstance(field, dict):
-            continue
-        pid = export_field_pdf_id(field)
-        if pid:
-            by_pid[pid] = dict(field)
+    field_list = [f for f in fields or [] if isinstance(f, dict)]
+    layout = column_layout if isinstance(column_layout, dict) else resolve_chapter5_layout_for_fields(field_list)
     for row in bindings:
         if not isinstance(row, dict):
             continue
-        seq_field = seq_field_for_binding_row(row, fields, by_pid)
+        seq_field = seq_field_for_binding_from_table_layout(row, field_list, layout)
         if isinstance(seq_field, dict):
             pid = export_field_pdf_id(seq_field)
             if pid:
@@ -1522,8 +2341,8 @@ def build_field_bindings_from_fields(
         )
         row.update(_assign_slots_to_point_row(items, dual_group=dual_group))
     out = list(rows.values())
-    out.sort(key=lambda r: (r.get("row") is None, r.get("row") or 0, r.get("radiationPoint") or ""))
-    attach_seq_no_to_bindings(out, fields)
+    out.sort(key=binding_pdf_table_sort_key)
+    attach_seq_no_to_bindings(out, fields, column_layout=col_layout)
     return out
 
 
@@ -2086,6 +2905,11 @@ def resolve_chapter_config_for_export(
         state,
         pdf_fields=pdf_fields,
         export_payload=export_payload,
+    )
+    state["backgroundBinding"] = resolve_background_row_binding(
+        pdf_fields or [],
+        chapter=state,
+        template_payload=export_payload,
     )
     _sync_dual_mean_formula_in_chapter(state, state.get("fieldBindings") or [])
     return state

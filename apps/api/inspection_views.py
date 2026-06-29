@@ -507,6 +507,11 @@ def _inject_frontend_payload_defaults(frontend_obj: dict, payload: dict) -> dict
         }:
             continue
         field["defaultValue"] = coerced
+
+    hi_block = payload.get("hospitalInfo") if isinstance(payload.get("hospitalInfo"), dict) else {}
+    from apps.core.site_record_hospital_prefill import apply_hospital_info_chapter_default_values
+
+    apply_hospital_info_chapter_default_values(steps, hi_block, _coerce_field_default)
     return frontend_obj
 
 

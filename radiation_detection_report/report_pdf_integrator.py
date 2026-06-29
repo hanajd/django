@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import replace
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional, Sequence
 
 import fitz
 
@@ -24,16 +24,91 @@ _QC_SUBSECTION_RE = re.compile(
     r"(\d{1,2})\s*[.．]\s*(\d+)\s*.*?质量控制",
     re.I,
 )
+# 动态 DR 等模板无「1.1」编号，仅用「摄影部分/透视部分…质量控制检测项目及结果」作小节标题
+_QC_PLAIN_SECTION_RE = re.compile(
+    r"(摄影部分|透视部分|透视摄影部分).*?质量控制(?:检测)?项目及结果",
+    re.I,
+)
+_QC_TABLE_PAGE_RE = re.compile(r"序号.*?检测项目", re.I)
 _RP_SUBSECTION_RE = re.compile(
     r"(\d{1,2})\s*[.．]\s*(\d+)\s*.*?工作场所放射防护",
     re.I,
 )
+_FLOOR_SUBSECTION_RE = re.compile(
+    r"(\d{1,2})\s*[.．]\s*(\d+)\s*.*?平面布局",
+    re.I,
+)
 _NEXT_DEVICE_RE = re.compile(r"[（(]\s*2\s*[）)]")
 _NEXT_MAJOR_RE = re.compile(r"^(\d+)\s*[.．]\s*1\s", re.M)
+_DEVICE_HEADER_RE = re.compile(r"[（(]\s*(\d+)\s*[）)]\s*受检编号")
 
 
 def _norm_compact(text: str) -> str:
     return re.sub(r"\s+", "", text or "")
+
+
+def _page_is_qc_table_continuation(compact: str) -> bool:
+    """质控结果表续页（无小节标题，含表头「序号/检测项目」）。"""
+    if "质量控制" in compact and _QC_PLAIN_SECTION_RE.search(compact):
+        return True
+    return bool(_QC_TABLE_PAGE_RE.search(compact))
+
+
+def _scan_results_qc_pages(doc: fitz.Document) -> tuple[Optional[int], int, int]:
+    """
+    在「三、检测结果」之后扫描质控小节页。
+    返回 (末页 0-based, device_major, 末个小节号 minor)。
+    支持编号小节（1.1…）与无编号「摄影部分/透视部分…质量控制」标题。
+    """
+    in_results = False
+    device_major: Optional[int] = None
+    max_qc_minor = 0
+    last_qc_page: Optional[int] = None
+    plain_section_count = 0
+
+    for pi in range(doc.page_count):
+        text = doc[pi].get_text("text")
+        compact = _norm_compact(text)
+        if _page_enters_results_section(compact):
+            in_results = True
+        if not in_results:
+            continue
+
+        if device_major is not None:
+            for maj, _minor in _iter_rp_subsections(compact):
+                if maj == device_major:
+                    return last_qc_page, device_major, max_qc_minor
+
+        numbered_on_page = False
+        for maj, minor in _iter_qc_subsections(compact):
+            numbered_on_page = True
+            if device_major is None:
+                device_major = maj
+            if maj != device_major:
+                continue
+            if minor > max_qc_minor:
+                max_qc_minor = minor
+            last_qc_page = pi
+
+        if not numbered_on_page and _QC_PLAIN_SECTION_RE.search(compact):
+            plain_section_count += 1
+            if device_major is None:
+                device_major = 1
+            if plain_section_count > max_qc_minor:
+                max_qc_minor = plain_section_count
+            last_qc_page = pi
+        elif not numbered_on_page and last_qc_page is not None and _page_is_qc_table_continuation(compact):
+            last_qc_page = pi
+
+        if last_qc_page is not None and pi > last_qc_page:
+            if re.search(r"^[三四五六七八九十]+、", text.strip()):
+                break
+            if _NEXT_DEVICE_RE.search(text) and "受检编号" in compact:
+                break
+
+    if device_major is None:
+        device_major = 1
+    return last_qc_page, device_major, max_qc_minor
 
 
 def _iter_qc_subsections(compact: str) -> list[tuple[int, int]]:
@@ -51,6 +126,19 @@ def _iter_qc_subsections(compact: str) -> list[tuple[int, int]]:
     return out
 
 
+def _page_enters_results_section(compact: str) -> bool:
+    """进入「检测结果」区：标准第三节标题、受检设备头或编号质控小节（drct9 等无「三、检测结果」）。"""
+    if "三、检测结果" in compact or "三.检测结果" in compact:
+        return True
+    if _DEVICE_HEADER_RE.search(compact):
+        return True
+    if _iter_qc_subsections(compact):
+        return True
+    if _QC_PLAIN_SECTION_RE.search(compact):
+        return True
+    return False
+
+
 def _iter_rp_subsections(compact: str) -> list[tuple[int, int]]:
     out: list[tuple[int, int]] = []
     for m in _RP_SUBSECTION_RE.finditer(compact):
@@ -63,6 +151,205 @@ def _iter_rp_subsections(compact: str) -> list[tuple[int, int]]:
             continue
         out.append((major, minor))
     return out
+
+
+def _iter_floor_subsections(compact: str) -> list[tuple[int, int]]:
+    out: list[tuple[int, int]] = []
+    for m in _FLOOR_SUBSECTION_RE.finditer(compact):
+        try:
+            major = int(m.group(1))
+            minor = int(m.group(2))
+        except ValueError:
+            continue
+        if not (1 <= major <= 9 and 1 <= minor <= 30):
+            continue
+        out.append((major, minor))
+    return out
+
+
+def _page_has_rp_header(compact: str, device_major: int, rp_minor: int) -> bool:
+    if "工作场所放射防护" not in compact:
+        return False
+    return any(
+        maj == device_major and minor == rp_minor for maj, minor in _iter_rp_subsections(compact)
+    )
+
+
+def _page_has_floor_plan_header(compact: str, device_major: int, floor_minor: int) -> bool:
+    if "平面布局" not in compact:
+        return False
+    return any(
+        maj == device_major and minor == floor_minor
+        for maj, minor in _iter_floor_subsections(compact)
+    )
+
+
+def _resolve_qc_followup_insert_anchor(doc: fitz.Document) -> tuple[Optional[int], int, int]:
+    """
+    质控末页之后插入防护/平面图：以编号小节扫描为准（避免「体层摄影…质量控制」误当 1.1）。
+    返回 (insert_index_0based, device_major, rp_section_minor)。
+    """
+    last_qc_page, device_major, max_qc_minor = _scan_results_qc_pages(doc)
+    major = int(device_major or 1)
+    rp_minor = max(1, int(max_qc_minor or 0) + 1)
+    if last_qc_page is None:
+        return None, major, rp_minor
+    return int(last_qc_page) + 1, major, rp_minor
+
+
+def _remove_rp_and_floor_pages_wrong_major(doc: fitz.Document, expected_major: int) -> None:
+    """删除 major 与质控小节不一致的预印/错误防护表、平面布局页（如质控 2.1 却残留 1.2）。"""
+    exp = int(expected_major)
+    to_delete: set[int] = set()
+    from_pi = _find_results_section_start_page(doc)
+    for pi in range(from_pi, doc.page_count):
+        compact = _norm_compact(doc[pi].get_text("text"))
+        for maj, _minor in _iter_rp_subsections(compact):
+            if maj != exp and _page_has_rp_table_body(compact):
+                to_delete.add(pi)
+                break
+        for maj, _minor in _iter_floor_subsections(compact):
+            if maj != exp:
+                to_delete.add(pi)
+                break
+    for pi in sorted(to_delete, reverse=True):
+        if 0 <= pi < doc.page_count:
+            doc.delete_page(pi)
+
+
+def _find_results_section_start_page(doc: fitz.Document) -> int:
+    for pi in range(doc.page_count):
+        compact = _norm_compact(doc[pi].get_text("text"))
+        if _page_enters_results_section(compact):
+            return pi
+    return 0
+
+
+def _page_has_rp_table_body(compact: str) -> bool:
+    return "检测点位置" in compact or ("检测点" in compact and "编号" in compact)
+
+
+def _detect_device_rp_minor(doc: fitz.Document, device_major: int) -> int:
+    """模板中设备 device_major 的首个工作场所放射防护小节号（如 1.1 → 1）。"""
+    from_pi = _find_results_section_start_page(doc)
+    for pi in range(from_pi, doc.page_count):
+        compact = _norm_compact(doc[pi].get_text("text"))
+        if not _page_has_rp_table_body(compact):
+            continue
+        for maj, minor in _iter_rp_subsections(compact):
+            if maj == device_major and "工作场所放射防护" in compact:
+                return minor
+    return 1
+
+
+def _page_is_rp_table_continuation(
+    text: str,
+    compact: str,
+    device_major: int,
+    rp_minor: int,
+) -> bool:
+    """防护表续页：含检测点表格正文，且不含下一小节标题。"""
+    if _page_has_floor_plan_header(compact, device_major, rp_minor + 1):
+        return False
+    for maj, minor in _iter_rp_subsections(compact):
+        if maj == device_major and minor != rp_minor:
+            return False
+        if maj > device_major:
+            return False
+    for maj, minor in _iter_floor_subsections(compact):
+        if maj == device_major and minor > rp_minor:
+            return False
+        if maj > device_major:
+            return False
+    if _NEXT_DEVICE_RE.search(text) and "受检编号" in compact and device_major == 1:
+        return False
+    return (
+        "检测点" in compact
+        and ("检测点位置" in compact or "检测结果" in compact or "编号" in compact)
+    )
+
+
+def _find_device_rp_page_span(
+    doc: fitz.Document,
+    device_major: int,
+    rp_minor: int,
+) -> tuple[Optional[int], Optional[int]]:
+    """返回设备防护表页范围 [start, end)（0-based）。"""
+    start: Optional[int] = None
+    end: Optional[int] = None
+    from_pi = _find_results_section_start_page(doc)
+    for pi in range(from_pi, doc.page_count):
+        text = doc[pi].get_text("text")
+        compact = _norm_compact(text)
+        if start is None:
+            if _page_has_rp_header(compact, device_major, rp_minor) and _page_has_rp_table_body(
+                compact
+            ):
+                start = pi
+                end = pi + 1
+            continue
+        if _page_has_floor_plan_header(compact, device_major, rp_minor + 1):
+            break
+        for maj, _minor in _iter_rp_subsections(compact):
+            if maj > device_major:
+                return start, end
+            if maj == device_major and _minor != rp_minor:
+                return start, end
+        if _page_is_rp_table_continuation(text, compact, device_major, rp_minor):
+            end = pi + 1
+            continue
+        break
+    return start, end
+
+
+def _find_device_floor_plan_page_span(
+    doc: fitz.Document,
+    device_major: int,
+    floor_minor: int,
+) -> tuple[Optional[int], Optional[int]]:
+    """返回设备平面布局页范围 [start, end)（0-based）。"""
+    start: Optional[int] = None
+    end: Optional[int] = None
+    from_pi = _find_results_section_start_page(doc)
+    for pi in range(from_pi, doc.page_count):
+        compact = _norm_compact(doc[pi].get_text("text"))
+        if start is None:
+            if _page_has_floor_plan_header(compact, device_major, floor_minor):
+                start = pi
+                end = pi + 1
+            continue
+        if _page_has_floor_plan_header(compact, device_major, floor_minor):
+            end = pi + 1
+            continue
+        break
+    return start, end
+
+
+def _remove_template_device_rp_and_floor_plan_pages(
+    doc: fitz.Document,
+    device_major: int,
+) -> tuple[Optional[int], Optional[int]]:
+    """
+    删除模板预印的「N.M 工作场所放射防护检测结果」及「N.(M+1) 平面布局」页组。
+    返回 (insert_at, rp_minor)；无预印内容时返回 (None, None)。
+    """
+    rp_minor = _detect_device_rp_minor(doc, device_major)
+    floor_minor = rp_minor + 1
+    rp_start, rp_end = _find_device_rp_page_span(doc, device_major, rp_minor)
+    fp_start, fp_end = _find_device_floor_plan_page_span(doc, device_major, floor_minor)
+
+    to_delete: set[int] = set()
+    if rp_start is not None and rp_end is not None:
+        to_delete.update(range(rp_start, rp_end))
+    if fp_start is not None and fp_end is not None:
+        to_delete.update(range(fp_start, fp_end))
+    if not to_delete:
+        return None, None
+
+    insert_at = min(to_delete)
+    for pi in sorted(to_delete, reverse=True):
+        doc.delete_page(pi)
+    return insert_at, rp_minor
 
 
 def find_radiation_table_insert_page_0based(doc: fitz.Document) -> tuple[Optional[int], int, int]:
@@ -80,7 +367,7 @@ def find_radiation_table_insert_page_0based(doc: fitz.Document) -> tuple[Optiona
     for pi in range(doc.page_count):
         text = doc[pi].get_text("text")
         compact = _norm_compact(text)
-        if "三、检测结果" in compact or "三.检测结果" in compact:
+        if _page_enters_results_section(compact):
             in_results = True
         if not in_results:
             continue
@@ -123,32 +410,12 @@ def find_radiation_table_insert_page_0based(doc: fitz.Document) -> tuple[Optiona
         if re.search(r"^[三四五六七八九十]+、", text.strip()):
             return pi, device_major, max_qc_minor + 1
 
-    if last_qc_page is not None and device_major is not None:
-        return last_qc_page + 1, device_major, max_qc_minor + 1
-    return None, device_major or 1, max_qc_minor + 1 if max_qc_minor else 2
+    return _resolve_qc_followup_insert_anchor(doc)
 
 
 def _find_page_after_last_qc(doc: fitz.Document) -> Optional[int]:
     """当前受检设备末个质控小节所在页的下一页（0-based）。"""
-    in_results = False
-    device_major: Optional[int] = None
-    max_qc_minor = 0
-    last_qc_page: Optional[int] = None
-    for pi in range(doc.page_count):
-        text = doc[pi].get_text("text")
-        compact = _norm_compact(text)
-        if "三、检测结果" in compact or "三.检测结果" in compact:
-            in_results = True
-        if not in_results:
-            continue
-        for maj, minor in _iter_qc_subsections(compact):
-            if device_major is None:
-                device_major = maj
-            if maj != device_major:
-                continue
-            if minor >= max_qc_minor:
-                max_qc_minor = minor
-                last_qc_page = pi
+    last_qc_page, _major, _minor = _scan_results_qc_pages(doc)
     if last_qc_page is not None:
         return last_qc_page + 1
     return None
@@ -168,15 +435,111 @@ def _find_page_after_existing_rp_section(doc: fitz.Document, device_major: int) 
 
 
 def _resolve_site_template_parsed(task_no: str, project, report_task) -> Optional[dict]:
+    return _resolve_site_template_parsed_at_index(task_no, project, report_task, 0)
+
+
+def _resolve_site_template_for_submit(
+    task_no: str,
+    project,
+    report_task,
+    submit_payload: Optional[Mapping[str, Any]],
+) -> Optional[dict]:
+    """按现场提交 taskNo 匹配对应现场记录模板 JSON（勿按枚举序号硬对齐）。"""
+    try:
+        from apps.api.inspection_pdf_service import _resolve_library_task_for_task_no
+        from apps.api.inspection_report_make import _iter_site_record_parsed_templates_for_report
+
+        site_task_no = str((submit_payload or {}).get("taskNo") or "").strip()
+        site_task = (
+            _resolve_library_task_for_task_no(site_task_no, project) if site_task_no else None
+        )
+        if site_task is not None:
+            from apps.api.inspection_report_make import _load_first_parsed_template_json_for_task
+
+            parsed_direct = _load_first_parsed_template_json_for_task(site_task)
+            if isinstance(parsed_direct, dict):
+                return parsed_direct
+        for st, parsed in _iter_site_record_parsed_templates_for_report(
+            task_no, project, report_task
+        ):
+            if site_task is not None and int(st.pk) == int(site_task.pk):
+                return parsed if isinstance(parsed, dict) else None
+            if site_task is None and site_task_no and (st.code or "").strip() == site_task_no:
+                return parsed if isinstance(parsed, dict) else None
+    except Exception as exc:
+        logger.debug("resolve site template for submit: %s", exc)
+    return _resolve_site_template_parsed_at_index(task_no, project, report_task, 0)
+
+
+def _resolve_site_template_parsed_at_index(
+    task_no: str, project, report_task, index: int,
+) -> Optional[dict]:
     try:
         from apps.api.inspection_report_make import _iter_site_record_parsed_templates_for_report
 
-        for _st, parsed in _iter_site_record_parsed_templates_for_report(task_no, project, report_task):
-            if isinstance(parsed, dict):
+        for i, (_st, parsed) in enumerate(
+            _iter_site_record_parsed_templates_for_report(task_no, project, report_task)
+        ):
+            if i == int(index) and isinstance(parsed, dict):
                 return parsed
     except Exception as exc:
-        logger.debug("resolve site template: %s", exc)
+        logger.debug("resolve site template at %s: %s", index, exc)
     return None
+
+
+def _select_submit_payload_for_device_section(
+    source_payload: Optional[Mapping[str, Any]],
+    ordered_submit_payloads: Optional[Sequence[Mapping[str, Any]]],
+    section_major: int,
+) -> Optional[Mapping[str, Any]]:
+    """多设备报告：按受检设备序号选取对应现场提交（避免合并 payload 串位）。"""
+    if ordered_submit_payloads:
+        idx = max(0, int(section_major) - 1)
+        if idx < len(ordered_submit_payloads) and isinstance(ordered_submit_payloads[idx], dict):
+            return ordered_submit_payloads[idx]
+    return source_payload if isinstance(source_payload, dict) else None
+
+
+def _resolve_site_pdf_path_for_submit(
+    project,
+    submit_payload: Optional[Mapping[str, Any]],
+) -> Optional[str]:
+    if not isinstance(submit_payload, dict) or project is None:
+        return None
+    try:
+        from apps.api.inspection_pdf_service import _resolve_library_task_for_task_no
+        from apps.core.models import InspectionCase, LibraryFile
+        from apps.core import pipeline_service
+
+        task_no = str(submit_payload.get("taskNo") or "").strip()
+        if not task_no:
+            return None
+        site_task = _resolve_library_task_for_task_no(task_no, project)
+        if site_task is None:
+            return None
+        case = InspectionCase.objects.filter(
+            library_project=project, case_no=task_no
+        ).first()
+        if case is None:
+            return None
+        lf = (
+            LibraryFile.objects.filter(
+                category=LibraryFile.CATEGORY_SITE_RECORD,
+                link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
+                link_object_id=case.pk,
+                projects=project,
+            )
+            .filter(original_name__iendswith=".pdf")
+            .order_by("-created_at", "-id")
+            .first()
+        )
+        if lf is None:
+            return None
+        path = pipeline_service.library_absolute_path(lf.relative_path)
+        return str(path) if path and path.is_file() else None
+    except Exception as exc:
+        logger.debug("resolve site pdf for submit: %s", exc)
+        return None
 
 
 def _resolve_site_pdf_path(case, project) -> Optional[str]:
@@ -247,6 +610,13 @@ def _strip_blank_markers_except_last(doc: fitz.Document) -> None:
         logger.warning("strip blank markers failed: %s", exc)
 
 
+# 嵌入报告 PDF 时预留页眉带（rewrite_merged_report_page_headers 约 46–82pt）
+_REPORT_RP_EMBED_TITLE_Y_TOP = 76.0
+_REPORT_RP_EMBED_TABLE_Y_TOP = 112.0
+_REPORT_RP_EMBED_CONTINUATION_Y_TOP = 96.0
+_REPORT_RP_EMBED_CONTENT_BOTTOM = 728.0
+
+
 def build_radiation_table_pdf_bytes(
     report_data: Mapping[str, Any],
     *,
@@ -258,9 +628,10 @@ def build_radiation_table_pdf_bytes(
     layout = replace(
         layout,
         section_title=title,
-        title_y_top=float(layout.title_y_top) + 4.0,
-        table_y_top=float(layout.table_y_top) + 4.0,
-        continuation_y_top=float(layout.continuation_y_top) + 4.0,
+        title_y_top=_REPORT_RP_EMBED_TITLE_Y_TOP,
+        table_y_top=_REPORT_RP_EMBED_TABLE_Y_TOP,
+        continuation_y_top=_REPORT_RP_EMBED_CONTINUATION_Y_TOP,
+        content_bottom=_REPORT_RP_EMBED_CONTENT_BOTTOM,
     )
     table_doc = RadiationTableBuilder(layout, dict(report_data)).build()
     try:
@@ -269,12 +640,59 @@ def build_radiation_table_pdf_bytes(
         table_doc.close()
 
 
-def _doc_has_floor_plan_section(doc: fitz.Document) -> bool:
-    for pi in range(doc.page_count):
-        compact = _norm_compact(doc[pi].get_text("text"))
-        if "平面布局及检测点方位图" in compact:
-            return True
-    return False
+def _insert_radiation_table_at(
+    doc: fitz.Document,
+    *,
+    insert_at: int,
+    device_major: int,
+    minor: int,
+    report_data: Optional[Mapping[str, Any]],
+    source_payload: Optional[Mapping[str, Any]],
+    ordered_submit_payloads: Optional[Sequence[Mapping[str, Any]]],
+    site_template_parsed: Optional[dict],
+    task_no: str,
+    project,
+    report_task,
+) -> tuple[Optional[int], int]:
+    """在 insert_at 插入防护表，返回 (cursor, floor_minor)。"""
+    section_payload = _select_submit_payload_for_device_section(
+        source_payload, ordered_submit_payloads, device_major
+    )
+    section_template = (
+        _resolve_site_template_for_submit(task_no, project, report_task, section_payload)
+        if task_no and project is not None
+        else site_template_parsed
+    ) or site_template_parsed
+    section_site_pdf = _resolve_site_pdf_path_for_submit(project, section_payload)
+    section_report_data: Optional[Dict[str, Any]] = None
+    if isinstance(section_payload, dict):
+        built = try_build_report_data(
+            section_payload,
+            site_template_parsed=section_template,
+            site_pdf_path=section_site_pdf,
+        )
+        if isinstance(built, dict) and built.get("points"):
+            section_report_data = built
+    if section_report_data is None:
+        section_report_data = report_data if isinstance(report_data, dict) else {}
+    table_bytes = build_radiation_table_pdf_bytes(
+        section_report_data,
+        section_major=device_major,
+        section_minor=minor,
+    )
+    table_doc = fitz.open(stream=table_bytes, filetype="pdf")
+    try:
+        if table_doc.page_count <= 0:
+            return None, minor + 1
+        doc.insert_pdf(
+            table_doc,
+            start_at=insert_at,
+            from_page=0,
+            to_page=table_doc.page_count - 1,
+        )
+        return insert_at + table_doc.page_count, minor + 1
+    finally:
+        table_doc.close()
 
 
 def enrich_report_pdf_with_qc_followups(
@@ -283,6 +701,10 @@ def enrich_report_pdf_with_qc_followups(
     report_data: Optional[Mapping[str, Any]] = None,
     source_payload: Optional[Mapping[str, Any]] = None,
     site_template_parsed: Optional[dict] = None,
+    ordered_submit_payloads: Optional[Sequence[Mapping[str, Any]]] = None,
+    task_no: str = "",
+    project=None,
+    report_task=None,
 ) -> bytes:
     """
     在末个质控/防护小节后插入放射防护表（若有）与平面布局节。
@@ -310,34 +732,57 @@ def enrich_report_pdf_with_qc_followups(
 
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     try:
-        if _doc_has_floor_plan_section(doc):
-            return pdf_bytes
-
         insert_at, major, minor = find_radiation_table_insert_page_0based(doc)
         device_major = major or 1
+        _remove_rp_and_floor_pages_wrong_major(doc, device_major)
+        insert_at, major, minor = _resolve_qc_followup_insert_anchor(doc)
+        device_major = major or 1
+        minor = minor or 2
+
+        removed_insert, removed_minor = _remove_template_device_rp_and_floor_plan_pages(
+            doc, device_major
+        )
+        template_replaced = removed_insert is not None
+        if template_replaced:
+            insert_at = removed_insert
+            minor = removed_minor or minor or 1
+        if insert_at is None:
+            insert_at, device_major, minor = _resolve_qc_followup_insert_anchor(doc)
+            device_major = device_major or major or 1
+
         cursor: Optional[int] = None
         floor_minor = (minor or 1) + 1
 
-        if has_radiation:
-            if insert_at is not None:
-                table_bytes = build_radiation_table_pdf_bytes(
-                    report_data,
-                    section_major=device_major,
-                    section_minor=minor,
+        if has_radiation and (insert_at is not None or template_replaced):
+            cursor, floor_minor = _insert_radiation_table_at(
+                doc,
+                insert_at=insert_at if insert_at is not None else removed_insert,
+                device_major=device_major,
+                minor=minor or 1,
+                report_data=report_data,
+                source_payload=source_payload,
+                ordered_submit_payloads=ordered_submit_payloads,
+                site_template_parsed=site_template_parsed,
+                task_no=task_no,
+                project=project,
+                report_task=report_task,
+            )
+        elif has_radiation and insert_at is None:
+            after_qc = _find_page_after_last_qc(doc)
+            if after_qc is not None:
+                cursor, floor_minor = _insert_radiation_table_at(
+                    doc,
+                    insert_at=after_qc,
+                    device_major=device_major,
+                    minor=minor or 1,
+                    report_data=report_data,
+                    source_payload=source_payload,
+                    ordered_submit_payloads=ordered_submit_payloads,
+                    site_template_parsed=site_template_parsed,
+                    task_no=task_no,
+                    project=project,
+                    report_task=report_task,
                 )
-                table_doc = fitz.open(stream=table_bytes, filetype="pdf")
-                try:
-                    if table_doc.page_count > 0:
-                        doc.insert_pdf(
-                            table_doc,
-                            start_at=insert_at,
-                            from_page=0,
-                            to_page=table_doc.page_count - 1,
-                        )
-                        cursor = insert_at + table_doc.page_count
-                        floor_minor = minor + 1
-                finally:
-                    table_doc.close()
             else:
                 after_rp = _find_page_after_existing_rp_section(doc, device_major)
                 cursor = after_rp
@@ -356,7 +801,9 @@ def enrich_report_pdf_with_qc_followups(
                     floor_minor = (minor or 1) + (2 if has_radiation else 1)
 
             image_bytes = extract_floor_plan_image_bytes(
-                source_payload,
+                _select_submit_payload_for_device_section(
+                    source_payload, ordered_submit_payloads, device_major
+                ) or source_payload,
                 site_template_parsed=site_template_parsed,
             )
             fig_no = count_existing_figure_numbers(doc) + 1
@@ -440,6 +887,7 @@ def try_enrich_report_pdf_with_radiation_table(
     report_task=None,
     task_no: str = "",
     manual_device_count: int | None = None,
+    ordered_submit_payloads: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> bytes:
     """插入放射防护表（若有第五章数据），并完成封面/目录/页眉等终稿后处理。"""
     if not pdf_bytes:
@@ -466,6 +914,10 @@ def try_enrich_report_pdf_with_radiation_table(
             report_data=report_data if has_radiation_protection else None,
             source_payload=source_payload,
             site_template_parsed=site_template,
+            ordered_submit_payloads=ordered_submit_payloads,
+            task_no=task_no,
+            project=project,
+            report_task=report_task,
         )
         if enriched != out:
             out = enriched

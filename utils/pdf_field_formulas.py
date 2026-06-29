@@ -251,6 +251,9 @@ def _collect_pdf_field_metadata_by_id(template_obj: Mapping[str, Any]) -> Dict[s
         jct = row.get("judgmentCriteriaByTestType")
         if isinstance(jct, dict) and jct:
             chunk["judgmentCriteriaByTestType"] = jct
+        jsets = row.get("judgmentRuleSets")
+        if isinstance(jsets, dict) and jsets:
+            chunk["judgmentRuleSets"] = copy.deepcopy(jsets)
         fv = row.get("fieldVerdict")
         if isinstance(fv, dict) and fv:
             chunk["fieldVerdict"] = fv
@@ -401,6 +404,9 @@ def embed_pdf_field_formulas_into_frontend_fields(
         if "judgmentCriteriaByTestType" in extra:
             src["judgmentCriteriaByTestType"] = extra["judgmentCriteriaByTestType"]
             fld["judgmentCriteriaByTestType"] = extra["judgmentCriteriaByTestType"]
+        if "judgmentRuleSets" in extra:
+            src["judgmentRuleSets"] = copy.deepcopy(extra["judgmentRuleSets"])
+            fld["judgmentRuleSets"] = copy.deepcopy(extra["judgmentRuleSets"])
         if "fieldVerdict" in extra:
             src["fieldVerdict"] = extra["fieldVerdict"]
             fld["fieldVerdict"] = extra["fieldVerdict"]

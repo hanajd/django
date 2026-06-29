@@ -553,6 +553,19 @@ def library_user_may_assign_on_project(user, project) -> bool:
     return library_user_is_project_primary_responsible(user, project)
 
 
+def library_user_can_delete_library_project(user, project) -> bool:
+    """是否可在项目工作台删除或停用指定项目。"""
+    if project is None or not getattr(user, "is_authenticated", False):
+        return False
+    if library_user_can_assign_tasks_to_participants(user):
+        return True
+    if library_user_is_project_primary_responsible(user, project):
+        return True
+    if role_has(user, "perm_create_library_project") and getattr(project, "created_by_id", None) == user.id:
+        return True
+    return False
+
+
 def library_user_may_mutate_project_workbench(user, project) -> bool:
     """
     是否可对「项目工作台」内指定项目进行委托、流程、分配等写操作（不含「文件」标签维护）。
