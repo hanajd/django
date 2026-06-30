@@ -500,9 +500,7 @@ def commission_project_rows(
     projects = list(qs[:500])
     pids = [p.pk for p in projects]
     cmap = _completion_map(pids)
-    items_by_project = _bulk_project_item_progress(
-        projects, viewer=viewer, include_large=False
-    )
+    items_by_project = _bulk_project_item_progress(projects, viewer=viewer)
 
     assignees_by_project: dict[int, list[dict]] = defaultdict(list)
     for row in (
@@ -554,7 +552,7 @@ def commission_project_rows(
         issued = agg_bar.get("issued_count", 0) if show_issuance_progress else 0
         total_items = agg_bar.get("total_items", len(item_rows)) if show_issuance_progress else 0
         if large_commission:
-            progress_summary = f"大委托 · {equipment_count} 台设备"
+            progress_summary = f"大委托 · {equipment_count} 台设备 · {len(item_rows)} 项检测"
             progress_label = "—"
         elif total_items and issued:
             progress_summary = f"{issued}/{total_items} 已签发"
@@ -569,11 +567,12 @@ def commission_project_rows(
                 "completion_label": "已完成" if completion == "completed" else "未完成",
                 "progress_label": progress_label,
                 "progress_summary": progress_summary,
-                "progress_updated_at": latest_ts if show_issuance_progress else None,
+                "progress_updated_at": latest_ts,
                 "progress_bar": agg_bar if show_issuance_progress else None,
-                "item_progress_rows": item_rows if show_issuance_progress else [],
+                "item_progress_rows": item_rows,
                 "is_large_commission": large_commission,
                 "show_issuance_progress": show_issuance_progress,
+                "show_item_expand": bool(item_rows),
                 "relation_labels": relations,
                 "on_viewer_name": on_name,
                 "equipment_count": equipment_count,

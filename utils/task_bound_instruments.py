@@ -15,6 +15,7 @@ ASSIGNMENT_MODE_MANUAL = "manual"
 KIND_SEP = "\x1e"  # 历史 JSON / 内部键
 KIND_SEP_FORM = "||"  # 表单 checkbox value（避免控制字符在 POST 中被剥离）
 REQ_SEP = "\x1f"  # 项目手动分配：任务+范围+种类 键分隔符
+DETECTION_ITEM_SEP = "|"  # 委托设备 link + 现场记录库任务 id
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,60 @@ def parse_kind_requirement_key(raw: str) -> tuple[int, str, str, str] | None:
     if task_id <= 0 or scope not in (SCOPE_QC, SCOPE_RP) or not name:
         return None
     return task_id, scope, name, model
+
+
+def detection_item_instrument_key(link_id: int, library_task_id: int) -> str:
+    """唯一标识「某委托设备 × 某现场记录任务模板」的仪器分配槽位。"""
+    return f"{int(link_id)}{DETECTION_ITEM_SEP}{int(library_task_id)}"
+
+
+def parse_detection_item_instrument_key(raw: str) -> tuple[int, int] | None:
+    s = str(raw or "").strip()
+    if DETECTION_ITEM_SEP not in s:
+        return None
+    left, _, right = s.partition(DETECTION_ITEM_SEP)
+    try:
+        link_id = int(left)
+        library_task_id = int(right)
+    except (TypeError, ValueError):
+        return None
+    if link_id <= 0 or library_task_id <= 0:
+        return None
+    return link_id, library_task_id
+
+
+def normalize_project_by_detection_item(raw: Any) -> dict[str, dict[str, list[int]]]:
+    """``byDetectionItem``：检测项键 → 质控/防护编号列表。"""
+    out: dict[str, dict[str, list[int]]] = {}
+    if not isinstance(raw, dict):
+        return out
+    src = raw.get("byDetectionItem")
+    if not isinstance(src, dict):
+        return out
+    for key, val in src.items():
+        k = str(key or "").strip()
+        if not k or not isinstance(val, dict):
+            continue
+        binding = normalize_project_assigned_instruments(val)
+        if bound_instrument_ids_for_legacy_list(binding):
+            out[k] = binding
+    return out
+
+
+def assigned_instruments_for_detection_item(
+    assigned_raw: Any,
+    link_id: int,
+    library_task_id: int,
+) -> dict[str, list[int]]:
+    """读取某检测项（委托设备×现场记录）已分配编号。"""
+    if not isinstance(assigned_raw, dict):
+        return {SCOPE_QC: [], SCOPE_RP: []}
+    by_item = normalize_project_by_detection_item(assigned_raw)
+    key = detection_item_instrument_key(link_id, library_task_id)
+    entry = by_item.get(key)
+    if entry:
+        return entry
+    return assigned_instruments_for_task(assigned_raw, int(library_task_id))
 
 
 def project_assignment_mode(raw: Any) -> str:
@@ -379,6 +434,7 @@ def serialize_project_assigned_instruments(
     by_task: Dict[str | int, dict] | None = None,
     by_requirement: Dict[str, List[int]] | None = None,
     by_kind: Dict[str, List[int]] | None = None,
+    by_detection_item: Dict[str, dict] | None = None,
     assignment_mode: str = ASSIGNMENT_MODE_AUTO,
 ) -> dict:
     out: dict = {
@@ -389,6 +445,10 @@ def serialize_project_assigned_instruments(
         out[SCOPE_QC] = list(quality_control_ids)
     if radiation_protection_ids:
         out[SCOPE_RP] = list(radiation_protection_ids)
+    if by_detection_item:
+        out["byDetectionItem"] = {
+            str(k): normalize_project_assigned_instruments(v) for k, v in by_detection_item.items()
+        }
     if by_task:
         out["byTask"] = {str(k): v for k, v in by_task.items()}
     if by_kind:

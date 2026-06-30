@@ -171,15 +171,22 @@ from apps.core.project_equipment_service import (
     report_task_options_for_project,
     resolve_workbench_equipment_scope_org,
     sync_project_task_assignments_for_user,
+    sync_project_tasks_to_all_workflow_members,
+    task_no_display_index,
     unbind_equipment_from_project,
     update_project_equipment_report_task,
 )
 from apps.core.project_workflow_ui import (
     PROCESS_STEPS_REFERENCE,
     ROLE_LADDER,
+    build_issuance_progress_bar,
     build_workbench_pipeline_status,
+    build_assignment_sync_summary,
+    build_workflow_dispatch_role_panels,
+    build_workflow_role_user_picker,
     group_workflow_members_by_role,
     normalize_workbench_tab,
+    user_eligible_for_workflow_role,
 )
 from apps.core.hospital_info_service import (
     backfill_equipment_histories_from_reports,
@@ -1868,6 +1875,12 @@ def library_projects(request):
                                 request,
                                 f"项目任务模板已按当前委托设备整理为 {n_sync} 个（已移除无关残留）",
                             )
+                        n_assigned = sync_project_tasks_to_all_workflow_members(proj, request.user)
+                        if n_assigned:
+                            messages.info(
+                                request,
+                                f"已向已登记岗位参与人自动同步 {n_assigned} 条 App 任务",
+                            )
                         from apps.core.instrument_inventory_service import (
                             auto_checkout_on_detection_phase,
                         )
@@ -1942,10 +1955,14 @@ def library_projects(request):
                 else:
                     project.primary_responsible = assignee
                     project.save(update_fields=["primary_responsible", "updated_at"])
+                    synced, _ = sync_project_task_assignments_for_user(
+                        project, assignee, request.user
+                    )
+                    sync_project_tasks_to_all_workflow_members(project, request.user)
                     messages.success(
                         request,
-                        f"已指定 {assignee.username} 为项目「{project.name}」主要负责人。"
-                        "请在下方「向参与人同步任务」中为其或检测人员手动分配任务。",
+                        f"已指定 {assignee.username} 为项目「{project.name}」统筹人"
+                        + (f"，并同步 App 任务" if synced else ""),
                     )
             return redirect(
                 reverse("library_projects")
@@ -1977,15 +1994,15 @@ def library_projects(request):
                 messages.success(
                     request,
                     "已设为「跨模板共用」：多个任务模板要求同种仪器时将只分配一台。"
-                    "若此前已分配编号，请再次「确认同步 App 任务」以重新分配。",
+                    "若此前已分配编号，请在「仪器管理」中重新分配。",
                 )
             else:
                 messages.success(
                     request,
                     "已设为「按任务模板分别分配」（默认）：不同模板默认可各用一台，同一模板下多台设备仍共用。"
-                    "若此前已分配编号，请再次「确认同步 App 任务」以重新分配。",
+                    "若此前已分配编号，请在「仪器管理」中重新分配。",
                 )
-            return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=dispatch")
+            return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=instruments")
 
         if action == "save_manual_instrument_assignment":
             project_raw = request.POST.get("project_id", "").strip()
@@ -1996,39 +2013,69 @@ def library_projects(request):
             project = LibraryProject.objects.filter(pk=project_id, is_active=True).first()
             if project is None:
                 messages.error(request, "请选择有效项目")
-                return redirect(reverse("library_projects") + "?tab=dispatch")
+                return redirect(reverse("library_projects") + "?tab=instruments")
             if not library_user_may_mutate_project_workbench(request.user, project):
                 messages.error(request, "无权修改本项目的仪器分配")
-                return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=dispatch")
+                return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=instruments")
             import json
 
             raw_json = (request.POST.get("instrument_manual_json") or "").strip()
             by_kind: dict[str, list[int]] = {}
+            by_detection_item: dict[str, dict[str, list[int]]] | None = None
             if raw_json:
                 try:
                     payload = json.loads(raw_json)
                 except json.JSONDecodeError:
                     messages.error(request, "仪器分配数据格式无效，请重试")
-                    return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=dispatch")
+                    return redirect(reverse("library_projects") + f"?project_id={project.pk}&tab=instruments")
                 if isinstance(payload, dict):
-                    items = payload.get("kinds") or payload.get("requirements") or []
-                    for item in items:
-                        if not isinstance(item, dict):
-                            continue
-                        key = str(item.get("key") or "").strip()
-                        ids_raw = item.get("ids") or item.get("selectedIds") or []
-                        if not key:
-                            continue
-                        ids: list[int] = []
-                        if isinstance(ids_raw, (list, tuple)):
-                            for x in ids_raw:
-                                try:
-                                    pk = int(x)
-                                except (TypeError, ValueError):
-                                    continue
-                                if pk > 0:
-                                    ids.append(pk)
-                        by_kind[key] = ids
+                    from utils.task_bound_instruments import SCOPE_QC, SCOPE_RP
+
+                    per_items = payload.get("items")
+                    if isinstance(per_items, list) and per_items:
+                        by_detection_item = {}
+                        for item in per_items:
+                            if not isinstance(item, dict):
+                                continue
+                            key = str(item.get("key") or "").strip()
+                            if not key:
+                                continue
+                            qc_raw = item.get("qualityControl") or item.get("qc") or []
+                            rp_raw = item.get("radiationProtection") or item.get("rp") or []
+                            qc_ids: list[int] = []
+                            rp_ids: list[int] = []
+                            for scope_raw, bucket in ((qc_raw, qc_ids), (rp_raw, rp_ids)):
+                                if isinstance(scope_raw, (list, tuple)):
+                                    for x in scope_raw:
+                                        try:
+                                            pk = int(x)
+                                        except (TypeError, ValueError):
+                                            continue
+                                        if pk > 0:
+                                            bucket.append(pk)
+                            by_detection_item[key] = {
+                                SCOPE_QC: qc_ids,
+                                SCOPE_RP: rp_ids,
+                            }
+                    else:
+                        items = payload.get("kinds") or payload.get("requirements") or []
+                        for item in items:
+                            if not isinstance(item, dict):
+                                continue
+                            key = str(item.get("key") or "").strip()
+                            ids_raw = item.get("ids") or item.get("selectedIds") or []
+                            if not key:
+                                continue
+                            ids: list[int] = []
+                            if isinstance(ids_raw, (list, tuple)):
+                                for x in ids_raw:
+                                    try:
+                                        pk = int(x)
+                                    except (TypeError, ValueError):
+                                        continue
+                                    if pk > 0:
+                                        ids.append(pk)
+                            by_kind[key] = ids
             else:
                 from utils.task_bound_instruments import kind_spec_from_form_value
 
@@ -2056,6 +2103,7 @@ def library_projects(request):
             result = apply_manual_instrument_assignment(
                 project,
                 by_kind,
+                by_detection_item=by_detection_item,
                 user=request.user,
                 checkout=do_checkout,
             )
@@ -2065,7 +2113,7 @@ def library_projects(request):
                 messages.warning(request, result.message)
             else:
                 messages.error(request, "保存失败")
-            tab_q = f"?project_id={project.pk}&tab=dispatch"
+            tab_q = f"?project_id={project.pk}&tab=instruments"
             fl = (request.POST.get("fl_path") or "").strip()
             if fl:
                 tab_q += f"&fl_path={quote(fl)}"
@@ -2392,6 +2440,11 @@ def library_projects(request):
                         messages.error(request, "演示账号仅可将流程岗位分配给本人")
                     elif u.profile.role.code not in APP_SIDE_ROLE_CODES:
                         messages.error(request, "所选用户角色不属于可参与检测流程的账号")
+                    elif not user_eligible_for_workflow_role(u, wf_role):
+                        messages.error(
+                            request,
+                            "该用户权限不足以登记到此流程岗位（高权限账号可兼任不高于自身等级的岗位）",
+                        )
                     else:
                         _, created = LibraryProjectWorkflowMember.objects.get_or_create(
                             project=proj,
@@ -2399,10 +2452,16 @@ def library_projects(request):
                             workflow_role=wf_role,
                         )
                         if created:
-                            messages.success(
-                                request,
-                                f"已添加流程参与人：{u.username} → {dict(LibraryProjectWorkflowMember.WORKFLOW_ROLE_CHOICES).get(wf_role, wf_role)}",
+                            synced, _ = sync_project_task_assignments_for_user(
+                                proj, u, request.user
                             )
+                            role_label = dict(
+                                LibraryProjectWorkflowMember.WORKFLOW_ROLE_CHOICES
+                            ).get(wf_role, wf_role)
+                            msg = f"已添加流程参与人：{u.username} → {role_label}"
+                            if synced:
+                                msg += f"，已自动同步 {synced} 条 App 任务"
+                            messages.success(request, msg)
                         else:
                             messages.info(request, f"{u.username} 已在该岗位登记，无需重复添加")
             else:
@@ -2416,8 +2475,17 @@ def library_projects(request):
                 elif library_user_has_party_a_demo_restrictions(request.user) and row.user_id != request.user.id:
                     messages.error(request, "演示账号仅可移除本人担任的流程岗位")
                 else:
+                    uname = row.user.username
+                    LibraryTaskAssignment.objects.filter(
+                        project=proj, assignee_id=row.user_id
+                    ).delete()
                     row.delete()
-            return redirect(reverse("library_projects") + f"?project_id={proj.pk}&tab=dispatch")
+                    messages.success(request, f"已移除 {uname} 的岗位登记并撤回其 App 任务")
+            redir_role = (request.POST.get("workflow_role") or "").strip()
+            redir_q = f"?project_id={proj.pk}&tab=dispatch"
+            if redir_role:
+                redir_q += f"&dispatch_role={quote(redir_role)}"
+            return redirect(reverse("library_projects") + redir_q)
 
         if action == "delete_project":
             post_raw = request.POST.get("project_id", "").strip()
@@ -2519,18 +2587,31 @@ def library_projects(request):
 
     project_submissions = []
     if selected_project and library_user_may_mutate_project_workbench(request.user, selected_project):
+        from apps.core.commission_workflow_progress import effective_workflow_stage
+
+        task_display = task_no_display_index(selected_project)
         subs = (
             InspectionSubmission.objects.filter(project=selected_project)
-            .select_related("case", "created_by")
+            .select_related("case", "case__workflow_state", "created_by")
             .order_by("-updated_at")[:600]
         )
         for s in subs:
+            disp = task_display.get(s.task_no) or {}
+            stage = effective_workflow_stage(s.case, s) if s.case_id else ""
+            wf_bar = build_issuance_progress_bar(stage or None)
+            equipment_title = disp.get("equipment_title") or "未关联设备"
+            detection_label = disp.get("detection_label") or (s.report_type or "—")
             project_submissions.append(
                 {
                     "id": s.pk,
                     "task_no": s.task_no,
+                    "equipment_title": equipment_title,
+                    "detection_label": detection_label,
+                    "department_label": disp.get("department_label") or "",
+                    "display_title": f"{equipment_title} · {detection_label}",
                     "status": s.status,
                     "status_display": s.get_status_display(),
+                    "workflow_stage_display": wf_bar["stage_label"],
                     "case_no": s.case.case_no if s.case_id else "",
                     "updated_at": s.updated_at,
                     "submitted_at": s.submitted_at,
@@ -2587,10 +2668,16 @@ def library_projects(request):
         "overview",
         "commission",
         "dispatch",
+        "instruments",
         "files",
         "submissions",
     ):
         workbench_tab = "overview"
+
+    dispatch_role = (request.GET.get("dispatch_role") or "").strip()
+    valid_dispatch_roles = {c for c, _ in LibraryProjectWorkflowMember.WORKFLOW_ROLE_CHOICES}
+    if dispatch_role not in valid_dispatch_roles:
+        dispatch_role = LibraryProjectWorkflowMember.ROLE_FIELD_INSPECTOR
 
     app_users_for_assign = []
     can_assign_on_selected_project = bool(
@@ -2802,12 +2889,21 @@ def library_projects(request):
         ("overview", "概览"),
         ("commission", "委托立项"),
         ("dispatch", "人员派工"),
+        ("instruments", "仪器管理"),
     ]
     if not hide_project_workbench_files_tab:
         workbench_tabs.append(("files", "文件"))
     workbench_tabs.append(("submissions", "进度跟踪"))
 
     workflow_members_by_role = group_workflow_members_by_role(workflow_members)
+    picker_users_source = (
+        assignable_workflow_users if can_assign_on_selected_project else app_users_for_assign
+    )
+    workflow_dispatch_panels = build_workflow_dispatch_role_panels(
+        picker_users_source,
+        workflow_members_by_role,
+    )
+    assignment_sync_summary = build_assignment_sync_summary(project_scoped_assignment_records)
     project_equipment_count = len(project_commission_equipment_cards)
     project_instrument_dispatch_panel: dict = {}
     if selected_project:
@@ -2822,6 +2918,7 @@ def library_projects(request):
         assignee_count=len(project_assignees),
         workflow_member_count=len(workflow_members),
         submission_count=len(project_submissions),
+        instrument_panel=project_instrument_dispatch_panel or None,
     )
 
     can_mock_inspection_submit = library_user_may_mock_inspection_submit(request.user)
@@ -2903,6 +3000,9 @@ def library_projects(request):
             "project_equipment_scope_label": project_equipment_scope_label,
             "workbench_pipeline_status": workbench_pipeline_status,
             "workflow_members_by_role": workflow_members_by_role,
+            "workflow_dispatch_panels": workflow_dispatch_panels,
+            "dispatch_role": dispatch_role,
+            "assignment_sync_summary": assignment_sync_summary,
             "role_ladder": ROLE_LADDER,
             "process_steps_reference": PROCESS_STEPS_REFERENCE,
             "project_equipment_count": project_equipment_count,

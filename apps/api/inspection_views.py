@@ -537,79 +537,47 @@ def _inject_instruments_root_into_frontend_export(
 
 def _resolve_task_template_json(task_obj):
     """
-    查找任务关联的 JSON 模板文件（优先含 ``pdf.fields`` 的统一模板，而非仅 steps 的前端 JSON）。
+    查找任务当前绑定的 JSON 模板（优先任务模板对 + current/ 槽位，非历史或辅助 JSON）。
     返回: (template_file_id, template_file_name, error_message)
     """
-    template_qs = (
-        LibraryFile.objects.filter(
-            category=LibraryFile.CATEGORY_TEMPLATE,
-            library_tasks=task_obj,
-        )
-        .order_by("-created_at", "-id")
-        .distinct()
-    )
     from apps.core.library_task_template_binding_service import (
-        is_auxiliary_template_json_filename,
+        get_task_template_pair,
+        list_task_storage_current_json_files,
+        pick_task_primary_json_template,
     )
 
-    json_rows = [
-        lf
-        for lf in template_qs
-        if (lf.original_name or "").lower().endswith(".json")
-        and not is_auxiliary_template_json_filename(lf.original_name or "")
-    ]
-    if not json_rows:
+    _pdf_lf, json_lf = get_task_template_pair(task_obj)
+    if json_lf is None:
+        current = list_task_storage_current_json_files(task_obj)
+        json_lf = current[0] if current else pick_task_primary_json_template(task_obj)
+    if json_lf is None:
         return None, "", "任务下缺少 JSON 模板（需为含 pdf.fields 的坐标模板，非 *_frontend.json）"
-
-    def _score_library_template_json(lf: LibraryFile) -> tuple[int, int]:
-        """分数越高越优先：统一模板 + 含 pdf.fields。"""
-        try:
-            template_path = pipeline_service.library_absolute_path(lf.relative_path)
-            obj = json_std.loads(template_path.read_text(encoding="utf-8", errors="replace"))
-        except Exception:
-            return (0, 0)
-        if not isinstance(obj, dict):
-            return (0, 0)
-        score = 0
-        schema = str(obj.get("schema") or "").strip().lower()
-        if schema.startswith("unified_form_template"):
-            score += 4
-        pdf = obj.get("pdf") if isinstance(obj.get("pdf"), dict) else {}
-        fields = pdf.get("fields") if isinstance(pdf.get("fields"), list) else []
-        if fields:
-            score += 8
-        elif isinstance(obj.get("fields"), list) and obj.get("fields"):
-            score += 2
-        if isinstance(obj.get("steps"), list) and obj.get("steps"):
-            score += 1
-        return (score, int(lf.pk))
-
-    template_lf = max(json_rows, key=_score_library_template_json)
-    if _score_library_template_json(template_lf)[0] <= 0:
-        return None, "", "任务下缺少可用的 HTMLPDF/统一模板 JSON"
-    return template_lf.pk, template_lf.original_name, ""
+    return json_lf.pk, json_lf.original_name, ""
 
 
 def _resolve_task_template_pdf(task_obj):
     """
-    查找任务关联的 PDF 版式模板（与 JSON 成对绑定在任务模板库）。
+    查找任务当前绑定的 PDF 版式模板。
     返回: (template_file_id, template_file_name, error_message)
     """
-    template_qs = (
-        LibraryFile.objects.filter(
+    from apps.core.library_task_template_binding_service import get_task_template_pair
+    from apps.core.library_file_service import library_file_exists_on_disk
+    from apps.core.template_storage_service import task_storage_base_segments
+
+    pdf_lf, _json_lf = get_task_template_pair(task_obj)
+    if pdf_lf is None:
+        prefix = "/".join(["templates", *task_storage_base_segments(task_obj), "current"]) + "/"
+        for lf in LibraryFile.objects.filter(
             category=LibraryFile.CATEGORY_TEMPLATE,
-            library_tasks=task_obj,
-        )
-        .order_by("-created_at", "-id")
-        .distinct()
-    )
-    pdf_rows = [lf for lf in template_qs if (lf.original_name or "").lower().endswith(".pdf")]
-    if not pdf_rows:
+            relative_path__startswith=prefix,
+            deleted_at__isnull=True,
+        ).order_by("-created_at", "-id"):
+            if (lf.original_name or "").lower().endswith(".pdf") and library_file_exists_on_disk(lf):
+                pdf_lf = lf
+                break
+    if pdf_lf is None:
         return None, "", "任务下缺少 PDF 模板"
-    if len(pdf_rows) > 1:
-        return None, "", "任务下存在多个 PDF 模板，请在任务模板库中仅保留一个 PDF"
-    lf = pdf_rows[0]
-    return lf.pk, lf.original_name, ""
+    return pdf_lf.pk, pdf_lf.original_name, ""
 
 
 def _parse_client_datetime(value):
@@ -1910,6 +1878,16 @@ class InspectionProjectTaskListAPIView(APIView):
                     _resolve_task_template_pdf(library_task),
                 )
             (tpl_id, tpl_name, tpl_error), (pdf_id, pdf_name, pdf_error) = template_cache[library_task.id]
+            tpl_updated_at = ""
+            pdf_updated_at = ""
+            if tpl_id:
+                ts = LibraryFile.objects.filter(pk=tpl_id).values_list("updated_at", flat=True).first()
+                if ts:
+                    tpl_updated_at = ts.isoformat()
+            if pdf_id:
+                ts = LibraryFile.objects.filter(pk=pdf_id).values_list("updated_at", flat=True).first()
+                if ts:
+                    pdf_updated_at = ts.isoformat()
             eq_fields = equipment_ctx.get(library_task.id) or empty_equipment_ctx
             rows.append(
                 {
@@ -1945,6 +1923,7 @@ class InspectionProjectTaskListAPIView(APIView):
                     "frontendTemplateMeta": {
                         "templateFileId": tpl_id,
                         "templateFileName": tpl_name,
+                        "templateUpdatedAt": tpl_updated_at,
                         "exported": not bool(tpl_error),
                         "error": tpl_error or "",
                     },
@@ -1956,6 +1935,7 @@ class InspectionProjectTaskListAPIView(APIView):
                     "templatePdfMeta": {
                         "templateFileId": pdf_id,
                         "templateFileName": pdf_name,
+                        "templateUpdatedAt": pdf_updated_at,
                         "ready": not bool(pdf_error),
                         "error": pdf_error or "",
                     },

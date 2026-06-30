@@ -24,7 +24,6 @@
                     <th class="px-4 py-2.5 text-left">设备</th>
                     <th class="px-4 py-2.5 text-left">科室</th>
                     <th class="px-4 py-2.5 text-left">本次检测类型</th>
-                    <th class="px-4 py-2.5 text-left">检测状态</th>
                     <th class="px-4 py-2.5 text-left min-w-[12rem]">报告任务模板</th>
                     <th class="px-4 py-2.5 text-left">现场记录</th>
                     <th class="px-4 py-2.5 min-w-[8rem]"></th>
@@ -47,10 +46,6 @@
                         <span class="inline-flex px-2 py-0.5 rounded-lg text-xs font-medium bg-violet-50 text-violet-900 ring-1 ring-violet-200/80">
                             {{ card.inspection_type_label }}
                         </span>
-                    </td>
-                    <td class="px-4 py-3">
-                        <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium ring-1 {{ card.status.badge_class }}">{{ card.status.label }}</span>
-                        <div class="text-xs text-slate-500 mt-1 max-w-[14rem]">{{ card.status.hint }}</div>
                     </td>
                     <td class="px-4 py-3">
                         {% if can_edit_project_workbench %}

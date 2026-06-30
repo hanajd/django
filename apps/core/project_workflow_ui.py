@@ -170,13 +170,21 @@ WORKBENCH_PIPELINE: List[Dict[str, Any]] = [
         "key": "dispatch",
         "step": "②",
         "title": "人员派工",
-        "subtitle": "统筹人 · 五级岗位 · App 任务",
+        "subtitle": "统筹人 · 五级岗位",
         "tab": "dispatch",
-        "hint": "指定项目统筹人，按检测员→校核员→编制人→审核人→授权签字人登记参与人，再向检测人员同步 App 任务。",
+        "hint": "指定项目统筹人，按检测员→校核员→编制人→审核人→授权签字人登记参与人；登记后系统自动同步 App 任务。",
+    },
+    {
+        "key": "instruments",
+        "step": "③",
+        "title": "仪器管理",
+        "subtitle": "种类 · 编号 · 出库",
+        "tab": "instruments",
+        "hint": "按任务模板所需仪器种类分配具体编号并登记出库；与人员派工分开维护。",
     },
     {
         "key": "submissions",
-        "step": "③",
+        "step": "④",
         "title": "进度跟踪",
         "subtitle": "现场记录 · 报告 · 环节",
         "tab": "submissions",
@@ -203,6 +211,138 @@ def normalize_workbench_tab(tab: str) -> str:
     if t in ("workflow", "assign"):
         return "dispatch"
     return t or "overview"
+
+
+# 全局账号角色 → 流程权限等级（数值越大权限越高，可登记不高于自身等级的流程岗位）
+GLOBAL_ROLE_WORKFLOW_RANK: Dict[str, int] = {
+    "app_user": 1,
+    "field_inspector": 1,
+    "site_reviewer": 2,
+    "report_author": 3,
+    "report_auditor": 4,
+    "authorized_signatory": 5,
+}
+
+WORKFLOW_ROLE_RANK: Dict[str, int] = {
+    LibraryProjectWorkflowMember.ROLE_FIELD_INSPECTOR: 1,
+    LibraryProjectWorkflowMember.ROLE_SITE_REVIEWER: 2,
+    LibraryProjectWorkflowMember.ROLE_REPORT_AUTHOR: 3,
+    LibraryProjectWorkflowMember.ROLE_REPORT_AUDITOR: 4,
+    LibraryProjectWorkflowMember.ROLE_AUTH_SIGNATORY: 5,
+}
+
+
+def global_role_code_for_user(user) -> str:
+    prof = getattr(user, "profile", None)
+    role = getattr(prof, "role", None) if prof else None
+    return (getattr(role, "code", None) or "").strip()
+
+
+def global_workflow_rank(user) -> int:
+    return GLOBAL_ROLE_WORKFLOW_RANK.get(global_role_code_for_user(user), 0)
+
+
+def workflow_role_rank(workflow_role: str) -> int:
+    return WORKFLOW_ROLE_RANK.get(workflow_role, 99)
+
+
+def user_eligible_for_workflow_role(user, workflow_role: str) -> bool:
+    """高权限账号可登记到不高于自身等级的流程岗位（如授权签字人可兼任检测员）。"""
+    rank = global_workflow_rank(user)
+    return rank > 0 and rank >= workflow_role_rank(workflow_role)
+
+
+def build_workflow_dispatch_role_panels(
+    users: List[Any],
+    members_by_role: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """各流程岗位：已登记成员 + 可添加候选人（供两步确认添加）。"""
+    panels: List[Dict[str, Any]] = []
+    for grp in members_by_role:
+        code = grp["code"]
+        assigned_ids = {int(m.user_id) for m in (grp.get("members") or [])}
+        picker_users: List[Dict[str, Any]] = []
+        for u in users:
+            if u.pk in assigned_ids:
+                continue
+            if not user_eligible_for_workflow_role(u, code):
+                continue
+            ur = global_workflow_rank(u)
+            rr = workflow_role_rank(code)
+            role = getattr(getattr(u, "profile", None), "role", None)
+            picker_users.append(
+                {
+                    "user_id": u.pk,
+                    "username": u.username,
+                    "full_name": u.get_full_name() or "",
+                    "role_label": role.name if role else global_role_code_for_user(u) or "—",
+                    "is_cross_role": ur > rr,
+                }
+            )
+        panels.append(
+            {
+                **grp,
+                "picker_users": picker_users,
+                "eligible_count": len(picker_users),
+                "assigned_count": len(assigned_ids),
+            }
+        )
+    return panels
+
+
+def build_workflow_role_user_picker(
+    users: List[Any],
+    members_by_role: List[Dict[str, Any]],
+    *,
+    selected_role: str,
+) -> Dict[str, Any]:
+    """人员派工：选定岗位后展示可添加的用户列表（非下拉）。"""
+    role_codes = {r["code"] for r in ROLE_LADDER}
+    if selected_role not in role_codes:
+        selected_role = LibraryProjectWorkflowMember.ROLE_FIELD_INSPECTOR
+    assigned_ids: set[int] = set()
+    for grp in members_by_role:
+        if grp.get("code") == selected_role:
+            for m in grp.get("members") or []:
+                assigned_ids.add(int(m.user_id))
+    eligible_users = [u for u in users if user_eligible_for_workflow_role(u, selected_role)]
+    picker_users: List[Dict[str, Any]] = []
+    for u in eligible_users:
+        rc = global_role_code_for_user(u)
+        role = getattr(getattr(u, "profile", None), "role", None)
+        ur = global_workflow_rank(u)
+        rr = workflow_role_rank(selected_role)
+        picker_users.append(
+            {
+                "user": u,
+                "user_id": u.pk,
+                "username": u.username,
+                "full_name": u.get_full_name() or "",
+                "role_label": role.name if role else rc or "—",
+                "already_assigned": u.pk in assigned_ids,
+                "is_cross_role": ur > rr,
+            }
+        )
+    role_meta = {r["code"]: r for r in ROLE_LADDER}
+    sel = role_meta.get(selected_role, ROLE_LADDER[0])
+    return {
+        "selected_role": selected_role,
+        "selected_label": sel["label"],
+        "selected_level": sel["level"],
+        "users": picker_users,
+        "eligible_count": len(eligible_users),
+        "assigned_count": len(assigned_ids),
+    }
+
+
+def build_assignment_sync_summary(records: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """任务同步记录概览（默认折叠明细用）。"""
+    user_count = len(records)
+    task_total = sum(len(r.get("tasks") or []) for r in records)
+    return {
+        "user_count": user_count,
+        "task_total": task_total,
+    }
 
 
 def group_workflow_members_by_role(members: List[Any]) -> List[Dict[str, Any]]:
@@ -234,6 +374,7 @@ def build_workbench_pipeline_status(
     assignee_count: int = 0,
     workflow_member_count: int = 0,
     submission_count: int = 0,
+    instrument_panel: dict | None = None,
 ) -> List[Dict[str, Any]]:
     """为概览/派工页生成三步完成状态。"""
     rows: List[Dict[str, Any]] = []
@@ -251,7 +392,7 @@ def build_workbench_pipeline_status(
             done = has_equipment
             detail = f"已绑定 {equipment_count} 台设备" if done else "尚未绑定受检设备"
         elif key == "dispatch":
-            done = has_primary and has_workflow and has_assign
+            done = has_primary and has_workflow
             parts = []
             if has_primary:
                 parts.append("已指定统筹人")
@@ -259,7 +400,11 @@ def build_workbench_pipeline_status(
                 parts.append(f"{workflow_member_count} 名岗位参与人")
             if has_assign:
                 parts.append(f"{assignee_count} 人已同步 App 任务")
-            detail = " · ".join(parts) if parts else "待指定统筹人、登记岗位、同步任务"
+            detail = " · ".join(parts) if parts else "待指定统筹人并登记岗位"
+        elif key == "instruments":
+            from apps.core.instrument_inventory_service import instrument_pipeline_step_status
+
+            done, detail = instrument_pipeline_step_status(instrument_panel)
         else:
             done = submission_count > 0
             detail = f"{submission_count} 条检测提交" if done else "暂无提交，待现场/App 填报"

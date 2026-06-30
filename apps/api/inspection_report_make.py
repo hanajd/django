@@ -3681,20 +3681,28 @@ def _flat_instruments_by_scope(items: list | None) -> dict[str, dict]:
     return out
 
 
-def _project_instrument_binding(project_obj, task_obj=None) -> dict[str, list[int]]:
+def _project_instrument_binding(
+    project_obj, task_obj=None, *, equipment_link_id: int | None = None
+) -> dict[str, list[int]]:
     if project_obj is None:
         return {_INSTRUMENT_SCOPE_QC: [], _INSTRUMENT_SCOPE_RP: []}
     from apps.core.instrument_inventory_service import resolved_instrument_ids_for_project
 
-    return resolved_instrument_ids_for_project(project_obj, task_obj=task_obj)
+    return resolved_instrument_ids_for_project(
+        project_obj,
+        task_obj=task_obj,
+        equipment_link_id=equipment_link_id,
+    )
 
 
 def _resolve_instrument_binding_dict(
-    project_obj=None, task_obj=None
+    project_obj=None, task_obj=None, *, equipment_link_id: int | None = None
 ) -> dict[str, list[int]]:
     """质控/防护各一套仪器 id（项目派工优先，否则任务模板 bound_instrument_ids）。"""
     if project_obj is not None:
-        return _project_instrument_binding(project_obj, task_obj=task_obj)
+        return _project_instrument_binding(
+            project_obj, task_obj=task_obj, equipment_link_id=equipment_link_id
+        )
     if task_obj is None:
         return {_INSTRUMENT_SCOPE_QC: [], _INSTRUMENT_SCOPE_RP: []}
     from utils.task_bound_instruments import normalize_task_bound_instruments
@@ -3790,12 +3798,28 @@ def coerce_submit_instruments(
     raw_payload: dict | None = None,
     project_obj=None,
     task_obj=None,
+    equipment_link_id: int | None = None,
 ) -> SubmitInstrumentsBundle:
     """
     以根级 instruments[] 全套为准；台账 ``ledger_rows`` 按 id 去重。
     优先顺序：根级列表 → raw_payload.instruments 嵌套 → 项目/模板绑定兜底。
     """
-    binding = _project_instrument_binding(project_obj, task_obj)
+    if equipment_link_id is None and project_obj is not None and task_obj is not None:
+        eq_info = None
+        if isinstance(raw_payload, dict):
+            eq_info = raw_payload.get("equipmentInfo")
+        if not isinstance(eq_info, dict) and isinstance(instruments_raw, dict):
+            eq_info = instruments_raw.get("equipmentInfo")
+        if isinstance(eq_info, dict):
+            from apps.core.instrument_inventory_service import resolve_equipment_link_id_for_submit
+
+            equipment_link_id = resolve_equipment_link_id_for_submit(
+                project_obj, task_obj, eq_info
+            )
+
+    binding = _project_instrument_binding(
+        project_obj, task_obj, equipment_link_id=equipment_link_id
+    )
     scoped: dict[str, dict] = {}
 
     nested_sources: list[Any] = []
@@ -3986,14 +4010,28 @@ def finalize_submit_instruments_in_payload(
         dict(payload or {}), task_obj, project_obj=project_obj
     )
     raw_rp = out.get("rawPayload") if isinstance(out.get("rawPayload"), dict) else None
+    eq_info = out.get("equipmentInfo") if isinstance(out.get("equipmentInfo"), dict) else None
+    equipment_link_id = None
+    if project_obj is not None and task_obj is not None and isinstance(eq_info, dict):
+        from apps.core.instrument_inventory_service import resolve_equipment_link_id_for_submit
+
+        equipment_link_id = resolve_equipment_link_id_for_submit(
+            project_obj, task_obj, eq_info
+        )
     bundle = coerce_submit_instruments(
         out.get("instruments"),
         raw_payload=raw_rp,
         project_obj=project_obj,
         task_obj=task_obj,
+        equipment_link_id=equipment_link_id,
     )
     out = apply_submit_instruments_bundle(out, bundle)
-    full_rows = instruments_full_set_rows_from_binding(project_obj, task_obj)
+    binding = _resolve_instrument_binding_dict(
+        project_obj, task_obj, equipment_link_id=equipment_link_id
+    )
+    full_rows = instruments_full_set_rows_from_binding(
+        project_obj, task_obj, binding=binding
+    )
     if not full_rows and task_obj is not None:
         full_rows = instruments_full_set_rows_from_task_kinds(task_obj)
     if full_rows:

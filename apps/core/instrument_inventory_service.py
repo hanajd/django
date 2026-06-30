@@ -19,16 +19,20 @@ from utils.task_bound_instruments import (
     SCOPE_RP,
     SHARE_MODE_PER_TASK,
     SHARE_MODE_PROJECT,
+    assigned_instruments_for_detection_item,
     assigned_instruments_for_task,
     binding_mode,
     bound_instrument_ids_for_legacy_list,
+    detection_item_instrument_key,
     kind_form_value,
     kind_spec_from_form_value,
     normalize_project_assigned_instruments,
+    normalize_project_by_detection_item,
     normalize_project_by_kind,
     normalize_project_by_requirement,
     normalize_task_bound_instruments,
     normalize_task_bound_kinds,
+    parse_detection_item_instrument_key,
     parse_kind_requirement_key,
     project_assignment_mode,
     project_instrument_share_mode,
@@ -365,7 +369,204 @@ def _flat_assigned_from_by_task(by_task: dict[str, dict[str, list[int]]]) -> dic
     return assigned
 
 
+def detection_items_for_project_instruments(project: LibraryProject) -> list[dict]:
+    """
+    按「委托设备 × 现场记录任务」展开检测项，供仪器管理按项分配。
+    """
+    from apps.core.project_equipment_service import (
+        equipment_title_from_card,
+        project_equipment_cards,
+    )
+
+    items: list[dict] = []
+    task_cache: dict[int, LibraryTask | None] = {}
+    for card in project_equipment_cards(project):
+        link = card["link"]
+        equip_title = equipment_title_from_card(card)
+        report_label = (card.get("report_task_label") or "").strip()
+        for row in card.get("site_submit_tasks") or []:
+            lib_tid = int(row.get("libraryTaskId") or 0)
+            if lib_tid <= 0:
+                continue
+            if lib_tid not in task_cache:
+                task_cache[lib_tid] = LibraryTask.objects.filter(pk=lib_tid).first()
+            site_task = task_cache[lib_tid]
+            if site_task is None:
+                continue
+            raw_bind = getattr(site_task, "bound_instrument_ids", None) or []
+            scoped_kinds: dict[str, list[dict]] = {SCOPE_QC: [], SCOPE_RP: []}
+            has_template_kinds = False
+            if binding_mode(raw_bind) == BINDING_MODE_KINDS:
+                kinds = normalize_task_bound_kinds(raw_bind)
+                for scope in (SCOPE_QC, SCOPE_RP):
+                    for spec in kinds.get(scope) or []:
+                        has_template_kinds = True
+                        scoped_kinds[scope].append(
+                            {
+                                "key": kind_form_value(spec.name, spec.model),
+                                "name": spec.name,
+                                "model": spec.model,
+                                "scope": scope,
+                            }
+                        )
+            code = (row.get("code") or "").strip()
+            name = (row.get("name") or "").strip()
+            site_label = f"{code} · {name}" if code else (name or "—")
+            items.append(
+                {
+                    "key": detection_item_instrument_key(link.pk, lib_tid),
+                    "linkId": int(link.pk),
+                    "libraryTaskId": lib_tid,
+                    "equipmentTitle": equip_title,
+                    "reportTaskLabel": report_label,
+                    "siteTaskLabel": site_label,
+                    "detectionLabel": f"{equip_title} · {site_label}",
+                    "taskNo": str(row.get("taskNo") or "").strip(),
+                    "taskCode": code,
+                    "taskName": name,
+                    "scopedKinds": scoped_kinds,
+                    "hasTemplateKinds": has_template_kinds,
+                }
+            )
+    return items
+
+
+def _selected_ids_for_kind_in_binding(
+    binding: dict[str, list[int]],
+    scope: str,
+    spec: InstrumentKindSpec,
+    catalog_buckets: dict[tuple[str, str], list[InstrumentCatalog]],
+) -> list[int]:
+    scope_ids = {int(x) for x in (binding.get(scope) or []) if int(x) > 0}
+    kind_ids = {int(inst.pk) for inst in catalog_buckets.get(spec.key(), [])}
+    return [pk for pk in scope_ids if pk in kind_ids]
+
+
 def build_manual_instrument_picker_catalog(project: LibraryProject) -> dict:
+    """
+    手动分配悬浮窗：按检测项（委托设备×现场记录）列出所需仪器种类与台账选项。
+    """
+    detection_items = detection_items_for_project_instruments(project)
+    if not detection_items:
+        if merged_kind_slots_for_project(project):
+            return _legacy_build_kind_picker_catalog(project)
+        return {"items": [], "projectId": project.pk}
+
+    raw = getattr(project, "assigned_instrument_ids", None) or {}
+    by_item = normalize_project_by_detection_item(raw)
+    legacy_by_kind = normalize_project_by_kind(raw)
+
+    catalog = list(
+        InstrumentCatalog.objects.filter(is_active=True)
+        .select_related("checkout_project")
+        .order_by("name", "model", "code", "id")
+    )
+    buckets: dict[tuple[str, str], list[InstrumentCatalog]] = {}
+    for inst in catalog:
+        k = instrument_kind_key(inst.name, inst.model or "")
+        buckets.setdefault(k, []).append(inst)
+
+    picker_items: list[dict] = []
+    for item in detection_items:
+        key = item["key"]
+        binding = by_item.get(key) or {SCOPE_QC: [], SCOPE_RP: []}
+        if not bound_instrument_ids_for_legacy_list(binding) and legacy_by_kind:
+            binding = _binding_from_legacy_by_kind(item, legacy_by_kind, buckets)
+        scopes_out: list[dict] = []
+        for scope in (SCOPE_QC, SCOPE_RP):
+            kinds_out: list[dict] = []
+            for kind_row in item["scopedKinds"].get(scope) or []:
+                spec = InstrumentKindSpec(
+                    name=kind_row["name"],
+                    model=kind_row.get("model") or "",
+                )
+                selected = _selected_ids_for_kind_in_binding(binding, scope, spec, buckets)
+                avail = availability_for_kind(spec.name, spec.model)
+                kinds_out.append(
+                    {
+                        "key": kind_row["key"],
+                        "name": spec.name,
+                        "model": spec.model,
+                        "scope": scope,
+                        "selectedIds": selected,
+                        "kindTotal": avail["total"],
+                        "kindInStock": avail["in_stock"],
+                        "instruments": [
+                            _instrument_picker_row(inst, project)
+                            for inst in buckets.get(spec.key(), [])
+                        ],
+                    }
+                )
+            if kinds_out:
+                scopes_out.append(
+                    {
+                        "scope": scope,
+                        "scopeLabel": "质控（性能）" if scope == SCOPE_QC else "工作场所放射防护",
+                        "kinds": kinds_out,
+                    }
+                )
+            else:
+                scope_selected = [
+                    int(pk)
+                    for pk in (binding.get(scope) or [])
+                    if int(pk) > 0
+                ]
+                scopes_out.append(
+                    {
+                        "scope": scope,
+                        "scopeLabel": "质控（性能）" if scope == SCOPE_QC else "工作场所放射防护",
+                        "freeSelect": True,
+                        "selectedIds": scope_selected,
+                        "instruments": [
+                            _instrument_picker_row(inst, project) for inst in catalog
+                        ],
+                    }
+                )
+        picker_items.append(
+            {
+                "key": key,
+                "linkId": item["linkId"],
+                "libraryTaskId": item["libraryTaskId"],
+                "equipmentTitle": item["equipmentTitle"],
+                "siteTaskLabel": item["siteTaskLabel"],
+                "detectionLabel": item["detectionLabel"],
+                "taskNo": item["taskNo"],
+                "taskCode": item.get("taskCode") or "",
+                "taskName": item.get("taskName") or "",
+                "hasTemplateKinds": bool(item.get("hasTemplateKinds")),
+                "selectedBinding": binding,
+                "scopes": scopes_out,
+            }
+        )
+
+    return {
+        "projectId": project.pk,
+        "assignmentMode": project_assignment_mode(raw),
+        "items": picker_items,
+    }
+
+
+def _binding_from_legacy_by_kind(
+    item: dict,
+    by_kind: dict[str, list[int]],
+    buckets: dict[tuple[str, str], list[InstrumentCatalog]],
+) -> dict[str, list[int]]:
+    """旧版按种类汇总分配 → 展开到单个检测项（便于迁移展示）。"""
+    binding: dict[str, list[int]] = {SCOPE_QC: [], SCOPE_RP: []}
+    for scope in (SCOPE_QC, SCOPE_RP):
+        for kind_row in item["scopedKinds"].get(scope) or []:
+            spec = InstrumentKindSpec(
+                name=kind_row["name"],
+                model=kind_row.get("model") or "",
+            )
+            for pk in by_kind.get(kind_row["key"]) or []:
+                if pk in {int(x.pk) for x in buckets.get(spec.key(), [])}:
+                    if pk not in binding[scope]:
+                        binding[scope].append(int(pk))
+    return binding
+
+
+def _legacy_build_kind_picker_catalog(project: LibraryProject) -> dict:
     """
     手动分配悬浮窗数据：按仪器种类汇总（不区分质控/防护），
     每种可多选台账设备作为本项目出库清单。
@@ -408,12 +609,22 @@ def build_manual_instrument_picker_catalog(project: LibraryProject) -> dict:
 @transaction.atomic
 def apply_manual_instrument_assignment(
     project: LibraryProject,
-    by_kind: dict[str, list[int]],
+    by_kind: dict[str, list[int]] | None = None,
     *,
+    by_detection_item: dict[str, dict[str, list[int]]] | None = None,
     user: User | None = None,
     checkout: bool = True,
 ) -> InstrumentDispatchCheckResult:
-    """按仪器种类保存手动选择（每种可多选）并登记出库至本项目。"""
+    """保存手动仪器分配并登记出库；支持按检测项或按种类（旧版）。"""
+    if by_detection_item is not None:
+        return _apply_detection_item_instrument_assignment(
+            project,
+            by_detection_item,
+            user=user,
+            checkout=checkout,
+        )
+
+    by_kind = by_kind or {}
     kind_slots = merged_kind_slots_for_project(project)
     if not kind_slots:
         return InstrumentDispatchCheckResult(ok=True, message="本项目无仪器种类需求。")
@@ -447,28 +658,117 @@ def apply_manual_instrument_assignment(
         parts.append(f"已入库 {n_in} 台（已取消本项目绑定）")
     if checkout and n_out:
         parts.append(f"已出库 {n_out} 台至本项目")
-    elif not checkout and all_ids:
-        linked = _instrument_ids_linked_to_project(project)
-        pending = len(set(all_ids) - linked)
-        if pending:
-            parts.append(f"未勾选出库登记，另有 {pending} 台仍待在库")
-    msg = "；".join(parts) + "。"
-    if errs and INSTRUMENT_DISPATCH_SOFT_MODE:
+    if errs:
+        parts.append("；".join(errs))
+    msg = "，".join(parts) + "。"
+    if errs and not INSTRUMENT_DISPATCH_SOFT_MODE:
         return InstrumentDispatchCheckResult(
-            ok=True,
-            message=msg + " 部分出库登记未完成：\n" + "\n".join(errs),
+            ok=False,
+            message=msg,
+            blocked=errs,
+            assigned_ids=assigned,
             checked_out_count=n_out,
             checked_in_count=n_in,
-            assigned_ids=assigned,
-            warning_only=True,
         )
     if errs:
         return InstrumentDispatchCheckResult(
-            ok=False,
-            message=msg + " 出库失败：\n" + "\n".join(errs),
+            ok=True,
+            message=msg,
             blocked=errs,
             assigned_ids=assigned,
+            checked_out_count=n_out,
             checked_in_count=n_in,
+            warning_only=True,
+        )
+    return InstrumentDispatchCheckResult(
+        ok=True,
+        message=msg,
+        checked_out_count=n_out,
+        checked_in_count=n_in,
+        assigned_ids=assigned,
+    )
+
+
+@transaction.atomic
+def _apply_detection_item_instrument_assignment(
+    project: LibraryProject,
+    by_detection_item: dict[str, dict[str, list[int]]],
+    *,
+    user: User | None = None,
+    checkout: bool = True,
+) -> InstrumentDispatchCheckResult:
+    """按检测项（委托设备×现场记录）保存仪器分配。"""
+    valid_items = {
+        item["key"]: item for item in detection_items_for_project_instruments(project)
+    }
+    if not valid_items:
+        return InstrumentDispatchCheckResult(ok=True, message="本项目无按检测项分配的仪器需求。")
+
+    cleaned: dict[str, dict[str, list[int]]] = {}
+    for key, scopes in (by_detection_item or {}).items():
+        k = str(key or "").strip()
+        if k not in valid_items or not isinstance(scopes, dict):
+            continue
+        binding = {
+            SCOPE_QC: _dedupe_id_list(scopes.get(SCOPE_QC) or []),
+            SCOPE_RP: _dedupe_id_list(scopes.get(SCOPE_RP) or []),
+        }
+        cleaned[k] = binding
+
+    assigned: dict[str, list[int]] = {SCOPE_QC: [], SCOPE_RP: []}
+    for binding in cleaned.values():
+        for scope in (SCOPE_QC, SCOPE_RP):
+            for pk in binding.get(scope) or []:
+                if pk not in assigned[scope]:
+                    assigned[scope].append(pk)
+
+    share_mode = SHARE_MODE_PROJECT if getattr(project, "instrument_share_across_tasks", False) else SHARE_MODE_PER_TASK
+    project.assigned_instrument_ids = serialize_project_assigned_instruments(
+        quality_control_ids=assigned[SCOPE_QC],
+        radiation_protection_ids=assigned[SCOPE_RP],
+        share_mode=share_mode,
+        by_detection_item=cleaned,
+        assignment_mode=ASSIGNMENT_MODE_MANUAL,
+    )
+    project.save(update_fields=["assigned_instrument_ids", "updated_at"])
+
+    all_ids = _sort_ids_by_code(bound_instrument_ids_for_legacy_list(assigned))
+    n_in, n_out, errs = sync_project_instrument_checkout(
+        project,
+        all_ids,
+        user=user,
+        allow_checkout=checkout,
+        checkout_note="仪器管理：按检测项指定仪器并出库",
+        checkin_note="仪器管理：取消绑定，登记入库",
+    )
+    parts: list[str] = [
+        f"已按 {len(cleaned)} 个检测项保存仪器分配（共 {len(all_ids)} 台编号）"
+    ]
+    if n_in:
+        parts.append(f"已入库 {n_in} 台（已取消本项目绑定）")
+    if checkout and n_out:
+        parts.append(f"已出库 {n_out} 台至本项目")
+    if errs:
+        parts.append("；".join(errs))
+    msg = "，".join(parts) + "。"
+    if errs and not INSTRUMENT_DISPATCH_SOFT_MODE:
+        return InstrumentDispatchCheckResult(
+            ok=False,
+            message=msg,
+            blocked=errs,
+            assigned_ids=assigned,
+            checked_out_count=n_out,
+            checked_in_count=n_in,
+        )
+    if errs:
+        return InstrumentDispatchCheckResult(
+            ok=True,
+            message=msg,
+            blocked=errs,
+            assigned_ids=assigned,
+            checked_out_count=n_out,
+            checked_in_count=n_in,
+            warning_only=True,
         )
     return InstrumentDispatchCheckResult(
         ok=True,
@@ -489,12 +789,22 @@ def project_uses_kind_binding(project: LibraryProject) -> bool:
 def resolved_instrument_ids_for_project(
     project: LibraryProject,
     task_obj: LibraryTask | None = None,
+    *,
+    equipment_link_id: int | None = None,
 ) -> dict[str, list[int]]:
     """
     项目实际使用的仪器编号：优先 ``assigned_instrument_ids``（派工分配）；
-    指定 task_obj 时优先读 byTask 中该模板的编号。
+    指定 task_obj 时优先读 byDetectionItem / byTask 中该模板的编号。
     """
     raw = getattr(project, "assigned_instrument_ids", None) or {}
+    by_item = normalize_project_by_detection_item(raw)
+    if by_item and task_obj is not None and equipment_link_id:
+        per_item = assigned_instruments_for_detection_item(
+            raw, int(equipment_link_id), int(task_obj.pk)
+        )
+        if bound_instrument_ids_for_legacy_list(per_item):
+            return per_item
+
     by_kind = normalize_project_by_kind(raw)
     if by_kind:
         slots = merged_kind_slots_for_project(project)
@@ -530,6 +840,88 @@ def resolved_instrument_ids_for_project(
                 seen.add(pk)
                 merged[scope].append(pk)
     return merged
+
+
+def resolve_equipment_link_id_for_submit(
+    project: LibraryProject,
+    library_task: LibraryTask | None,
+    equipment_info: dict | None,
+) -> int | None:
+    """从提交 payload 的设备信息反查委托设备 link，用于按检测项读取仪器。"""
+    if project is None or library_task is None or not isinstance(equipment_info, dict):
+        return None
+    name = (
+        str(
+            equipment_info.get("name")
+            or equipment_info.get("equipmentName")
+            or equipment_info.get("deviceName")
+            or ""
+        )
+        .strip()
+    )
+    serial = (
+        str(
+            equipment_info.get("serialNo")
+            or equipment_info.get("serial")
+            or equipment_info.get("serialNumber")
+            or equipment_info.get("deviceSerial")
+            or ""
+        )
+        .strip()
+    )
+    model = str(equipment_info.get("model") or equipment_info.get("deviceModel") or "").strip()
+    if not name and not serial:
+        return None
+
+    from apps.core.project_equipment_service import (
+        effective_report_task,
+        normalize_equipment_report_task,
+        project_equipment_queryset,
+    )
+
+    site_task_ids = {int(library_task.pk)}
+    if library_task.output_target == LibraryTask.OUTPUT_SITE_RECORD:
+        pass
+    elif library_task.output_target == LibraryTask.OUTPUT_REPORT:
+        site_task_ids = set()
+        for st in library_task.report_source_tasks.filter(
+            output_target=LibraryTask.OUTPUT_SITE_RECORD
+        ):
+            site_task_ids.add(int(st.pk))
+    else:
+        return None
+
+    serial_matches: list[int] = []
+    name_matches: list[int] = []
+    for link in project_equipment_queryset(project):
+        report = normalize_equipment_report_task(effective_report_task(link))
+        if report is None:
+            continue
+        link_site_ids = {
+            int(st.pk)
+            for st in report.report_source_tasks.filter(
+                output_target=LibraryTask.OUTPUT_SITE_RECORD
+            )
+        }
+        if library_task.output_target == LibraryTask.OUTPUT_SITE_RECORD:
+            if int(library_task.pk) not in link_site_ids:
+                continue
+        elif not link_site_ids.intersection(site_task_ids):
+            continue
+        eq = link.equipment
+        eq_serial = (eq.serial_no or "").strip()
+        eq_name = (eq.name or "").strip()
+        eq_model = (eq.model or "").strip()
+        if serial and eq_serial and serial == eq_serial:
+            serial_matches.append(int(link.pk))
+        if name and eq_name == name and (not model or eq_model == model):
+            name_matches.append(int(link.pk))
+
+    if len(serial_matches) == 1:
+        return serial_matches[0]
+    if len(name_matches) == 1:
+        return name_matches[0]
+    return None
 
 
 def required_instrument_ids_for_project(project: LibraryProject) -> list[int]:
@@ -1183,8 +1575,31 @@ def build_project_instrument_dispatch_panel(project: LibraryProject) -> dict:
     else:
         hint = "请确认台账中有对应种类的启用仪器后，再同步 App 任务。"
 
+    detection_items = detection_items_for_project_instruments(project)
+    detection_item_rows = _build_detection_item_panel_rows(project, detection_items)
+    uses_per_item_assignment = bool(detection_items)
+    if uses_per_item_assignment:
+        required_physical = sum(
+            len(item["scopedKinds"].get(SCOPE_QC) or [])
+            + len(item["scopedKinds"].get(SCOPE_RP) or [])
+            for item in detection_items
+        )
+        hint = (
+            "按「受检设备 × 现场记录」为每个检测项选择仪器；"
+            "任务模板未预设种类时，可从台账自选质控/防护仪器。"
+            "保存后 App 提交将按设备信息匹配对应仪器。"
+        )
+
+    manual_catalog = (
+        build_manual_instrument_picker_catalog(project)
+        if (uses_kinds or uses_per_item_assignment)
+        else {"items": []}
+    )
+
     return {
         "uses_kind_binding": uses_kinds,
+        "uses_per_item_assignment": uses_per_item_assignment,
+        "detection_item_rows": detection_item_rows,
         "kind_rows": kind_rows,
         "scoped_kind_rows": scoped_kind_rows,
         "scoped_required_rows": scoped_required_rows,
@@ -1202,13 +1617,161 @@ def build_project_instrument_dispatch_panel(project: LibraryProject) -> dict:
         "in_stock_count": sum(1 for r in inst_rows if r.get("status") == "in_stock"),
         "assigned_binding": resolved,
         "share_mode": project_instrument_share_mode(project),
-        "manual_picker_catalog": build_manual_instrument_picker_catalog(project)
-        if uses_kinds
-        else {"kinds": []},
+        "manual_picker_catalog": manual_catalog,
         "assignment_mode": project_assignment_mode(
             getattr(project, "assigned_instrument_ids", None) or {}
         ),
     }
+
+
+def _build_detection_item_panel_rows(
+    project: LibraryProject,
+    detection_items: list[dict],
+) -> list[dict]:
+    """仪器管理页：每个检测项的分配摘要。"""
+    if not detection_items:
+        return []
+    raw = getattr(project, "assigned_instrument_ids", None) or {}
+    by_item = normalize_project_by_detection_item(raw)
+    legacy_by_kind = normalize_project_by_kind(raw)
+
+    catalog = {
+        int(r.pk): r
+        for r in InstrumentCatalog.objects.filter(is_active=True).only(
+            "pk", "code", "name", "model", "checkout_project_id", "checkout_project_ids"
+        )
+    }
+    buckets: dict[tuple[str, str], set[int]] = {}
+    for pk, inst in catalog.items():
+        k = instrument_kind_key(inst.name, inst.model or "")
+        buckets.setdefault(k, set()).add(pk)
+
+    rows: list[dict] = []
+    for item in detection_items:
+        key = item["key"]
+        binding = by_item.get(key) or {SCOPE_QC: [], SCOPE_RP: []}
+        if not bound_instrument_ids_for_legacy_list(binding) and legacy_by_kind:
+            binding = _binding_from_legacy_by_kind(item, legacy_by_kind, {
+                k: [catalog[pk] for pk in pks if pk in catalog]
+                for k, pks in buckets.items()
+            })
+
+        required_kind_count = sum(
+            len(item["scopedKinds"].get(scope) or []) for scope in (SCOPE_QC, SCOPE_RP)
+        )
+        assigned_kind_count = 0
+        inst_labels: list[str] = []
+        bucket_lists = {
+            k: [catalog[pk] for pk in ids if pk in catalog]
+            for k, ids in buckets.items()
+        }
+        if required_kind_count > 0:
+            for scope in (SCOPE_QC, SCOPE_RP):
+                for kind_row in item["scopedKinds"].get(scope) or []:
+                    spec = InstrumentKindSpec(
+                        name=kind_row["name"],
+                        model=kind_row.get("model") or "",
+                    )
+                    picked = _selected_ids_for_kind_in_binding(
+                        binding, scope, spec, bucket_lists
+                    )
+                    if picked:
+                        assigned_kind_count += 1
+                        for pk in picked:
+                            inst = catalog.get(int(pk))
+                            if inst:
+                                inst_labels.append(inst.code or f"#{pk}")
+        else:
+            for scope in (SCOPE_QC, SCOPE_RP):
+                for pk in binding.get(scope) or []:
+                    inst = catalog.get(int(pk))
+                    if inst:
+                        code = inst.code or f"#{pk}"
+                        if code not in inst_labels:
+                            inst_labels.append(code)
+
+        has_template_kinds = bool(item.get("hasTemplateKinds"))
+        if required_kind_count > 0:
+            is_complete = assigned_kind_count >= required_kind_count
+        else:
+            is_complete = True
+
+        rows.append(
+            {
+                "key": key,
+                "equipment_title": item["equipmentTitle"],
+                "site_task_label": item["siteTaskLabel"],
+                "detection_label": item["detectionLabel"],
+                "task_no": item["taskNo"],
+                "required_kind_count": required_kind_count,
+                "assigned_kind_count": assigned_kind_count,
+                "has_template_kinds": has_template_kinds,
+                "is_complete": is_complete,
+                "instrument_codes": inst_labels,
+            }
+        )
+    return rows
+
+
+def instrument_pipeline_step_status(panel: dict | None) -> tuple[bool, str]:
+    """
+    概览「仪器管理」步骤是否已完成。
+
+    已完成：无需配置仪器，或已满足种类/编号分配且无在库未出库、无效登记。
+    待办：任务需要仪器但尚未分配完整，或已选编号仍有在库/缺失。
+    """
+    if not panel:
+        return False, "请在仪器管理页分配检测仪器"
+
+    uses_kinds = bool(panel.get("uses_kind_binding"))
+    kind_slot_count = int(panel.get("kind_slot_count") or 0)
+    required_physical = int(panel.get("required_physical_count") or 0)
+    item_rows: list[dict] = list(panel.get("detection_item_rows") or [])
+    rows: list[dict] = list(panel.get("required_rows") or [])
+
+    if not uses_kinds and kind_slot_count == 0:
+        return True, "本项目任务未配置仪器种类，无需分配"
+
+    if item_rows:
+        required_items = [r for r in item_rows if int(r.get("required_kind_count") or 0) > 0]
+        incomplete = sum(1 for r in required_items if not r.get("is_complete"))
+        if incomplete:
+            return False, f"有 {incomplete} 个检测项尚未完成仪器分配"
+        if rows:
+            missing = sum(1 for r in rows if r.get("status") == "missing")
+            if missing:
+                return False, f"有 {missing} 条仪器登记无效，请在仪器管理页核对"
+            in_stock = int(panel.get("in_stock_count") or 0)
+            if in_stock > 0:
+                return False, f"已选仪器中 {in_stock} 台仍在库，待出库至本项目"
+            return True, f"已为 {len(item_rows)} 个检测项完成仪器分配"
+
+    if not rows:
+        if required_physical > 0:
+            return False, f"需为 {required_physical} 个仪器位分配具体编号"
+        return False, "请在仪器管理页分配检测仪器"
+
+    missing = sum(1 for r in rows if r.get("status") == "missing")
+    if missing:
+        return False, f"有 {missing} 条仪器登记无效，请在仪器管理页核对"
+
+    in_stock = int(panel.get("in_stock_count") or 0)
+    if in_stock > 0:
+        return False, f"已选 {len(rows)} 台，其中 {in_stock} 台仍在库，待出库至本项目"
+
+    if panel.get("blocked_messages"):
+        return False, str(panel["blocked_messages"][0])
+
+    on_project = int(panel.get("on_project_count") or 0)
+    shared = sum(1 for r in rows if r.get("status") == "shared")
+    ready = on_project + shared
+    if ready >= len(rows) and len(rows) >= max(required_physical, 1):
+        return True, f"已分配 {len(rows)} 台仪器（{on_project} 台已关联本项目）"
+
+    if panel.get("assignment_mode") == ASSIGNMENT_MODE_MANUAL and rows and in_stock == 0:
+        return True, f"已手动分配 {len(rows)} 台仪器"
+
+    return False, (panel.get("hint") or "请在仪器管理页完成仪器分配").strip()
 
 
 def ensure_instruments_for_project_dispatch(
@@ -1218,7 +1781,9 @@ def ensure_instruments_for_project_dispatch(
 ) -> InstrumentDispatchCheckResult:
     """派工：种类模式或旧版 id 模式均先解析编号（按顺序），再出库。"""
     raw = getattr(project, "assigned_instrument_ids", None) or {}
-    if project_assignment_mode(raw) == ASSIGNMENT_MODE_MANUAL and normalize_project_by_kind(raw):
+    if project_assignment_mode(raw) == ASSIGNMENT_MODE_MANUAL and (
+        normalize_project_by_kind(raw) or normalize_project_by_detection_item(raw)
+    ):
         all_ids = required_instrument_ids_for_project(project)
         n_in, n_out, errs = sync_project_instrument_checkout(
             project,

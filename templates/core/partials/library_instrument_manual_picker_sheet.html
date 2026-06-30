@@ -1,4 +1,4 @@
-{# 人员派工：按仪器种类手动选择出库设备（每种可多选，不区分质控/防护） #}
+{# 仪器管理：按检测项或按种类手动选择出库设备 #}
 <div id="instrument-manual-backdrop"
      class="fixed inset-0 z-[100] bg-slate-900/45 backdrop-blur-[2px] hidden"
      aria-hidden="true"></div>
@@ -6,12 +6,12 @@
 <div id="instrument-manual-sheet"
      class="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-6 pointer-events-none hidden"
      role="dialog" aria-modal="true" aria-labelledby="instrument-manual-title">
-    <div class="pointer-events-auto relative w-full max-w-3xl max-h-[min(92vh,40rem)] flex flex-col rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200/80 overflow-hidden">
+    <div class="pointer-events-auto relative w-full max-w-4xl max-h-[min(92vh,44rem)] flex flex-col rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200/80 overflow-hidden">
         <div class="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 shrink-0 bg-gradient-to-r from-violet-50/90 to-white">
             <div class="min-w-0">
-                <h3 id="instrument-manual-title" class="text-base font-semibold text-slate-900">手动分配检测仪器</h3>
-                <p class="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
-                    已按<strong>仪器种类</strong>汇总（不区分质控/防护）；每种可多选一台或多台台账设备，保存后作为本委托按类别出库清单。
+                <h3 id="instrument-manual-title" class="text-base font-semibold text-slate-900">按检测项分配仪器</h3>
+                <p id="instrument-manual-subtitle" class="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                    为每个「受检设备 × 现场记录」分别选择所需仪器种类对应的具体台账编号。
                 </p>
             </div>
             <button type="button" class="instrument-manual-close rounded-lg p-2 text-slate-500 hover:bg-slate-100 shrink-0" aria-label="关闭">
@@ -30,14 +30,14 @@
             <div class="px-5 py-3 border-b border-slate-100 shrink-0 space-y-2">
                 <div class="relative">
                     <i class="ri-search-line absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
-                    <input type="search" id="instrument-manual-filter" placeholder="搜索种类、任务模板、仪器编号…"
+                    <input type="search" id="instrument-manual-filter" placeholder="搜索设备、现场记录、仪器编号…"
                            class="w-full rounded-xl border border-slate-200 bg-slate-50/80 pl-9 pr-3 py-2 text-sm focus:border-violet-500 focus:bg-white focus:ring-2 focus:ring-violet-500/20"
                            autocomplete="off">
                 </div>
                 <p id="instrument-manual-summary" class="text-xs text-slate-600"></p>
             </div>
 
-            <div id="instrument-manual-list" class="flex-1 overflow-y-auto px-5 py-4 space-y-4 min-h-0">
+            <div id="instrument-manual-list" class="flex-1 overflow-y-auto px-5 py-3 space-y-2 min-h-0">
             </div>
 
             <div class="shrink-0 border-t border-slate-100 px-5 py-4 flex flex-wrap items-center justify-between gap-3 bg-slate-50/60">
@@ -56,7 +56,7 @@
     </div>
 </div>
 
-{% if project_instrument_dispatch_panel.manual_picker_catalog.kinds %}
+{% if project_instrument_dispatch_panel.manual_picker_catalog.items or project_instrument_dispatch_panel.manual_picker_catalog.kinds %}
 {{ project_instrument_dispatch_panel.manual_picker_catalog|json_script:"instrument-manual-catalog-data" }}
 <script>
 (function () {
@@ -64,75 +64,255 @@
     if (!catalogEl) return;
 
     var catalog = JSON.parse(catalogEl.textContent);
-    var kinds = catalog.kinds || catalog.requirements || [];
+    var perItemMode = Array.isArray(catalog.items) && catalog.items.length > 0;
+    var items = perItemMode ? catalog.items : [];
+    var kinds = (!perItemMode && catalog.kinds) ? catalog.kinds : [];
+
     var backdrop = document.getElementById('instrument-manual-backdrop');
     var sheet = document.getElementById('instrument-manual-sheet');
     var listEl = document.getElementById('instrument-manual-list');
     var filterInput = document.getElementById('instrument-manual-filter');
     var summaryEl = document.getElementById('instrument-manual-summary');
+    var subtitleEl = document.getElementById('instrument-manual-subtitle');
     var jsonInput = document.getElementById('instrument-manual-json');
     var checkoutHidden = document.getElementById('instrument-manual-checkout');
     var checkoutCb = document.getElementById('instrument-manual-checkout-cb');
     var form = document.getElementById('instrument-manual-form');
 
+    if (subtitleEl) {
+        subtitleEl.textContent = perItemMode
+            ? '点击检测项展开后选择仪器；已选数量显示在标题右侧。'
+            : '已按仪器种类汇总；点击种类展开后勾选台账设备。';
+    }
+
+    var expandedItemKeys = new Set();
+    var expandedKindKeys = new Set();
+    var selectionCache = {};
+
     function esc(s) {
         return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
     }
 
-    function renderList() {
+    function bindingFromItem(item) {
+        var cached = selectionCache[item.key];
+        if (cached) {
+            return {
+                qualityControl: cached.qualityControl || [],
+                radiationProtection: cached.radiationProtection || []
+            };
+        }
+        var b = item.selectedBinding;
+        if (b) {
+            return {
+                qualityControl: (b.qualityControl || []).slice(),
+                radiationProtection: (b.radiationProtection || []).slice()
+            };
+        }
+        return { qualityControl: [], radiationProtection: [] };
+    }
+
+    function countPicked(binding) {
+        return (binding.qualityControl || []).length + (binding.radiationProtection || []).length;
+    }
+
+    function syncSelectionFromDom() {
+        if (!listEl) return;
+        if (perItemMode) {
+            var byItem = collectPerItemSelection();
+            Object.keys(byItem).forEach(function (k) {
+                selectionCache[k] = byItem[k];
+            });
+        } else {
+            var byKey = collectKindSelection();
+            Object.keys(byKey).forEach(function (k) {
+                selectionCache[k] = byKey[k];
+            });
+        }
+    }
+
+    function selectedIdsForScope(item, scope, binding) {
+        return scope === 'radiationProtection'
+            ? (binding.radiationProtection || [])
+            : (binding.qualityControl || []);
+    }
+
+    function renderPerItemList() {
+        syncSelectionFromDom();
         var q = (filterInput && filterInput.value || '').toLowerCase().trim();
         var html = '';
-        kinds.forEach(function (row) {
-            var taskCodes = row.taskCodes || [];
-            if (!taskCodes.length && row.taskCode) taskCodes = [row.taskCode];
-            var hay = [row.name, row.model].concat(taskCodes).join(' ').toLowerCase();
-            (row.instruments || []).forEach(function (inst) {
-                hay += ' ' + (inst.code + ' ' + inst.name + ' ' + inst.model).toLowerCase();
+        items.forEach(function (item) {
+            var binding = bindingFromItem(item);
+            var hay = [
+                item.equipmentTitle, item.siteTaskLabel, item.detectionLabel,
+                item.taskNo, item.taskCode, item.taskName
+            ].join(' ').toLowerCase();
+            (item.scopes || []).forEach(function (sc) {
+                (sc.kinds || []).forEach(function (kind) {
+                    hay += ' ' + (kind.name + ' ' + kind.model).toLowerCase();
+                    (kind.instruments || []).forEach(function (inst) {
+                        hay += ' ' + (inst.code + ' ' + inst.name).toLowerCase();
+                    });
+                });
+                if (sc.freeSelect && sc.instruments) {
+                    sc.instruments.forEach(function (inst) {
+                        hay += ' ' + (inst.code + ' ' + inst.name + ' ' + inst.model).toLowerCase();
+                    });
+                }
             });
             if (q && hay.indexOf(q) < 0) return;
 
-            html += '<section class="instrument-manual-kind rounded-xl border border-slate-200 bg-white overflow-hidden" data-kind-key="' + esc(row.key) + '">';
-            html += '<div class="px-3 py-2.5 bg-slate-50 border-b border-slate-100">';
-            html += '<p class="text-sm font-medium text-slate-900">' + esc(row.name);
-            if (row.model) html += ' <span class="text-slate-400 font-normal">(' + esc(row.model) + ')</span>';
-            html += '</p>';
-            if (taskCodes.length) {
-                html += '<p class="text-[10px] text-slate-500 mt-1">引用模板：<span class="font-mono text-violet-800">' + esc(taskCodes.join('、')) + '</span></p>';
-            }
-            if (row.referencedByMultipleTasks) {
-                html += '<span class="inline-block mt-1 px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 text-[10px]">多模板共用此种类</span>';
-            }
-            html += '<p class="text-[10px] text-slate-500 mt-0.5">台账同种 ' + (row.kindTotal || 0) + ' 台 · 在库 ' + (row.kindInStock || 0) + ' 台</p>';
-            html += '</div>';
+            var picked = countPicked(binding);
+            var isOpen = q ? true : expandedItemKeys.has(item.key);
+            var badge = picked > 0
+                ? '<span class="shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full bg-violet-100 text-violet-800">已选 ' + picked + ' 台</span>'
+                : '<span class="shrink-0 text-[10px] text-slate-400">未选</span>';
 
-            if (!row.instruments || !row.instruments.length) {
-                html += '<p class="px-3 py-4 text-xs text-amber-700">台账中暂无该种类启用的仪器，请先在检测仪器台账登记。</p>';
-            } else {
-                html += '<div class="p-2 grid gap-1 sm:grid-cols-2">';
-                row.instruments.forEach(function (inst) {
-                    var checked = (row.selectedIds || []).indexOf(inst.id) >= 0;
-                    html += '<label class="instrument-manual-inst flex items-start gap-2 rounded-lg border px-2.5 py-2 cursor-pointer transition-colors ' +
-                        (checked ? 'border-violet-400 bg-violet-50/80' : 'border-slate-100 hover:border-violet-200 hover:bg-slate-50') + '">';
-                    html += '<input type="checkbox" class="instrument-manual-cb rounded border-slate-300 text-violet-600 mt-0.5 shrink-0" ' +
-                        'data-kind-key="' + esc(row.key) + '" data-inst-id="' + inst.id + '"' + (checked ? ' checked' : '') + '>';
-                    html += '<span class="min-w-0 text-xs">';
-                    html += '<span class="block font-mono font-medium text-slate-800">' + esc(inst.code) + '</span>';
-                    html += '<span class="block text-slate-600 truncate">' + esc(inst.name) + '</span>';
-                    html += '<span class="block text-[10px] text-slate-400">' + esc(inst.statusLabel) + '</span>';
-                    html += '</span></label>';
+            html += '<details class="instrument-manual-item rounded-xl border border-violet-200 bg-white overflow-hidden group"' +
+                (isOpen ? ' open' : '') + ' data-item-key="' + esc(item.key) + '">';
+            html += '<summary class="cursor-pointer select-none px-3 py-2.5 bg-violet-50/80 hover:bg-violet-50 flex items-center gap-2 list-none [&::-webkit-details-marker]:hidden">';
+            html += '<i class="ri-arrow-right-s-line text-slate-400 shrink-0 transition-transform group-open:rotate-90"></i>';
+            html += '<div class="min-w-0 flex-1">';
+            html += '<p class="text-sm font-semibold text-slate-900 truncate">' + esc(item.equipmentTitle) + '</p>';
+            html += '<p class="text-xs text-slate-600 mt-0.5 truncate">';
+            html += '<span class="font-mono text-violet-800">' + esc(item.taskNo) + '</span>';
+            html += ' · ' + esc(item.siteTaskLabel) + '</p>';
+            html += '</div>';
+            html += badge;
+            html += '</summary>';
+
+            html += '<div class="border-t border-violet-100">';
+            if (!item.hasTemplateKinds) {
+                html += '<p class="px-3 pt-2 text-[10px] text-violet-700">模板未预设仪器种类，请从台账自选</p>';
+            }
+
+            (item.scopes || []).forEach(function (sc) {
+                var scopeIds = selectedIdsForScope(item, sc.scope, binding);
+                html += '<div class="px-3 py-2 border-b border-slate-50 last:border-0">';
+                html += '<p class="text-[11px] font-semibold text-slate-700 mb-1.5">' + esc(sc.scopeLabel) + '</p>';
+                if (sc.freeSelect) {
+                    if (!sc.instruments || !sc.instruments.length) {
+                        html += '<p class="text-[11px] text-amber-700 py-1">台账中暂无可用仪器</p>';
+                    } else {
+                        html += '<p class="text-[10px] text-slate-500 mb-1.5">从台账自选（可多选）</p>';
+                        html += '<div class="grid gap-1 sm:grid-cols-2 max-h-48 overflow-y-auto">';
+                        sc.instruments.forEach(function (inst) {
+                            var checked = scopeIds.indexOf(inst.id) >= 0;
+                            html += '<label class="flex items-start gap-2 rounded-lg border px-2 py-1.5 cursor-pointer text-xs ' +
+                                (checked ? 'border-violet-400 bg-violet-50/80' : 'border-slate-100 hover:border-violet-200') + '">';
+                            html += '<input type="checkbox" class="instrument-manual-cb rounded border-slate-300 text-violet-600 mt-0.5 shrink-0" ' +
+                                'data-item-key="' + esc(item.key) + '" data-scope="' + esc(sc.scope) + '" data-inst-id="' + inst.id + '"' +
+                                (checked ? ' checked' : '') + '>';
+                            html += '<span class="min-w-0"><span class="font-mono font-medium">' + esc(inst.code) + '</span>';
+                            html += ' <span class="block text-slate-600 truncate">' + esc(inst.name) + '</span>';
+                            html += ' <span class="text-slate-400">' + esc(inst.statusLabel) + '</span></span></label>';
+                        });
+                        html += '</div>';
+                    }
+                    html += '</div>';
+                    return;
+                }
+                (sc.kinds || []).forEach(function (kind) {
+                    var kindInstIds = new Set((kind.instruments || []).map(function (i) { return i.id; }));
+                    var kindSelected = scopeIds.filter(function (id) { return kindInstIds.has(id); });
+                    html += '<div class="mb-2 last:mb-0">';
+                    html += '<p class="text-xs font-medium text-slate-800 mb-1">' + esc(kind.name);
+                    if (kind.model) html += ' <span class="text-slate-400 font-normal">(' + esc(kind.model) + ')</span>';
+                    html += ' <span class="text-[10px] text-slate-400">在库 ' + (kind.kindInStock || 0) + '/' + (kind.kindTotal || 0) + '</span></p>';
+                    if (!kind.instruments || !kind.instruments.length) {
+                        html += '<p class="text-[11px] text-amber-700 py-1">台账中暂无该种类仪器</p>';
+                    } else {
+                        html += '<div class="grid gap-1 sm:grid-cols-2">';
+                        kind.instruments.forEach(function (inst) {
+                            var checked = kindSelected.indexOf(inst.id) >= 0;
+                            html += '<label class="flex items-start gap-2 rounded-lg border px-2 py-1.5 cursor-pointer text-xs ' +
+                                (checked ? 'border-violet-400 bg-violet-50/80' : 'border-slate-100 hover:border-violet-200') + '">';
+                            html += '<input type="checkbox" class="instrument-manual-cb rounded border-slate-300 text-violet-600 mt-0.5 shrink-0" ' +
+                                'data-item-key="' + esc(item.key) + '" data-scope="' + esc(kind.scope) + '" data-inst-id="' + inst.id + '"' +
+                                (checked ? ' checked' : '') + '>';
+                            html += '<span><span class="font-mono font-medium">' + esc(inst.code) + '</span>';
+                            html += ' <span class="text-slate-500">' + esc(inst.statusLabel) + '</span></span></label>';
+                        });
+                        html += '</div>';
+                    }
+                    html += '</div>';
                 });
                 html += '</div>';
-            }
-            html += '</section>';
+            });
+            html += '</div></details>';
         });
         if (!html) {
-            html = '<p class="text-sm text-slate-400 text-center py-8">无匹配的仪器种类</p>';
+            html = '<p class="text-sm text-slate-400 text-center py-8">无匹配的检测项</p>';
         }
         listEl.innerHTML = html;
         updateSummary();
     }
 
-    function collectSelection() {
+    function renderKindList() {
+        syncSelectionFromDom();
+        var q = (filterInput && filterInput.value || '').toLowerCase().trim();
+        var html = '';
+        kinds.forEach(function (row) {
+            var taskCodes = row.taskCodes || [];
+            var hay = [row.name, row.model].concat(taskCodes).join(' ').toLowerCase();
+            (row.instruments || []).forEach(function (inst) {
+                hay += ' ' + (inst.code + ' ' + inst.name).toLowerCase();
+            });
+            if (q && hay.indexOf(q) < 0) return;
+
+            var selected = selectionCache[row.key] || row.selectedIds || [];
+            var isOpen = q ? true : expandedKindKeys.has(row.key);
+            var badge = selected.length > 0
+                ? '<span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-violet-100 text-violet-800">已选 ' + selected.length + '</span>'
+                : '';
+
+            html += '<details class="instrument-manual-kind-item rounded-xl border border-slate-200 bg-white overflow-hidden group"' +
+                (isOpen ? ' open' : '') + ' data-kind-key="' + esc(row.key) + '">';
+            html += '<summary class="cursor-pointer select-none px-3 py-2.5 bg-slate-50 hover:bg-slate-100 flex items-center gap-2 list-none [&::-webkit-details-marker]:hidden">';
+            html += '<i class="ri-arrow-right-s-line text-slate-400 shrink-0 transition-transform group-open:rotate-90"></i>';
+            html += '<p class="text-sm font-medium text-slate-900 flex-1 min-w-0 truncate">' + esc(row.name);
+            if (row.model) html += ' <span class="text-slate-400 font-normal">(' + esc(row.model) + ')</span>';
+            html += '</p>' + badge + '</summary>';
+            if (!row.instruments || !row.instruments.length) {
+                html += '<p class="px-3 py-4 text-xs text-amber-700">台账中暂无该种类仪器</p>';
+            } else {
+                html += '<div class="p-2 grid gap-1 sm:grid-cols-2 border-t border-slate-100">';
+                row.instruments.forEach(function (inst) {
+                    var checked = selected.indexOf(inst.id) >= 0;
+                    html += '<label class="flex items-start gap-2 rounded-lg border px-2.5 py-2 cursor-pointer text-xs ' +
+                        (checked ? 'border-violet-400 bg-violet-50/80' : 'border-slate-100') + '">';
+                    html += '<input type="checkbox" class="instrument-manual-cb rounded border-slate-300 text-violet-600 mt-0.5" ' +
+                        'data-kind-key="' + esc(row.key) + '" data-inst-id="' + inst.id + '"' + (checked ? ' checked' : '') + '>';
+                    html += '<span class="font-mono font-medium">' + esc(inst.code) + '</span></label>';
+                });
+                html += '</div>';
+            }
+            html += '</details>';
+        });
+        if (!html) html = '<p class="text-sm text-slate-400 text-center py-8">无匹配项</p>';
+        listEl.innerHTML = html;
+        updateSummary();
+    }
+
+    function renderList() {
+        if (perItemMode) renderPerItemList();
+        else renderKindList();
+    }
+
+    function collectPerItemSelection() {
+        var byItem = {};
+        listEl.querySelectorAll('.instrument-manual-cb:checked').forEach(function (cb) {
+            var itemKey = cb.getAttribute('data-item-key');
+            var scope = cb.getAttribute('data-scope');
+            var id = parseInt(cb.getAttribute('data-inst-id'), 10);
+            if (!itemKey || !scope || !id) return;
+            if (!byItem[itemKey]) byItem[itemKey] = { qualityControl: [], radiationProtection: [] };
+            var bucket = scope === 'radiationProtection' ? byItem[itemKey].radiationProtection : byItem[itemKey].qualityControl;
+            if (bucket.indexOf(id) < 0) bucket.push(id);
+        });
+        return byItem;
+    }
+
+    function collectKindSelection() {
         var byKey = {};
         listEl.querySelectorAll('.instrument-manual-cb:checked').forEach(function (cb) {
             var key = cb.getAttribute('data-kind-key');
@@ -145,20 +325,35 @@
     }
 
     function updateSummary() {
-        var byKey = collectSelection();
-        var kindCount = kinds.length;
-        var kindWithPick = 0;
-        var totalInst = 0;
-        Object.keys(byKey).forEach(function (k) {
-            if (byKey[k].length) {
-                kindWithPick += 1;
-                totalInst += byKey[k].length;
-            }
-        });
-        summaryEl.textContent = '共 ' + kindCount + ' 种仪器 · 已选 ' + kindWithPick + ' 种 · 合计 ' + totalInst + ' 台将按种类出库';
+        syncSelectionFromDom();
+        if (perItemMode) {
+            var filled = 0;
+            var totalInst = 0;
+            items.forEach(function (item) {
+                var sel = selectionCache[item.key] || bindingFromItem(item);
+                var n = (sel.qualityControl || []).length + (sel.radiationProtection || []).length;
+                if (n > 0) { filled += 1; totalInst += n; }
+            });
+            summaryEl.textContent = '共 ' + items.length + ' 个检测项 · 已配置 ' + filled + ' 项 · 合计 ' + totalInst + ' 台仪器编号';
+        } else {
+            var kindWithPick = 0;
+            var totalInst = 0;
+            kinds.forEach(function (row) {
+                var ids = selectionCache[row.key] || row.selectedIds || [];
+                if (ids.length) {
+                    kindWithPick += 1;
+                    totalInst += ids.length;
+                }
+            });
+            summaryEl.textContent = '共 ' + kinds.length + ' 种仪器 · 已选 ' + kindWithPick + ' 种 · 合计 ' + totalInst + ' 台';
+        }
     }
 
     function openSheet() {
+        expandedItemKeys.clear();
+        expandedKindKeys.clear();
+        selectionCache = {};
+        if (filterInput) filterInput.value = '';
         renderList();
         backdrop.classList.remove('hidden');
         sheet.classList.remove('hidden');
@@ -196,6 +391,20 @@
         listEl.addEventListener('change', function (e) {
             if (e.target && e.target.classList.contains('instrument-manual-cb')) updateSummary();
         });
+        listEl.addEventListener('toggle', function (e) {
+            var el = e.target;
+            if (!el || el.tagName !== 'DETAILS') return;
+            var itemKey = el.getAttribute('data-item-key');
+            var kindKey = el.getAttribute('data-kind-key');
+            if (itemKey) {
+                if (el.open) expandedItemKeys.add(itemKey);
+                else expandedItemKeys.delete(itemKey);
+            }
+            if (kindKey) {
+                if (el.open) expandedKindKeys.add(kindKey);
+                else expandedKindKeys.delete(kindKey);
+            }
+        }, true);
     }
 
     if (checkoutCb && checkoutHidden) {
@@ -206,13 +415,26 @@
 
     if (form) {
         form.addEventListener('submit', function () {
-            var byKey = collectSelection();
-            var payload = {
-                kinds: kinds.map(function (row) {
-                    return { key: row.key, ids: byKey[row.key] || [] };
-                })
-            };
-            jsonInput.value = JSON.stringify(payload);
+            syncSelectionFromDom();
+            if (perItemMode) {
+                var payload = {
+                    items: items.map(function (item) {
+                        var sel = selectionCache[item.key] || bindingFromItem(item);
+                        return {
+                            key: item.key,
+                            qualityControl: sel.qualityControl || [],
+                            radiationProtection: sel.radiationProtection || []
+                        };
+                    })
+                };
+                jsonInput.value = JSON.stringify(payload);
+            } else {
+                jsonInput.value = JSON.stringify({
+                    kinds: kinds.map(function (row) {
+                        return { key: row.key, ids: selectionCache[row.key] || row.selectedIds || [] };
+                    })
+                });
+            }
         });
     }
 })();

@@ -233,6 +233,51 @@ def project_equipment_cards(project: LibraryProject) -> list[dict]:
     return cards
 
 
+def equipment_title_from_card(card: dict) -> str:
+    """设备卡片 → 人员可读的受检设备标题。"""
+    eq = card["equipment"]
+    return " · ".join(
+        x
+        for x in (
+            (eq.name or "").strip(),
+            (eq.model or "").strip(),
+            (card.get("inspection_type_label") or "").strip(),
+        )
+        if x
+    ) or "—"
+
+
+def task_no_display_index(project: LibraryProject) -> dict[str, dict]:
+    """taskNo → 受检设备、检测项目等人员可读标签（供进度跟踪等界面）。"""
+    index: dict[str, dict] = {}
+    for card in project_equipment_cards(project):
+        equip_title = equipment_title_from_card(card)
+        report_label = (card.get("report_task_label") or "").strip() or "—"
+        if " · " in report_label:
+            _, report_human = report_label.split(" · ", 1)
+        else:
+            report_human = report_label
+        department_label = (card.get("department_label") or "").strip()
+        site_rows = card.get("site_submit_tasks") or []
+        multi_site = len(site_rows) > 1
+        for row in site_rows:
+            task_no = str(row.get("taskNo") or "").strip()
+            if not task_no:
+                continue
+            code = (row.get("code") or "").strip()
+            if multi_site and code:
+                detection_label = f"{report_human}（{code}）"
+            else:
+                detection_label = report_human
+            index[task_no] = {
+                "equipment_title": equip_title,
+                "detection_label": detection_label,
+                "report_task_label": report_label,
+                "department_label": department_label,
+            }
+    return index
+
+
 def available_equipments_for_project(
     project: LibraryProject,
     *,
@@ -464,6 +509,28 @@ def sync_project_task_assignments_for_user(project, assignee, assigned_by) -> tu
     if all_file_ids:
         attach_files_to_projects(sorted(all_file_ids), [project.pk], assigned_by)
     return created_count, len(all_file_ids)
+
+
+def sync_project_tasks_to_all_workflow_members(project, assigned_by) -> int:
+    """将项目任务同步给全部已登记岗位参与人与统筹人（幂等）。"""
+    from apps.core.models import LibraryProjectWorkflowMember
+
+    if project is None or assigned_by is None:
+        return 0
+    seen: set[int] = set()
+    total = 0
+    for m in LibraryProjectWorkflowMember.objects.filter(project=project).select_related("user"):
+        if m.user_id in seen:
+            continue
+        seen.add(m.user_id)
+        created, _ = sync_project_task_assignments_for_user(project, m.user, assigned_by)
+        total += created
+    if project.primary_responsible_id and project.primary_responsible_id not in seen:
+        created, _ = sync_project_task_assignments_for_user(
+            project, project.primary_responsible, assigned_by
+        )
+        total += created
+    return total
 
 
 def unbind_equipment_from_project(

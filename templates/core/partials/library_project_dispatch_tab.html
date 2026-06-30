@@ -1,11 +1,11 @@
-{# 项目工作台 · 人员派工（合并原「分配」「流程」） #}
+{# 项目工作台 · 人员派工 #}
 <div class="space-y-6">
     <div class="rounded-xl border border-indigo-100 bg-indigo-50/40 p-5">
-        <h3 class="text-base font-semibold text-slate-900 mb-2">人员派工 · 与本项目委托对应</h3>
+        <h3 class="text-base font-semibold text-slate-900 mb-2">人员派工</h3>
         <p class="text-xs text-slate-600 max-w-3xl mb-4">
             权限由低到高：<strong>检测员 → 校核员 → 编制人 → 审核人 → 授权签字人</strong>。
-            高权限可审核低权限成果；授权签字人负责派单统筹与终审签发。
-            请先完成「<a href="?project_id={{ selected_project_id }}{{ workbench_fl_query }}&tab=commission" class="text-indigo-700 underline font-medium">委托情况</a>」中的设备绑定，再在本页配置人员。
+            <strong>高权限账号可兼任不高于自身等级的流程岗位</strong>（如授权签字人可登记为检测员）。
+            登记后自动同步 App 任务。仪器分配见「<a href="?project_id={{ selected_project_id }}{{ workbench_fl_query }}&tab=instruments" class="text-indigo-700 underline font-medium">仪器管理</a>」。
         </p>
         <div class="flex flex-wrap gap-2 text-xs">
             {% for r in role_ladder %}
@@ -21,537 +21,234 @@
     <p class="text-sm text-slate-500">您无权维护人员派工。</p>
     {% else %}
 
-    {# —— ① 项目统筹（对应流程表 01 派单） —— #}
     <section class="rounded-xl border border-amber-200 bg-amber-50/40 p-5">
-        <div class="flex flex-wrap items-start justify-between gap-2 mb-3">
+        <div class="flex flex-wrap items-start justify-between gap-2 mb-4">
             <div>
-                <span class="text-xs font-bold text-amber-800 uppercase tracking-wide">步骤 1</span>
-                <h4 class="text-base font-semibold text-slate-900 mt-0.5">项目统筹人</h4>
-                <p class="text-xs text-slate-600 mt-1 max-w-2xl">
-                    对应流程「派单安排技术人员」：一名统筹人维护本项目委托设备、登记流程参与人，并向检测人员下发 App 任务（<strong>不会</strong>自动代填所有人）。
-                </p>
+                <h4 class="text-base font-semibold text-slate-900">项目统筹人</h4>
+                <p class="text-xs text-slate-600 mt-1">在下方选择一名用户，点击「确认指定」后生效（避免误点）。</p>
             </div>
             {% if selected_project.primary_responsible %}
-            <span class="text-xs px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-medium">已指定</span>
+            <span class="text-xs px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-medium">当前：{{ selected_project.primary_responsible.username }}</span>
             {% else %}
             <span class="text-xs px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 font-medium">待指定</span>
             {% endif %}
         </div>
-        {% if can_assign_on_selected_project %}
-        {% if not app_users_for_assign %}
-        <p class="text-sm text-amber-800">没有可指定的检测侧账号。</p>
-        {% else %}
-        <form method="post" class="grid sm:grid-cols-2 gap-4 max-w-2xl">
+        {% if can_assign_on_selected_project and app_users_for_assign %}
+        <form method="post" id="primary-responsible-form" class="space-y-3 max-w-xl">
             {% csrf_token %}
             <input type="hidden" name="action" value="set_primary_responsible">
             <input type="hidden" name="project_id" value="{{ selected_project_id }}">
-            <div>
-                <label class="block text-xs font-medium text-slate-600 mb-1">统筹人（建议授权签字人或项目负责人）</label>
-                <select name="assignee" required class="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white">
-                    <option value="">请选择</option>
-                    {% for u in app_users_for_assign %}
-                    <option value="{{ u.pk }}" {% if selected_project.primary_responsible_id == u.pk %}selected{% endif %}>{{ u.username }}{% if u.get_full_name %}（{{ u.get_full_name }}）{% endif %}</option>
-                    {% endfor %}
-                </select>
+            <div class="rounded-xl border border-amber-100 bg-white max-h-56 overflow-y-auto divide-y divide-slate-100">
+                {% for u in app_users_for_assign %}
+                <label class="flex items-start gap-3 px-4 py-3 cursor-pointer hover:bg-amber-50/50 {% if selected_project.primary_responsible_id == u.pk %}bg-amber-50/80{% endif %}">
+                    <input type="radio" name="assignee" value="{{ u.pk }}" class="mt-1 text-amber-600"
+                           {% if selected_project.primary_responsible_id == u.pk %}checked{% endif %}
+                           data-username="{{ u.username }}">
+                    <span class="min-w-0">
+                        <span class="font-medium text-slate-900 block">{{ u.username }}</span>
+                        {% if u.get_full_name %}<span class="text-xs text-slate-500 block">{{ u.get_full_name }}</span>{% endif %}
+                        {% if u.profile.role %}<span class="text-[10px] text-amber-800 mt-0.5 inline-block">{{ u.profile.role.name }}</span>{% endif %}
+                    </span>
+                </label>
+                {% endfor %}
             </div>
-            <div class="flex items-end">
-                <button type="submit" class="px-6 py-2.5 rounded-xl bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700">确认统筹人</button>
-            </div>
+            <button type="submit" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700">
+                <i class="ri-check-line"></i> 确认指定统筹人
+            </button>
         </form>
-        {% if selected_project.primary_responsible %}
-        <p class="text-xs text-slate-600 mt-3">当前统筹人：<strong>{{ selected_project.primary_responsible.username }}</strong></p>
-        {% endif %}
-        {% endif %}
+        {% elif selected_project.primary_responsible %}
+        <p class="text-sm text-slate-700">当前统筹人：<strong>{{ selected_project.primary_responsible.username }}</strong></p>
         {% else %}
-        <p class="text-xs text-slate-500">仅高权限账号可指定统筹人；您可向本人同步下方 App 任务。</p>
-        {% if selected_project.primary_responsible %}
-        <p class="text-xs text-slate-600 mt-2">当前统筹人：<strong>{{ selected_project.primary_responsible.username }}</strong></p>
-        {% endif %}
+        <p class="text-xs text-slate-500">仅高权限账号可指定统筹人。</p>
         {% endif %}
     </section>
 
-    {# —— ② 五级岗位参与人（对应 03–07 各环节角色） —— #}
     <section class="rounded-xl border border-teal-200 bg-teal-50/30 p-5">
         <div class="flex flex-wrap items-start justify-between gap-2 mb-4">
             <div>
-                <span class="text-xs font-bold text-teal-800 uppercase tracking-wide">步骤 2</span>
-                <h4 class="text-base font-semibold text-slate-900 mt-0.5">流程岗位参与人</h4>
-                <p class="text-xs text-slate-600 mt-1 max-w-2xl">
-                    按岗位登记多名参与人（如多名检测员）。与 App 内「现场记录→校核→编制→审核→签发」环节对应；同一岗位可多人，添加不会替换他人。
-                </p>
+                <h4 class="text-base font-semibold text-slate-900">流程岗位参与人</h4>
+                <p class="text-xs text-slate-600 mt-1 max-w-2xl">按岗位展开「添加人员」：先勾选一名用户，再点确认；已登记人员显示在各自岗位下。</p>
             </div>
             <span class="text-xs px-2.5 py-1 rounded-full {% if workflow_members %}bg-emerald-100 text-emerald-800{% else %}bg-slate-100 text-slate-600{% endif %} font-medium">
-                {% if workflow_members %}{{ workflow_members|length }} 人已登记{% else %}待登记{% endif %}
+                共 {{ workflow_members|length }} 人
             </span>
         </div>
 
-        <div class="space-y-3 mb-4">
-            {% for grp in workflow_members_by_role %}
-            <div class="rounded-lg border border-white/80 bg-white overflow-hidden">
-                <div class="px-3 py-2 bg-slate-50 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
+        <div class="space-y-3">
+            {% for panel in workflow_dispatch_panels %}
+            <div id="dispatch-role-{{ panel.code }}" class="rounded-xl border border-white bg-white overflow-hidden shadow-sm">
+                <div class="px-4 py-3 bg-slate-50 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
                     <div class="text-sm font-medium text-slate-800">
-                        <span class="font-mono text-teal-700 text-xs mr-1">{{ grp.level }}</span>{{ grp.label }}
+                        <span class="font-mono text-teal-700 text-xs mr-1.5">{{ panel.level }}</span>{{ panel.label }}
+                        <span class="text-xs font-normal text-slate-500 ml-1">已登记 {{ panel.assigned_count }} 人</span>
                     </div>
-                    <span class="text-xs text-slate-500">{{ grp.summary }}</span>
+                    <span class="text-xs text-slate-500 hidden sm:inline">{{ panel.summary }}</span>
                 </div>
-                <div class="px-3 py-2">
-                    {% if grp.members %}
-                    <ul class="flex flex-wrap gap-2">
-                        {% for m in grp.members %}
-                        <li class="inline-flex items-center gap-2 text-sm bg-slate-50 px-2.5 py-1 rounded-lg ring-1 ring-slate-200">
+
+                <div class="px-4 py-3">
+                    {% if panel.members %}
+                    <ul class="flex flex-wrap gap-2 mb-3">
+                        {% for m in panel.members %}
+                        <li class="inline-flex items-center gap-2 text-sm bg-slate-50 px-2.5 py-1.5 rounded-lg ring-1 ring-slate-200">
                             <span class="font-medium text-slate-900">{{ m.user.username }}</span>
                             {% if can_edit_project_workbench %}
-                            <form method="post" class="inline" onsubmit="return confirm('移除该参与人？');">
+                            <form method="post" class="inline" onsubmit="return confirm('移除 {{ m.user.username }} 在「{{ panel.label }}」岗位的登记，并撤回其 App 任务？');">
                                 {% csrf_token %}
                                 <input type="hidden" name="action" value="remove_workflow_member">
                                 <input type="hidden" name="project_id" value="{{ selected_project_id }}">
                                 <input type="hidden" name="member_id" value="{{ m.id }}">
-                                <button type="submit" class="text-xs text-red-600 hover:underline">移除</button>
+                                <input type="hidden" name="workflow_role" value="{{ panel.code }}">
+                                <button type="submit" class="text-xs text-red-600 hover:underline px-1">移除</button>
                             </form>
                             {% endif %}
                         </li>
                         {% endfor %}
                     </ul>
                     {% else %}
-                    <span class="text-xs text-slate-400">未登记</span>
+                    <p class="text-xs text-slate-400 mb-3">该岗位尚未登记人员</p>
+                    {% endif %}
+
+                    {% if can_assign_on_selected_project %}
+                    <details class="group/add rounded-lg border border-teal-100 bg-teal-50/30" {% if dispatch_role == panel.code %}open{% endif %}>
+                        <summary class="cursor-pointer list-none px-3 py-2.5 text-xs font-medium text-teal-900 flex items-center justify-between gap-2">
+                            <span class="inline-flex items-center gap-1.5"><i class="ri-user-add-line"></i> 添加人员到「{{ panel.label }}」</span>
+                            <span class="text-teal-600 group-open/add:rotate-180 transition-transform"><i class="ri-arrow-down-s-line text-base"></i></span>
+                        </summary>
+                        <div class="px-3 pb-3 pt-1 border-t border-teal-100/80">
+                            {% if panel.picker_users %}
+                            <form method="post" class="dispatch-add-member-form space-y-3" data-role-label="{{ panel.label }}">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="add_workflow_member">
+                                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                                <input type="hidden" name="workflow_role" value="{{ panel.code }}">
+                                <div class="max-h-48 overflow-y-auto rounded-lg border border-white bg-white divide-y divide-slate-50">
+                                    {% for row in panel.picker_users %}
+                                    <label class="flex items-start gap-3 px-3 py-2.5 cursor-pointer hover:bg-teal-50/40">
+                                        <input type="radio" name="user_id" value="{{ row.user_id }}" class="mt-0.5 text-teal-600"
+                                               data-username="{{ row.username }}">
+                                        <span class="min-w-0 flex-1">
+                                            <span class="font-medium text-slate-900 text-sm block">{{ row.username }}</span>
+                                            {% if row.full_name %}<span class="text-xs text-slate-500 block">{{ row.full_name }}</span>{% endif %}
+                                            <span class="text-[10px] text-slate-500 mt-0.5 inline-flex flex-wrap items-center gap-1">
+                                                <span>系统角色：{{ row.role_label }}</span>
+                                                {% if row.is_cross_role %}
+                                                <span class="px-1 py-0.5 rounded bg-indigo-100 text-indigo-800">高权限兼任</span>
+                                                {% endif %}
+                                            </span>
+                                        </span>
+                                    </label>
+                                    {% endfor %}
+                                </div>
+                                <button type="submit" class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-teal-700 text-white text-xs font-semibold hover:bg-teal-800">
+                                    <i class="ri-check-line"></i> 确认添加到「{{ panel.label }}」
+                                </button>
+                            </form>
+                            {% else %}
+                            <p class="text-xs text-amber-800 bg-amber-50 rounded-lg px-3 py-2 ring-1 ring-amber-100">暂无可添加的账号（可能均已登记，或无人达到该岗位所需权限等级）。</p>
+                            {% endif %}
+                        </div>
+                    </details>
                     {% endif %}
                 </div>
             </div>
             {% endfor %}
         </div>
+    </section>
 
-        <form method="post" class="flex flex-wrap items-end gap-3 pt-2 border-t border-teal-100">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="add_workflow_member">
-            <input type="hidden" name="project_id" value="{{ selected_project_id }}">
-            <div>
-                <label class="block text-xs text-slate-500 mb-1">用户</label>
-                <select name="user_id" class="px-3 py-2 border border-slate-200 rounded-lg text-sm min-w-[12rem]">
-                    <option value="">请选择</option>
-                    {% for u in assignable_workflow_users %}
-                    <option value="{{ u.id }}">{{ u.username }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div>
-                <label class="block text-xs text-slate-500 mb-1">岗位</label>
-                <select name="workflow_role" class="px-3 py-2 border border-slate-200 rounded-lg text-sm min-w-[10rem]">
-                    {% for rcode, rlabel in workflow_role_choices %}
-                    <option value="{{ rcode }}">{{ rlabel }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <button type="submit" class="px-4 py-2 rounded-xl bg-teal-700 text-white text-sm font-medium hover:bg-teal-800">添加参与人</button>
-        </form>
-
-        {% if project_workflow_cases %}
-        <details class="mt-4 text-xs">
-            <summary class="cursor-pointer text-slate-600 font-medium">查看案件当前环节（{{ project_workflow_cases|length }}）</summary>
-            <div class="mt-2 overflow-x-auto max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-white">
-                <table class="min-w-full text-sm">
-                    <thead class="bg-slate-50 text-slate-500 sticky top-0">
-                        <tr><th class="px-3 py-2 text-left">案件</th><th class="px-3 py-2 text-left">环节</th><th class="px-3 py-2 text-left">签发</th></tr>
-                    </thead>
-                    <tbody>
-                        {% for row in project_workflow_cases %}
-                        <tr class="border-t border-slate-100">
-                            <td class="px-3 py-2 font-mono text-xs">{{ row.case.case_no }}</td>
-                            <td class="px-3 py-2">{{ row.stage_display }}</td>
-                            <td class="px-3 py-2">{{ row.issue_date|default:"—" }}</td>
-                        </tr>
+    <section class="rounded-xl border border-blue-200 bg-blue-50/40 p-5">
+        <details class="group">
+            <summary class="cursor-pointer list-none flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h4 class="text-base font-semibold text-slate-900 inline">任务同步概览</h4>
+                    <p class="text-xs text-slate-600 mt-0.5">登记岗位后自动同步；模板更新后 App 拉取任务列表时获取最新版本</p>
+                </div>
+                <div class="flex items-center gap-2 text-xs shrink-0">
+                    <span class="px-2.5 py-1 rounded-full bg-white text-slate-700 ring-1 ring-blue-200 font-medium tabular-nums">{{ assignment_sync_summary.user_count }} 人</span>
+                    <span class="px-2.5 py-1 rounded-full bg-white text-slate-700 ring-1 ring-blue-200 font-medium tabular-nums">{{ assignment_sync_summary.task_total }} 个模板</span>
+                    <span class="text-blue-600 group-open:rotate-180 transition-transform"><i class="ri-arrow-down-s-line text-lg"></i></span>
+                </div>
+            </summary>
+            <div class="mt-4 space-y-4">
+                {% if can_assign_on_selected_project and project_assignees %}
+                <div>
+                    <h5 class="text-sm font-semibold text-slate-800 mb-2">成员编辑权限</h5>
+                    <div class="rounded-lg border border-slate-200 divide-y divide-slate-100 bg-white">
+                        {% for row in project_assignees %}
+                        <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
+                            <div>
+                                <span class="font-medium text-slate-900">{{ row.user.username }}</span>
+                                {% if row.revoked %}
+                                <span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">已取消编辑</span>
+                                {% else %}
+                                <span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">可编辑</span>
+                                {% endif %}
+                            </div>
+                            <form method="post">
+                                {% csrf_token %}
+                                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                                <input type="hidden" name="user_id" value="{{ row.user.pk }}">
+                                {% if row.revoked %}
+                                <button type="submit" name="action" value="restore_project_user" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium">恢复编辑</button>
+                                {% else %}
+                                <button type="submit" name="action" value="revoke_project_user" class="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-800 text-xs font-medium hover:bg-slate-200"
+                                        onclick="return confirm('取消该用户在本项目上的编辑权限？');">取消编辑</button>
+                                {% endif %}
+                            </form>
+                        </div>
                         {% endfor %}
-                    </tbody>
-                </table>
+                    </div>
+                </div>
+                {% endif %}
+                <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                    <table class="min-w-full text-sm">
+                        <thead class="bg-slate-50 text-slate-500 text-xs uppercase">
+                            <tr>
+                                <th class="px-4 py-2 text-left">接收用户</th>
+                                <th class="px-4 py-2 text-left">分配人</th>
+                                <th class="px-4 py-2 text-left">已同步模板</th>
+                                <th class="px-4 py-2 text-left">操作</th>
+                                <th class="px-4 py-2 text-left">时间</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for a in project_scoped_assignment_records %}
+                            <tr class="border-t border-slate-100 align-top">
+                                <td class="px-4 py-2 font-medium">{% if a.assignee %}{{ a.assignee.username }}{% else %}—{% endif %}</td>
+                                <td class="px-4 py-2 text-slate-600">{% if a.assigned_by %}{{ a.assigned_by.username }}{% else %}—{% endif %}</td>
+                                <td class="px-4 py-2">
+                                    <p class="text-xs text-slate-600 mb-1">{{ a.tasks|length }} 个模板</p>
+                                </td>
+                                <td class="px-4 py-2 whitespace-nowrap">
+                                    {% if a.assignee %}
+                                    {% if can_assign_on_selected_project or a.assignee.id == user.id %}
+                                    <form method="post" class="inline" onsubmit="return confirm('撤回该用户在本项目上的任务同步？');">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="action" value="unassign_project">
+                                        <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                                        <input type="hidden" name="assignee_id" value="{{ a.assignee.id }}">
+                                        <button type="submit" class="text-xs px-2.5 py-1 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 font-medium">撤回</button>
+                                    </form>
+                                    {% endif %}
+                                    {% endif %}
+                                </td>
+                                <td class="px-4 py-2 text-slate-500 whitespace-nowrap text-xs">{{ a.created_at|date:"Y-m-d H:i" }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="5" class="px-4 py-10 text-center text-slate-400">登记岗位后将自动出现同步记录</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </details>
-        {% endif %}
-    </section>
-
-    {# —— 仪器：模板定种类，派工定编号 —— #}
-    {% if project_instrument_dispatch_panel.uses_kind_binding or project_instrument_dispatch_panel.required_rows %}
-    <section class="rounded-xl border border-violet-200 bg-violet-50/30 p-5">
-        <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
-            <div class="min-w-0 flex-1">
-                <span class="text-xs font-bold text-violet-800 uppercase tracking-wide">仪器</span>
-                <h4 class="text-base font-semibold text-slate-900 mt-0.5">检测仪器分配与出库</h4>
-                <p class="text-xs text-slate-600 mt-1 max-w-2xl">{{ project_instrument_dispatch_panel.hint }}</p>
-            </div>
-            <div class="flex flex-wrap items-center gap-2 shrink-0">
-                {% if project_instrument_dispatch_panel.manual_picker_catalog.kinds and can_edit_project_workbench %}
-                <button type="button" class="instrument-manual-open inline-flex items-center gap-1.5 rounded-xl bg-violet-700 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-800 shadow-sm">
-                    <i class="ri-list-check-2"></i> 手动分配仪器
-                </button>
-                {% endif %}
-                {% if project_instrument_dispatch_panel.assignment_mode == 'manual' %}
-                <span class="text-xs px-2.5 py-1 rounded-full bg-violet-100 text-violet-800 font-medium">已手动分配</span>
-                {% endif %}
-                {% if project_instrument_dispatch_panel.can_dispatch %}
-                <span class="text-xs px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-medium">可同步任务</span>
-                {% else %}
-                <span class="text-xs px-2.5 py-1 rounded-full bg-red-100 text-red-800 font-medium">不可下发</span>
-                {% endif %}
-            </div>
-        </div>
-        {% if project_instrument_dispatch_panel.blocked_messages %}
-        <ul class="text-xs text-red-800 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-3 space-y-1 list-disc list-inside">
-            {% for msg in project_instrument_dispatch_panel.blocked_messages %}
-            <li>{{ msg }}</li>
-            {% endfor %}
-        </ul>
-        {% endif %}
-        {% if project_instrument_dispatch_panel.info_messages %}
-        <ul class="text-xs text-amber-900 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-3 space-y-1 list-disc list-inside">
-            {% for msg in project_instrument_dispatch_panel.info_messages %}
-            <li>{{ msg }}</li>
-            {% endfor %}
-        </ul>
-        {% endif %}
-        {% if project_instrument_dispatch_panel.scoped_kind_rows.qualityControl or project_instrument_dispatch_panel.scoped_kind_rows.radiationProtection %}
-        <p class="text-xs font-medium text-slate-700 mb-2">
-            各任务模板绑定的仪器种类（按质控 / 防护分类；手动分配时按种类勾选出库设备）：
-        </p>
-        {% if project_instrument_dispatch_panel.scoped_kind_rows.qualityControl %}
-        <div class="mb-3">
-            <p class="text-xs font-semibold inline-flex px-2 py-0.5 rounded-md mb-1.5 bg-sky-100 text-sky-800">
-                质控（性能）检测 · {{ project_instrument_dispatch_panel.scoped_kind_rows.qualityControl|length }} 种
-            </p>
-            <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-                <table class="min-w-full text-sm text-left">
-                    <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
-                        <tr>
-                            <th class="px-3 py-2">仪器种类</th>
-                            <th class="px-3 py-2">引用任务模板</th>
-                            <th class="px-3 py-2">同种在库</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-100">
-                        {% for row in project_instrument_dispatch_panel.scoped_kind_rows.qualityControl %}
-                        <tr>
-                            <td class="px-3 py-2">
-                                {{ row.name }}{% if row.model %} <span class="text-slate-400">({{ row.model }})</span>{% endif %}
-                            </td>
-                            <td class="px-3 py-2 text-xs font-mono text-slate-700">{{ row.task_codes|join:"、" }}</td>
-                            <td class="px-3 py-2 text-xs tabular-nums">{{ row.kind_in_stock }}/{{ row.kind_total }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        {% endif %}
-        {% if project_instrument_dispatch_panel.scoped_kind_rows.radiationProtection %}
-        <div class="mb-4">
-            <p class="text-xs font-semibold inline-flex px-2 py-0.5 rounded-md mb-1.5 bg-amber-100 text-amber-900">
-                工作场所放射防护检测 · {{ project_instrument_dispatch_panel.scoped_kind_rows.radiationProtection|length }} 种
-            </p>
-            <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-                <table class="min-w-full text-sm text-left">
-                    <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
-                        <tr>
-                            <th class="px-3 py-2">仪器种类</th>
-                            <th class="px-3 py-2">引用任务模板</th>
-                            <th class="px-3 py-2">同种在库</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-100">
-                        {% for row in project_instrument_dispatch_panel.scoped_kind_rows.radiationProtection %}
-                        <tr>
-                            <td class="px-3 py-2">
-                                {{ row.name }}{% if row.model %} <span class="text-slate-400">({{ row.model }})</span>{% endif %}
-                            </td>
-                            <td class="px-3 py-2 text-xs font-mono text-slate-700">{{ row.task_codes|join:"、" }}</td>
-                            <td class="px-3 py-2 text-xs tabular-nums">{{ row.kind_in_stock }}/{{ row.kind_total }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        {% endif %}
-        {% elif project_instrument_dispatch_panel.kind_rows %}
-        <p class="text-xs font-medium text-slate-700 mb-2">
-            本项目涉及的仪器种类（共 <strong>{{ project_instrument_dispatch_panel.kind_rows|length }}</strong> 种）：
-        </p>
-        <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white mb-4">
-            <table class="min-w-full text-sm text-left">
-                <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
-                    <tr>
-                        <th class="px-3 py-2">仪器种类</th>
-                        <th class="px-3 py-2">引用任务模板</th>
-                        <th class="px-3 py-2">同种在库</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100">
-                    {% for row in project_instrument_dispatch_panel.kind_rows %}
-                    <tr>
-                        <td class="px-3 py-2">
-                            {{ row.name }}{% if row.model %} <span class="text-slate-400">({{ row.model }})</span>{% endif %}
-                        </td>
-                        <td class="px-3 py-2 text-xs font-mono text-slate-700">{{ row.task_codes|join:"、" }}</td>
-                        <td class="px-3 py-2 text-xs tabular-nums">{{ row.kind_in_stock }}/{{ row.kind_total }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% endif %}
-        <form method="post" class="mb-4 rounded-lg border border-violet-100 bg-white/90 px-3 py-3 space-y-2">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="set_instrument_share_mode">
-            <input type="hidden" name="project_id" value="{{ selected_project_id }}">
-            <p class="text-xs font-medium text-slate-800">同种仪器在本委托内的分配策略</p>
-            <label class="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
-                <input type="checkbox" name="instrument_share_across_tasks" value="1"
-                       class="rounded border-slate-300 text-violet-600 mt-0.5"
-                       {% if project_instrument_dispatch_panel.instrument_share_across_tasks %}checked{% endif %}>
-                <span>
-                    <strong>跨模板共用一台</strong>
-                    <span class="block text-xs text-slate-500 mt-0.5">
-                        未勾选（默认）：各任务模板分别选一台物理编号；<strong>同一模板下多台受检设备自动共用</strong>。
-                        勾选后：多个模板若要求同种仪器，整项目只分配一台。
-                    </span>
-                </span>
-            </label>
-            <button type="submit" class="inline-flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-medium text-violet-900 hover:bg-violet-100">
-                保存分配策略
-            </button>
-        </form>
-        {% if project_instrument_dispatch_panel.scoped_required_rows.qualityControl or project_instrument_dispatch_panel.scoped_required_rows.radiationProtection %}
-        <p class="text-xs font-medium text-slate-700 mb-2">本项目已分配的具体编号（质控套装 / 防护套装）：</p>
-        {% if project_instrument_dispatch_panel.scoped_required_rows.qualityControl %}
-        <p class="text-[11px] font-semibold text-sky-800 mb-1">质控（性能）套装</p>
-        <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white mb-3">
-            <table class="min-w-full text-sm text-left">
-                <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
-                    <tr>
-                        <th class="px-3 py-2">编号</th>
-                        <th class="px-3 py-2">名称</th>
-                        <th class="px-3 py-2">状态</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100">
-                    {% for row in project_instrument_dispatch_panel.scoped_required_rows.qualityControl %}
-                    <tr>
-                        <td class="px-3 py-2 font-mono text-xs">{{ row.code }}</td>
-                        <td class="px-3 py-2">
-                            {{ row.name }}{% if row.model %} <span class="text-slate-400">({{ row.model }})</span>{% endif %}
-                            {% if row.task_codes %}
-                            <span class="block text-[10px] text-slate-500 mt-0.5 font-mono">{{ row.task_codes|join:"、" }}</span>
-                            {% endif %}
-                        </td>
-                        <td class="px-3 py-2">
-                            {% if row.status == 'in_stock' %}<span class="text-emerald-700">在库</span>
-                            {% elif row.status == 'on_project' %}<span class="text-indigo-700">{{ row.status_label }}</span>
-                            {% elif row.status == 'shared' %}<span class="text-amber-700">{{ row.status_label }}</span>
-                            {% else %}<span class="text-slate-400">{{ row.status_label }}</span>{% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% endif %}
-        {% if project_instrument_dispatch_panel.scoped_required_rows.radiationProtection %}
-        <p class="text-[11px] font-semibold text-amber-900 mb-1">防护套装</p>
-        <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white mb-3">
-            <table class="min-w-full text-sm text-left">
-                <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
-                    <tr>
-                        <th class="px-3 py-2">编号</th>
-                        <th class="px-3 py-2">名称</th>
-                        <th class="px-3 py-2">状态</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100">
-                    {% for row in project_instrument_dispatch_panel.scoped_required_rows.radiationProtection %}
-                    <tr>
-                        <td class="px-3 py-2 font-mono text-xs">{{ row.code }}</td>
-                        <td class="px-3 py-2">
-                            {{ row.name }}{% if row.model %} <span class="text-slate-400">({{ row.model }})</span>{% endif %}
-                            {% if row.task_codes %}
-                            <span class="block text-[10px] text-slate-500 mt-0.5 font-mono">{{ row.task_codes|join:"、" }}</span>
-                            {% endif %}
-                        </td>
-                        <td class="px-3 py-2">
-                            {% if row.status == 'in_stock' %}<span class="text-emerald-700">在库</span>
-                            {% elif row.status == 'on_project' %}<span class="text-indigo-700">{{ row.status_label }}</span>
-                            {% elif row.status == 'shared' %}<span class="text-amber-700">{{ row.status_label }}</span>
-                            {% else %}<span class="text-slate-400">{{ row.status_label }}</span>{% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% endif %}
-        {% elif project_instrument_dispatch_panel.required_rows %}
-        <p class="text-xs font-medium text-slate-700 mb-2">本项目已分配的具体编号：</p>
-        <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white mb-3">
-            <table class="min-w-full text-sm text-left">
-                <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
-                    <tr>
-                        <th class="px-3 py-2">编号</th>
-                        <th class="px-3 py-2">名称</th>
-                        <th class="px-3 py-2">状态</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100">
-                    {% for row in project_instrument_dispatch_panel.required_rows %}
-                    <tr>
-                        <td class="px-3 py-2 font-mono text-xs">{{ row.code }}</td>
-                        <td class="px-3 py-2">
-                            {{ row.name }}{% if row.model %} <span class="text-slate-400">({{ row.model }})</span>{% endif %}
-                            {% if row.task_codes %}
-                            <span class="block text-[10px] text-slate-500 mt-0.5 font-mono">{{ row.task_codes|join:"、" }}</span>
-                            {% endif %}
-                        </td>
-                        <td class="px-3 py-2">
-                            {% if row.status == 'in_stock' %}<span class="text-emerald-700">在库</span>
-                            {% elif row.status == 'on_project' %}<span class="text-indigo-700">{{ row.status_label }}</span>
-                            {% elif row.status == 'shared' %}<span class="text-amber-700">{{ row.status_label }}</span>
-                            {% else %}<span class="text-slate-400">{{ row.status_label }}</span>{% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% endif %}
-        <p class="text-xs text-slate-600 mb-3 rounded-lg border border-violet-100 bg-white/90 px-3 py-2.5 leading-relaxed">
-            <strong class="text-violet-900">仪器台账（可选）：</strong>同步 App 任务时会<strong>尝试</strong>按种类自动分配编号并登记出库，失败不阻断派工；
-            <strong>停用/结束委托</strong>（项目停用）时，仅将本项目从该仪器的关联中移除（其他委托仍可共用同一台）。
-            同一模板下多台设备始终共用仪器；不同模板默认各用一台，可按上方策略改为跨模板共用。
-            推荐先点<strong>手动分配仪器</strong>按种类勾选出库设备，再同步 App 任务。
-        </p>
-    </section>
-    {% if project_instrument_dispatch_panel.manual_picker_catalog.kinds and can_edit_project_workbench %}
-    {% include "core/partials/library_instrument_manual_picker_sheet.html" %}
-    {% endif %}
-    {% endif %}
-
-    {# —— ③ App 任务同步（检测员等在移动端可见项目） —— #}
-    <section class="rounded-xl border border-blue-200 bg-blue-50/40 p-5">
-        <div class="flex flex-wrap items-start justify-between gap-2 mb-3">
-            <div>
-                <span class="text-xs font-bold text-blue-800 uppercase tracking-wide">步骤 3</span>
-                <h4 class="text-base font-semibold text-slate-900 mt-0.5">向检测人员同步 App 任务</h4>
-                <p class="text-xs text-slate-600 mt-1 max-w-2xl">
-                    将<strong>当前委托设备</strong>关联的现场记录/报告模板同步到指定账号，对方可在 App 中打开本项目填报（<strong>进入检测环节</strong>）。
-                    若已绑定仪器种类，同步时将<strong>尝试</strong>自动分配编号（失败也不阻断派工）。
-                    {% if project_equipment_count %}（本项目 {{ project_equipment_count }} 台设备，按设备模板下发，不含无关残留模板。）{% endif %}
-                </p>
-            </div>
-        </div>
-
-        <form method="post" class="grid sm:grid-cols-2 gap-4 max-w-2xl mb-6">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="assign">
-            <input type="hidden" name="project_id" value="{{ selected_project_id }}">
-            <div>
-                <label class="block text-xs font-medium text-slate-600 mb-1">接收用户（通常为检测员）</label>
-                <select name="assignee" required class="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white">
-                    {% if not participant_assign_self_only %}
-                    <option value="">请选择</option>
-                    {% endif %}
-                    {% for u in app_users_for_assign %}
-                    <option value="{{ u.pk }}" {% if participant_assign_self_only %}selected{% endif %}>{{ u.username }}{% if u.get_full_name %}（{{ u.get_full_name }}）{% endif %}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="flex items-end">
-                <button type="submit" class="px-6 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700">确认同步</button>
-            </div>
-        </form>
-
-        {% if can_assign_on_selected_project and project_assignees %}
-        <h5 class="text-sm font-semibold text-slate-800 mb-2">成员编辑权限</h5>
-        <div class="rounded-lg border border-slate-200 divide-y divide-slate-100 bg-white mb-6">
-            {% for row in project_assignees %}
-            <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
-                <div>
-                    <span class="font-medium text-slate-900">{{ row.user.username }}</span>
-                    {% if row.revoked %}
-                    <span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">已取消编辑</span>
-                    {% else %}
-                    <span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">可编辑</span>
-                    {% endif %}
-                </div>
-                <form method="post">
-                    {% csrf_token %}
-                    <input type="hidden" name="project_id" value="{{ selected_project_id }}">
-                    <input type="hidden" name="user_id" value="{{ row.user.pk }}">
-                    {% if row.revoked %}
-                    <button type="submit" name="action" value="restore_project_user" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium">恢复编辑</button>
-                    {% else %}
-                    <button type="submit" name="action" value="revoke_project_user" class="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-800 text-xs font-medium hover:bg-slate-200"
-                            onclick="return confirm('取消该用户在本项目上的编辑权限？');">取消编辑</button>
-                    {% endif %}
-                </form>
-            </div>
-            {% endfor %}
-        </div>
-        {% endif %}
-
-        <h5 class="text-sm font-semibold text-slate-800 mb-2">同步记录</h5>
-        <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-            <table class="min-w-full text-sm">
-                <thead class="bg-slate-50 text-slate-500 text-xs uppercase">
-                    <tr>
-                        <th class="px-4 py-2 text-left">接收用户</th>
-                        <th class="px-4 py-2 text-left">分配人</th>
-                        <th class="px-4 py-2 text-left">已同步模板</th>
-                        <th class="px-4 py-2 text-left">操作</th>
-                        <th class="px-4 py-2 text-left">时间</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for a in project_scoped_assignment_records %}
-                    <tr class="border-t border-slate-100 align-top">
-                        <td class="px-4 py-2 font-medium">{% if a.assignee %}{{ a.assignee.username }}{% else %}—{% endif %}</td>
-                        <td class="px-4 py-2 text-slate-600">{% if a.assigned_by %}{{ a.assigned_by.username }}{% else %}—{% endif %}</td>
-                        <td class="px-4 py-2">
-                            <ul class="list-disc list-inside text-slate-700 space-y-0.5">
-                                {% for t in a.tasks %}
-                                <li class="text-xs"><span class="font-mono text-slate-500">{{ t.code }}</span> · {{ t.name }}</li>
-                                {% empty %}
-                                <li class="text-slate-400 list-none">无</li>
-                                {% endfor %}
-                            </ul>
-                        </td>
-                        <td class="px-4 py-2 whitespace-nowrap">
-                            {% if a.assignee %}
-                            {% if can_assign_on_selected_project or a.assignee.id == user.id %}
-                            <form method="post" class="inline" onsubmit="return confirm('撤回该用户在本项目上的任务同步？');">
-                                {% csrf_token %}
-                                <input type="hidden" name="action" value="unassign_project">
-                                <input type="hidden" name="project_id" value="{{ selected_project_id }}">
-                                <input type="hidden" name="assignee_id" value="{{ a.assignee.id }}">
-                                <button type="submit" class="text-xs px-2.5 py-1 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 font-medium">撤回</button>
-                            </form>
-                            {% endif %}
-                            {% endif %}
-                        </td>
-                        <td class="px-4 py-2 text-slate-500 whitespace-nowrap text-xs">{{ a.created_at|date:"Y-m-d H:i" }}</td>
-                    </tr>
-                    {% empty %}
-                    <tr><td colspan="5" class="px-4 py-10 text-center text-slate-400">暂无同步记录</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
     </section>
 
     <details class="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
-        <summary class="cursor-pointer text-sm font-medium text-slate-700">附录：检测部全流程对照表（线下 + 系统）</summary>
+        <summary class="cursor-pointer text-sm font-medium text-slate-700">附录：检测部全流程对照表</summary>
         <div class="mt-4 overflow-x-auto">
             <table class="min-w-full text-xs text-slate-700">
                 <thead class="bg-white text-slate-500">
-                    <tr>
-                        <th class="px-2 py-2 text-left">步骤</th>
-                        <th class="px-2 py-2 text-left">内容</th>
-                        <th class="px-2 py-2 text-left">角色</th>
-                        <th class="px-2 py-2 text-left">系统</th>
-                    </tr>
+                    <tr><th class="px-2 py-2 text-left">步骤</th><th class="px-2 py-2 text-left">内容</th><th class="px-2 py-2 text-left">角色</th><th class="px-2 py-2 text-left">系统</th></tr>
                 </thead>
                 <tbody>
                     {% for s in process_steps_reference %}
@@ -559,17 +256,50 @@
                         <td class="px-2 py-2 font-mono">{{ s.no }}</td>
                         <td class="px-2 py-2">{{ s.title }}</td>
                         <td class="px-2 py-2">{{ s.roles }}</td>
-                        <td class="px-2 py-2">
-                            {% if s.online == "app" %}<span class="text-emerald-700">App/本系统</span>
-                            {% elif s.online == "partial" %}<span class="text-indigo-700">部分在线</span>
-                            {% else %}<span class="text-slate-500">主要为线下</span>{% endif %}
-                        </td>
+                        <td class="px-2 py-2">{% if s.online == "app" %}<span class="text-emerald-700">App/本系统</span>{% elif s.online == "partial" %}<span class="text-indigo-700">部分在线</span>{% else %}<span class="text-slate-500">主要为线下</span>{% endif %}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
     </details>
+
+    <script>
+    (function () {
+        var primaryForm = document.getElementById('primary-responsible-form');
+        if (primaryForm) {
+            primaryForm.addEventListener('submit', function (e) {
+                var checked = primaryForm.querySelector('input[name="assignee"]:checked');
+                if (!checked) {
+                    e.preventDefault();
+                    alert('请先选择一名统筹人');
+                    return false;
+                }
+                var name = checked.getAttribute('data-username') || '所选用户';
+                return confirm('确认指定「' + name + '」为本项目统筹人？');
+            });
+        }
+        document.querySelectorAll('form.dispatch-add-member-form').forEach(function (form) {
+            form.addEventListener('submit', function (e) {
+                var checked = form.querySelector('input[name="user_id"]:checked');
+                if (!checked) {
+                    e.preventDefault();
+                    alert('请先勾选一名要添加的用户');
+                    return false;
+                }
+                var role = form.getAttribute('data-role-label') || '该岗位';
+                var name = checked.getAttribute('data-username') || '';
+                return confirm('确认将「' + name + '」登记为「' + role + '」？\n登记后将自动同步 App 任务。');
+            });
+        });
+        {% if dispatch_role %}
+        var anchor = document.getElementById('dispatch-role-{{ dispatch_role }}');
+        if (anchor) {
+            anchor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+        {% endif %}
+    })();
+    </script>
 
     {% endif %}
 </div>

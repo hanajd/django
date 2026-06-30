@@ -1,0 +1,250 @@
+{# 项目工作台 · 仪器管理（与人员派工分离） #}
+<div class="space-y-6">
+    <div class="rounded-xl border border-violet-100 bg-violet-50/40 p-5">
+        <h3 class="text-base font-semibold text-slate-900 mb-1">仪器管理</h3>
+        <p class="text-xs text-slate-600 max-w-3xl">
+            按<strong>受检设备 × 现场记录</strong>为每个检测项分别选择仪器，使 App 现场记录与台账编号一一对应。
+            人员登记岗位后 App 任务会自动同步；仪器分配在本页独立完成。
+            与「<a href="?project_id={{ selected_project_id }}{{ workbench_fl_query }}&tab=dispatch" class="text-violet-700 underline font-medium">人员派工</a>」分开维护。
+        </p>
+    </div>
+
+    {% if not can_edit_project_workbench %}
+    <p class="text-sm text-slate-500">您无权维护仪器分配。</p>
+    {% elif not project_instrument_dispatch_panel.uses_per_item_assignment and not project_instrument_dispatch_panel.uses_kind_binding and not project_instrument_dispatch_panel.required_rows %}
+    <p class="text-sm text-slate-500 rounded-xl border border-slate-200 bg-slate-50 px-4 py-6 text-center">
+        请先在委托立项中绑定受检设备与现场记录任务，或配置任务模板仪器种类后再分配。
+    </p>
+    {% else %}
+
+    <section class="rounded-xl border border-violet-200 bg-violet-50/30 p-5">
+        <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+            <div class="min-w-0 flex-1">
+                <h4 class="text-base font-semibold text-slate-900">检测仪器分配与出库</h4>
+                <p class="text-xs text-slate-600 mt-1 max-w-2xl">{{ project_instrument_dispatch_panel.hint }}</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2 shrink-0">
+                {% if project_instrument_dispatch_panel.manual_picker_catalog.items or project_instrument_dispatch_panel.manual_picker_catalog.kinds %}
+                <button type="button" class="instrument-manual-open inline-flex items-center gap-1.5 rounded-xl bg-violet-700 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-800 shadow-sm">
+                    <i class="ri-list-check-2"></i>
+                    {% if project_instrument_dispatch_panel.uses_per_item_assignment %}按检测项分配仪器{% else %}手动分配仪器{% endif %}
+                </button>
+                {% endif %}
+                {% if project_instrument_dispatch_panel.assignment_mode == 'manual' %}
+                <span class="text-xs px-2.5 py-1 rounded-full bg-violet-100 text-violet-800 font-medium">已手动分配</span>
+                {% endif %}
+            </div>
+        </div>
+        {% if project_instrument_dispatch_panel.blocked_messages %}
+        <ul class="text-xs text-red-800 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-3 space-y-1 list-disc list-inside">
+            {% for msg in project_instrument_dispatch_panel.blocked_messages %}
+            <li>{{ msg }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+        {% if project_instrument_dispatch_panel.info_messages %}
+        <ul class="text-xs text-amber-900 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-3 space-y-1 list-disc list-inside">
+            {% for msg in project_instrument_dispatch_panel.info_messages %}
+            <li>{{ msg }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+
+        {% if project_instrument_dispatch_panel.detection_item_rows %}
+        <p class="text-xs font-medium text-slate-700 mb-2">
+            检测项目仪器分配（共 <strong>{{ project_instrument_dispatch_panel.detection_item_rows|length }}</strong> 项）：
+        </p>
+        <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white mb-4">
+            <table class="min-w-full text-sm text-left">
+                <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+                    <tr>
+                        <th class="px-3 py-2">受检设备</th>
+                        <th class="px-3 py-2">现场记录 / 任务号</th>
+                        <th class="px-3 py-2">已选仪器编号</th>
+                        <th class="px-3 py-2">状态</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for row in project_instrument_dispatch_panel.detection_item_rows %}
+                    <tr>
+                        <td class="px-3 py-2 text-xs text-slate-800">{{ row.equipment_title }}</td>
+                        <td class="px-3 py-2 text-xs">
+                            <span class="font-mono text-violet-800">{{ row.task_no }}</span>
+                            <span class="text-slate-600"> · {{ row.site_task_label }}</span>
+                        </td>
+                        <td class="px-3 py-2 text-xs font-mono text-slate-700">
+                            {% if row.instrument_codes %}
+                            {{ row.instrument_codes|join:"、" }}
+                            {% else %}
+                            <span class="text-slate-400">未分配</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-3 py-2 text-xs">
+                            {% if row.is_complete and row.instrument_codes %}
+                            <span class="text-emerald-700">已分配</span>
+                            {% elif row.is_complete and not row.has_template_kinds %}
+                            <span class="text-slate-500">自选（未分配）</span>
+                            {% elif row.is_complete %}
+                            <span class="text-emerald-700">已分配</span>
+                            {% else %}
+                            <span class="text-amber-700">待分配 {{ row.assigned_kind_count }}/{{ row.required_kind_count }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        {% if project_instrument_dispatch_panel.scoped_kind_rows.qualityControl or project_instrument_dispatch_panel.scoped_kind_rows.radiationProtection %}
+        <details class="mb-4 rounded-lg border border-slate-200 bg-white/80">
+            <summary class="cursor-pointer px-3 py-2 text-xs font-medium text-slate-600">展开：任务模板仪器种类汇总</summary>
+            <div class="px-3 pb-3 pt-1">
+        {% if project_instrument_dispatch_panel.scoped_kind_rows.qualityControl %}
+        <div class="mb-3">
+            <p class="text-xs font-semibold inline-flex px-2 py-0.5 rounded-md mb-1.5 bg-sky-100 text-sky-800">
+                质控（性能）检测 · {{ project_instrument_dispatch_panel.scoped_kind_rows.qualityControl|length }} 种
+            </p>
+            <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+                <table class="min-w-full text-sm text-left">
+                    <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+                        <tr><th class="px-3 py-2">仪器种类</th><th class="px-3 py-2">引用任务模板</th><th class="px-3 py-2">同种在库</th></tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        {% for row in project_instrument_dispatch_panel.scoped_kind_rows.qualityControl %}
+                        <tr>
+                            <td class="px-3 py-2">{{ row.name }}{% if row.model %} <span class="text-slate-400">({{ row.model }})</span>{% endif %}</td>
+                            <td class="px-3 py-2 text-xs text-slate-700">{{ row.task_codes|join:"、" }}</td>
+                            <td class="px-3 py-2 text-xs tabular-nums">{{ row.kind_in_stock }}/{{ row.kind_total }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+        {% if project_instrument_dispatch_panel.scoped_kind_rows.radiationProtection %}
+        <div class="mb-2">
+            <p class="text-xs font-semibold inline-flex px-2 py-0.5 rounded-md mb-1.5 bg-amber-100 text-amber-900">
+                工作场所放射防护检测 · {{ project_instrument_dispatch_panel.scoped_kind_rows.radiationProtection|length }} 种
+            </p>
+            <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+                <table class="min-w-full text-sm text-left">
+                    <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+                        <tr><th class="px-3 py-2">仪器种类</th><th class="px-3 py-2">引用任务模板</th><th class="px-3 py-2">同种在库</th></tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        {% for row in project_instrument_dispatch_panel.scoped_kind_rows.radiationProtection %}
+                        <tr>
+                            <td class="px-3 py-2">{{ row.name }}{% if row.model %} <span class="text-slate-400">({{ row.model }})</span>{% endif %}</td>
+                            <td class="px-3 py-2 text-xs text-slate-700">{{ row.task_codes|join:"、" }}</td>
+                            <td class="px-3 py-2 text-xs tabular-nums">{{ row.kind_in_stock }}/{{ row.kind_total }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+            </div>
+        </details>
+        {% endif %}
+
+        <form method="post" class="mb-4 rounded-lg border border-violet-100 bg-white/90 px-3 py-3 space-y-2">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="set_instrument_share_mode">
+            <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+            <p class="text-xs font-medium text-slate-800">同种仪器在本委托内的分配策略（无委托设备时按模板汇总分配时生效）</p>
+            <label class="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
+                <input type="checkbox" name="instrument_share_across_tasks" value="1"
+                       class="rounded border-slate-300 text-violet-600 mt-0.5"
+                       {% if project_instrument_dispatch_panel.instrument_share_across_tasks %}checked{% endif %}>
+                <span>
+                    <strong>跨模板共用一台</strong>
+                    <span class="block text-xs text-slate-500 mt-0.5">按检测项分配时各设备独立选仪；此选项主要影响旧版按种类汇总分配。</span>
+                </span>
+            </label>
+            <button type="submit" class="inline-flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-medium text-violet-900 hover:bg-violet-100">保存分配策略</button>
+        </form>
+
+        {% if project_instrument_dispatch_panel.scoped_required_rows.qualityControl or project_instrument_dispatch_panel.scoped_required_rows.radiationProtection %}
+        <p class="text-xs font-medium text-slate-700 mb-2">已分配的具体编号（汇总）：</p>
+        {% if project_instrument_dispatch_panel.scoped_required_rows.qualityControl %}
+        <p class="text-[11px] font-semibold text-sky-800 mb-1">质控（性能）套装</p>
+        <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white mb-3">
+            <table class="min-w-full text-sm text-left">
+                <thead class="bg-slate-50 text-xs text-slate-500 uppercase"><tr><th class="px-3 py-2">编号</th><th class="px-3 py-2">名称</th><th class="px-3 py-2">状态</th></tr></thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for row in project_instrument_dispatch_panel.scoped_required_rows.qualityControl %}
+                    <tr>
+                        <td class="px-3 py-2 font-mono text-xs">{{ row.code }}</td>
+                        <td class="px-3 py-2">{{ row.name }}{% if row.model %} <span class="text-slate-400">({{ row.model }})</span>{% endif %}</td>
+                        <td class="px-3 py-2">
+                            {% if row.status == 'in_stock' %}<span class="text-emerald-700">在库</span>
+                            {% elif row.status == 'on_project' %}<span class="text-indigo-700">{{ row.status_label }}</span>
+                            {% elif row.status == 'shared' %}<span class="text-amber-700">{{ row.status_label }}</span>
+                            {% else %}<span class="text-slate-400">{{ row.status_label }}</span>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        {% if project_instrument_dispatch_panel.scoped_required_rows.radiationProtection %}
+        <p class="text-[11px] font-semibold text-amber-900 mb-1">防护套装</p>
+        <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white mb-3">
+            <table class="min-w-full text-sm text-left">
+                <thead class="bg-slate-50 text-xs text-slate-500 uppercase"><tr><th class="px-3 py-2">编号</th><th class="px-3 py-2">名称</th><th class="px-3 py-2">状态</th></tr></thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for row in project_instrument_dispatch_panel.scoped_required_rows.radiationProtection %}
+                    <tr>
+                        <td class="px-3 py-2 font-mono text-xs">{{ row.code }}</td>
+                        <td class="px-3 py-2">{{ row.name }}{% if row.model %} <span class="text-slate-400">({{ row.model }})</span>{% endif %}</td>
+                        <td class="px-3 py-2">
+                            {% if row.status == 'in_stock' %}<span class="text-emerald-700">在库</span>
+                            {% elif row.status == 'on_project' %}<span class="text-indigo-700">{{ row.status_label }}</span>
+                            {% elif row.status == 'shared' %}<span class="text-amber-700">{{ row.status_label }}</span>
+                            {% else %}<span class="text-slate-400">{{ row.status_label }}</span>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        {% elif project_instrument_dispatch_panel.required_rows %}
+        <p class="text-xs font-medium text-slate-700 mb-2">已分配的具体编号：</p>
+        <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white mb-3">
+            <table class="min-w-full text-sm text-left">
+                <thead class="bg-slate-50 text-xs text-slate-500 uppercase"><tr><th class="px-3 py-2">编号</th><th class="px-3 py-2">名称</th><th class="px-3 py-2">状态</th></tr></thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for row in project_instrument_dispatch_panel.required_rows %}
+                    <tr>
+                        <td class="px-3 py-2 font-mono text-xs">{{ row.code }}</td>
+                        <td class="px-3 py-2">{{ row.name }}{% if row.model %} <span class="text-slate-400">({{ row.model }})</span>{% endif %}</td>
+                        <td class="px-3 py-2">
+                            {% if row.status == 'in_stock' %}<span class="text-emerald-700">在库</span>
+                            {% elif row.status == 'on_project' %}<span class="text-indigo-700">{{ row.status_label }}</span>
+                            {% elif row.status == 'shared' %}<span class="text-amber-700">{{ row.status_label }}</span>
+                            {% else %}<span class="text-slate-400">{{ row.status_label }}</span>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        <p class="text-xs text-slate-600 rounded-lg border border-violet-100 bg-white/90 px-3 py-2.5 leading-relaxed">
+            <strong class="text-violet-900">说明：</strong>推荐点「按检测项分配仪器」，为每台受检设备的每个现场记录任务分别勾选台账设备。
+            停用/结束委托时，仅将本项目从该仪器的关联中移除（其他委托仍可共用同一台）。
+        </p>
+    </section>
+
+    {% if project_instrument_dispatch_panel.manual_picker_catalog.items or project_instrument_dispatch_panel.manual_picker_catalog.kinds %}
+    {% include "core/partials/library_instrument_manual_picker_sheet.html" %}
+    {% endif %}
+    {% endif %}
+</div>
