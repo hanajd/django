@@ -19,40 +19,16 @@ _DATA_URL_RE = re.compile(
 # 现场记录仅保留三个签名角色
 CANONICAL_SIGNATURE_ROLES = ("inspector", "checker", "accompanyingPerson")
 
-# 旧版提交只读归并（dynamicData 历史 f 槽）
-_LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE: dict[str, str] = {
-    "f36": "inspector",
-    "f35": "checker",
-    "f34": "accompanyingPerson",
-    "f76": "inspector",
-    "f78": "checker",
-    "f77": "accompanyingPerson",
-}
-
-# 曾误将 f625/f632/f633 硬编码为签名；只读兼容已落盘旧提交，禁止用于新模板/schema
-_STALE_MISASSIGNED_SIGNATURE_PDF_FIELD_ROLES: dict[str, str] = {
-    "f625": "inspector",
-    "f632": "checker",
-    "f633": "accompanyingPerson",
-}
-
-_LEGACY_SIGNATURE_PDF_FIELD_IDS = frozenset(_LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE.keys())
-_STALE_SIGNATURE_PDF_FIELD_IDS = frozenset(_STALE_MISASSIGNED_SIGNATURE_PDF_FIELD_ROLES.keys())
-
 
 def _signature_maps_for_payload(
     payload: dict | None,
     *,
     template_obj: dict | None = None,
 ) -> tuple[dict[str, str], dict[str, str]]:
-    """role↔pdfFieldId：优先模板/steps 动态解析，叠加旧版只读 f 槽。"""
+    """role↔pdfFieldId：仅从模板 formSchema/steps 或 payload steps 动态解析。"""
     role_to_pdf, pdf_to_role = collect_signature_pdf_bindings(template_obj, payload=payload)
     role_to_pdf = dict(role_to_pdf)
     pdf_to_role = dict(pdf_to_role)
-    for pid, role in _LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE.items():
-        pdf_to_role.setdefault(pid, role)
-    for pid, role in _STALE_MISASSIGNED_SIGNATURE_PDF_FIELD_ROLES.items():
-        pdf_to_role.setdefault(pid, role)
     for role in CANONICAL_SIGNATURE_ROLES:
         if role not in role_to_pdf:
             for pid, r in pdf_to_role.items():
@@ -88,23 +64,6 @@ def _dynamic_signature_field_ids(
     return frozenset(_pdf_field_to_signature_role_map(payload, template_obj=template_obj).keys())
 
 
-# 模块级默认（无 payload 时仅旧版 f 槽；调用方应优先传 payload/template）
-_PDF_FIELD_TO_SIGNATURE_ROLE: dict[str, str] = {
-    **_LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE,
-    **_STALE_MISASSIGNED_SIGNATURE_PDF_FIELD_ROLES,
-}
-_SIGNATURE_PDF_FIELD_IDS = frozenset(_PDF_FIELD_TO_SIGNATURE_ROLE.keys())
-_ROLE_TO_PDF_FIELD: dict[str, str] = {
-    role: next((pid for pid, r in _PDF_FIELD_TO_SIGNATURE_ROLE.items() if r == role), "")
-    for role in CANONICAL_SIGNATURE_ROLES
-}
-_ROLE_TO_PDF_FIELD = {k: v for k, v in _ROLE_TO_PDF_FIELD.items() if v}
-
-# 无 payload 时的兜底集合（旧版 + 历史误映射）；新逻辑请用 ``_dynamic_signature_field_ids(payload)``
-_DYNAMIC_SIGNATURE_FIELD_IDS = (
-    _SIGNATURE_PDF_FIELD_IDS | _LEGACY_SIGNATURE_PDF_FIELD_IDS | _STALE_SIGNATURE_PDF_FIELD_IDS
-)
-
 _ROLE_ALIAS_TO_CANONICAL: dict[str, str] = {
     "inspector": "inspector",
     "maininspector": "inspector",
@@ -119,15 +78,6 @@ _ROLE_ALIAS_TO_CANONICAL: dict[str, str] = {
     "accompanyingperson": "accompanyingPerson",
     "approver": "accompanyingPerson",
     "受检单位陪同人": "accompanyingPerson",
-    "f625": "inspector",
-    "f632": "checker",
-    "f633": "accompanyingPerson",
-    "f36": "inspector",
-    "f35": "checker",
-    "f34": "accompanyingPerson",
-    "f76": "inspector",
-    "f78": "checker",
-    "f77": "accompanyingPerson",
 }
 
 _SIGNATURE_KEYS = frozenset(_ROLE_ALIAS_TO_CANONICAL.keys()) | frozenset(
@@ -300,9 +250,14 @@ def _signature_value_priority(value: str) -> int:
     return 9
 
 
-def consolidate_submit_signatures(payload: dict) -> dict:
+def consolidate_submit_signatures(
+    payload: dict,
+    *,
+    template_obj: dict | None = None,
+) -> dict:
     """
-    将 signatures / dynamicData 中分散的签名合并为三个角色，并去掉 f665 等误占槽位的图片。
+    将 signatures / dynamicData 中分散的签名合并为三个角色；
+    仅写入模板解析出的签名 pdfFieldId，并剔除误写入其它 f 槽的重复签名路径。
     """
     if not isinstance(payload, dict):
         return payload
@@ -322,29 +277,14 @@ def consolidate_submit_signatures(payload: dict) -> dict:
         if _is_stored_media_path(s) or _looks_like_inline_image(s):
             buckets[role].append(s)
 
-    role_to_pdf = _role_to_pdf_field_map(out)
-    pdf_to_role = _pdf_field_to_signature_role_map(out)
+    role_to_pdf = _role_to_pdf_field_map(out, template_obj=template_obj)
+    pdf_to_role = _pdf_field_to_signature_role_map(out, template_obj=template_obj)
     dynamic_ids = set(pdf_to_role.keys())
 
     for k, v in sig_in.items():
         _offer(str(k), v)
     for pid in dynamic_ids:
         _offer(pid, dd.get(pid))
-
-    # 误写入 f665/f676/f677 的签名图：仅当对应角色仍空时归位到检测员/校核/陪同
-    _LEGACY_MISPLACED = (
-        ("f665", "inspector"),
-        ("f676", "checker"),
-        ("f677", "accompanyingPerson"),
-    )
-    for pid, role in _LEGACY_MISPLACED:
-        val = dd.get(pid)
-        if not isinstance(val, str) or not val.strip():
-            continue
-        if not (_is_stored_media_path(val) or _looks_like_inline_image(val)):
-            continue
-        if not buckets[role]:
-            buckets[role].append(val.strip())
 
     merged: dict[str, str | None] = {}
     for role in CANONICAL_SIGNATURE_ROLES:
@@ -357,27 +297,36 @@ def consolidate_submit_signatures(payload: dict) -> dict:
 
     if isinstance(out.get("dynamicData"), dict):
         dd_out = out["dynamicData"]
+        merged_urls = {
+            str(merged[r]).strip()
+            for r in CANONICAL_SIGNATURE_ROLES
+            if merged.get(r)
+        }
         for role in CANONICAL_SIGNATURE_ROLES:
             pid = role_to_pdf.get(role)
             if pid and merged.get(role):
                 dd_out[pid] = merged[role]
-        for pid, _role in _LEGACY_MISPLACED:
-            if _looks_like_inline_image(dd_out.get(pid)) or _is_stored_media_path(
-                dd_out.get(pid)
-            ):
-                dd_out.pop(pid, None)
-        for pid in _LEGACY_SIGNATURE_PDF_FIELD_IDS:
-            val = dd_out.get(pid)
-            if isinstance(val, str) and val.strip() and (
-                _looks_like_inline_image(val) or _is_stored_media_path(val)
-            ):
+        for pid, val in list(dd_out.items()):
+            if pid in pdf_to_role:
+                continue
+            if not re.match(r"^f\d+$", str(pid or ""), re.I):
+                continue
+            if not isinstance(val, str) or not val.strip():
+                continue
+            if not (_looks_like_inline_image(val) or _is_stored_media_path(val)):
+                continue
+            if val.strip() in merged_urls:
                 dd_out.pop(pid, None)
     return out
 
 
-def extract_canonical_signature_assets(payload: dict) -> tuple[dict, list[dict]]:
+def extract_canonical_signature_assets(
+    payload: dict,
+    *,
+    template_obj: dict | None = None,
+) -> tuple[dict, list[dict]]:
     """每个角色至多落盘一张 PNG；同内容哈希复用同一文件。"""
-    out = consolidate_submit_signatures(payload)
+    out = consolidate_submit_signatures(payload, template_obj=template_obj)
     pending: list[dict] = []
     sig = out.get("signatures")
     if not isinstance(sig, dict):
@@ -385,7 +334,7 @@ def extract_canonical_signature_assets(payload: dict) -> tuple[dict, list[dict]]
 
     hash_to_pending: dict[str, dict] = {}
 
-    role_to_pdf = _role_to_pdf_field_map(out)
+    role_to_pdf = _role_to_pdf_field_map(out, template_obj=template_obj)
 
     for role in CANONICAL_SIGNATURE_ROLES:
         val = sig.get(role)
@@ -729,13 +678,17 @@ def _paths_claimed_by_pending(pending: list[dict]) -> set[tuple]:
     return claimed
 
 
-def extract_all_payload_binary_assets(payload: dict) -> tuple[dict, list[dict]]:
+def extract_all_payload_binary_assets(
+    payload: dict,
+    *,
+    template_obj: dict | None = None,
+) -> tuple[dict, list[dict]]:
     """
     全量提取 payload 中的内联图片：签名三角色 + sectionPhotos + 其余路径；
     相同字节只落盘一次，所有引用路径写回同一 URL（不重不漏）。
     """
-    out = consolidate_submit_signatures(copy.deepcopy(payload))
-    out, pending = extract_canonical_signature_assets(out)
+    out = consolidate_submit_signatures(copy.deepcopy(payload), template_obj=template_obj)
+    out, pending = extract_canonical_signature_assets(out, template_obj=template_obj)
     hash_index: dict[str, dict] = {
         hashlib.sha256(item["raw_bytes"]).hexdigest(): item
         for item in pending
@@ -859,6 +812,7 @@ def strip_inline_signatures(payload: dict) -> dict:
 def prepare_submit_payload_for_storage(
     payload: dict,
     *,
+    template_obj: dict | None = None,
     strip_signatures: bool = True,
 ) -> tuple[dict, list[dict], list[dict]]:
     """
@@ -867,7 +821,9 @@ def prepare_submit_payload_for_storage(
  落盘后须调用 apply_extracted_asset_urls 写回相对 URL。
     """
     storage_payload = normalize_floor_plan_dynamic_data(payload)
-    storage_payload, all_pending = extract_all_payload_binary_assets(storage_payload)
+    storage_payload, all_pending = extract_all_payload_binary_assets(
+        storage_payload, template_obj=template_obj
+    )
     if strip_signatures:
         storage_payload = strip_all_inline_binary(storage_payload)
     residual = find_residual_inline_binary(storage_payload)

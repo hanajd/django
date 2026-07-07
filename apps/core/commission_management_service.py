@@ -10,6 +10,7 @@ from apps.core.library_access import (
     APP_SIDE_ROLE_CODES,
     _role_code,
     library_user_can_assign_tasks_to_participants,
+    library_user_can_delete_library_project,
     library_user_has_task_assignment_on_project,
     library_user_is_project_primary_responsible,
     library_user_may_assign_on_project,
@@ -580,6 +581,8 @@ def commission_project_rows(
                 "assignee_labels": ", ".join(sorted(set(unique_users.values()))) or "—",
                 "assignees": assignees,
                 "can_manage": can_manage,
+                "can_lifecycle_manage": library_user_can_delete_library_project(viewer, p),
+                "can_deactivate": library_user_can_delete_library_project(viewer, p) and p.is_active,
                 "workbench_url": f"?project_id={p.pk}&tab=submissions",
                 "_sort_ts": sort_ts,
             }

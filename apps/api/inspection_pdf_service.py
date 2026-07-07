@@ -37,12 +37,59 @@ def site_record_task_count_for_project(project) -> int:
 
 def resolve_manual_report_device_count(distinct_inspection_case_count: int) -> int:
     """
-    文件库多选合并导出**一份**报告 PDF 时的「受检设备台数」：
-    按勾选记录所关联的**不同 inspection 案件（报告/受检设备）份数**计；
-    与「每份报告对应一台受检设备、合成报告台数=合并的报告份数」一致。
-    可与 `site_record_task_count_for_project(project)` 对照，校验现场记录类任务配置是否覆盖案件规模。
+    已废弃：按案件数计台数会把同一报告下多条现场记录（如 DSA 性能+CBCT）误计为多台。
+    请改用 ``resolve_merged_report_device_count``。
     """
     return max(0, int(distinct_inspection_case_count))
+
+
+def resolve_merged_report_device_count(
+    project,
+    rows_ok,
+    *,
+    report_task=None,
+) -> int:
+    """
+    多份现场记录合并导出**一份**报告 PDF 时的「受检设备台数」：
+    按所涉 **报告任务** 计数，而非现场记录条数或 inspection 案件数。
+    同一报告模板下的多条现场记录（如 DSA 状态检测的性能+防护）仍为 1 台。
+    """
+    from apps.core.project_numbering import parent_report_task_for_site_task
+
+    if (
+        report_task is not None
+        and getattr(report_task, "output_target", None) == LibraryTask.OUTPUT_REPORT
+    ):
+        return 1
+
+    report_pks: set[int] = set()
+    for lf, case, _payload in rows_ok or []:
+        site_tasks = [
+            t
+            for t in lf.library_tasks.all()
+            if getattr(t, "output_target", None) == LibraryTask.OUTPUT_SITE_RECORD
+        ]
+        if site_tasks:
+            for st in site_tasks:
+                parent = parent_report_task_for_site_task(st, project)
+                if parent is not None:
+                    report_pks.add(int(parent.pk))
+            continue
+        if case is None:
+            continue
+        lt = _resolve_library_task_for_task_no((case.case_no or "").strip(), project)
+        if lt is None:
+            continue
+        if lt.output_target == LibraryTask.OUTPUT_REPORT:
+            report_pks.add(int(lt.pk))
+        elif lt.output_target == LibraryTask.OUTPUT_SITE_RECORD:
+            parent = parent_report_task_for_site_task(lt, project)
+            if parent is not None:
+                report_pks.add(int(parent.pk))
+
+    if not report_pks and report_task is not None:
+        report_pks.add(int(report_task.pk))
+    return max(1, len(report_pks))
 
 
 def resolve_report_device_count_for_project(
@@ -54,7 +101,7 @@ def resolve_report_device_count_for_project(
 ) -> int:
     """
     单份报告「受检设备台数 / 受检工作场所」：
-    - 多案合并导出：``manual_override``（不同案件数）；
+    - 多现场记录合并导出同一报告：``manual_override``（按报告任务数，通常为 1）；
     - 单份现场记录生成：固定 1 台（对应当前提交所关联的一台委托设备）。
     """
     if manual_override is not None:
@@ -246,6 +293,58 @@ def resolve_report_library_task_for_file(
     return None
 
 
+def library_file_matches_project_library_task(
+    lf: LibraryFile,
+    *,
+    project: LibraryProject,
+    library_task: LibraryTask,
+    case: InspectionCase | None = None,
+) -> bool:
+    """
+    文件是否属于项目内指定 LibraryTask（与文件库分组 resolve_*_library_task_for_file 一致）。
+    供 projectId + taskNo API 仅返回当前任务相关文件，避免整项目同 category 文件混入。
+    当传入 assignment case 时，现场记录/报告/检测提交须关联同一案件（同模板多派工各有独立文件）。
+    """
+    if lf is None or project is None or library_task is None:
+        return False
+    cat = lf.category
+    case_scoped_categories = (
+        LibraryFile.CATEGORY_SITE_RECORD,
+        LibraryFile.CATEGORY_INSPECTION_SUBMIT,
+        LibraryFile.CATEGORY_REPORT,
+    )
+    if case is not None and cat in case_scoped_categories:
+        if lf.link_entity != LibraryFile.LINK_ENTITY_INSPECTION_CASE:
+            return False
+        if int(lf.link_object_id or 0) != int(case.pk):
+            return False
+    file_case = case
+    if lf.link_entity == LibraryFile.LINK_ENTITY_INSPECTION_CASE and lf.link_object_id:
+        linked = InspectionCase.objects.filter(pk=int(lf.link_object_id)).first()
+        if linked is not None:
+            file_case = linked
+    if cat == LibraryFile.CATEGORY_SITE_RECORD:
+        if getattr(library_task, "output_target", None) != LibraryTask.OUTPUT_SITE_RECORD:
+            return False
+        resolved = resolve_site_record_library_task_for_file(lf, file_case, project)
+        return resolved is not None and resolved.pk == library_task.pk
+    if cat == LibraryFile.CATEGORY_REPORT:
+        if getattr(library_task, "output_target", None) != LibraryTask.OUTPUT_REPORT:
+            return False
+        resolved = resolve_report_library_task_for_file(lf, file_case, project)
+        return resolved is not None and resolved.pk == library_task.pk
+    if cat == LibraryFile.CATEGORY_INSPECTION_SUBMIT:
+        if getattr(library_task, "output_target", None) != LibraryTask.OUTPUT_SITE_RECORD:
+            return False
+        resolved = resolve_site_record_library_task_for_file(lf, file_case, project)
+        return resolved is not None and resolved.pk == library_task.pk
+    if lf.library_tasks.filter(pk=library_task.pk).exists():
+        return True
+    if file_case is not None and lf.link_entity == LibraryFile.LINK_ENTITY_INSPECTION_CASE:
+        return int(lf.link_object_id or 0) == int(file_case.pk)
+    return False
+
+
 def resolve_report_task_for_case(
     task_no: str,
     project,
@@ -351,6 +450,250 @@ def dedupe_inspection_submit_selection_latest_per_site_record(
 
     out = [lf for lf in seq if int(lf.pk) not in superseded]
     return out, notes
+
+
+def _pick_newest_library_file(files: Sequence[LibraryFile]) -> LibraryFile | None:
+    if not files:
+        return None
+    return max(
+        files,
+        key=lambda f: (
+            f.created_at.timestamp() if f.created_at else 0.0,
+            int(f.pk),
+        ),
+    )
+
+
+def _site_tasks_for_report_folder_merge(project, report_task: LibraryTask | None) -> tuple[list[LibraryTask], list[str]]:
+    """报告文件夹合并导出：按 report_source_tasks 顺序列出待合并的现场记录任务。"""
+    from apps.api.inspection_report_make import _report_site_record_source_tasks
+    from apps.core.project_numbering import parent_report_task_for_site_task
+
+    notes: list[str] = []
+    if project is None or report_task is None:
+        return [], notes
+    tasks = list(_report_site_record_source_tasks(project, report_task))
+    if report_task.report_source_tasks.filter(output_target=LibraryTask.OUTPUT_SITE_RECORD).exists():
+        return tasks, notes
+    filtered: list[LibraryTask] = []
+    for st in tasks:
+        parent = parent_report_task_for_site_task(st, project)
+        if parent is None or parent.pk == report_task.pk:
+            filtered.append(st)
+    if filtered:
+        notes.append("报告未配置 report_source_tasks，已按项目内归属本报告的现场记录任务合并。")
+        return filtered, notes
+    return [], notes
+
+
+def _group_library_files_by_site_task(
+    project: LibraryProject,
+    user,
+    site_task_pks: set[int],
+    *,
+    category: str,
+    ext: str,
+) -> dict[int, list[LibraryFile]]:
+    """将项目内某分类文件按现场记录任务分组（与文件库文件夹层级一致）。"""
+    from apps.core.library_access import library_file_access_allowed
+
+    by_site: dict[int, list[LibraryFile]] = {int(pk): [] for pk in site_task_pks}
+    if not site_task_pks:
+        return by_site
+    case_cache: dict[int, InspectionCase] = {}
+    cand_qs = (
+        LibraryFile.objects.filter(projects=project, category=category)
+        .filter(link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE)
+        .select_related("created_by")
+        .prefetch_related("library_tasks")
+        .order_by("-created_at", "-id")
+        .distinct()
+    )
+    ext_l = (ext or "").lower()
+    for lf in cand_qs:
+        on = (lf.original_name or "").lower()
+        if ext_l and not on.endswith(ext_l):
+            continue
+        if not library_file_access_allowed(user, lf):
+            continue
+        try:
+            case_id = int(lf.link_object_id)
+        except (TypeError, ValueError):
+            continue
+        case = case_cache.get(case_id)
+        if case is None:
+            case = InspectionCase.objects.select_related("library_project").filter(pk=case_id).first()
+            if case is not None:
+                case_cache[case_id] = case
+        if case is None or case.library_project_id != project.pk:
+            continue
+        st = resolve_site_record_library_task_for_file(lf, case, project)
+        if st is None or int(st.pk) not in by_site:
+            continue
+        by_site[int(st.pk)].append(lf)
+    return by_site
+
+
+def _load_submit_payload_from_library_file(
+    lf: LibraryFile,
+    case: InspectionCase,
+    *,
+    as_site_record_pdf: bool,
+) -> tuple[dict | None, InspectionCase | None, str]:
+    if as_site_record_pdf:
+        return resolve_submit_payload_for_site_record_pdf_lf(lf)
+    try:
+        p = pipeline_service.library_absolute_path(lf.relative_path)
+        submit_payload = json_std.loads(p.read_text(encoding="utf-8", errors="replace"))
+    except Exception as exc:
+        return None, case, f"文件读取失败 ({exc})"
+    submit_payload = _normalize_submit_payload_for_fill(submit_payload)
+    if not isinstance(submit_payload, dict):
+        return None, case, "检测提交数据格式无效"
+    return submit_payload, case, ""
+
+
+def _collect_latest_submit_rows_for_site_tasks(
+    project: LibraryProject,
+    site_tasks: Sequence[LibraryTask],
+    user,
+    *,
+    tab: str = "inspection_submit",
+    source_mode: str = "tab",
+) -> tuple[list[tuple[LibraryFile, InspectionCase, dict]], list[str], list[str]]:
+    """
+    按现场记录任务（文件库文件夹）顺序，各取最新一条数据源后解析为提交 JSON。
+
+    source_mode:
+    - tab: 由当前 Tab 决定（检测提交=JSON，现场记录=PDF）
+    - site_record_first: 各文件夹优先最新现场记录 PDF，无 PDF 时回退最新检测提交 JSON（文件夹合并导出）
+    """
+    info_notes: list[str] = []
+    errors: list[str] = []
+    rows_ok: list[tuple[LibraryFile, InspectionCase, dict]] = []
+    site_tasks = [st for st in (site_tasks or []) if st is not None]
+    if project is None or not site_tasks:
+        return [], info_notes, ["未指定可导出的现场记录任务"]
+
+    site_pks = {int(st.pk) for st in site_tasks}
+    if source_mode == "site_record_first":
+        pdf_by_site = _group_library_files_by_site_task(
+            project, user, site_pks, category=LibraryFile.CATEGORY_SITE_RECORD, ext=".pdf"
+        )
+        json_by_site = _group_library_files_by_site_task(
+            project, user, site_pks, category=LibraryFile.CATEGORY_INSPECTION_SUBMIT, ext=".json"
+        )
+    else:
+        use_site_pdf = tab == "site_record"
+        category = LibraryFile.CATEGORY_SITE_RECORD if use_site_pdf else LibraryFile.CATEGORY_INSPECTION_SUBMIT
+        ext = ".pdf" if use_site_pdf else ".json"
+        single_by_site = _group_library_files_by_site_task(project, user, site_pks, category=category, ext=ext)
+        pdf_by_site = single_by_site if use_site_pdf else {pk: [] for pk in site_pks}
+        json_by_site = single_by_site if not use_site_pdf else {pk: [] for pk in site_pks}
+
+    case_cache: dict[int, InspectionCase] = {}
+
+    for st in site_tasks:
+        st_label = f"{st.code} · {st.name}"
+        pdf_group = pdf_by_site.get(int(st.pk)) or []
+        json_group = json_by_site.get(int(st.pk)) or []
+        winner_pdf = _pick_newest_library_file(pdf_group)
+        winner_json = _pick_newest_library_file(json_group)
+
+        if source_mode == "site_record_first":
+            if winner_pdf is not None:
+                winner = winner_pdf
+                as_pdf = True
+                group = pdf_group
+                src_lbl = "现场记录 PDF"
+            elif winner_json is not None:
+                winner = winner_json
+                as_pdf = False
+                group = json_group
+                src_lbl = "检测提交 JSON"
+                info_notes.append(f"{st_label}：无现场记录 PDF，已回退使用最新检测提交 JSON")
+            else:
+                errors.append(f"{st_label}: 未找到可用的现场记录 PDF 或检测提交 JSON")
+                continue
+        else:
+            group = pdf_group if tab == "site_record" else json_group
+            winner = _pick_newest_library_file(group)
+            as_pdf = tab == "site_record"
+            src_lbl = "现场记录 PDF" if as_pdf else "检测提交 JSON"
+            if winner is None:
+                errors.append(f"{st_label}: 未找到可用的{src_lbl}")
+                continue
+
+        if len(group) > 1:
+            info_notes.append(
+                f"{st_label}：共 {len(group)} 份{src_lbl}，已自动采用最新「{winner.original_name or winner.pk}」"
+            )
+
+        try:
+            case_id = int(winner.link_object_id)
+        except (TypeError, ValueError):
+            errors.append(f"{st_label}: 文件未关联案件")
+            continue
+        case = case_cache.get(case_id)
+        if case is None:
+            case = InspectionCase.objects.select_related("library_project").filter(pk=case_id).first()
+            if case is not None:
+                case_cache[case_id] = case
+        if case is None:
+            errors.append(f"{st_label}: 关联案件不存在")
+            continue
+
+        submit_payload, case2, err = _load_submit_payload_from_library_file(
+            winner, case, as_site_record_pdf=as_pdf
+        )
+        if err or case2 is None or not isinstance(submit_payload, dict):
+            errors.append(f"{st_label}: {err or '未能解析为检测提交数据'}")
+            continue
+        case = case2
+        if not SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(submit_payload.keys()):
+            errors.append(f"{st_label}: 检测提交数据不完整")
+            continue
+        rows_ok.append((winner, case, submit_payload))
+
+    return rows_ok, info_notes, errors
+
+
+def collect_latest_submit_rows_for_report_folder(
+    project: LibraryProject,
+    report_task: LibraryTask,
+    user,
+    *,
+    tab: str = "inspection_submit",
+) -> tuple[list[tuple[LibraryFile, InspectionCase, dict]], list[str], list[str]]:
+    """
+    报告文件夹合并导出：按 report_source_tasks 顺序，
+    各现场记录文件夹取最新现场记录 PDF（无则回退检测提交 JSON），
+    再按报告模板 report_site_field_map 映射合并（见 _build_filled_template_fields_for_task）。
+    """
+    if project is None or report_task is None:
+        return [], [], ["项目或报告任务无效"]
+    site_tasks, setup_notes = _site_tasks_for_report_folder_merge(project, report_task)
+    if not site_tasks:
+        return [], setup_notes, ["该报告下没有可合并的现场记录任务，请先在任务模板库配置 report_source_tasks"]
+    rows_ok, info_notes, errors = _collect_latest_submit_rows_for_site_tasks(
+        project, site_tasks, user, tab=tab, source_mode="site_record_first"
+    )
+    return rows_ok, setup_notes + info_notes, errors
+
+
+def collect_latest_submit_rows_for_site_folder(
+    project: LibraryProject,
+    site_task: LibraryTask,
+    user,
+    *,
+    tab: str = "inspection_submit",
+) -> tuple[list[tuple[LibraryFile, InspectionCase, dict]], list[str], list[str]]:
+    """现场记录文件夹：取该环节最新现场记录 PDF（无则回退检测提交 JSON）。"""
+    if project is None or site_task is None:
+        return [], [], ["项目或现场记录任务无效"]
+    return _collect_latest_submit_rows_for_site_tasks(
+        project, [site_task], user, tab=tab, source_mode="site_record_first"
+    )
 
 
 def _display_task_no(task_no: str, project=None) -> str:

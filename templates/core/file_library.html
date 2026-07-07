@@ -13,6 +13,22 @@
     {% if project_selected %}<input type="hidden" name="project" value="{{ project_selected }}">{% endif %}
 </form>
 {% endif %}
+{% if can_manual_export_report_from_site_record %}
+<form id="file-lib-folder-export-form" method="post" action="{% url 'file_library' %}" class="hidden" aria-hidden="true">
+    {% csrf_token %}
+    <input type="hidden" name="tab" value="{{ tab }}">
+    {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
+    {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
+    {% if uploader_selected %}<input type="hidden" name="uploader" value="{{ uploader_selected }}">{% endif %}
+    {% if project_selected %}<input type="hidden" name="project" value="{{ project_selected }}">{% endif %}
+    {% if co_path %}<input type="hidden" name="co_path" value="{{ co_path }}">{% elif commission_org_raw %}<input type="hidden" name="commission_org" value="{{ commission_org_raw }}">{% endif %}
+    {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
+    <input type="hidden" name="action" id="file-lib-folder-export-action" value="">
+    <input type="hidden" name="project_folder_key" id="file-lib-folder-export-project" value="">
+    <input type="hidden" name="report_folder_key" id="file-lib-folder-export-report" value="">
+    <input type="hidden" name="site_folder_key" id="file-lib-folder-export-site" value="">
+</form>
+{% endif %}
 
 <div class="max-w-[1680px] mx-auto pb-8">
     <div id="library-explorer-dnd-scope" class="grid grid-cols-1 xl:grid-cols-[minmax(168px,200px)_minmax(200px,240px)_minmax(0,1fr)] gap-4 items-start"
@@ -68,7 +84,7 @@
             <div class="min-w-0 flex-1">
                 <h2 class="text-base font-semibold tracking-tight text-slate-900">筛选条件</h2>
                 <p class="mt-1 text-xs leading-relaxed text-slate-500">创建日期须同时选择起止日，含首尾最多 30 天。{% if not file_scope_own_only %}上传者筛选仅作用于当前 Tab 与上述日期范围内的记录。{% endif %}选择某一检测项目时，仍会包含未绑定项目的记录，便于核对遗漏关联。</p>
-                <p class="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600 ring-1 ring-slate-100">{% if tab == 'template' %}<strong>模板</strong>视图按环节任务一级分组；<strong>分组展开行最左侧复选框</strong>可勾选该环节下全部文件（无需展开）。列内为展示名、类型与简要关联，存储文件名可在行内「系统文件名」展开查看。{% elif tab == 'inspection_submit' %}<strong>检测提交</strong>按<strong>检测项目 → 报告环节 → 现场记录环节</strong>三级分组（与提交所绑定的文件库任务一致）；未解析到现场记录任务时归入「未绑定现场记录任务」。每一级分组<strong>展开行最左侧复选框</strong>可勾选该分支下全部文件（<strong>无需展开</strong>子分组即可操作）。手动导出 PDF/报告时，若同一案件且同一路径「现场记录」下存在多份 JSON，系统<strong>仅自动采用创建时间最新的一份</strong>，避免多版数据重叠。{% else %}默认按<strong>检测项目 → 报告环节</strong>二级分组；<strong>分组展开行最左侧复选框</strong>可勾选该分支下全部文件（无需展开子分组）。项目与环节名称见分组标题，列内为展示名、类型与委托号等摘要，存储路径同上展开查看。{% endif %}预览受权限控制；无预览权限时可下载后本地打开。下方检索仅匹配当前已加载且已展开的行。</p>
+                <p class="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600 ring-1 ring-slate-100">{% if tab == 'template' %}<strong>模板</strong>视图按环节任务一级分组；<strong>分组展开行最左侧复选框</strong>可勾选该环节下全部文件（无需展开）。列内为展示名、类型与简要关联，存储文件名可在行内「系统文件名」展开查看。{% elif tab == 'inspection_submit' or tab == 'site_record' %}按<strong>检测项目 → 报告环节 → 现场记录环节</strong>文件夹导航。在<strong>报告环节</strong>点「导出合并报告」：各现场记录文件夹取最新现场记录 PDF（无则回退检测提交 JSON），按报告模板 <strong>report_site_field_map</strong> 映射合并。{% else %}默认按<strong>检测项目 → 报告环节</strong>二级分组；<strong>分组展开行最左侧复选框</strong>可勾选该分支下全部文件（无需展开子分组）。项目与环节名称见分组标题，列内为展示名、类型与委托号等摘要，存储路径同上展开查看。{% endif %}预览受权限控制；无预览权限时可下载后本地打开。下方检索仅匹配当前已加载且已展开的行。</p>
             </div>
         </div>
         <form method="get" id="file-library-date-filter" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-12 lg:items-end">
@@ -522,7 +538,7 @@
         </div>
         {% if file_library_use_explorer %}
         <div class="px-4 py-4 sm:px-5">
-            {% include "core/partials/folder_explorer_main.html" with explorer_base_url=explorer_base_url folder_breadcrumbs=folder_breadcrumbs folder_entries=folder_entries files_at_path=files_at_path explorer_dnd_enabled=explorer_dnd_enabled explorer_dnd_post_url=explorer_dnd_post_url explorer_dnd_mode=explorer_dnd_mode fl_path=fl_path tab=tab date_from=date_from date_to=date_to uploader_selected=uploader_selected %}
+            {% include "core/partials/folder_explorer_main.html" with explorer_base_url=explorer_base_url folder_breadcrumbs=folder_breadcrumbs folder_entries=folder_entries files_at_path=files_at_path explorer_dnd_enabled=explorer_dnd_enabled explorer_dnd_post_url=explorer_dnd_post_url explorer_dnd_mode=explorer_dnd_mode fl_path=fl_path tab=tab date_from=date_from date_to=date_to uploader_selected=uploader_selected can_manual_export_report_from_site_record=can_manual_export_report_from_site_record folder_export_context=folder_export_context project_selected=project_selected commission_org_raw=commission_org_raw co_path=co_path %}
         </div>
         {% else %}
         <div class="divide-y divide-slate-100">
@@ -560,10 +576,10 @@
                                 <tr class="file-lib-row transition-colors hover:bg-slate-50/90" data-file-lib-search="{{ f.file_library_search_blob|default:''|escape }}">
                                     {% if file_library_row_selection %}
                                     <td class="px-3 py-3 align-top">
-                                        {% if f.file_library_may_delete %}
+                                        {% if f.file_library_may_select %}
                                         <input type="checkbox" name="ids" value="{{ f.pk }}" class="row-check mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30">
                                         {% else %}
-                                        <span class="mt-1 inline-block text-xs text-slate-400" title="仅可删除本人上传的文件">—</span>
+                                        <span class="mt-1 inline-block text-xs text-slate-400" title="当前文件不可勾选">—</span>
                                         {% endif %}
                                     </td>
                                     {% endif %}
@@ -618,6 +634,18 @@
                                 <div class="text-[11px] font-medium uppercase tracking-wide text-slate-500">报告环节</div>
                                 <div class="mt-0.5 text-sm font-medium leading-snug text-slate-800 break-words">{{ rg.report_heading }}</div>
                             </div>
+                            {% if can_manual_export_report_from_site_record and rg.report_key != 'none' %}
+                            <button type="button"
+                                    class="file-lib-folder-export-action shrink-0 self-center inline-flex items-center gap-1 rounded-lg bg-violet-600 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm hover:bg-violet-500"
+                                    title="各现场记录环节自动取最新一条后合并"
+                                    onclick="event.stopPropagation(); return fileLibSubmitFolderExport(this)"
+                                    data-action="export_report_folder_merged"
+                                    data-project-key="{{ pg.project_key }}"
+                                    data-report-key="{{ rg.report_key }}"
+                                    data-confirm="确定合并导出本报告下各现场记录环节的最新提交？">
+                                <i class="ri-draft-line"></i>导出合并报告
+                            </button>
+                            {% endif %}
                             <span class="shrink-0 self-center rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-violet-900">{{ rg.file_count }} 个</span>
                         </summary>
                         <div class="border-t border-slate-100 bg-slate-50/30 pl-1 sm:pl-2">
@@ -632,6 +660,19 @@
                                         <div class="text-[10px] font-medium uppercase tracking-wide text-slate-500">现场记录环节</div>
                                         <div class="mt-0.5 text-sm font-medium leading-snug text-slate-800 break-words">{{ sg.site_heading }}</div>
                                     </div>
+                                    {% if can_manual_export_report_from_site_record and sg.site_key != 'none' and rg.report_key != 'none' %}
+                                    <button type="button"
+                                            class="file-lib-folder-export-action shrink-0 self-center inline-flex items-center gap-1 rounded-lg bg-violet-600 px-2 py-1 text-[10px] font-semibold text-white shadow-sm hover:bg-violet-500"
+                                            title="自动取本文件夹下最新一条"
+                                            onclick="event.stopPropagation(); return fileLibSubmitFolderExport(this)"
+                                            data-action="export_site_folder_report"
+                                            data-project-key="{{ pg.project_key }}"
+                                            data-report-key="{{ rg.report_key }}"
+                                            data-site-key="{{ sg.site_key }}"
+                                            data-confirm="确定导出本现场记录环节最新提交对应的报告？">
+                                        <i class="ri-draft-line"></i>导出报告
+                                    </button>
+                                    {% endif %}
                                     <span class="shrink-0 self-center rounded-full bg-cyan-100 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-cyan-900">{{ sg.files|length }} 个</span>
                                 </summary>
                                 <div class="bg-slate-50/50 px-2 pb-3 pt-1 sm:px-3">
@@ -653,10 +694,10 @@
                                                 <tr class="file-lib-row transition-colors hover:bg-slate-50/90" data-file-lib-search="{{ f.file_library_search_blob|default:''|escape }}">
                                                     {% if file_library_row_selection %}
                                                     <td class="px-3 py-3 align-top">
-                                                        {% if f.file_library_may_delete %}
+                                                        {% if f.file_library_may_select %}
                                                         <input type="checkbox" name="ids" value="{{ f.pk }}" class="row-check mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30">
                                                         {% else %}
-                                                        <span class="mt-1 inline-block text-xs text-slate-400" title="仅可删除本人上传的文件">—</span>
+                                                        <span class="mt-1 inline-block text-xs text-slate-400" title="当前文件不可勾选">—</span>
                                                         {% endif %}
                                                     </td>
                                                     {% endif %}
@@ -738,10 +779,10 @@
                                         <tr class="file-lib-row transition-colors hover:bg-slate-50/90" data-file-lib-search="{{ f.file_library_search_blob|default:''|escape }}">
                                             {% if file_library_row_selection %}
                                             <td class="px-3 py-3 align-top">
-                                                {% if f.file_library_may_delete %}
+                                                {% if f.file_library_may_select %}
                                                 <input type="checkbox" name="ids" value="{{ f.pk }}" class="row-check mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30">
                                                 {% else %}
-                                                <span class="mt-1 inline-block text-xs text-slate-400" title="仅可删除本人上传的文件">—</span>
+                                                <span class="mt-1 inline-block text-xs text-slate-400" title="当前文件不可勾选">—</span>
                                                 {% endif %}
                                             </td>
                                             {% endif %}

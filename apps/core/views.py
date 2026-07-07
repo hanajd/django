@@ -5,6 +5,7 @@ Web 视图
 import copy
 import json as json_std
 import importlib.util
+import logging
 import os
 import re
 import uuid
@@ -32,6 +33,8 @@ from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.http import require_POST
 from django.views.decorators.csrf import csrf_exempt
 
+logger = logging.getLogger("apps.core.file_library_export")
+
 from apps.core import pipeline_service
 from apps.core import htmlpdf_service
 from apps.core.session_lease import bind_web_session_for_user, clear_web_session_lease
@@ -53,6 +56,14 @@ from apps.core.library_file_service import (
 )
 from apps.core.library_media_integrity import reconcile_library_files_missing_on_disk
 from apps.core.library_access import (
+    library_user_is_commission_coordinator,
+    library_user_may_manage_target_user,
+    roles_assignable_by_user,
+    file_library_tab_allowed_for_user,
+    file_library_tabs_for_user,
+    FILE_LIBRARY_TAB_DEFS,
+    library_user_can_delete_library_project,
+    library_coordinator_managed_users_queryset,
     APP_SIDE_ROLE_CODES,
     ROLE_DEFAULT_PERMS_BY_CODE,
     ROLE_PERMISSION_MATRIX,
@@ -71,6 +82,7 @@ from apps.core.library_access import (
     library_user_can_assign_tasks_to_participants,
     library_user_can_delete_library_project,
     library_user_may_access_hospital_info_nav,
+    library_user_may_edit_hospital_info,
     library_user_is_project_primary_responsible,
     library_user_may_assign_on_project,
     library_user_is_template_editor,
@@ -79,6 +91,8 @@ from apps.core.library_access import (
     library_user_may_edit_library_task,
     library_user_may_export_task_template_pdf_for_project,
     library_user_may_filled_pdf_toolchain,
+    library_user_may_export_inspection_library_pdfs,
+    library_user_may_select_library_file_for_batch,
     library_user_may_use_htmlpdf_matrix_beta_controls,
     library_user_may_mock_inspection_submit,
     library_user_has_party_a_demo_restrictions,
@@ -593,6 +607,44 @@ def _perm_override_rows_for_profile(profile) -> list:
     return rows
 
 
+def _user_form_context(request, profile=None, edit_user=None):
+    """用户创建/编辑页上下文；委托统筹仅选人员派工五级岗位，不展示权限个性化。"""
+    from apps.core.models import Role
+    from apps.core.project_workflow_ui import ROLE_LADDER
+
+    is_coordinator = library_user_is_commission_coordinator(request.user)
+    roles = roles_assignable_by_user(request.user) or list(Role.objects.all())
+    workflow_role_options = []
+    if is_coordinator:
+        meta = {r["code"]: r for r in ROLE_LADDER}
+        for role in roles:
+            row = meta.get(role.code, {})
+            workflow_role_options.append(
+                {
+                    "role": role,
+                    "label": row.get("label") or role.name,
+                    "summary": row.get("summary", ""),
+                    "selected": bool(profile and profile.role_id == role.id),
+                }
+            )
+    perm_override_disabled = False
+    if edit_user is not None:
+        perm_override_disabled = edit_user.is_superuser or (
+            getattr(profile.role, "code", None) == "super_admin"
+        )
+    return {
+        "edit_user": edit_user,
+        "profile": profile,
+        "roles": roles,
+        "is_coordinator_user_form": is_coordinator,
+        "workflow_role_options": workflow_role_options,
+        "perm_override_rows": []
+        if is_coordinator
+        else _perm_override_rows_for_profile(profile),
+        "perm_override_disabled": perm_override_disabled,
+    }
+
+
 def _require_api_login(request):
     """HTMLPDF API 统一登录检查：未登录时返回 JSON，而不是重定向 HTML 登录页。"""
     if not getattr(request, "user", None) or not request.user.is_authenticated:
@@ -927,7 +979,7 @@ def user_list(request):
     page = request.GET.get('page', 1)
     
     # 搜索过滤（稳定排序，避免分页 UnorderedObjectListWarning）
-    users = User.objects.select_related("profile").order_by("username", "id")
+    users = library_coordinator_managed_users_queryset(request.user)
     if search:
         users = users.filter(
             Q(username__icontains=search) |
@@ -942,6 +994,7 @@ def user_list(request):
     context = {
         'users': users_page,
         'search': search,
+        'is_coordinator_user_list': library_user_is_commission_coordinator(request.user),
     }
     return render(request, 'core/user_list.html', context)
 
@@ -979,6 +1032,13 @@ def user_create(request):
             except (Role.DoesNotExist, ValueError):
                 messages.error(request, "所选角色无效")
                 return redirect("user_create")
+        assignable = {r.pk for r in roles_assignable_by_user(request.user)}
+        if role is not None and assignable and role.pk not in assignable:
+            messages.error(request, "无权分配所选角色")
+            return redirect("user_create")
+        if library_user_is_commission_coordinator(request.user) and not role:
+            messages.error(request, "请选择检测岗位")
+            return redirect("user_create")
 
         with transaction.atomic():
             user = User.objects.create_user(
@@ -994,19 +1054,17 @@ def user_create(request):
             profile.department = department or None
             profile.position = position or None
             profile.role = role
-            profile.perm_overrides = _parse_perm_overrides_from_post(request)
+            profile.created_by = request.user
+            if library_user_is_commission_coordinator(request.user):
+                profile.perm_overrides = {}
+            else:
+                profile.perm_overrides = _parse_perm_overrides_from_post(request)
             profile.save()
         
         messages.success(request, '用户创建成功')
         return redirect('user_list')
     
-    roles = Role.objects.all()
-    context = {
-        'roles': roles,
-        'perm_override_rows': _perm_override_rows_for_profile(None),
-        'perm_override_disabled': False,
-    }
-    return render(request, 'core/user_form.html', context)
+    return render(request, 'core/user_form.html', _user_form_context(request))
 
 
 @login_required
@@ -1019,6 +1077,9 @@ def user_edit(request, user_id):
     if gx:
         return gx
     user = get_object_or_404(User, id=user_id)
+    if not library_user_may_manage_target_user(request.user, user):
+        messages.error(request, "无权编辑该用户")
+        return redirect("user_list")
     profile, _ = UserProfile.objects.get_or_create(user=user)
     
     if request.method == 'POST':
@@ -1045,14 +1106,27 @@ def user_edit(request, user_id):
         
         # 更新资料
         profile.phone = request.POST.get('phone', profile.phone)
-        profile.department = request.POST.get('department', profile.department)
-        profile.position = request.POST.get('position', profile.position)
+        if not library_user_is_commission_coordinator(request.user):
+            profile.department = request.POST.get('department', profile.department)
+            profile.position = request.POST.get('position', profile.position)
         
         role_id = request.POST.get('role')
         if role_id:
-            profile.role = Role.objects.get(id=role_id)
+            new_role = Role.objects.get(id=role_id)
+            assignable = {r.pk for r in roles_assignable_by_user(request.user)}
+            if assignable and new_role.pk not in assignable:
+                messages.error(request, '无权分配所选角色')
+                return redirect("user_edit", user_id=user_id)
+            profile.role = new_role
+        elif library_user_is_commission_coordinator(request.user):
+            messages.error(request, "请选择检测岗位")
+            return redirect("user_edit", user_id=user_id)
         
-        skip_perm_overrides = user.is_superuser or (getattr(profile.role, "code", None) == "super_admin")
+        skip_perm_overrides = (
+            user.is_superuser
+            or (getattr(profile.role, "code", None) == "super_admin")
+            or library_user_is_commission_coordinator(request.user)
+        )
         if not skip_perm_overrides:
             profile.perm_overrides = _parse_perm_overrides_from_post(request)
         
@@ -1061,16 +1135,11 @@ def user_edit(request, user_id):
         messages.success(request, '用户更新成功')
         return redirect('user_list')
     
-    roles = Role.objects.all()
-    perm_override_disabled = user.is_superuser or (getattr(profile.role, "code", None) == "super_admin")
-    context = {
-        "edit_user": user,
-        "profile": profile,
-        "roles": roles,
-        "perm_override_rows": _perm_override_rows_for_profile(profile),
-        "perm_override_disabled": perm_override_disabled,
-    }
-    return render(request, "core/user_form.html", context)
+    return render(
+        request,
+        "core/user_form.html",
+        _user_form_context(request, profile=profile, edit_user=user),
+    )
 
 
 @login_required
@@ -1083,6 +1152,9 @@ def user_delete(request, user_id):
     if gx:
         return gx
     user = get_object_or_404(User, id=user_id)
+    if not library_user_may_manage_target_user(request.user, user):
+        messages.error(request, "无权删除该用户")
+        return redirect("user_list")
     
     if request.method == 'POST':
         user.delete()
@@ -2747,7 +2819,7 @@ def library_projects(request):
             )
         project_scoped_assignment_records.sort(key=lambda x: x["created_at"], reverse=True)
 
-    projects_qs = LibraryProject.objects.order_by("-is_active", "code").select_related(
+    projects_qs = LibraryProject.objects.filter(is_active=True).order_by("code").select_related(
         "commission_org", "commission_org__parent", "commission_org__parent__parent"
     )
     if library_scope_own_files_only(request.user) and not library_user_can_assign_tasks_to_participants(request.user):
@@ -2988,7 +3060,7 @@ def library_projects(request):
                     selected_project.commission_org if selected_project else None
                 ),
             },
-            "file_library_tabs": list(_FILE_LIBRARY_TAB_DEFS),
+            "file_library_tabs": file_library_tabs_for_user(request.user),
             "project_commission_equipment_cards": project_commission_equipment_cards,
             "project_available_equipment_rows": project_available_equipment_rows,
             "can_create_library_project": can_create_library_project,
@@ -3264,6 +3336,40 @@ def commission_manage(request):
                     messages.success(request, msg)
                 else:
                     messages.error(request, msg)
+        elif action == "deactivate_project":
+            if not library_user_can_delete_library_project(request.user, project):
+                messages.error(request, "无权停用该项目")
+                return redirect(redir + tab_q)
+            if not project.is_active:
+                messages.error(request, "项目已停用")
+                return redirect(redir + tab_q)
+            from apps.core.instrument_inventory_service import auto_checkin_on_commission_end
+
+            n_in = auto_checkin_on_commission_end(project, user=request.user)
+            project.is_active = False
+            project.save(update_fields=["is_active", "updated_at"])
+            label = f"{project.code} · {project.name}"
+            if n_in:
+                messages.success(request, f"已停用项目：{label}；已自动入库 {n_in} 台仪器")
+            else:
+                messages.success(request, f"已停用项目：{label}")
+        elif action == "delete_project":
+            if not library_user_can_delete_library_project(request.user, project):
+                messages.error(request, "无权删除该项目")
+                return redirect(redir + tab_q)
+            label = f"{project.code} · {project.name}"
+            from apps.core.instrument_inventory_service import auto_checkin_on_commission_end
+
+            auto_checkin_on_commission_end(project, user=request.user)
+            try:
+                project.delete()
+            except ProtectedError:
+                messages.error(
+                    request,
+                    "项目删除失败：该项目仍有关联的检测提交，请先在项目工作台「进度跟踪」中删除全部提交后再试。",
+                )
+                return redirect(redir + tab_q)
+            messages.success(request, f"已删除项目：{label}")
         else:
             messages.error(request, "未知操作")
         return redirect(redir + tab_q)
@@ -3287,13 +3393,6 @@ def commission_manage(request):
         scope_filter=scope_filter,
         search=search,
     )
-    app_users_for_assign = list(
-        User.objects.filter(profile__role__code__in=APP_SIDE_ROLE_CODES, is_active=True)
-        .select_related("profile__role")
-        .order_by("username")
-    )
-    can_assign_globally = library_user_can_assign_tasks_to_participants(request.user)
-
     return render(
         request,
         "core/commission_manage.html",
@@ -3307,8 +3406,6 @@ def commission_manage(request):
             "status_filter": status_filter,
             "scope_filter": scope_filter,
             "search": search,
-            "app_users_for_assign": app_users_for_assign,
-            "can_assign_globally": can_assign_globally,
         },
     )
 
@@ -3385,16 +3482,7 @@ _FILE_LIBRARY_VALID_TABS = frozenset(
     {"ocr", "json", "template", "site_record", "report", "attachment", "inspection_submit", "trash"}
 )
 
-_FILE_LIBRARY_TAB_DEFS = (
-    {"key": "ocr", "label": "待识别文件"},
-    {"key": "json", "label": "数据文件"},
-    {"key": "template", "label": "模板"},
-    {"key": "site_record", "label": "现场记录"},
-    {"key": "report", "label": "报告"},
-    {"key": "attachment", "label": "附件"},
-    {"key": "inspection_submit", "label": "检测提交"},
-    {"key": "trash", "label": "回收站"},
-)
+_FILE_LIBRARY_TAB_DEFS = FILE_LIBRARY_TAB_DEFS
 
 
 def _normalize_library_tab(tab: str) -> str:
@@ -3840,6 +3928,7 @@ def _annotate_file_library_display(user, files: list) -> None:
 
         f.file_library_search_blob = _file_library_search_blob(f)
         f.file_library_may_delete = library_user_may_delete_library_file(user, f)
+        f.file_library_may_select = library_user_may_select_library_file_for_batch(user, f)
 
 
 def _leaf_latest_ts(file_list: list) -> float:
@@ -4169,6 +4258,232 @@ def _nest_file_library_by_library_task(files: list) -> list[dict]:
     return out
 
 
+def _file_library_redirect_from_post(request, tab: str, project_selected: str):
+    return reverse("file_library") + _file_library_query_string(
+        tab,
+        request.POST.get("date_from", "").strip(),
+        request.POST.get("date_to", "").strip(),
+        request.POST.get("uploader", "").strip(),
+        project_selected,
+        commission_org=request.POST.get("commission_org", "").strip(),
+        co_path=request.POST.get("co_path", "").strip(),
+        fl_path=request.POST.get("fl_path", "").strip(),
+    )
+
+
+def _folder_export_keys_from_post(request) -> tuple[str, str, str | None]:
+    from apps.core.library_folder_service import _norm_path, _parse_segments
+
+    project_key = (request.POST.get("project_folder_key") or "").strip()
+    report_key = (request.POST.get("report_folder_key") or "").strip()
+    site_key = (request.POST.get("site_folder_key") or "").strip() or None
+    fl_path = (request.POST.get("fl_path") or "").strip()
+    if fl_path:
+        segs = _parse_segments(_norm_path(fl_path))
+        if segs and segs[0][0] == "p" and segs[0][1]:
+            project_key = project_key or segs[0][1]
+        if len(segs) >= 2 and segs[1][0] == "r" and segs[1][1]:
+            report_key = report_key or segs[1][1]
+        if len(segs) >= 3 and segs[2][0] == "s" and segs[2][1]:
+            site_key = site_key or segs[2][1]
+    return project_key, report_key, site_key
+
+
+def _consolidate_user_flash_lines(lines, *, max_items: int = 12) -> str:
+    """多条说明合并为一条页面提示，避免连续弹出多个 message。"""
+    seen: list[str] = []
+    for line in lines or []:
+        s = str(line or "").strip()
+        if not s or s in seen:
+            continue
+        seen.append(s)
+    if not seen:
+        return ""
+    if len(seen) > max_items:
+        omitted = len(seen) - max_items
+        seen = seen[:max_items]
+        seen.append(f"其余 {omitted} 条说明已省略")
+    return "；".join(seen)
+
+
+def _flash_user_message_once(request, level: str, *parts: str, lines=None) -> None:
+    chunks = [p for p in parts if str(p or "").strip()]
+    if lines:
+        chunks.extend(lines)
+    msg = _consolidate_user_flash_lines(chunks)
+    if not msg:
+        return
+    getattr(messages, level)(request, msg)
+
+
+def _log_file_library_export_detail(user, action: str, lines=None) -> None:
+    """合并导出等技术细节写入服务端日志，供运维/超管排查；不展示给普通用户。"""
+    detail = _consolidate_user_flash_lines(lines or [], max_items=64)
+    if not detail:
+        return
+    logger.info(
+        "action=%s user_id=%s username=%s detail=%s",
+        action,
+        getattr(user, "pk", None),
+        getattr(user, "username", ""),
+        detail,
+    )
+
+
+def _merged_report_export_user_success_message(project, report_task, library_file=None) -> str:
+    code = str(getattr(project, "code", "") or "").strip() or "—"
+    label = (getattr(report_task, "name", None) or getattr(report_task, "code", None) or "报告").strip()
+    fname = (getattr(library_file, "original_name", None) or "").strip() if library_file is not None else ""
+    if fname:
+        return f"项目 {code}「{label}」报告已生成：{fname}"
+    return f"项目 {code}「{label}」报告已生成，请在文件库「报告」分类查看。"
+
+
+def _run_merged_report_export_from_submit_rows(
+    request,
+    rows_ok: list,
+    tab: str,
+    project_selected: str,
+    *,
+    scope_hint: str = "",
+    report_task_override=None,
+    prep_notes: list | None = None,
+) -> HttpResponse:
+    from apps.api.inspection_pdf_service import (
+        _build_filled_template_fields_for_task,
+        _persist_filled_pdf_from_submit,
+        _resolve_report_task_for_case,
+        accumulate_inspection_payloads_ordered_merge,
+        load_report_payload_for_manual_export,
+        resolve_merged_report_device_count,
+        site_record_task_count_for_project,
+    )
+
+    redir = _file_library_redirect_from_post(request, tab, project_selected)
+    if not rows_ok:
+        messages.error(request, "没有可用的现场记录，或缺少可用的检测提交数据")
+        return redirect(redir)
+
+    project_ids = {r[1].library_project_id for r in rows_ok}
+    if len(project_ids) != 1:
+        messages.error(
+            request,
+            "所选记录对应了多个项目；一个项目只导出一份报告，请仅选择同一项目下的记录后再试",
+        )
+        return redirect(redir)
+
+    cases_for_load: list[InspectionCase] = []
+    seen_case_pk: set[int] = set()
+    for _lf, c, _p in rows_ok:
+        if int(c.pk) in seen_case_pk:
+            continue
+        seen_case_pk.add(int(c.pk))
+        cases_for_load.append(c)
+
+    project = cases_for_load[0].library_project
+    persist_case = min(cases_for_load, key=lambda x: (x.case_no or ""))
+    report_task = report_task_override
+    if report_task is None:
+        report_task = _resolve_report_task_for_case(persist_case.case_no, project)
+    if report_task is None:
+        messages.error(request, "该项目下未找到报告任务，无法导出报告")
+        return redirect(redir)
+
+    merged_submit = accumulate_inspection_payloads_ordered_merge([p for _lf, _c, p in rows_ok])
+    source_payload, merge_note = load_report_payload_for_manual_export(
+        cases_for_load,
+        project,
+        report_task,
+        merged_submit,
+        submit_merge_is_authoritative=True,
+    )
+    if not isinstance(source_payload, dict) or not source_payload:
+        messages.error(request, merge_note or "报告数据汇总失败")
+        return redirect(redir)
+
+    task_no_for_fill = str(merged_submit.get("taskNo") or "").strip() or str(persist_case.case_no or "").strip()
+    distinct_case_n = len(cases_for_load)
+    n_site_tasks = site_record_task_count_for_project(project)
+    manual_device_count = resolve_merged_report_device_count(
+        project,
+        rows_ok,
+        report_task=report_task,
+    )
+    config_warning = ""
+    if n_site_tasks > 0 and distinct_case_n > n_site_tasks:
+        config_warning = (
+            f"导出涉及 {distinct_case_n} 个不同案件，但本项目在任务管理中仅关联 {n_site_tasks} 个现场记录类任务，请核对项目—任务配置"
+        )
+
+    filled_fields, template_pdf_id, fill_reason, template_json_name = _build_filled_template_fields_for_task(
+        report_task,
+        source_payload,
+        project=project,
+        task_no=task_no_for_fill,
+        inspection_case=persist_case,
+        manual_device_count=manual_device_count,
+        ordered_submit_payloads=[p for _lf, _c, p in rows_ok],
+    )
+    if not filled_fields:
+        messages.error(
+            request,
+            f"{report_task.code}({report_task.output_target}): {fill_reason or '模板填充失败'}",
+        )
+        return redirect(redir)
+
+    ok, pdf_reason, pdf_lf = _persist_filled_pdf_from_submit(
+        request.user,
+        task_no_for_fill,
+        persist_case,
+        project,
+        filled_fields,
+        template_pdf_id=template_pdf_id,
+        template_json_name=template_json_name,
+        task_obj=report_task,
+        source_payload=source_payload,
+        manual_device_count=manual_device_count,
+    )
+    if not ok:
+        messages.error(
+            request,
+            f"{report_task.code}({report_task.output_target}): {pdf_reason or '报告导出失败'}",
+        )
+    else:
+        n_files = len(rows_ok)
+        case_nos = ", ".join(sorted({c.case_no for c in cases_for_load}))
+        source_names = ", ".join(
+            (getattr(lf, "original_name", None) or str(lf.pk)) for lf, _c, _p in rows_ok
+        )
+        log_lines = []
+        if scope_hint:
+            log_lines.append(scope_hint)
+        if prep_notes:
+            log_lines.extend(prep_notes)
+        if merge_note:
+            log_lines.append(merge_note)
+        if config_warning:
+            log_lines.append(config_warning)
+        log_lines.extend(
+            [
+                f"project={project.code} report_task={report_task.code}({report_task.name})",
+                f"cases={distinct_case_n} case_nos={case_nos}",
+                f"data_sources={n_files} files={source_names}",
+                f"device_count={manual_device_count}",
+                f"task_no_for_fill={task_no_for_fill}",
+            ]
+        )
+        if pdf_reason:
+            log_lines.append(pdf_reason)
+        if pdf_lf is not None:
+            log_lines.append(f"saved_file={pdf_lf.original_name} pk={pdf_lf.pk}")
+        _log_file_library_export_detail(request.user, "merged_report_from_site_records", log_lines)
+        messages.success(
+            request,
+            _merged_report_export_user_success_message(project, report_task, pdf_lf),
+        )
+    return redirect(redir)
+
+
 @login_required
 def file_library(request):
     tab_raw = request.GET.get("tab")
@@ -4179,6 +4494,13 @@ def file_library(request):
     gx = _require_perm(request, "perm_file_library")
     if gx:
         return gx
+    if not file_library_tab_allowed_for_user(request.user, tab):
+        allowed = file_library_tabs_for_user(request.user)
+        fallback = allowed[0]["key"] if allowed else "ocr"
+        if tab != fallback and request.method == "GET":
+            messages.info(request, "当前账号无权访问该文件分类。")
+            return redirect(reverse("file_library") + f"?tab={fallback}")
+        tab = fallback
     project_raw = request.GET.get("project", "").strip()
     try:
         project_selected_id = int(project_raw) if project_raw else None
@@ -4706,7 +5028,7 @@ def file_library(request):
             dt = request.POST.get("date_to", "").strip()
             up = request.POST.get("uploader", "").strip()
             return redirect(reverse("file_library") + _file_library_query_string(tab, df, dt, up, project_selected))
-        if not library_user_may_filled_pdf_toolchain(request.user):
+        if not library_user_may_export_inspection_library_pdfs(request.user):
             messages.error(request, "当前角色无权执行手动导出 PDF")
             df = request.POST.get("date_from", "").strip()
             dt = request.POST.get("date_to", "").strip()
@@ -4833,6 +5155,82 @@ def file_library(request):
         up = request.POST.get("uploader", "").strip()
         return redirect(reverse("file_library") + _file_library_query_string(tab, df, dt, up, project_selected))
 
+    if request.method == "POST" and request.POST.get("action") in (
+        "export_report_folder_merged",
+        "export_site_folder_report",
+    ):
+        action = request.POST.get("action")
+        tab_post = (request.POST.get("tab") or tab).strip()
+        redir = _file_library_redirect_from_post(request, tab_post, project_selected)
+        if tab_post not in ("inspection_submit", "site_record"):
+            messages.error(request, "仅支持在「检测提交」或「现场记录」分类执行文件夹导出报告")
+            return redirect(redir)
+        if not library_user_may_export_inspection_library_pdfs(request.user):
+            messages.error(request, "当前角色无权执行导出报告")
+            return redirect(redir)
+
+        project_key, report_key, site_key = _folder_export_keys_from_post(request)
+        if not project_key or project_key == "none" or not project_key.isdigit():
+            messages.error(request, "未识别项目文件夹，请进入具体项目后再导出")
+            return redirect(redir)
+        if not report_key or report_key == "none" or not report_key.isdigit():
+            messages.error(request, "未识别报告环节文件夹，请进入报告环节后再导出")
+            return redirect(redir)
+
+        project = LibraryProject.objects.filter(pk=int(project_key)).first()
+        report_task = LibraryTask.objects.filter(pk=int(report_key)).first()
+        if project is None:
+            messages.error(request, "项目不存在或无权访问")
+            return redirect(redir)
+        if report_task is None or report_task.output_target != LibraryTask.OUTPUT_REPORT:
+            messages.error(request, "报告任务不存在或不是报告类任务")
+            return redirect(redir)
+        if not project.library_tasks.filter(pk=report_task.pk).exists():
+            messages.error(request, "该报告任务未关联到当前项目")
+            return redirect(redir)
+
+        from apps.api.inspection_pdf_service import (
+            collect_latest_submit_rows_for_report_folder,
+            collect_latest_submit_rows_for_site_folder,
+        )
+
+        if action == "export_site_folder_report":
+            if not site_key or site_key == "none" or not site_key.isdigit():
+                messages.error(request, "未识别现场记录环节文件夹")
+                return redirect(redir)
+            site_task = LibraryTask.objects.filter(pk=int(site_key)).first()
+            if site_task is None or site_task.output_target != LibraryTask.OUTPUT_SITE_RECORD:
+                messages.error(request, "现场记录任务不存在")
+                return redirect(redir)
+            rows_ok, info_notes, errors = collect_latest_submit_rows_for_site_folder(
+                project, site_task, request.user, tab=tab_post
+            )
+            scope_hint = f"现场记录环节 {site_task.code} · {site_task.name} 最新提交"
+        else:
+            rows_ok, info_notes, errors = collect_latest_submit_rows_for_report_folder(
+                project, report_task, request.user, tab=tab_post
+            )
+            scope_hint = f"报告环节 {report_task.code} · {report_task.name} 下各现场记录最新提交"
+
+        if errors:
+            _log_file_library_export_detail(
+                request.user,
+                "merged_report_folder_failed",
+                [scope_hint, *errors],
+            )
+            messages.error(request, "部分现场记录缺少可用数据，未能导出报告。")
+            return redirect(redir)
+
+        return _run_merged_report_export_from_submit_rows(
+            request,
+            rows_ok,
+            tab_post,
+            project_selected,
+            scope_hint=scope_hint,
+            report_task_override=report_task,
+            prep_notes=info_notes,
+        )
+
     if request.method == "POST" and request.POST.get("action") == "manual_export_report_from_site_record":
         if tab not in ("inspection_submit", "site_record"):
             messages.error(request, "仅支持在「检测提交」或「现场记录」分类执行手动导出报告")
@@ -4840,7 +5238,7 @@ def file_library(request):
             dt = request.POST.get("date_to", "").strip()
             up = request.POST.get("uploader", "").strip()
             return redirect(reverse("file_library") + _file_library_query_string(tab, df, dt, up, project_selected))
-        if not library_user_may_filled_pdf_toolchain(request.user):
+        if not library_user_may_export_inspection_library_pdfs(request.user):
             messages.error(request, "当前角色无权执行手动导出报告")
             df = request.POST.get("date_from", "").strip()
             dt = request.POST.get("date_to", "").strip()
@@ -4867,21 +5265,15 @@ def file_library(request):
             return redirect(reverse("file_library") + _file_library_query_string(tab, df, dt, up, project_selected))
 
         from apps.api.inspection_pdf_service import (
-            _build_filled_template_fields_for_task,
-            _persist_filled_pdf_from_submit,
-            _resolve_report_task_for_case,
-            accumulate_inspection_payloads_ordered_merge,
             dedupe_inspection_submit_selection_latest_per_site_record,
-            load_report_payload_for_manual_export,
-            resolve_manual_report_device_count,
             resolve_submit_payload_for_site_record_pdf_lf,
-            site_record_task_count_for_project,
         )
 
         submit_required = {"reportInfo", "hospitalInfo", "equipmentInfo", "testResult"}
         id_order = {pk: i for i, pk in enumerate(ids)}
         errors: list[str] = []
         rows_ok: list = []
+        prep_notes: list[str] = []
 
         if tab == "inspection_submit":
             raw_submit_files = list(
@@ -4892,13 +5284,11 @@ def file_library(request):
             loaded_submit_pks = {f.pk for f in raw_submit_files}
             raw_submit_files.sort(key=lambda f: id_order.get(f.pk, 10**9))
             files_list, dedupe_notes = dedupe_inspection_submit_selection_latest_per_site_record(raw_submit_files)
-            for msg in dedupe_notes:
-                messages.info(request, msg)
+            prep_notes.extend(dedupe_notes)
             json_files = [lf for lf in files_list if (lf.original_name or "").strip().lower().endswith(".json")]
             if len(json_files) < len(files_list):
-                messages.info(
-                    request,
-                    f"手动导出报告仅汇总检测提交 JSON：已忽略 {len(files_list) - len(json_files)} 个非 JSON 附件。",
+                prep_notes.append(
+                    f"手动导出报告仅汇总检测提交 JSON：已忽略 {len(files_list) - len(json_files)} 个非 JSON 附件"
                 )
             files_list = json_files
             for pk in ids:
@@ -4948,125 +5338,25 @@ def file_library(request):
                     continue
                 rows_ok.append((lf, case, submit_payload))
 
-        df = request.POST.get("date_from", "").strip()
-        dt = request.POST.get("date_to", "").strip()
-        up = request.POST.get("uploader", "").strip()
-        redir = reverse("file_library") + _file_library_query_string(tab, df, dt, up, project_selected)
+        redir = _file_library_redirect_from_post(request, tab, project_selected)
 
         if errors:
-            messages.error(request, "所选文件存在问题，未导出报告（同一项目仅生成一份报告）")
-            for msg in errors[:25]:
-                messages.warning(request, msg)
-            if len(errors) > 25:
-                messages.warning(request, f"其余 {len(errors) - 25} 条原因已省略")
-            return redirect(redir)
-
-        if not rows_ok:
-            messages.error(
-                request,
-                "没有可用的现场记录，或缺少可用的检测提交数据",
+            _log_file_library_export_detail(
+                request.user,
+                "manual_merged_report_failed",
+                errors,
             )
+            messages.error(request, "所选文件存在问题，未能导出报告。")
             return redirect(redir)
 
-        project_ids = {r[1].library_project_id for r in rows_ok}
-        if len(project_ids) != 1:
-            messages.error(
-                request,
-                "勾选的文件对应了多个项目；一个项目只导出一份报告，请仅选择同一项目下的记录后再试",
-            )
-            return redirect(redir)
-
-        cases_for_load: list[InspectionCase] = []
-        seen_case_pk: set[int] = set()
-        for _lf, c, _p in rows_ok:
-            if int(c.pk) in seen_case_pk:
-                continue
-            seen_case_pk.add(int(c.pk))
-            cases_for_load.append(c)
-
-        project = cases_for_load[0].library_project
-        persist_case = min(cases_for_load, key=lambda x: (x.case_no or ""))
-        report_task = _resolve_report_task_for_case(persist_case.case_no, project)
-        if report_task is None:
-            messages.error(request, "该项目下未找到报告任务，无法导出报告")
-            return redirect(redir)
-
-        # 多份 JSON 深度合并：同路径以后勾选为准，避免「整段 testResult 被第一份独占」导致后份完全无效
-        merged_submit = accumulate_inspection_payloads_ordered_merge([p for _lf, _c, p in rows_ok])
-
-        # 勾选的多份检测提交 JSON，或现场记录 PDF（解析为同 taskNo 的 JSON）→ 汇总 → 填入同一份报告 PDF
-        source_payload, merge_note = load_report_payload_for_manual_export(
-            cases_for_load,
-            project,
-            report_task,
-            merged_submit,
-            submit_merge_is_authoritative=True,
+        return _run_merged_report_export_from_submit_rows(
+            request,
+            rows_ok,
+            tab,
+            project_selected,
+            scope_hint="手动勾选",
+            prep_notes=prep_notes,
         )
-        if not isinstance(source_payload, dict) or not source_payload:
-            messages.error(request, merge_note or "报告数据汇总失败")
-            return redirect(redir)
-        if merge_note:
-            messages.info(request, merge_note)
-
-        # taskNo 在 ordered_merge 中已锚定第一份，与报告/占位绑定一致
-        task_no_for_fill = str(merged_submit.get("taskNo") or "").strip() or str(persist_case.case_no or "").strip()
-
-        distinct_case_n = len(cases_for_load)
-        n_site_tasks = site_record_task_count_for_project(project)
-        manual_device_count = resolve_manual_report_device_count(distinct_case_n)
-        if n_site_tasks > 0 and distinct_case_n > n_site_tasks:
-            messages.warning(
-                request,
-                f"勾选涉及 {distinct_case_n} 个不同案件，但本项目在任务管理中仅关联 {n_site_tasks} 个现场记录类任务，请核对项目—任务配置。",
-            )
-
-        filled_fields, template_pdf_id, fill_reason, template_json_name = _build_filled_template_fields_for_task(
-            report_task,
-            source_payload,
-            project=project,
-            task_no=task_no_for_fill,
-            inspection_case=persist_case,
-            manual_device_count=manual_device_count,
-            ordered_submit_payloads=[p for _lf, _c, p in rows_ok],
-        )
-        if not filled_fields:
-            messages.error(
-                request,
-                f"{report_task.code}({report_task.output_target}): {fill_reason or '模板填充失败'}",
-            )
-            return redirect(redir)
-
-        ok, pdf_reason, _ = _persist_filled_pdf_from_submit(
-            request.user,
-            task_no_for_fill,
-            persist_case,
-            project,
-            filled_fields,
-            template_pdf_id=template_pdf_id,
-            template_json_name=template_json_name,
-            task_obj=report_task,
-            source_payload=source_payload,
-            manual_device_count=manual_device_count,
-        )
-        if not ok:
-            messages.error(
-                request,
-                f"{report_task.code}({report_task.output_target}): {pdf_reason or '报告导出失败'}",
-            )
-        else:
-            n_files = len(rows_ok)
-            case_nos = ", ".join(sorted({c.case_no for c in cases_for_load}))
-            src_lbl = "现场记录 PDF" if tab == "site_record" else "检测提交数据"
-            msg = (
-                f"已为项目 {project.code} 导出 1 份报告（"
-                f"不同案件 {distinct_case_n} 个（受检台数以此为准），勾选{src_lbl} {n_files} 份；"
-                f"项目任务管理中现场记录类任务 {n_site_tasks} 个；"
-                f"多份数据：testResult 等仍按勾选顺序合并；dynamicData 按份与对应现场模板解析为占位符词条后汇入同一份报告（勿依赖跨模板 f 号）；taskNo 取第一份；案件号：{case_nos}）"
-            )
-            if pdf_reason:
-                msg = f"{msg}；提示：{pdf_reason}"
-            messages.success(request, msg)
-        return redirect(redir)
 
     if request.method == "POST" and request.POST.get("action") == "merge_reports":
         df = request.POST.get("date_from", "").strip()
@@ -5076,7 +5366,7 @@ def file_library(request):
         if tab != "report":
             messages.error(request, "仅支持在「报告」分类执行报告合并")
             return redirect(reverse("file_library") + _file_library_query_string(tab, df, dt, up, project_selected))
-        if not library_user_may_filled_pdf_toolchain(request.user):
+        if not library_user_may_export_inspection_library_pdfs(request.user):
             messages.error(request, "当前角色无权执行报告合并")
             return redirect(redir)
         if not library_export_merge_allowed_under_own_files_scope(request.user, project_selected_id):
@@ -5130,9 +5420,12 @@ def file_library(request):
             project_pids_union.update(lf.projects.values_list("pk", flat=True))
 
         if merge_errors:
-            messages.error(request, "所选报告存在问题，未执行合并")
-            for msg in merge_errors[:25]:
-                messages.warning(request, msg)
+            _log_file_library_export_detail(
+                request.user,
+                "merge_report_pdfs_failed",
+                merge_errors,
+            )
+            messages.error(request, "所选报告存在问题，未能完成合并。")
             return redirect(redir)
         if len(paths) < 2:
             messages.warning(request, "有效可合并的报告 PDF 不足两份")
@@ -5187,13 +5480,18 @@ def file_library(request):
         if not created:
             messages.error(request, "合并 PDF 已生成但保存到文件库失败")
             return redirect(redir)
-        messages.success(
-            request,
-            f"已生成并保存合并报告：{fname}（{merge_overlay_hint}；"
-            f"封面报告日期为合并当日；合并报告名称与受检台数、评价及受检编号序列表已按合并规则叠印；"
-            f"插入目录为报告第 2 页，「三、检测结果」从报告第 3 页起；"
-            f"目录页眉「共 y 页」为 PDF 总页数减封面与声明 2 页；共合并 {len(paths)} 份）",
+        _log_file_library_export_detail(
+            request.user,
+            "merge_report_pdfs",
+            [
+                merge_overlay_hint,
+                f"merged_count={len(paths)}",
+                f"files={', '.join(titles)}",
+                f"saved_as={fname}",
+                "封面报告日期为合并当日；目录为第 2 页；检测结果从第 3 页起",
+            ],
         )
+        messages.success(request, f"已合并 {len(paths)} 份报告并保存：{fname}")
         return redirect(redir)
 
     date_err, d0, d1, date_from, date_to = _parse_file_library_date_range(request)
@@ -5294,7 +5592,7 @@ def file_library(request):
                 ],
                 "commission_org_unset_label": _COMMISSION_ORG_UNSET_LABEL,
                 "tab": tab,
-                "file_library_tabs": list(_FILE_LIBRARY_TAB_DEFS),
+                "file_library_tabs": file_library_tabs_for_user(request.user),
                 "files": files,
                 "file_library_nested_groups": [],
                 "file_library_nested_mode": "trash",
@@ -5529,7 +5827,7 @@ def file_library(request):
 
     can_batch_delete = role_has(request.user, "perm_file_delete")
     scope_export_ok = library_export_merge_allowed_under_own_files_scope(request.user, project_selected_id)
-    fill_export_ok = library_user_may_filled_pdf_toolchain(request.user) and scope_export_ok
+    fill_export_ok = library_user_may_export_inspection_library_pdfs(request.user) and scope_export_ok
     file_library_row_selection = can_batch_delete or (
         fill_export_ok and tab in ("inspection_submit", "site_record", "report")
     )
@@ -5537,6 +5835,24 @@ def file_library(request):
 
     usage_b = library_user_file_library_usage_bytes(request.user)
     quota_b = library_user_file_library_quota_bytes(request.user)
+
+    folder_export_context = None
+    if fill_export_ok and tab in ("inspection_submit", "site_record") and file_library_nested_mode == "project_report_site":
+        from apps.core.library_folder_service import _norm_path, _parse_segments
+
+        segs = _parse_segments(_norm_path(fl_path))
+        if len(segs) >= 2 and segs[0][0] == "p" and segs[1][0] == "r":
+            pk_raw, rk_raw = segs[0][1], segs[1][1]
+            if pk_raw not in ("", "none") and rk_raw not in ("", "none") and pk_raw.isdigit() and rk_raw.isdigit():
+                site_key = None
+                if len(segs) >= 3 and segs[2][0] == "s" and segs[2][1] not in ("", "none"):
+                    site_key = segs[2][1]
+                folder_export_context = {
+                    "project_folder_key": pk_raw,
+                    "report_folder_key": rk_raw,
+                    "site_folder_key": site_key,
+                    "mode": "site" if site_key and site_key.isdigit() else "report",
+                }
 
     return render(
         request,
@@ -5554,7 +5870,7 @@ def file_library(request):
             "co_explorer_base": co_explorer_base,
             "explorer_co_org": explorer_co_org,
             "tab": tab,
-            "file_library_tabs": list(_FILE_LIBRARY_TAB_DEFS),
+            "file_library_tabs": file_library_tabs_for_user(request.user),
             "files": files,
             "file_library_nested_groups": file_library_nested_groups,
             "file_library_nested_mode": file_library_nested_mode,
@@ -5583,6 +5899,7 @@ def file_library(request):
                 tab == "report"
                 and fill_export_ok
             ),
+            "folder_export_context": folder_export_context,
             "trash_days_notice": 30,
             "file_library_usage_bytes": usage_b,
             "file_library_quota_bytes": quota_b,
@@ -8999,6 +9316,7 @@ def hospital_info_manage(request):
 
     fl_path = (request.GET.get("fl_path") or request.POST.get("fl_path") or "").strip()
     base_url = reverse("hospital_info_manage")
+    hospital_info_can_edit = library_user_may_edit_hospital_info(request.user)
     hospital_info_edit = _hospital_info_edit_mode(request)
 
     def _redir(*, edit: bool | None = None) -> HttpResponse:
@@ -9006,8 +9324,8 @@ def hospital_info_manage(request):
         return redirect(_hospital_info_page_url(fl_path, edit=use_edit))
 
     if request.method == "POST":
-        if not hospital_info_edit:
-            messages.warning(request, "当前为浏览模式，请点击「编辑」后再修改")
+        if not hospital_info_can_edit:
+            messages.error(request, "当前角色无权维护医院信息")
             return _redir(edit=False)
         action = (request.POST.get("action") or "").strip()
 
@@ -9029,10 +9347,14 @@ def hospital_info_manage(request):
             )
             if err:
                 messages.error(request, err)
-                return _redir(edit=True)
+                return _redir(edit=hospital_info_edit)
             messages.success(request, f"已添加{org.level_label}：{org.full_display_name}")
             fl_path = org.folder_path()
-            return _redir(edit=True)
+            return _redir(edit=hospital_info_edit)
+
+        if not hospital_info_edit:
+            messages.warning(request, "当前为浏览模式，请点击「编辑」后再修改")
+            return _redir(edit=False)
 
         if action == "delete_commission_organization":
             try:
@@ -9430,6 +9752,7 @@ def hospital_info_manage(request):
             "fl_path": fl_path,
             "hospital_info_base": base_url,
             "hospital_info_edit": hospital_info_edit,
+            "hospital_info_can_edit": hospital_info_can_edit,
             "hospital_info_explorer_base": hospital_info_explorer_base,
             "hospital_info_url_read": _hospital_info_page_url(fl_path, edit=False),
             "hospital_info_url_edit": _hospital_info_page_url(fl_path, edit=True),

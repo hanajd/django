@@ -193,6 +193,39 @@ def _split_compound(crit: str) -> List[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
+def parse_boolean_value(raw: object) -> Optional[bool]:
+    """解析勾选框等布尔取值（True/False、是/否、1/0 等）。"""
+    if isinstance(raw, bool):
+        return raw
+    if raw is None:
+        return None
+    if isinstance(raw, (int, float)):
+        return int(raw) != 0
+    t = str(raw).strip().lower()
+    if t in ("true", "1", "yes", "y", "on", "是", "勾选", "☑", "✓", "√", "开"):
+        return True
+    if t in ("false", "0", "no", "n", "off", "否", "未勾选", "□", "☐", "关"):
+        return False
+    return None
+
+
+def verdict_from_boolean(measured: object, criterion: str) -> Optional[str]:
+    """
+    勾选框判定：标准串为 ``True`` 或 ``False``。
+    - ``True``：勾选为合格，未勾选为不合格
+    - ``False``：勾选为不合格，未勾选为合格
+    """
+    crit = normalize_criterion_text(criterion).strip().lower()
+    if crit not in ("true", "false"):
+        return None
+    val = parse_boolean_value(measured)
+    if val is None:
+        return None
+    expect_pass_when_checked = crit == "true"
+    ok = val if expect_pass_when_checked else not val
+    return "合格" if ok else "不合格"
+
+
 def verdict_from_measurement(measured: str, criterion: str) -> Optional[str]:
     """
     若可解析则返回「合格」或「不合格」，否则 None。
@@ -200,6 +233,9 @@ def verdict_from_measurement(measured: str, criterion: str) -> Optional[str]:
     crit_raw = normalize_criterion_text(criterion)
     if not crit_raw:
         return None
+    bool_verdict = verdict_from_boolean(measured, crit_raw)
+    if bool_verdict in ("合格", "不合格"):
+        return bool_verdict
     v = parse_first_number(measured)
     if v is None:
         return None

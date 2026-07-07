@@ -713,6 +713,12 @@ def _computed_report_value_from_field(
         pdf_field_by_pid=field_by_pid,
     )
     formula = resolve_field_formula_for_eval(field, vm)
+    if formula and isinstance(binding, dict) and (
+        "{mean}" in formula or "{mean2}" in formula or "__ROW_MEAN" in formula
+    ):
+        from radiation_detection_report.chapter5_field_sync import _substitute_row_tokens
+
+        formula = _substitute_row_tokens(formula, binding, report_group=group)
     if not formula and isinstance(binding, dict):
         rules = (
             chapter.get("reportValueRules")

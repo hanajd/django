@@ -8,7 +8,7 @@
         <div>
             <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">系统管理</p>
             <h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-900">用户列表</h1>
-            <p class="mt-1 text-sm text-slate-600">搜索、编辑账号与角色分配</p>
+            <p class="mt-1 text-sm text-slate-600">{% if is_coordinator_user_list %}创建与管理检测流程岗位账号{% else %}搜索、编辑账号与角色分配{% endif %}</p>
         </div>
         <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
             <form method="get" class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
@@ -38,7 +38,7 @@
                         <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">邮箱</th>
                         <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">姓名</th>
                         <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">手机</th>
-                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">角色</th>
+                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">{% if is_coordinator_user_list %}岗位{% else %}角色{% endif %}</th>
                         <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">状态</th>
                         <th class="px-5 py-3.5 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">操作</th>
                     </tr>

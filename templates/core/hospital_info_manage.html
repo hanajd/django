@@ -35,7 +35,7 @@
                                 </span>
                                 组织架构
                             </h2>
-                            {% if hospital_info_edit %}
+                            {% if hospital_info_can_edit %}
                             <button type="button" id="btn-open-create-org"
                                     class="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-900 text-white hover:bg-slate-800 transition">
                                 <i class="ri-add-line"></i> 新建
@@ -62,8 +62,21 @@
                     </div>
                     <h2 class="text-lg font-semibold text-slate-900">选择要查看的机构</h2>
                     <p class="mt-2 text-sm text-slate-500 max-w-md mx-auto">
-                        在左侧树中点击医院、院区或科室，可浏览地址、简介、合并报告、联系人与科室设备；点击「编辑」后再进行修改。
+                        {% if hospital_info_can_edit %}
+                        在左侧点击「新建」创建医院、院区或科室；选中机构后可浏览详情，点击「编辑」修改信息与设备。
+                        {% else %}
+                        在左侧树中点击医院、院区或科室，可浏览地址、简介、合并报告、联系人与科室设备。
+                        {% endif %}
                     </p>
+                    {% if hospital_info_can_edit %}
+                    <div class="mt-6 flex flex-wrap items-center justify-center gap-3">
+                        <button type="button" id="btn-open-create-org-empty"
+                                class="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-slate-900 text-sm font-medium text-white hover:bg-slate-800 transition">
+                            <i class="ri-add-line text-lg"></i>
+                            新建医院
+                        </button>
+                    </div>
+                    {% endif %}
                 </article>
                 {% endif %}
             </div>
@@ -71,8 +84,8 @@
     </div>
 </div>
 
-{# 新建层级弹窗（仅编辑模式） #}
-{% if hospital_info_edit %}
+{# 新建层级弹窗 #}
+{% if hospital_info_can_edit %}
 <dialog id="create-org-dialog" class="rounded-3xl shadow-2xl border-0 p-0 w-full max-w-md backdrop:bg-slate-900/40 open:animate-in">
     <div class="p-6">
         <div class="flex items-center justify-between mb-4">
@@ -92,8 +105,13 @@
 (function () {
     var dlg = document.getElementById('create-org-dialog');
     var openBtn = document.getElementById('btn-open-create-org');
-    if (dlg && openBtn) {
-        openBtn.addEventListener('click', function () { dlg.showModal(); });
+    var openBtnEmpty = document.getElementById('btn-open-create-org-empty');
+    function openCreateOrgDialog() {
+        if (dlg) dlg.showModal();
+    }
+    if (openBtn) openBtn.addEventListener('click', openCreateOrgDialog);
+    if (openBtnEmpty) openBtnEmpty.addEventListener('click', openCreateOrgDialog);
+    if (dlg) {
         dlg.querySelectorAll('[data-close-create-org]').forEach(function (el) {
             el.addEventListener('click', function () { dlg.close(); });
         });

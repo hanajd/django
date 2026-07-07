@@ -9,7 +9,7 @@ from django.contrib.auth import get_user_model
 from apps.api.inspection_pdf_service import (
     accumulate_inspection_payloads_ordered_merge,
     load_report_payload_for_manual_export,
-    resolve_manual_report_device_count,
+    resolve_merged_report_device_count,
     resolve_submit_payload_for_site_record_pdf_lf,
     site_record_task_count_for_project,
 )
@@ -91,7 +91,11 @@ def run() -> None:
         print("merge:", merge_note)
 
     task_no_for_fill = str(merged_submit.get("taskNo") or "").strip() or str(persist_case.case_no or "").strip()
-    manual_device_count = resolve_manual_report_device_count(len(cases_for_load))
+    manual_device_count = resolve_merged_report_device_count(
+        project,
+        rows_ok,
+        report_task=report_task,
+    )
 
     filled_fields, template_pdf_id, fill_reason, template_json_name = _build_filled_template_fields_for_task(
         report_task,

@@ -20,6 +20,7 @@ class Role(models.Model):
         ('authorized_signatory', _('授权签字人')),
         ('template_editor', _('模板编辑')),
         ('template_tester', _('模板编辑器（测试）')),
+        ('commission_coordinator', _('委托统筹')),
     )
     
     name = models.CharField(
@@ -133,6 +134,15 @@ class UserProfile(models.Model):
         blank=True,
         related_name='user_profiles',
         verbose_name=_('角色')
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='user_profiles_created',
+        verbose_name=_('创建者'),
+        help_text=_('后台创建该账号的操作人；委托统筹仅可管理本人创建的用户'),
     )
     perm_overrides = models.JSONField(
         default=dict,

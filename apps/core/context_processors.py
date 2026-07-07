@@ -7,6 +7,7 @@ from django.urls import reverse
 
 from apps.core.library_access import (
     library_user_has_party_a_demo_restrictions,
+    library_user_is_commission_coordinator,
     library_user_may_access_hospital_info_nav,
     library_user_may_access_instrument_database,
     library_user_may_access_task_template_library_nav,
@@ -296,6 +297,9 @@ def _build_usage_site_tour_manifest(request):
 
 
 def _menus_for_user(user):
+    if library_user_is_commission_coordinator(user):
+        # 委托统筹：侧栏固定入口已覆盖业务功能，不展示数据库/角色等动态菜单
+        return Menu.objects.none()
     if user.is_superuser:
         return (
             Menu.objects.filter(parent=None, is_visible=True)

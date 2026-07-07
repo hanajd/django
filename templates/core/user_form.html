@@ -90,6 +90,7 @@
                         >
                     </div>
                     
+                    {% if not is_coordinator_user_form %}
                     <div>
                         <label for="department" class="mb-1 block text-sm font-medium text-slate-700">部门</label>
                         <input 
@@ -111,9 +112,29 @@
                             class="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                         >
                     </div>
+                    {% endif %}
                     
                     <div>
-                        <label for="role" class="mb-1 block text-sm font-medium text-slate-700">角色</label>
+                        <label for="role" class="mb-1 block text-sm font-medium text-slate-700">
+                            {% if is_coordinator_user_form %}检测岗位{% else %}角色{% endif %}
+                            {% if is_coordinator_user_form %}<span class="text-red-500">*</span>{% endif %}
+                        </label>
+                        {% if is_coordinator_user_form %}
+                        <p class="mb-2 text-xs leading-relaxed text-slate-500">与项目工作台「人员派工」中的五级岗位一致，按岗位自动赋予对应系统权限。</p>
+                        <select 
+                            name="role" 
+                            id="role" 
+                            required
+                            class="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                        >
+                            <option value="">请选择检测岗位</option>
+                            {% for opt in workflow_role_options %}
+                            <option value="{{ opt.role.id }}" {% if opt.selected %}selected{% endif %}>
+                                {{ opt.label }} — {{ opt.summary }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        {% else %}
                         <select 
                             name="role" 
                             id="role" 
@@ -126,6 +147,7 @@
                             </option>
                             {% endfor %}
                         </select>
+                        {% endif %}
                     </div>
                 </div>
             </div>

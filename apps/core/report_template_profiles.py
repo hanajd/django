@@ -260,6 +260,33 @@ DR1_ACCEPT_REPORT_PROFILE = ReportTemplateProfile(
     f1_slot="report_no",
 )
 
+# 001-验收检测 / 07-乳腺DR / dr-6（空白 PDF 实测：封面 f46–f49 叠印，基本情况 f1–f7 红字）
+DR6_ACCEPT_REPORT_PROFILE = ReportTemplateProfile(
+    code="dr-6",
+    basic_info_value_x0=175.34,
+    basic_info_table_x1=519.34,
+    basic_info_project_name_x0=180.65,
+    page_header_left_x0=70.65,
+    page_header_right_x1=519.34,
+    summary_page_header_right_x1=519.34,
+    cover_project_name_erase_above_pt=18.0,
+    cover_modality_residue_texts=("放射诊疗设备",),
+    cover_project_name_write_below_label=True,
+    cover_project_name_line2_above_underline_pt=16.0,
+    basic_info_device_count_write_y_offset=-1.0,
+    basic_info_device_count_write_x_offset=14.0,
+    evaluation_clear_x0=78.5,
+    evaluation_write_x0=78.5,
+    evaluation_text_indent=True,
+    evaluation_text_only_clear=True,
+    evaluation_write_y_offset=3.0,
+    cover_overlay_pdf_field_ids=("f46", "f47", "f48", "f49"),
+    summary_overlay_pdf_field_ids=("f50", "f51", "f52", "f53"),
+    htmlpdf_basic_info_pdf_field_ids=("f1", "f2", "f3", "f4", "f5", "f6", "f7"),
+    contact_pdf_field_ids=("f4", "f5"),
+    f1_slot="commission_no",
+)
+
 # 001-验收检测 / 06-动态DR / dr-2（空白 PDF 实测，与 ctc-1 同套基本情况列宽）
 DR2_ACCEPT_REPORT_PROFILE = ReportTemplateProfile(
     code="dr-2",
@@ -455,6 +482,7 @@ REPORT_TEMPLATE_PROFILES: dict[str, ReportTemplateProfile] = {
     "cbct-1": CBCT_ACCEPT_REPORT_PROFILE,
     CTC_ACCEPT_REPORT_PROFILE.code: CTC_ACCEPT_REPORT_PROFILE,
     DR1_ACCEPT_REPORT_PROFILE.code: DR1_ACCEPT_REPORT_PROFILE,
+    DR6_ACCEPT_REPORT_PROFILE.code: DR6_ACCEPT_REPORT_PROFILE,
     DSA_STATUS_REPORT_PROFILE.code: DSA_STATUS_REPORT_PROFILE,
     DR2_ACCEPT_REPORT_PROFILE.code: DR2_ACCEPT_REPORT_PROFILE,
     TASK1_ACCEPT_REPORT_PROFILE.code: TASK1_ACCEPT_REPORT_PROFILE,

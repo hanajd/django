@@ -84,12 +84,6 @@ def submission_has_checker_signature(sub: InspectionSubmission | None) -> bool:
             return True
         if isinstance(val, dict) and (val.get("path") or val.get("url") or val.get("data")):
             return True
-    for bucket in (raw.get("hospitalInfo"), raw.get("reportInfo"), raw.get("dynamicData")):
-        if not isinstance(bucket, dict):
-            continue
-        for fk in ("f35", "f78", "f632"):
-            if bucket.get(fk):
-                return True
     return False
 
 

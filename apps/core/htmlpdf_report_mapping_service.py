@@ -64,18 +64,78 @@ def _pdf_field_id_key(field: dict) -> str:
     return raw.lower() if raw.lower().startswith("f") and raw[1:].isdigit() else raw
 
 
+def _parsed_template_steps_list_extended(parsed: dict | None) -> list:
+    """统一读取 formSchema.steps / form_schema.steps / 根级 steps。"""
+    if not isinstance(parsed, dict):
+        return []
+    fs = parsed.get("formSchema")
+    if isinstance(fs, dict) and isinstance(fs.get("steps"), list):
+        return fs["steps"]
+    from apps.api.inspection_report_make import _parsed_template_steps_list
+
+    return _parsed_template_steps_list(parsed)
+
+
+def _collect_template_pdf_field_rows(parsed: dict | None) -> list[dict[str, Any]]:
+    """合并 pdf.fields、根级 fields 与 formSchema.steps 中的栏位定义。"""
+    if not isinstance(parsed, dict):
+        return []
+    from apps.api.inspection_report_make import (
+        _attach_step_schema_to_pdf_fields,
+        _flatten_unified_form_steps_to_fields,
+    )
+
+    by_pid: dict[str, dict[str, Any]] = {}
+    steps = _parsed_template_steps_list_extended(parsed)
+
+    def _merge_field(raw: dict) -> None:
+        if not isinstance(raw, dict):
+            return
+        pid = _pdf_field_id_key(raw)
+        if not pid:
+            return
+        row = dict(raw)
+        prev = by_pid.get(pid)
+        if prev is None or len(str(row.get("label") or "")) > len(str(prev.get("label") or "")):
+            by_pid[pid] = row
+
+    for block in (
+        parsed.get("fields") or [],
+        (parsed.get("pdf") or {}).get("fields")
+        if isinstance(parsed.get("pdf"), dict)
+        else [],
+    ):
+        for f in materialize_unified_pdf_fields(block or []):
+            _merge_field(f)
+
+    for f in _flatten_unified_form_steps_to_fields(steps):
+        _merge_field(f)
+
+    rows = list(by_pid.values())
+    if steps:
+        _attach_step_schema_to_pdf_fields(rows, steps)
+    return rows
+
+
+def _build_report_field_by_pdf_id(parsed: dict | None) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for f in _collect_template_pdf_field_rows(parsed):
+        pid = str(f.get("pdfFieldId") or "").strip()
+        if pid:
+            out[pid] = f
+    return out
+
+
 def _build_pdf_field_meta_index(parsed: dict | None) -> dict[str, dict[str, Any]]:
     """pdfFieldId -> submitPath / placeholder 等（合并 steps 上的 source）。"""
     if not isinstance(parsed, dict):
         return {}
     from apps.api.inspection_report_make import _attach_step_schema_to_pdf_fields
 
-    fields = materialize_unified_pdf_fields(parsed.get("fields") or [])
-    if not fields:
-        return {}
-    steps = parsed.get("steps") if isinstance(parsed.get("steps"), list) else []
-    field_rows = [dict(f) for f in fields if isinstance(f, dict)]
-    _attach_step_schema_to_pdf_fields(field_rows, steps)
+    steps = _parsed_template_steps_list_extended(parsed)
+    field_rows = [dict(f) for f in _collect_template_pdf_field_rows(parsed) if isinstance(f, dict)]
+    if steps:
+        _attach_step_schema_to_pdf_fields(field_rows, steps)
     out: dict[str, dict[str, Any]] = {}
     for f in field_rows:
         pid = _pdf_field_id_key(f)
@@ -85,7 +145,7 @@ def _build_pdf_field_meta_index(parsed: dict | None) -> dict[str, dict[str, Any]
         placeholder = str(f.get("placeholder") or "").strip()
         title = str(f.get("title") or "").strip()
         out[pid] = {
-            "submitPath": str(src.get("submitPath") or "").strip(),
+            "submitPath": str(src.get("submitPath") or f.get("submitPath") or "").strip(),
             "placeholder": placeholder,
             "title": title,
             "label": str(f.get("label") or "").strip(),
@@ -163,10 +223,9 @@ def _resolve_site_pdf_field_id_by_label(
     try:
         from apps.api.inspection_report_make import (
             _flatten_unified_form_steps_to_fields,
-            _parsed_template_steps_list,
         )
 
-        for sf in _flatten_unified_form_steps_to_fields(_parsed_template_steps_list(site_parsed)):
+        for sf in _flatten_unified_form_steps_to_fields(_parsed_template_steps_list_extended(site_parsed)):
             if not isinstance(sf, dict):
                 continue
             _add(
@@ -385,11 +444,25 @@ def _compose_report_site_field_final_value(
     *,
     sources: list[dict] | None = None,
     report_field_label: str = "",
-) -> str:
+    value_cases: list[dict] | None = None,
+    site_parsed_resolver=None,
+    inspection_type: str = "acceptance",
+) -> tuple[str, str | None]:
     """
-    多来源合并：有合法占位模板则渲染；否则按 slot 顺序拼接实测值。
-    旧版映射常把现场 label 误存为 valueTemplate，须忽略以免报告格显示 label 而非数值。
+    多来源合并：有 valueCases 时按条件匹配回填文本；否则有合法占位模板则渲染；
+    单来源且无模板时直接回填；多来源且既无条件也无模板时留空。
+    返回 (回填文本, 同行单项判定) —— 后者仅在有测量值判定标准时给出。
     """
+    cases_out, peer_verdict = _resolve_report_mapping_value_cases(
+        value_cases,
+        slot_values,
+        sources=sources,
+        site_parsed_resolver=site_parsed_resolver,
+        inspection_type=inspection_type,
+    )
+    if cases_out is not None:
+        return cases_out, peer_verdict
+
     tpl = _coerce_value_template(template)
     if tpl.strip() and _value_template_has_slot_placeholders(tpl):
         if _is_bare_slot_concat_template(tpl):
@@ -399,15 +472,561 @@ def _compose_report_site_field_final_value(
                 report_field_label=report_field_label,
             )
             if formatted:
-                return formatted
+                return formatted, None
             if "检测日期" in str(report_field_label or "") and len(picked_parts) == 3:
                 date_cn = _compose_chinese_test_date_from_parts(picked_parts)
                 if date_cn:
-                    return date_cn
-        return render_report_value_template(tpl, slot_values)
+                    return date_cn, None
+        return render_report_value_template(tpl, slot_values), None
     if len(picked_parts) == 1:
-        return picked_parts[0]
-    return "\n".join(picked_parts)
+        return picked_parts[0], None
+    return "", None
+
+
+_MAPPING_CASE_SLOT_REF_RE = re.compile(r"\{([^{}]+)\}")
+
+
+def _normalize_value_cases(rows: list | None) -> list[dict[str, Any]]:
+    from utils.conditional_field_rules import normalize_rule_list
+
+    return normalize_rule_list(rows if isinstance(rows, list) else [])
+
+
+def _coerce_mapping_case_operand(raw: Any) -> Any:
+    if isinstance(raw, bool):
+        return raw
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    low = s.lower()
+    if low in ("true", "1", "yes", "y", "on", "是", "勾选", "☑", "✓", "√"):
+        return True
+    if low in ("false", "0", "no", "n", "off", "否", "未勾选", "□", "☐"):
+        return False
+    try:
+        if re.fullmatch(r"-?\d+\.?\d*", s):
+            return float(s) if "." in s else int(s)
+    except (TypeError, ValueError):
+        pass
+    return s
+
+
+def _safe_slot_var_key(slot_key: str) -> str:
+    sk = str(slot_key or "").strip()
+    if not sk:
+        return "_s0"
+    if sk.isdigit():
+        return f"_s{sk}"
+    if re.fullmatch(r"f\d+", sk, re.I):
+        return sk.lower()
+    safe = re.sub(r"\W+", "_", sk).strip("_")
+    if not safe:
+        return "_sx"
+    if safe[0].isdigit():
+        return f"_s_{safe}"
+    return safe
+
+
+def _slot_values_to_case_vm(slot_values: Mapping[str, Any]) -> dict[str, Any]:
+    vm: dict[str, Any] = {}
+    for k, v in (slot_values or {}).items():
+        sk = str(k or "").strip()
+        if not sk:
+            continue
+        coerced = _coerce_mapping_case_operand(v)
+        vm[_safe_slot_var_key(sk)] = coerced
+    return vm
+
+
+def _preprocess_mapping_case_condition(condition: str) -> str:
+    text = str(condition or "")
+
+    def _repl(m: re.Match) -> str:
+        return _safe_slot_var_key(m.group(1))
+
+    return _MAPPING_CASE_SLOT_REF_RE.sub(_repl, text)
+
+
+_BARE_SLOT_COND_RE = re.compile(r"^\{([^{}]+)\}$")
+_NEGATED_SLOT_COND_RE = re.compile(
+    r"^(?:!\s*\{([^{}]+)\}|(?:not|非)\s+\{([^{}]+)\})$",
+    re.IGNORECASE,
+)
+
+
+def _normalize_mapping_case_condition(condition: str) -> str:
+    """
+    将简写条件转为可求值表达式：
+    - ``{1}`` → ``_s1 == true``（勾选/真值）
+    - ``!{1}`` / ``not {1}`` / ``非{1}`` → ``_s1 == false``
+    - 其它表达式仅替换 ``{slot}`` 为安全变量名
+    """
+    text = str(condition or "").strip()
+    if not text:
+        return ""
+    m_neg = _NEGATED_SLOT_COND_RE.match(text)
+    if m_neg:
+        slot = (m_neg.group(1) or m_neg.group(2) or "").strip()
+        if slot:
+            return f"{_safe_slot_var_key(slot)} == false"
+    m_pos = _BARE_SLOT_COND_RE.match(text)
+    if m_pos:
+        slot = str(m_pos.group(1) or "").strip()
+        if slot:
+            return f"{_safe_slot_var_key(slot)} == true"
+    return _preprocess_mapping_case_condition(text)
+
+
+def _mapping_case_rule_has_output(rule: dict) -> bool:
+    if not isinstance(rule, dict):
+        return False
+    if str(rule.get("condition") or "").strip():
+        return "expression" in rule or "formula" in rule
+    return False
+
+
+def _find_source_for_slot(sources: list | None, slot: str) -> dict | None:
+    slot_s = str(slot or "").strip()
+    if not slot_s:
+        return None
+    for src in sources or []:
+        if not isinstance(src, dict):
+            continue
+        if str(src.get("slot") or "").strip() == slot_s:
+            return src
+    try:
+        idx = int(slot_s) - 1
+        if 0 <= idx < len(sources or []):
+            row = sources[idx]
+            return row if isinstance(row, dict) else None
+    except (TypeError, ValueError):
+        pass
+    return None
+
+
+def _inspection_type_from_payload(source_data: dict | None) -> str:
+    if not isinstance(source_data, dict):
+        return "acceptance"
+    tt = str(
+        source_data.get("testType")
+        or (source_data.get("reportInfo") or {}).get("testType")
+        or ""
+    ).strip().lower()
+    if tt in ("status", "state") or "状态" in tt:
+        return "status"
+    return "acceptance"
+
+
+def _site_field_judgment_criterion(
+    site_parsed: dict | None,
+    site_pdf_field_id: str,
+    *,
+    inspection_type: str = "acceptance",
+) -> str:
+    if not site_parsed or not site_pdf_field_id:
+        return ""
+    from apps.api.inspection_report_make import _flatten_unified_form_steps_to_fields
+
+    want = str(site_pdf_field_id).strip().lower()
+    for sf in _flatten_unified_form_steps_to_fields(_parsed_template_steps_list_extended(site_parsed)):
+        pid = str(sf.get("pdfFieldId") or "").strip().lower()
+        if pid != want:
+            continue
+        jc = sf.get("judgmentCriteriaByTestType")
+        if not isinstance(jc, dict):
+            return ""
+        it = str(inspection_type or "").strip().lower()
+        if "状态" in it or it == "status":
+            return str(jc.get("status") or jc.get("acceptance") or "").strip()
+        return str(jc.get("acceptance") or jc.get("status") or "").strip()
+    return ""
+
+
+_SINGLE_SLOT_VALUE_CASE_EXPR = re.compile(r"^\{(\d+)\}$")
+
+
+def _get_site_field_meta_from_parsed(site_parsed: dict | None, site_pdf_field_id: str) -> dict | None:
+    if not site_parsed or not site_pdf_field_id:
+        return None
+    from apps.api.inspection_report_make import _flatten_unified_form_steps_to_fields
+
+    want = str(site_pdf_field_id).strip().lower()
+    for sf in _flatten_unified_form_steps_to_fields(_parsed_template_steps_list_extended(site_parsed)):
+        pid = str(sf.get("pdfFieldId") or "").strip().lower()
+        if pid == want:
+            return sf
+    return None
+
+
+def _slot_mapping_value_is_truthy(val: object) -> bool:
+    if val is True:
+        return True
+    if val is False or val is None:
+        return False
+    s = str(val).strip().lower()
+    if s in ("false", "0", "no", "n", "off", "否", "未勾选", "□", "☐"):
+        return False
+    if s in ("true", "1", "yes", "y", "on", "是", "勾选", "☑", "✓", "√"):
+        return True
+    return bool(s)
+
+
+def _is_checkbox_site_field(meta: dict | None, src: dict | None = None) -> bool:
+    ftype = str((meta or {}).get("type") or "").lower()
+    if ftype in ("boolean", "check"):
+        return True
+    src_ft = str((src or {}).get("fieldType") or "").lower()
+    return src_ft == "check"
+
+
+def _peer_verdict_from_checkbox_criterion(
+    *,
+    slot_asserts_true: bool,
+    criterion: str,
+) -> str | None:
+    """勾选框判定公式 True/False：勾选即 True，未勾选即 False。"""
+    crit = str(criterion or "").strip().lower()
+    if crit not in ("true", "false"):
+        return None
+    expect_pass_when_checked = crit == "true"
+    ok = slot_asserts_true if expect_pass_when_checked else not slot_asserts_true
+    return "合格" if ok else "不合格"
+
+
+def _peer_verdict_from_condition_slot(
+    slot_ref: str,
+    *,
+    slot_asserts_true: bool,
+    slot_values: Mapping[str, str],
+    sources: list | None,
+    site_parsed_resolver,
+    inspection_type: str = "acceptance",
+) -> str | None:
+    from apps.api.inspection_report_make import _normalize_pass_fail_verdict_text
+
+    src = _find_source_for_slot(sources, slot_ref)
+    if not src:
+        return None
+
+    raw_val = slot_values.get(slot_ref) or slot_values.get(str(slot_ref))
+    verdict_text = _normalize_pass_fail_verdict_text(raw_val)
+    if verdict_text and slot_asserts_true:
+        return verdict_text
+
+    site_tid = int(src.get("siteTaskId") or 0)
+    site_code = str(src.get("siteTaskCode") or "")
+    site_parsed = site_parsed_resolver(site_tid, site_code) if site_parsed_resolver else None
+    site_pid = str(src.get("sitePdfFieldId") or "").strip()
+    meta = _get_site_field_meta_from_parsed(site_parsed, site_pid) or {}
+
+    criterion = _site_field_judgment_criterion(site_parsed, site_pid, inspection_type=inspection_type)
+    if _is_checkbox_site_field(meta, src):
+        checkbox_verdict = _peer_verdict_from_checkbox_criterion(
+            slot_asserts_true=slot_asserts_true,
+            criterion=criterion or "true",
+        )
+        if checkbox_verdict in ("合格", "不合格"):
+            return checkbox_verdict
+
+    fv = meta.get("fieldVerdict")
+    if isinstance(fv, dict):
+        kind = str(fv.get("kind") or "").lower()
+        if kind == "exclusivecheck":
+            pid_low = site_pid.lower()
+            pass_ids = {str(x or "").strip().lower() for x in (fv.get("passWhenCheckedPdfFieldIds") or [])}
+            fail_ids = {str(x or "").strip().lower() for x in (fv.get("failWhenCheckedPdfFieldIds") or [])}
+            if slot_asserts_true:
+                if pid_low in pass_ids:
+                    return "合格"
+                if pid_low in fail_ids:
+                    return "不合格"
+            else:
+                if pid_low in pass_ids:
+                    return "不合格"
+                if pid_low in fail_ids:
+                    return "合格"
+
+    if str(meta.get("type") or "").lower() in ("verdict",):
+        if slot_asserts_true and verdict_text:
+            return verdict_text
+
+    if criterion and slot_asserts_true:
+        try:
+            from utils.verdict_from_criterion import parse_first_number, verdict_from_measurement
+        except ImportError:
+            return None
+        measured = str(raw_val or "").strip()
+        if parse_first_number(measured) is not None:
+            verdict = verdict_from_measurement(measured, criterion)
+            if verdict in ("合格", "不合格"):
+                return verdict
+    return None
+
+
+_BARE_NEG_SLOT_COND_RE = re.compile(
+    r"^(?:!\s*\{([^{}]+)\}|(?:not|非)\s+\{([^{}]+)\})$",
+    re.IGNORECASE,
+)
+
+
+def _peer_verdict_from_value_case_condition(
+    condition: str,
+    *,
+    slot_values: Mapping[str, str],
+    sources: list | None,
+    site_parsed_resolver,
+    inspection_type: str = "acceptance",
+) -> str | None:
+    """从条件侧引用来源推断单项判定（勾选/真 → 合格或不合格）。"""
+    cond = str(condition or "").strip()
+    if not cond:
+        return None
+
+    m_neg = _BARE_NEG_SLOT_COND_RE.match(cond)
+    if m_neg:
+        slot_ref = str(m_neg.group(1) or m_neg.group(2) or "").strip()
+        if slot_ref:
+            return _peer_verdict_from_condition_slot(
+                slot_ref,
+                slot_asserts_true=False,
+                slot_values=slot_values,
+                sources=sources,
+                site_parsed_resolver=site_parsed_resolver,
+                inspection_type=inspection_type,
+            )
+        return None
+
+    m_pos = _SINGLE_SLOT_VALUE_CASE_EXPR.match(cond)
+    if m_pos:
+        slot_ref = str(m_pos.group(1) or "").strip()
+        if slot_ref:
+            return _peer_verdict_from_condition_slot(
+                slot_ref,
+                slot_asserts_true=True,
+                slot_values=slot_values,
+                sources=sources,
+                site_parsed_resolver=site_parsed_resolver,
+                inspection_type=inspection_type,
+            )
+        return None
+
+    slot_refs = re.findall(r"\{(\d+)\}", cond)
+    if len(slot_refs) == 1 and not re.search(r"!\s*\{", cond) and not re.search(r"\bnot\b", cond, re.I):
+        slot_ref = slot_refs[0]
+        return _peer_verdict_from_condition_slot(
+            slot_ref,
+            slot_asserts_true=_slot_mapping_value_is_truthy(slot_values.get(slot_ref)),
+            slot_values=slot_values,
+            sources=sources,
+            site_parsed_resolver=site_parsed_resolver,
+            inspection_type=inspection_type,
+        )
+    return None
+
+
+def _peer_verdict_from_value_case_expression(
+    rendered: str,
+    expression: str,
+    *,
+    slot_values: Mapping[str, str],
+    sources: list | None,
+    site_parsed_resolver,
+    inspection_type: str = "acceptance",
+) -> str | None:
+    """从写入表达式中的 {N} 测量值 + judgmentCriteriaByTestType 推断单项判定。"""
+    expr = str(expression or "").strip()
+    if not expr:
+        return None
+
+    slot_refs: list[str] = []
+    slot_match = _SINGLE_SLOT_VALUE_CASE_EXPR.match(expr)
+    if slot_match:
+        slot_refs = [slot_match.group(1)]
+    else:
+        slot_refs = re.findall(r"\{(\d+)\}", expr)
+    if not slot_refs:
+        return None
+
+    try:
+        from utils.verdict_from_criterion import verdict_from_measurement
+    except ImportError:
+        return None
+
+    for slot_ref in slot_refs:
+        measured = str(slot_values.get(slot_ref) or rendered or "").strip()
+        src = _find_source_for_slot(sources, slot_ref)
+        if not src:
+            continue
+        verdict_text = None
+        try:
+            from apps.api.inspection_report_make import _normalize_pass_fail_verdict_text
+            verdict_text = _normalize_pass_fail_verdict_text(measured)
+        except ImportError:
+            pass
+        if verdict_text:
+            return verdict_text
+        site_tid = int(src.get("siteTaskId") or 0)
+        site_code = str(src.get("siteTaskCode") or "")
+        site_parsed = site_parsed_resolver(site_tid, site_code) if site_parsed_resolver else None
+        site_pid = str(src.get("sitePdfFieldId") or "").strip()
+        criterion = _site_field_judgment_criterion(
+            site_parsed,
+            site_pid,
+            inspection_type=inspection_type,
+        )
+        if not criterion:
+            continue
+        verdict = verdict_from_measurement(measured, criterion)
+        if verdict in ("合格", "不合格"):
+            return verdict
+    return None
+
+
+def _compute_peer_verdict_for_matched_value_case_rule(
+    rule: dict,
+    rendered: str,
+    *,
+    slot_values: Mapping[str, str],
+    sources: list | None,
+    site_parsed_resolver,
+    inspection_type: str = "acceptance",
+) -> str | None:
+    """合并条件侧与表达式侧推断的单项判定。"""
+    if not isinstance(rule, dict):
+        return None
+    expr = str(rule.get("expression") if rule.get("expression") is not None else rule.get("formula") or "")
+    cond = str(rule.get("condition") or "")
+
+    from_expr = _peer_verdict_from_value_case_expression(
+        rendered,
+        expr,
+        slot_values=slot_values,
+        sources=sources,
+        site_parsed_resolver=site_parsed_resolver,
+        inspection_type=inspection_type,
+    )
+    from_cond = _peer_verdict_from_value_case_condition(
+        cond,
+        slot_values=slot_values,
+        sources=sources,
+        site_parsed_resolver=site_parsed_resolver,
+        inspection_type=inspection_type,
+    )
+    if from_expr in ("合格", "不合格"):
+        return from_expr
+    if from_cond in ("合格", "不合格"):
+        return from_cond
+    return None
+
+
+def _compute_peer_verdict_for_value_case_expression(
+    rendered: str,
+    expression: str,
+    *,
+    slot_values: Mapping[str, str],
+    sources: list | None,
+    site_parsed_resolver,
+    inspection_type: str = "acceptance",
+) -> str | None:
+    """兼容旧调用：仅表达式侧推断。"""
+    return _peer_verdict_from_value_case_expression(
+        rendered,
+        expression,
+        slot_values=slot_values,
+        sources=sources,
+        site_parsed_resolver=site_parsed_resolver,
+        inspection_type=inspection_type,
+    )
+
+
+def _write_peer_verdict_for_report_result_field(
+    value_mapping: dict,
+    report_field: dict | None,
+    report_pdf_field_id: str,
+    peer_verdict: str,
+    report_parsed_template: dict | None = None,
+) -> None:
+    """将合格/不合格写入报告同行「单项判定」语义键与合成 verdict 域。"""
+    from apps.api.inspection_report_make import (
+        _field_semantic_candidate_keys,
+        _qc_result_row_base_from_field,
+    )
+
+    verdict = str(peer_verdict or "").strip()
+    if verdict not in ("合格", "不合格") or not isinstance(value_mapping, dict):
+        return
+    pid = str(report_pdf_field_id or "").strip()
+    if pid:
+        value_mapping[f"_synVerdict_{pid}"] = verdict
+    if isinstance(report_field, dict):
+        base = _qc_result_row_base_from_field(report_field)
+        if base:
+            value_mapping[f"{base}_单项判定"] = verdict
+    if isinstance(report_parsed_template, dict):
+        for vf in _collect_template_pdf_field_rows(report_parsed_template):
+            if str(vf.get("_peerResultPdfFieldId") or "").strip() != pid:
+                continue
+            vpid = str(vf.get("pdfFieldId") or "").strip()
+            if vpid:
+                value_mapping[vpid] = verdict
+            for k in _field_semantic_candidate_keys(vf):
+                if k:
+                    value_mapping[k] = verdict
+
+
+def _resolve_report_mapping_value_cases(
+    value_cases: list[dict] | None,
+    slot_values: Mapping[str, str],
+    *,
+    sources: list[dict] | None = None,
+    site_parsed_resolver=None,
+    inspection_type: str = "acceptance",
+) -> tuple[str | None, str | None]:
+    """
+    按顺序匹配 valueCases：condition 为真时采用 expression 作为回填文本（支持 {1}/{2} 占位）。
+    判断条件可简写为 ``{1}``（真/勾选）或 ``!{1}``（假/未勾选）；全部未命中时返回空字符串。
+    """
+    cases = _normalize_value_cases(value_cases)
+    if not cases:
+        return None, None
+    vm = _slot_values_to_case_vm(slot_values)
+    had_actionable = False
+    try:
+        from utils.dynamic_form_expression import eval_computed_formula
+    except ImportError:
+        eval_computed_formula = None  # type: ignore[assignment]
+
+    for rule in cases:
+        if not isinstance(rule, dict):
+            continue
+        cond_raw = str(rule.get("condition") or "").strip()
+        if not cond_raw:
+            continue
+        if not _mapping_case_rule_has_output(rule):
+            continue
+        had_actionable = True
+        expr = str(rule.get("expression") if rule.get("expression") is not None else rule.get("formula") or "")
+        if eval_computed_formula is None:
+            continue
+        cond = _normalize_mapping_case_condition(cond_raw)
+        try:
+            matched = eval_computed_formula(cond, vm)
+        except Exception:
+            matched = False
+        if matched is True or (matched not in (None, False) and bool(matched)):
+            rendered = render_report_value_template(expr, dict(slot_values))
+            peer_verdict = _compute_peer_verdict_for_matched_value_case_rule(
+                rule,
+                rendered,
+                slot_values=slot_values,
+                sources=sources,
+                site_parsed_resolver=site_parsed_resolver,
+                inspection_type=inspection_type,
+            )
+            return rendered, peer_verdict
+    if had_actionable:
+        return "", None
+    return None, None
 
 
 def normalize_report_site_field_configs(rows: list) -> list[dict[str, Any]]:
@@ -426,6 +1045,7 @@ def normalize_report_site_field_configs(rows: list) -> list[dict[str, Any]]:
                 "reportPdfFieldId": key,
                 "sources": [],
                 "valueTemplate": "",
+                "valueCases": [],
                 "mapSource": "",
                 "mapRuleLabel": "",
             }
@@ -447,6 +1067,7 @@ def normalize_report_site_field_configs(rows: list) -> list[dict[str, Any]]:
             cfg["valueTemplate"] = _coerce_value_template(
                 row.get("valueTemplate") or row.get("value_template")
             )
+            cfg["valueCases"] = _normalize_value_cases(row.get("valueCases") or row.get("value_cases"))
             cfg["mapSource"] = str(row.get("mapSource") or row.get("map_source") or "").strip()
             cfg["mapRuleLabel"] = str(row.get("mapRuleLabel") or row.get("map_rule_label") or "").strip()
         else:
@@ -470,10 +1091,17 @@ def normalize_report_site_field_configs(rows: list) -> list[dict[str, Any]]:
                     pass
                 elif len(vt) > len(cur):
                     cfg["valueTemplate"] = vt
+            vc = _normalize_value_cases(row.get("valueCases") or row.get("value_cases"))
+            if vc:
+                cfg["valueCases"] = vc
 
     out: list[dict[str, Any]] = []
     for key in order:
         cfg = grouped[key]
+        if cfg.get("valueCases") is None:
+            cfg["valueCases"] = []
+        else:
+            cfg["valueCases"] = _normalize_value_cases(cfg.get("valueCases"))
         seen_src: set[tuple[int, str]] = set()
         deduped: list[dict[str, Any]] = []
         for i, src in enumerate(cfg["sources"], start=1):
@@ -510,6 +1138,7 @@ def configs_to_flat_rows(configs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "mapSource": cfg.get("mapSource") or "",
                     "mapRuleLabel": cfg.get("mapRuleLabel") or "",
                     "valueTemplate": cfg.get("valueTemplate") or "",
+                    "valueCases": cfg.get("valueCases") or [],
                 }
             )
     return flat
@@ -851,6 +1480,7 @@ def apply_report_site_field_map_to_value_mapping(
     *,
     report_parsed_template: dict | None = None,
     ordered_submit_payloads: Sequence[dict] | None = None,
+    only_peer_verdicts: bool = False,
 ) -> None:
     """
     报告回填：显式映射优先于名称模糊匹配。
@@ -871,13 +1501,7 @@ def apply_report_site_field_map_to_value_mapping(
         _REPORT_SUMMARY_OVERLAY_MANAGED_KEYS,
     )
 
-    report_by_pdf: dict[str, dict] = {}
-    if isinstance(report_parsed_template, dict):
-        for f in report_parsed_template.get("fields") or []:
-            if isinstance(f, dict):
-                pid = str(f.get("pdfFieldId") or "").strip()
-                if pid:
-                    report_by_pdf[pid] = f
+    report_by_pdf = _build_report_field_by_pdf_id(report_parsed_template)
 
     site_parsed_cache: dict[tuple[int, str], dict | None] = {}
     site_payload_cache: dict[int, dict] = {}
@@ -989,10 +1613,9 @@ def apply_report_site_field_map_to_value_mapping(
         if site_field is None:
             from apps.api.inspection_report_make import (
                 _flatten_unified_form_steps_to_fields,
-                _parsed_template_steps_list,
             )
 
-            for sf in _flatten_unified_form_steps_to_fields(_parsed_template_steps_list(site_parsed)):
+            for sf in _flatten_unified_form_steps_to_fields(_parsed_template_steps_list_extended(site_parsed)):
                 pid = str(sf.get("pdfFieldId") or (sf.get("source") or {}).get("pdfFieldId") or "").strip()
                 if pid == site_pid:
                     site_field = sf
@@ -1014,8 +1637,8 @@ def apply_report_site_field_map_to_value_mapping(
             continue
         report_field = report_by_pdf.get(report_pid)
         if report_field is None:
-            for rf in (report_parsed_template or {}).get("fields") or []:
-                if isinstance(rf, dict) and str(rf.get("pdfFieldId") or "").strip() == report_pid:
+            for rf in _collect_template_pdf_field_rows(report_parsed_template):
+                if str(rf.get("pdfFieldId") or "").strip() == report_pid:
                     report_field = rf
                     break
         if report_field is None:
@@ -1066,7 +1689,7 @@ def apply_report_site_field_map_to_value_mapping(
                 val,
                 report_field_label=report_label,
                 source_label=src_label,
-            ):
+            ) and not _normalize_value_cases(cfg.get("valueCases") or cfg.get("value_cases")):
                 continue
             slot = str(src.get("slot") or str(i)).strip() or str(i)
             val = _coerce_site_pick_value_for_date_slot(val, label=src_label, slot=slot)
@@ -1085,18 +1708,52 @@ def apply_report_site_field_map_to_value_mapping(
             continue
         template = _coerce_value_template(cfg.get("valueTemplate") or cfg.get("value_template"))
         report_label = str(report_field.get("label") or report_field.get("title") or "").strip()
-        final_value = _compose_report_site_field_final_value(
+        insp_type = _inspection_type_from_payload(source_data)
+        final_value, peer_verdict = _compose_report_site_field_final_value(
             picked_parts,
             slot_values,
             template,
             sources=sources,
             report_field_label=report_label,
+            value_cases=cfg.get("valueCases") or cfg.get("value_cases"),
+            site_parsed_resolver=_parsed_for_site_task,
+            inspection_type=insp_type,
         )
+
+        if peer_verdict:
+            _write_peer_verdict_for_report_result_field(
+                value_mapping,
+                report_field,
+                report_pid,
+                peer_verdict,
+                report_parsed_template,
+            )
+        if only_peer_verdicts:
+            continue
 
         for key in _field_semantic_candidate_keys(report_field):
             if key:
                 value_mapping[key] = final_value
         value_mapping[report_pid] = final_value
+
+
+def apply_explicit_site_field_peer_verdicts(
+    value_mapping: dict,
+    source_data: dict,
+    bindings: dict | None,
+    *,
+    report_parsed_template: dict | None = None,
+    ordered_submit_payloads: Sequence[dict] | None = None,
+) -> None:
+    """在 reconcile/restore 显式映射结果后，补写同行单项判定（合格/不合格）。"""
+    apply_report_site_field_map_to_value_mapping(
+        value_mapping,
+        source_data,
+        bindings,
+        report_parsed_template=report_parsed_template,
+        ordered_submit_payloads=ordered_submit_payloads,
+        only_peer_verdicts=True,
+    )
 
 
 def snapshot_explicit_report_site_field_mapping(

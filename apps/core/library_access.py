@@ -102,6 +102,37 @@ APP_SIDE_ROLE_CODES: FrozenSet[str] = frozenset(
     }
 )
 
+COMMISSION_COORDINATOR_ROLE_CODE = "commission_coordinator"
+
+# 委托统筹账号在文件库中可见的分类（不含数据文件、模板）
+COMMISSION_COORDINATOR_FILE_LIBRARY_TAB_KEYS: FrozenSet[str] = frozenset(
+    {"ocr", "site_record", "report", "attachment", "inspection_submit", "trash"}
+)
+
+FILE_LIBRARY_TAB_DEFS: Tuple[Dict[str, str], ...] = (
+    {"key": "ocr", "label": "待识别文件"},
+    {"key": "json", "label": "数据文件"},
+    {"key": "template", "label": "模板"},
+    {"key": "site_record", "label": "现场记录"},
+    {"key": "report", "label": "报告"},
+    {"key": "attachment", "label": "附件"},
+    {"key": "inspection_submit", "label": "检测提交"},
+    {"key": "trash", "label": "回收站"},
+)
+
+# 委托统筹可创建用户的检测流程岗位（与项目人员派工五级岗位一致）
+COMMISSION_COORDINATOR_WORKFLOW_ROLE_CODES: FrozenSet[str] = frozenset(
+    {
+        "field_inspector",
+        "site_reviewer",
+        "report_author",
+        "report_auditor",
+        "authorized_signatory",
+    }
+)
+
+COMMISSION_COORDINATOR_ASSIGNABLE_ROLE_CODES: FrozenSet[str] = COMMISSION_COORDINATOR_WORKFLOW_ROLE_CODES
+
 
 _ROLE_KIND_BADGE_CLASSES = {
     "slate": "bg-slate-100 text-slate-800 ring-1 ring-slate-200/80",
@@ -128,6 +159,8 @@ def role_enterprise_catalog(code: str) -> Dict[str, Any]:
         kind, style = "模板与测试", "violet"
     elif code == "app_user":
         kind, style = "App 侧（兼容）", "amber"
+    elif code == COMMISSION_COORDINATOR_ROLE_CODE:
+        kind, style = "委托统筹", "amber"
     else:
         kind, style = "其他", "slate"
     return {
@@ -244,6 +277,104 @@ ROLE_DEFAULT_PERMS_BY_CODE["authorized_signatory"]["perm_file_delete"] = True
 ROLE_DEFAULT_PERMS_BY_CODE["authorized_signatory"]["perm_process_pipeline"] = True
 ROLE_DEFAULT_PERMS_BY_CODE["authorized_signatory"]["perm_file_scope_own_only"] = False
 ROLE_DEFAULT_PERMS_BY_CODE["authorized_signatory"]["perm_create_library_project"] = True
+
+ROLE_DEFAULT_PERMS_BY_CODE[COMMISSION_COORDINATOR_ROLE_CODE] = {
+    "perm_manage_users": True,
+    "perm_manage_roles": False,
+    "perm_manage_menus": False,
+    "perm_file_library": True,
+    "perm_file_upload": True,
+    "perm_file_upload_attachment": True,
+    "perm_file_download": True,
+    "perm_file_preview": True,
+    "perm_file_delete": True,
+    "perm_file_scope_own_only": False,
+    "perm_process_pipeline": False,
+    "perm_htmlpdf": False,
+    "perm_assign_tasks": True,
+    "perm_create_library_project": True,
+    "perm_biz_registry": True,
+}
+
+
+def library_user_is_commission_coordinator(user) -> bool:
+    return _role_code(user) == COMMISSION_COORDINATOR_ROLE_CODE
+
+
+def file_library_tabs_for_user(user) -> list[dict]:
+    """按角色返回文件库侧栏可见分类。"""
+    if library_user_is_commission_coordinator(user):
+        keys = COMMISSION_COORDINATOR_FILE_LIBRARY_TAB_KEYS
+        return [dict(t) for t in FILE_LIBRARY_TAB_DEFS if t["key"] in keys]
+    return [dict(t) for t in FILE_LIBRARY_TAB_DEFS]
+
+
+def file_library_tab_allowed_for_user(user, tab: str) -> bool:
+    normalized = (tab or "ocr").strip()
+    if normalized == "upload":
+        normalized = "ocr"
+    allowed = {t["key"] for t in file_library_tabs_for_user(user)}
+    return normalized in allowed
+
+
+def roles_assignable_by_user(actor) -> list:
+    """用户管理页：当前操作者可分配的角色主键列表（空表示不限制）。"""
+    from apps.core.models import Role
+
+    if not getattr(actor, "is_authenticated", False):
+        return []
+    if getattr(actor, "is_superuser", False) or _role_code(actor) in ("super_admin", "admin"):
+        return list(Role.objects.order_by("name", "id"))
+    if library_user_is_commission_coordinator(actor):
+        from apps.core.project_workflow_ui import ROLE_CODE_ORDER
+
+        roles_by_code = {
+            r.code: r
+            for r in Role.objects.filter(code__in=COMMISSION_COORDINATOR_WORKFLOW_ROLE_CODES)
+        }
+        return [roles_by_code[c] for c in ROLE_CODE_ORDER if c in roles_by_code]
+    if role_has(actor, "perm_manage_users"):
+        return list(Role.objects.order_by("name", "id"))
+    return []
+
+
+def library_user_may_manage_target_user(actor, target) -> bool:
+    """委托统筹仅可维护本人创建的检测流程岗位账号。"""
+    if actor is None or target is None:
+        return False
+    if getattr(actor, "is_superuser", False) or _role_code(actor) in ("super_admin", "admin"):
+        return True
+    if not role_has(actor, "perm_manage_users"):
+        return False
+    if not library_user_is_commission_coordinator(actor):
+        return True
+    if getattr(target, "is_superuser", False):
+        return False
+    try:
+        profile = target.profile
+        code = profile.role.code if profile.role_id else ""
+        if profile.created_by_id != actor.pk:
+            return False
+    except Exception:
+        return False
+    if code in ("super_admin", "admin", "template_editor", "template_tester", COMMISSION_COORDINATOR_ROLE_CODE):
+        return False
+    if code and code not in COMMISSION_COORDINATOR_ASSIGNABLE_ROLE_CODES:
+        return False
+    return True
+
+
+def library_coordinator_managed_users_queryset(actor):
+    """委托统筹用户列表：仅本人创建的流程岗位账号。"""
+    from django.contrib.auth.models import User
+
+    qs = User.objects.select_related("profile", "profile__role").order_by("username", "id")
+    if not library_user_is_commission_coordinator(actor):
+        return qs
+    return qs.filter(
+        profile__created_by=actor,
+        profile__role__code__in=COMMISSION_COORDINATOR_ASSIGNABLE_ROLE_CODES,
+    )
 
 
 def _user_role(user):
@@ -404,6 +535,44 @@ def library_user_may_filled_pdf_toolchain(user) -> bool:
     return role_has(user, "perm_process_pipeline") or role_has(user, "perm_htmlpdf")
 
 
+def library_user_may_export_inspection_library_pdfs(user) -> bool:
+    """
+    文件库：手动导出现场记录 PDF、由现场记录导出报告、合并报告等。
+
+    委托统筹无模板编辑器权限，但需在文件库完成上述导出操作。
+    """
+    if library_user_may_filled_pdf_toolchain(user):
+        return True
+    if library_user_is_commission_coordinator(user) and role_has(user, "perm_file_library"):
+        return True
+    return False
+
+
+_LIBRARY_EXPORT_SELECTABLE_CATEGORIES = frozenset(
+    {
+        LibraryFile.CATEGORY_INSPECTION_SUBMIT,
+        LibraryFile.CATEGORY_SITE_RECORD,
+        LibraryFile.CATEGORY_REPORT,
+    }
+)
+
+
+def library_user_may_select_library_file_for_batch(user, lf) -> bool:
+    """
+    文件库表格复选框：导出类操作可选中可见的检测提交/现场记录/报告；
+    删除类操作仍仅本人上传（或管理员删任意）。
+    """
+    if lf is None:
+        return False
+    if library_user_may_delete_library_file(user, lf):
+        return True
+    if not library_user_may_export_inspection_library_pdfs(user):
+        return False
+    if not library_file_access_allowed(user, lf):
+        return False
+    return (getattr(lf, "category", None) or "") in _LIBRARY_EXPORT_SELECTABLE_CATEGORIES
+
+
 def library_filter_tasks_for_template_management(queryset, user):
     """
     任务模板库左侧树 / 列表可见的 LibraryTask 范围。
@@ -457,7 +626,10 @@ def library_user_may_access_task_template_library_nav(user) -> bool:
     含：分配文件库任务、覆盖项 ``perm_library_task_templates_write``（如甲方演示自建模板）、
     或已被分配检测任务且具备模板填 PDF 链路的参与人。
     不包含 ``perm_file_library``；展示入口的模板仍需自备文件库可见性判断。
+    委托统筹（``commission_coordinator``）可使用全部任务模板立项，但不展示任务模板库入口。
     """
+    if library_user_is_commission_coordinator(user):
+        return False
     if not getattr(user, "is_authenticated", False):
         return False
     if role_has(user, "perm_assign_tasks") or role_has(user, "perm_library_task_templates_write"):
@@ -476,6 +648,17 @@ def library_user_may_access_hospital_info_nav(user) -> bool:
         return False
     if not role_has(user, "perm_file_library"):
         return False
+    return library_user_may_edit_hospital_info(user)
+
+
+def library_user_may_edit_hospital_info(user) -> bool:
+    """医院信息管理：维护医院/院区/科室与设备（本模块无只读访客档）。"""
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if library_user_is_commission_coordinator(user) and role_has(user, "perm_file_library"):
+        return True
+    if role_has(user, "perm_manage_users"):
+        return True
     return library_user_can_assign_tasks_to_participants(user) or role_has(
         user, "perm_create_library_project"
     )
@@ -963,6 +1146,7 @@ def role_ui_context(user) -> Dict[str, Any]:
     empty: Dict[str, Any] = {
         "ui_sidebar_show_project_management": False,
         "ui_sidebar_show_commission_manage": False,
+        "ui_sidebar_show_user_management": False,
         "ui_dashboard_hide_json_tile": False,
         "ui_dashboard_site_record_focus": False,
         "ui_dashboard_hide_file_stats_row": False,
@@ -973,23 +1157,26 @@ def role_ui_context(user) -> Dict[str, Any]:
     code = _role_code(user)
     is_super = bool(getattr(user, "is_superuser", False)) or code == "super_admin"
     is_admin = code == "admin"
+    is_coordinator = code == COMMISSION_COORDINATOR_ROLE_CODE
     has_assign = library_user_can_assign_tasks_to_participants(user)
 
     # 侧栏「项目管理」：现场检测两岗只做上传/校核，不进入项目配置页
-    if is_super or is_admin or has_assign:
+    if is_super or is_admin or has_assign or is_coordinator:
         show_pm = role_has(user, "perm_file_library")
     elif code in ("field_inspector", "site_reviewer"):
         show_pm = False
     else:
         show_pm = role_has(user, "perm_file_library")
 
-    # 仪表盘首行文件统计：现场两岗只强调现场记录，隐藏 JSON 统计块
+    # 仪表盘首行文件统计：现场两岗只强调现场记录；委托统筹隐藏数据文件入口
     site_focus = code in ("field_inspector", "site_reviewer")
-    hide_json = site_focus
+    hide_json = site_focus or is_coordinator
     hide_file_row = not role_has(user, "perm_file_library")
 
     # Django Admin 入口：仅保留给系统管理类角色，避免检测岗误点
-    show_admin_tile = is_super or is_admin or role_has(user, "perm_manage_users")
+    show_admin_tile = is_super or is_admin or (
+        role_has(user, "perm_manage_users") and not is_coordinator
+    )
 
     from apps.core.commission_management_service import library_user_may_access_commission_manage
 
@@ -997,6 +1184,9 @@ def role_ui_context(user) -> Dict[str, Any]:
         "ui_sidebar_show_project_management": bool(show_pm),
         "ui_sidebar_show_commission_manage": bool(
             show_pm and library_user_may_access_commission_manage(user)
+        ),
+        "ui_sidebar_show_user_management": bool(
+            is_coordinator and role_has(user, "perm_manage_users")
         ),
         "ui_dashboard_hide_json_tile": bool(hide_json),
         "ui_dashboard_site_record_focus": bool(site_focus),

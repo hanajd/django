@@ -30,6 +30,7 @@ from apps.core.models import (
 class UserProfileInline(admin.StackedInline):
     """用户资料内联"""
     model = UserProfile
+    fk_name = "user"
     can_delete = False
     verbose_name_plural = '用户资料'
 

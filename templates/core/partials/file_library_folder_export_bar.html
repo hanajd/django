@@ -1,0 +1,35 @@
+{# 报告/现场记录文件夹层级：一键合并导出报告（各现场记录取最新，无需勾选） #}
+{% if can_manual_export_report_from_site_record and folder_export_context %}
+<div class="mb-4 rounded-xl border border-violet-200 bg-violet-50/80 px-4 py-3 shadow-sm ring-1 ring-violet-100">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div class="min-w-0">
+            <p class="text-sm font-semibold text-violet-950">
+                {% if folder_export_context.mode == 'site' %}
+                导出本现场记录环节报告
+                {% else %}
+                导出本报告合并报告
+                {% endif %}
+            </p>
+            <p class="mt-1 text-xs leading-relaxed text-violet-800/90">
+                {% if folder_export_context.mode == 'site' %}
+                将自动采用<strong>本现场记录文件夹</strong>下创建时间最新的现场记录 PDF（若无 PDF 则回退最新检测提交 JSON），生成对应报告。
+                {% else %}
+                将按报告配置的各<strong>现场记录文件夹</strong>分别取最新现场记录 PDF（无 PDF 时回退检测提交 JSON），
+                再按报告模板中的 <strong>report_site_field_map</strong> 映射关系合并为一份完整报告。
+                {% endif %}
+            </p>
+        </div>
+        <button type="button"
+                onclick="return fileLibSubmitFolderExport(this)"
+                class="file-lib-folder-export-action inline-flex w-full shrink-0 items-center justify-center gap-1.5 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-500 sm:w-auto"
+                data-action="{% if folder_export_context.site_folder_key %}export_site_folder_report{% else %}export_report_folder_merged{% endif %}"
+                data-project-key="{{ folder_export_context.project_folder_key }}"
+                data-report-key="{{ folder_export_context.report_folder_key }}"
+                {% if folder_export_context.site_folder_key %}data-site-key="{{ folder_export_context.site_folder_key }}"{% endif %}
+                data-confirm="{% if folder_export_context.mode == 'site' %}确定导出本现场记录文件夹最新现场记录？{% else %}确定按各现场记录文件夹最新记录合并导出报告？{% endif %}">
+            <i class="ri-draft-line"></i>
+            {% if folder_export_context.mode == 'site' %}导出报告（本环节最新）{% else %}导出合并报告{% endif %}
+        </button>
+    </div>
+</div>
+{% endif %}

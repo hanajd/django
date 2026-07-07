@@ -311,6 +311,15 @@ def resolve_background_row_binding(
     return out if _norm(out.get("report_d") or "") or any(_norm(out.get(f"bg_reading_{i}") or "") for i in range(1, 11)) else {}
 
 
+def _chapter_rule_calibration_factor_pid(expr: str, *, mean_token: str) -> str:
+    """从章节报出值表达式提取校准因子 f 号（如 {mean}*f927）。"""
+    expr = _norm(expr)
+    if not expr or mean_token not in expr:
+        return ""
+    m = re.search(r"\*\s*(f\d+)", expr, re.I)
+    return m.group(1).lower() if m else ""
+
+
 def _chapter_g1_calibration_factor_pid(chapter: Optional[Mapping[str, Any]]) -> str:
     """从章节报出值规则第一组表达式提取校准因子 f 号（如 {mean}*f927）。"""
     chapter = chapter if isinstance(chapter, dict) else {}
@@ -321,9 +330,25 @@ def _chapter_g1_calibration_factor_pid(chapter: Optional[Mapping[str, Any]]) -> 
         expr = _norm(rule.get("expression") or rule.get("formula") or "")
         if not expr or "{mean2}" in expr:
             continue
-        m = re.search(r"\*\s*(f\d+)", expr, re.I)
-        if m:
-            return m.group(1).lower()
+        pid = _chapter_rule_calibration_factor_pid(expr, mean_token="{mean}")
+        if pid:
+            return pid
+    return ""
+
+
+def _chapter_g2_calibration_factor_pid(chapter: Optional[Mapping[str, Any]]) -> str:
+    """从章节报出值规则第二组表达式提取校准因子 f 号（如 {mean2}*f158）。"""
+    chapter = chapter if isinstance(chapter, dict) else {}
+    rules = chapter.get("reportValueRules") if isinstance(chapter.get("reportValueRules"), list) else []
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        expr = _norm(rule.get("expression") or rule.get("formula") or "")
+        if not expr or "{mean2}" not in expr:
+            continue
+        pid = _chapter_rule_calibration_factor_pid(expr, mean_token="{mean2}")
+        if pid:
+            return pid
     return ""
 
 
@@ -573,6 +598,14 @@ def _column_role(sem: Mapping[str, Any], field: Mapping[str, Any]) -> str:
     if col:
         if _is_annual_dose_field_label(col):
             return _COLUMN_ANNUAL_DOSE
+        if col in ("测量读数M", "测量读数") or col.startswith("测量读数"):
+            return _COLUMN_READING
+        if col == "测量值":
+            return _COLUMN_READING
+        if col in ("测量均值Mbar", "测量均值") or "均值" in col:
+            return _COLUMN_MEAN
+        if col in ("报出值D", "报出值") or "报出" in col:
+            return _COLUMN_REPORT
         return col
     if sem.get("meanOfReadings") or field.get("mean"):
         return _COLUMN_MEAN
@@ -833,6 +866,117 @@ def _dual_binding_assignment_complete(out: Mapping[str, Any]) -> bool:
         "mean_m_2",
     )
     return all(_norm(out.get(k) or "") for k in keys)
+
+
+# 窄列双组表（口腔 CBCT 等）：10 列固定 x 带，不依赖栏位 id 后缀（M3/M4/栏位编号）。
+_NARROW_DUAL_X_BANDS: tuple[tuple[str, float, float], ...] = (
+    ("reading_1", 210.0, 255.0),
+    ("reading_2", 255.0, 300.0),
+    ("reading_3", 300.0, 360.0),
+    ("mean_m", 360.0, 420.0),
+    ("reading_1_2", 420.0, 470.0),
+    ("reading_2_2", 470.0, 525.0),
+    ("reading_3_2", 525.0, 575.0),
+    ("mean_m_2", 575.0, 635.0),
+    ("report_d", 635.0, 705.0),
+    ("report_d_2", 705.0, 820.0),
+)
+
+
+def _narrow_dual_slot_from_label(label: str) -> str:
+    """标签后缀提示列角色；M4 与 M3 同属第一组读数 3。"""
+    t = _norm(label)
+    if not t:
+        return ""
+    if t.endswith("_测量读数M1"):
+        return "reading_1"
+    if t.endswith("_测量读数M2"):
+        return "reading_2"
+    if re.search(r"_测量读数M[34]$", t):
+        return "reading_3"
+    if re.search(r"_测量读数M$", t) and not re.search(r"_测量读数M\d", t):
+        return "reading_1_2"
+    if t.endswith("_测量值"):
+        return ""
+    if t.endswith("_测量均值Mbar"):
+        return ""
+    if t.endswith("_报出值D"):
+        return ""
+    return ""
+
+
+def _narrow_dual_slot_for_x(x: float) -> str:
+    for slot, lo, hi in _NARROW_DUAL_X_BANDS:
+        if lo <= x < hi:
+            return slot
+    return ""
+
+
+def _assign_dual_group_slots_by_narrow_x(items: List[Dict[str, Any]]) -> Dict[str, str]:
+    """
+    窄列双组表：按 PDF x 坐标列带分配槽位（M1/M2/M3/均值/M/测量值/报出值）。
+    第 6 页等「测量读数M4」栏亦落在 reading_3 列带，避免按读数个数对半拆分错位。
+    """
+    ordered = sorted(items, key=lambda it: float(it.get("x0") or 0.0))
+    out: Dict[str, str] = {}
+    value_slots = ("reading_2_2", "reading_3_2")
+    value_idx = 0
+    mean_idx = 0
+    report_idx = 0
+
+    for it in ordered:
+        field = it.get("field")
+        pid = _norm(it.get("pid") or "")
+        if not pid:
+            continue
+        label = ""
+        if isinstance(field, dict):
+            label = f"{_field_display_label(field)} {field.get('id') or ''}"
+        fid = str(field.get("id") or "") if isinstance(field, dict) else ""
+        role = _norm(it.get("role") or "")
+        x = float(it.get("x0") or 0.0)
+
+        slot = ""
+        if role == _COLUMN_MEAN or fid.endswith("_测量均值Mbar") or label.endswith("_测量均值Mbar"):
+            slot = _narrow_dual_slot_for_x(x) or ("mean_m" if mean_idx == 0 else "mean_m_2")
+            if slot in ("mean_m", "mean_m_2"):
+                mean_idx += 1
+        elif role == _COLUMN_REPORT or fid.endswith("_报出值D") or label.endswith("_报出值D"):
+            slot = _narrow_dual_slot_for_x(x) or ("report_d" if report_idx == 0 else "report_d_2")
+            if slot in ("report_d", "report_d_2"):
+                report_idx += 1
+        elif role == _COLUMN_READING or _is_rp_measurement_data_cell(field if isinstance(field, dict) else {}):
+            slot = _narrow_dual_slot_from_label(label or fid)
+            if not slot and (fid.endswith("_测量值") or label.endswith("_测量值")):
+                if value_idx < len(value_slots):
+                    slot = value_slots[value_idx]
+                    value_idx += 1
+            if not slot:
+                xs = _narrow_dual_slot_for_x(x)
+                if xs.startswith("reading_"):
+                    slot = xs
+        else:
+            slot = _narrow_dual_slot_from_label(label or fid)
+            if not slot and (fid.endswith("_测量值") or label.endswith("_测量值")):
+                if value_idx < len(value_slots):
+                    slot = value_slots[value_idx]
+                    value_idx += 1
+            if not slot:
+                slot = _narrow_dual_slot_for_x(x)
+
+        if not slot or slot not in _BINDING_SLOT_KEYS:
+            continue
+        if slot in out and out[slot] != pid:
+            xs = _narrow_dual_slot_for_x(x)
+            if xs and xs not in out:
+                slot = xs
+            else:
+                if slot.startswith("reading_") and not out.get(slot):
+                    out[slot] = pid
+                continue
+        out[slot] = pid
+
+    return out
 
 
 def _assign_dual_group_slots_by_x(items: List[Dict[str, Any]]) -> Dict[str, str]:
@@ -1590,6 +1734,13 @@ def _collect_point_data_fields(
                 continue
             role = _COLUMN_READING
             slot = ""
+        item_id = _norm(field.get("id") or "")
+        if item_id.startswith("栏位"):
+            band_slot = _narrow_dual_slot_for_x(_field_sort_x(field))
+            if band_slot in ("mean_m", "mean_m_2"):
+                role = _COLUMN_MEAN
+            elif band_slot in ("report_d", "report_d_2"):
+                role = _COLUMN_REPORT
         pt = _protection_row_coordinate_key(field)
         if not pt:
             continue
@@ -1616,6 +1767,13 @@ def _assign_slots_to_point_row(
         return {}
 
     if dual_group:
+        narrow_out = _assign_dual_group_slots_by_narrow_x(items)
+        if narrow_out.get("reading_1") and (
+            narrow_out.get("mean_m")
+            or narrow_out.get("reading_1_2")
+            or narrow_out.get("report_d")
+        ):
+            return narrow_out
         role_out = _assign_dual_group_slots_by_role(items)
         if role_out.get("reading_1") and (
             role_out.get("mean_m")
@@ -2539,13 +2697,48 @@ def compile_report_expression(
     )
 
 
+def report_expression_for_binding(
+    rules: List[Mapping[str, Any]],
+    binding: Mapping[str, Any],
+    *,
+    report_group: int = 1,
+) -> str:
+    """章节报出值规则套用到绑定行：{mean}/{mean2} 替换为该行均值 f 号（如 f177*f984）。"""
+    manual = manual_report_value_rules_for_binding(rules, binding, report_group=report_group)
+    if not manual:
+        return ""
+    return _norm(manual[0].get("expression") or manual[0].get("formula") or "")
+
+
+def chapter_report_rules_for_field_group(
+    rules: List[Mapping[str, Any]],
+    *,
+    report_group: int = 1,
+) -> List[Dict[str, Any]]:
+    """章节报出值规则（保留 {mean}/{mean2} 占位），按报出列组筛选，供栏位 formulaRules 展示。"""
+    manual_rows: List[Dict[str, Any]] = []
+    for rule in normalize_rule_list(rules):
+        cond = _norm(rule.get("condition"))
+        expr = _norm(rule.get("expression") or rule.get("formula"))
+        if cond or not expr:
+            continue
+        if report_group == 1 and "{mean2}" in expr and "{mean}" not in expr:
+            continue
+        if report_group == 2 and "{mean}" in expr and "{mean2}" not in expr and "mean2" not in expr.lower():
+            continue
+        row = export_rule_for_frontend(rule)
+        if row.get("expression") or row.get("formula"):
+            manual_rows.append(row)
+    return manual_rows
+
+
 def manual_report_value_rules_for_binding(
     rules: List[Mapping[str, Any]],
     binding: Mapping[str, Any],
     *,
     report_group: int = 1,
 ) -> List[Dict[str, Any]]:
-    """condition 为空的章节报出值规则 → 栏位级列表（{mean}/{mean2} 已替换为该行均值 f 号）。"""
+    """condition 为空的章节报出值规则 → 栏位级列表（{mean}/{mean2} 已替换为该行均值 f 号，仅后端求值）。"""
     manual_rows: List[Dict[str, Any]] = []
     for rule in normalize_rule_list(rules):
         cond = _norm(rule.get("condition"))
@@ -2574,7 +2767,11 @@ def _write_manual_report_rules_to_field(
     auto_expr: str = "",
     chapter_rules: Optional[List[Mapping[str, Any]]] = None,
 ) -> None:
-    """单元格级条件公式：单条默认自动；多条且含自动规则时写入栏位备选。"""
+    """
+    章节 condition 为空的规则写入栏位：
+    - 单条默认式 → fieldExpression（已替换为该行均值 f 号，如 f177*f984）；
+    - 多条备选 → formulaRules（同样为行内 f 号，不含 {mean}/{mean2} 占位）。
+    """
     if field_has_per_cell_formula_override(report_field, chapter_rules=chapter_rules):
         return
     if not manual:
@@ -2585,9 +2782,15 @@ def _write_manual_report_rules_to_field(
             manual[0].get("expression") or "",
             chapter_rules=chapter_rules,
         )
+        report_field.pop("formulaRules", None)
+        report_field.pop("fieldExpressionRules", None)
         return
     report_field["formulaRules"] = copy.deepcopy(manual)
     report_field.pop("fieldExpressionRules", None)
+    if not auto_expr and not _field_has_user_cell_formula(report_field, chapter_rules=chapter_rules):
+        report_field.pop("fieldExpression", None)
+        report_field.pop("pdfFieldExpression", None)
+        report_field.pop("formula", None)
     if str(report_field.get("type") or "").lower() in ("", "number"):
         report_field["type"] = "computed"
 
@@ -2595,15 +2798,19 @@ def _write_manual_report_rules_to_field(
 def _binding_with_mean_fallback(
     binding: Mapping[str, Any],
     report_field: Mapping[str, Any],
+    *,
+    report_group: int = 1,
 ) -> Dict[str, Any]:
-    """绑定行补全 mean_m：优先 fieldBindings，其次栏位已有 chapterMeanPdfFieldId。"""
+    """绑定行补全 mean_m / mean_m_2：优先 fieldBindings，其次栏位已有 chapterMeanPdfFieldId。"""
     out = dict(binding) if isinstance(binding, dict) else {}
-    mean_pid = _norm(out.get("mean_m") or "") or _norm(report_field.get("chapterMeanPdfFieldId") or "")
+    mean_key = _binding_mean_key(group=report_group)
+    mean_pid = _norm(out.get(mean_key) or "") or _norm(report_field.get("chapterMeanPdfFieldId") or "")
     if mean_pid:
-        out["mean_m"] = mean_pid
-    report_pid = _norm(out.get("report_d") or "") or export_field_pdf_id(report_field)
+        out[mean_key] = mean_pid
+    report_key = _binding_report_key(group=report_group)
+    report_pid = _norm(out.get(report_key) or "") or export_field_pdf_id(report_field)
     if report_pid:
-        out["report_d"] = report_pid
+        out[report_key] = report_pid
     return out
 
 
@@ -2617,15 +2824,14 @@ def apply_chapter_report_rules_to_field(
 ) -> None:
     """
     报出值栏位（steps / pdf.fields 均可）：
-    - condition 非空 → fieldExpression（if 嵌套，自动判定）；
-    - condition 为空 → 写入 formulaRules（{mean} 已换行内 f 号），由前端按 §3.2 人工选公式；
-    - 仅一条 condition 为空且无自动条 → 写 fieldExpression（默认公式）。
+    - condition 非空 → fieldExpression（if 嵌套，自动判定，仅后端/导出求值）；
+    - condition 为空 → fieldExpression 写行内 f 号公式（如 f177*f984），章节占位 {mean} 仅保留在 reportValueRules。
     """
     if is_background_range_pdf_field(report_field):
         return
     if not force and _field_has_user_cell_formula(report_field, chapter_rules=rules):
         return
-    binding = _binding_with_mean_fallback(binding, report_field)
+    binding = _binding_with_mean_fallback(binding, report_field, report_group=report_group)
     mean_pid = _norm(binding.get(_binding_mean_key(group=report_group)) or "")
     if mean_pid:
         report_field["chapterMeanPdfFieldId"] = mean_pid
@@ -2725,7 +2931,25 @@ def apply_mean_formulas_to_pdf_fields(
         for field in (fields or [])
         if isinstance(field, dict) and export_field_pdf_id(field)
     }
-    groups = (1, 2) if mode == "per_row_avg_dual" or int(mean_cfg.get("groups") or 1) >= 2 else (1,)
+    dual = mode == "per_row_avg_dual" or int(mean_cfg.get("groups") or 1) >= 2
+    reading_keys = (
+        ("reading_1", "reading_2", "reading_3", "reading_1_2", "reading_2_2", "reading_3_2")
+        if dual
+        else ("reading_1", "reading_2", "reading_3")
+    )
+    for binding in bindings or []:
+        if not isinstance(binding, dict):
+            continue
+        for rk in reading_keys:
+            read_pid = _norm(binding.get(rk) or "")
+            if not read_pid or read_pid not in by_pid:
+                continue
+            read_field = by_pid[read_pid]
+            if field_has_per_cell_formula_override(read_field):
+                continue
+            read_field.pop("fieldExpression", None)
+            read_field.pop("pdfFieldExpression", None)
+    groups = (1, 2) if dual else (1,)
     for binding in bindings or []:
         if not isinstance(binding, dict):
             continue
@@ -2838,14 +3062,9 @@ def resolve_chapter_field_bindings(
             if isinstance(chapter, dict):
                 saved = chapter.get("fieldBindings")
                 if isinstance(saved, list) and saved and not _bindings_look_stale(saved):
-                    built_dual = sum(
-                        1 for b in built if isinstance(b, dict) and _norm(b.get("mean_m_2") or "")
-                    )
-                    saved_dual = sum(
-                        1 for b in saved if isinstance(b, dict) and _norm(b.get("mean_m_2") or "")
-                    )
-                    if saved_dual > built_dual:
-                        return [dict(x) for x in saved if isinstance(x, dict)]
+                    # 模板内手工校正过的绑定（含 seq_no）优先于 pdf 坐标重算，
+                    # 避免窄列双组版式重算时读数列错位覆盖已保存绑定。
+                    return [dict(x) for x in saved if isinstance(x, dict)]
             return built
     if isinstance(chapter, dict):
         raw = chapter.get("fieldBindings")

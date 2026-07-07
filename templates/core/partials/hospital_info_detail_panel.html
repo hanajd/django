@@ -59,10 +59,12 @@
     <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-slate-50 text-slate-600 ring-1 ring-slate-200/80">
         <i class="ri-eye-line"></i> 浏览模式
     </span>
+    {% if hospital_info_can_edit %}
     <a href="{{ hospital_info_url_edit }}"
        class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm transition">
         <i class="ri-edit-line"></i> 编辑
     </a>
+    {% endif %}
     {% endif %}
 </div>
 

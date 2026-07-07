@@ -13,7 +13,6 @@
     {% if not explorer_org %}
     <form method="post" class="space-y-3">
         {% csrf_token %}
-        <input type="hidden" name="edit" value="1">
         <input type="hidden" name="action" value="create_commission_organization">
         <input type="hidden" name="org_level" value="hospital">
         {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
@@ -28,7 +27,6 @@
     {% elif explorer_org_child_levels %}
     <form method="post" class="space-y-3">
         {% csrf_token %}
-        <input type="hidden" name="edit" value="1">
         <input type="hidden" name="action" value="create_commission_organization">
         <input type="hidden" name="parent_id" value="{{ explorer_org.pk }}">
         {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}

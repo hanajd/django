@@ -2,10 +2,10 @@
 <tr class="file-lib-row transition-colors hover:bg-slate-50/90{% if explorer_dnd_enabled %} cursor-grab{% endif %}" data-file-lib-search="{{ f.file_library_search_blob|default:''|escape }}"{% if explorer_dnd_enabled %} data-file-drag-id="{{ f.pk }}" title="拖到项目文件夹可关联该项目"{% endif %}>
     {% if file_library_row_selection %}
     <td class="px-3 py-3 align-top">
-        {% if f.file_library_may_delete %}
+        {% if f.file_library_may_select %}
         <input type="checkbox" name="ids" value="{{ f.pk }}" class="row-check mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30">
         {% else %}
-        <span class="mt-1 inline-block text-xs text-slate-400" title="仅可删除本人上传的文件">—</span>
+        <span class="mt-1 inline-block text-xs text-slate-400" title="当前文件不可勾选">—</span>
         {% endif %}
     </td>
     {% endif %}

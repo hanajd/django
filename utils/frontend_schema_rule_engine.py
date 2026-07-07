@@ -686,16 +686,6 @@ SEMANTIC_ROLE_MAPPINGS = {
     "受检单位陪同人": {"id_prefix": "accompanyingPerson", "type": "signature"},
 }
 
-# 旧版现场记录 PDF 签名框（只读兼容历史提交 dynamicData，禁止用于新模板 schema 推断）
-_LEGACY_SIGNATURE_PDF_FIELD_ROLES: Dict[str, Tuple[str, str]] = {
-    "f36": ("inspector", "参与主要检测人员（签字）"),
-    "f35": ("checker", "校核员及校核日期（签字）"),
-    "f34": ("accompanyingPerson", "受检单位陪同人（签字）"),
-    "f76": ("inspector", "参与主要检测人员（签字）"),
-    "f78": ("checker", "校核员及校核日期（签字）"),
-    "f77": ("accompanyingPerson", "受检单位陪同人（签字）"),
-}
-
 CANONICAL_SIGNATURE_ROLE_IDS = frozenset({"inspector", "checker", "accompanyingPerson"})
 
 
@@ -890,11 +880,8 @@ def _infer_type(raw_type: str, label: str) -> str:
 
 
 def _signature_role_from_pdf_field_id(pdf_field_id: str) -> Tuple[str, str] | None:
-    """仅识别旧版固定 f 槽；新模板签名必须靠标签 + image 栏位。"""
-    pid = str(pdf_field_id or "").strip().lower()
-    if not pid:
-        return None
-    return _LEGACY_SIGNATURE_PDF_FIELD_ROLES.get(pid)
+    """签名角色仅由栏位标签或 formSchema type=signature 推断，不按固定 f 号。"""
+    return None
 
 
 def _is_pdf_field_row_signature_image(row: Dict[str, Any]) -> bool:

@@ -95,7 +95,7 @@ def resolve_case_for_project_library_task(
         )
     if assignment is None:
         raise InspectionFrontendExportError("任务未分配到当前项目")
-    case = mixin._ensure_case_for_assignment_internal(assignment)
+    case = mixin._ensure_case_for_assignment(assignment)
     if case.library_project_id != project.pk:
         case.library_project = project
         case.save(update_fields=["library_project", "updated_at"])
@@ -143,7 +143,7 @@ def _payload_from_submission_row(
             "signatures": {},
             "instruments": [],
         }
-    payload["taskNo"] = payload.get("taskNo") or submission_task_no
+    payload["taskNo"] = submission_task_no
     payload["projectId"] = payload.get("projectId") or project_public_id
     payload["updatedAt"] = payload.get("updatedAt") or (
         submission.updated_at_remote.isoformat() if submission.updated_at_remote else now_iso
@@ -169,15 +169,16 @@ def build_runtime_frontend_for_inspection_export(
         case, assignment = resolve_case_for_project_library_task(
             project, library_task, user=user
         )
-    submission_task_no = case.case_no
     tasks = project_tasks_ordered(project)
-    display_no = (str(display_task_no).strip() if display_task_no else "") or (
-        project_task_no_for_library_task(library_task, project, ordered_tasks=tasks) or submission_task_no
+    api_task_no = (str(display_task_no).strip() if display_task_no else "") or (
+        project_task_no_for_library_task(library_task, project, ordered_tasks=tasks) or ""
     )
+    if not api_task_no:
+        api_task_no = (case.case_no or "").strip()
 
     task_obj = library_task
     if task_obj is None:
-        task_obj = _resolve_library_task_for_task_no(submission_task_no, project)
+        task_obj = _resolve_library_task_for_task_no(api_task_no, project)
     if task_obj is None:
         raise InspectionFrontendExportError("未找到任务关联模板")
 
@@ -192,30 +193,28 @@ def build_runtime_frontend_for_inspection_export(
         scoped_payload, submission = resolve_submit_payload_for_site_export(
             case,
             project,
-            submission_task_no,
+            api_task_no,
             user=user,
         )
         if isinstance(scoped_payload, dict) and scoped_payload:
             payload = dict(scoped_payload)
-            payload["taskNo"] = payload.get("taskNo") or submission_task_no
+            payload["taskNo"] = api_task_no
             payload["projectId"] = payload.get("projectId") or project_public_id
         else:
             payload = _empty_submit_payload(
-                submission_task_no=submission_task_no,
+                submission_task_no=api_task_no,
                 project_public_id=project_public_id,
                 now_iso=now_iso,
             )
     else:
         submission = (
-            InspectionSubmission.objects.filter(
-                task_no=submission_task_no, case=case, project=project
-            )
+            InspectionSubmission.objects.filter(case=case, project=project)
             .order_by("-updated_at", "-id")
             .first()
         )
         payload = _payload_from_submission_row(
             submission,
-            submission_task_no=submission_task_no,
+            submission_task_no=api_task_no,
             project_public_id=project_public_id,
             now_iso=now_iso,
         )
@@ -227,7 +226,7 @@ def build_runtime_frontend_for_inspection_export(
     payload = normalize_floor_plan_dynamic_data(payload)
     payload = consolidate_submit_signatures(payload)
 
-    fill_task_no = submission_task_no
+    fill_task_no = api_task_no
     if task_obj.output_target == LibraryTask.OUTPUT_REPORT:
         from apps.api.inspection_pdf_service import (
             _deep_merge_payload_dicts,
@@ -295,8 +294,8 @@ def build_runtime_frontend_for_inspection_export(
         pdf_path=pdf_path,
         payload_for_defaults=payload,
         project_id=project_public_id,
-        task_no=submission_task_no,
-        inspected_display_no=display_inspected_no_for_fill(case, project, display_no),
+        task_no=api_task_no,
+        inspected_display_no=display_inspected_no_for_fill(case, project, api_task_no),
         task_obj=task_obj,
         project_obj=project,
     )

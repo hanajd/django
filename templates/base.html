@@ -132,6 +132,12 @@
                         <span>检测仪器台账</span>
                     </a>
                     {% endif %}
+                    {% if ui_sidebar_show_user_management %}
+                    <a id="sidebar-link-user-management" href="{% url 'user_list' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
+                        <i class="ri-team-line text-lg"></i>
+                        <span>用户管理</span>
+                    </a>
+                    {% endif %}
                     {% if show_library_task_nav %}
                     <a id="sidebar-link-task-templates" href="{% url 'library_task_management' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
                         <i class="ri-stack-line text-lg"></i>
@@ -263,6 +269,9 @@
         </main>
     </div>
     <script src="{% static 'js/admin-pjax.js' %}" defer></script>
+    {% if user.is_authenticated %}
+    <script src="{% static 'js/file_lib_folder_export.js' %}?v=1" defer></script>
+    {% endif %}
     
     {% else %}
     <!-- 未登录：显示登录页 -->

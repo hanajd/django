@@ -1735,22 +1735,49 @@ def _fill_template_fields_with_submit_legacy(
     binding_map = _build_template_binding_value_mapping(source_data, bindings or {})
     if binding_map:
         value_mapping.update(binding_map)
+    is_report_output_legacy = (
+        task_obj is not None
+        and getattr(task_obj, "output_target", None) == LibraryTask.OUTPUT_REPORT
+    )
+    report_reserved_pdf_field_ids = (
+        _collect_template_pdf_field_ids(template_fields)
+        if is_report_output_legacy
+        else frozenset()
+    )
     if task_obj is not None and project is not None:
         merged_site_sem: dict = {}
         for _st, parsed in _iter_parsed_templates_for_backfill(task_no, project, task_obj):
             steps = _parsed_template_steps_list(parsed)
             flat_schema = _flatten_unified_form_steps_to_fields(steps)
             if flat_schema:
-                _apply_template_field_sources_to_mapping(value_mapping, source_data, flat_schema)
+                _apply_template_field_sources_to_mapping(
+                    value_mapping,
+                    source_data,
+                    flat_schema,
+                    skip_pdf_field_ids=report_reserved_pdf_field_ids or None,
+                )
             _inject_step_section_qc_key_aliases(value_mapping, steps)
             site_fields = parsed.get("fields") or []
             if isinstance(site_fields, list):
-                _apply_template_field_sources_to_mapping(value_mapping, source_data, site_fields)
+                _apply_template_field_sources_to_mapping(
+                    value_mapping,
+                    source_data,
+                    site_fields,
+                    skip_pdf_field_ids=report_reserved_pdf_field_ids or None,
+                )
             _merge_mapping_fill_empty(merged_site_sem, _build_site_template_dynamic_semantic_mapping(parsed, source_data))
-        _merge_site_dynamic_semantics_into_value_mapping(value_mapping, merged_site_sem)
+        _merge_site_dynamic_semantics_into_value_mapping(
+            value_mapping,
+            merged_site_sem,
+            skip_pdf_field_ids=report_reserved_pdf_field_ids or None,
+        )
     # 提交内嵌 steps（若有）再补缺；映射层同时保留语义键与 pdfFieldId（按章节在取值时区分严格/优化）
     _merge_mapping_fill_empty(value_mapping, _build_dynamic_data_semantic_mapping(source_data))
-    _merge_dynamic_data_pdf_field_ids_into_value_mapping(value_mapping, source_data)
+    _merge_dynamic_data_pdf_field_ids_into_value_mapping(
+        value_mapping,
+        source_data,
+        report_pdf_field_ids=report_reserved_pdf_field_ids,
+    )
     _inject_test_date_split_pdf_field_aliases(value_mapping, source_data)
     submit_steps_legacy = source_data.get("steps")
     if isinstance(submit_steps_legacy, list):
@@ -1803,6 +1830,7 @@ def _fill_template_fields_with_submit_legacy(
         source_data,
         _merged_site_steps_for_instrument_backfill(task_no, project, task_obj),
         fill_font_pt=_htmlpdf_fill_font_pt(task_obj),
+        skip_pdf_field_ids=report_reserved_pdf_field_ids or None,
     )
     _normalize_iso_strings_in_test_date_part_slots(value_mapping)
     signature_map = {}
@@ -1921,6 +1949,42 @@ def _collect_template_pdf_field_ids(fields: list | None) -> frozenset[str]:
         if pid:
             pids.add(pid)
     return frozenset(pids)
+
+
+_SITE_PDF_FIELD_ID_SLOT_RE = re.compile(r"^f\d+$", re.I)
+
+
+def _collect_report_reserved_pdf_field_ids(
+    report_template_fields: list | None,
+    report_template_steps: list | None = None,
+) -> frozenset[str]:
+    """报告 PDF 已占用的 pdfFieldId；现场链不得在无显式映射时直写同 f 槽。"""
+    pids: set[str] = set(_collect_template_pdf_field_ids(report_template_fields))
+    for fld in _iter_schema_fields_from_steps(report_template_steps):
+        if not isinstance(fld, dict):
+            continue
+        pid = _field_pdf_id(fld)
+        if pid:
+            pids.add(pid)
+    return frozenset(pids)
+
+
+def _pdf_field_id_is_report_reserved(
+    pid: str, reserved_pdf_field_ids: frozenset[str]
+) -> bool:
+    s = str(pid or "").strip().lower()
+    if not s or not reserved_pdf_field_ids:
+        return False
+    return s in {p.lower() for p in reserved_pdf_field_ids}
+
+
+def _site_semantic_key_blocked_for_report(
+    key: str, reserved_pdf_field_ids: frozenset[str]
+) -> bool:
+    ks = str(key or "").strip()
+    if not ks or not _SITE_PDF_FIELD_ID_SLOT_RE.match(ks):
+        return False
+    return _pdf_field_id_is_report_reserved(ks, reserved_pdf_field_ids)
 
 
 def _report_semantic_key_is_preserve_original(ks: str) -> bool:
@@ -2536,10 +2600,12 @@ def _merge_dynamic_data_pdf_field_ids_into_value_mapping(
         if str(pid or "").strip()
     }
     from apps.api.inspection_submit_payload_service import (
-        _SIGNATURE_PDF_FIELD_IDS,
+        _dynamic_signature_field_ids,
         _is_stored_media_path,
         _looks_like_inline_image,
     )
+
+    sig_field_ids = _dynamic_signature_field_ids(source_data)
 
     for k, v in dd.items():
         pid = str(k or "").strip()
@@ -2547,7 +2613,7 @@ def _merge_dynamic_data_pdf_field_ids_into_value_mapping(
             continue
         if v in (None, "") or isinstance(v, (dict, list)):
             continue
-        if pid not in _SIGNATURE_PDF_FIELD_IDS and isinstance(v, str):
+        if pid not in sig_field_ids and isinstance(v, str):
             s = v.strip()
             if s and (_is_stored_media_path(s) or _looks_like_inline_image(s)):
                 continue
@@ -2567,12 +2633,14 @@ def _apply_template_field_sources_to_mapping(
     skip_report_legacy_qc_submit_path: bool = False,
     pdf_field_id_only: bool | None = None,
     task_obj=None,
+    skip_pdf_field_ids: frozenset[str] | None = None,
 ) -> None:
     """
     根据模板 fields 上的 source.submitPath，把 **真实提交 JSON** 中的值写入 value_mapping。
     pdf_field_id_only=True（默认）时只写 pdfFieldId 键，避免 placeholder 模糊键串到相邻格。
     overwrite=True 时在键上强制采用提交值（用于在派生字段之后仍以 submit JSON 为准）。
     skip_report_legacy_qc_submit_path：报告任务下跳过 testResult.test3 / field30 等 legacy 质控键。
+    skip_pdf_field_ids：报告生成时跳过现场模板对报告已占用 f 槽的直写（语义键仍写入）。
     """
     if pdf_field_id_only is None and task_obj is not None and isinstance(fields, list) and fields:
         pdf_field_id_only = None
@@ -2606,7 +2674,10 @@ def _apply_template_field_sources_to_mapping(
         pid = _field_pdf_id(f)
         if pid:
             coerced_pid = _coerce_iso_datetime_value_for_date_part_key(pid, val)
-            if overwrite or value_mapping.get(pid) in (None, ""):
+            pid_blocked = skip_pdf_field_ids and _pdf_field_id_is_report_reserved(
+                pid, skip_pdf_field_ids
+            )
+            if not pid_blocked and (overwrite or value_mapping.get(pid) in (None, "")):
                 value_mapping[pid] = coerced_pid
         if field_strict:
             continue
@@ -3628,6 +3699,7 @@ def _inject_instrument_scope_pdf_field_ids(
     site_steps_merged: list | None,
     *,
     fill_font_pt: float | None = None,
+    skip_pdf_field_ids: frozenset[str] | None = None,
 ) -> None:
     """严格 pdfFieldId 回填：根级 instruments[] 全套按 scope 紧凑写入 instrument_select 对应 f 号。"""
     if not isinstance(value_mapping, dict) or not isinstance(source_data, dict):
@@ -3654,8 +3726,11 @@ def _inject_instrument_scope_pdf_field_ids(
         if not text:
             continue
         pid = _field_pdf_id(fld)
-        if pid and value_mapping.get(pid) in (None, ""):
-            value_mapping[pid] = text
+        if not pid or value_mapping.get(pid) not in (None, ""):
+            continue
+        if skip_pdf_field_ids and _pdf_field_id_is_report_reserved(pid, skip_pdf_field_ids):
+            continue
+        value_mapping[pid] = text
 
 
 def _flat_instruments_by_scope(items: list | None) -> dict[str, dict]:
@@ -4819,6 +4894,9 @@ def _flatten_unified_form_steps_to_fields(steps: list | None) -> list:
 def _parsed_template_steps_list(parsed: dict | None) -> list:
     if not isinstance(parsed, dict):
         return []
+    fs = parsed.get("formSchema")
+    if isinstance(fs, dict) and isinstance(fs.get("steps"), list):
+        return fs["steps"]
     steps = parsed.get("steps") if isinstance(parsed.get("steps"), list) else []
     if not steps and isinstance(parsed.get("form_schema"), dict):
         s2 = parsed["form_schema"].get("steps")
@@ -7923,17 +8001,30 @@ def _normalize_dynamic_data_f_slots(dd: dict | None) -> dict:
     return out
 
 
-def _merge_site_dynamic_semantics_into_value_mapping(value_mapping: dict, merged_site_sem: dict) -> None:
+def _merge_site_dynamic_semantics_into_value_mapping(
+    value_mapping: dict,
+    merged_site_sem: dict,
+    *,
+    skip_pdf_field_ids: frozenset[str] | None = None,
+) -> None:
     """合并「库现场模板 + dynamicData」解释的词条。
 
     先补缺；再对「当前值等于键名」（常见占位回声）或明显桩值用 dynamicData 侧真值覆盖，
     否则 submitPath 已写入标签串「受检单位」会占住键，导致 f8 有值仍无法进入 PDF。
+    skip_pdf_field_ids：报告生成时勿将现场 dynamicData 的 f 槽直并入报告同 f 槽。
     """
     if not isinstance(value_mapping, dict) or not isinstance(merged_site_sem, dict):
         return
-    _merge_mapping_fill_empty(value_mapping, merged_site_sem)
+    sem = merged_site_sem
+    if skip_pdf_field_ids:
+        sem = {
+            k: v
+            for k, v in merged_site_sem.items()
+            if not _site_semantic_key_blocked_for_report(k, skip_pdf_field_ids)
+        }
+    _merge_mapping_fill_empty(value_mapping, sem)
     junk_stubs = frozenset({"-", "—", "－", "/", "无", "暂无", "N/A", "n/a"})
-    for k, v in merged_site_sem.items():
+    for k, v in sem.items():
         if not k:
             continue
         if v in (None, "") or isinstance(v, (dict, list, bool)):
@@ -8306,11 +8397,9 @@ def _collect_signature_values(source_data: dict) -> dict[str, str]:
                             if p:
                                 out[p] = val
 
-    # 3) dynamicData：模板/steps 解析的签名 f 槽 + 旧版只读 f 槽
+    # 3) dynamicData：仅模板/steps 解析出的签名 f 槽
     dynamic_data = source_data.get("dynamicData")
     if isinstance(dynamic_data, dict):
-        from apps.api.inspection_submit_payload_service import _LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE
-
         for k, v in dynamic_data.items():
             key = str(k or "").strip()
             if not key or key not in sig_field_ids:
@@ -8318,7 +8407,7 @@ def _collect_signature_values(source_data: dict) -> dict[str, str]:
             if not _is_signature_image_text(v):
                 continue
             out[key] = v
-            role = pdf_to_role.get(key) or _LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE.get(key)
+            role = pdf_to_role.get(key)
             if role:
                 out[role] = v
 
@@ -8367,18 +8456,7 @@ def _fill_template_fields_with_submit_enhanced(
     _, _sig_pdf_to_role = collect_signature_pdf_bindings(
         _sig_template_obj, payload=source_data if isinstance(source_data, dict) else None
     )
-    from apps.api.inspection_submit_payload_service import (
-        _LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE,
-        _STALE_MISASSIGNED_SIGNATURE_PDF_FIELD_ROLES,
-    )
-
     _signature_pdf_ids = set(_sig_pdf_to_role.keys())
-    for pid, role in {
-        **_LEGACY_PDF_FIELD_TO_SIGNATURE_ROLE,
-        **_STALE_MISASSIGNED_SIGNATURE_PDF_FIELD_ROLES,
-    }.items():
-        _signature_pdf_ids.add(pid)
-        _sig_pdf_to_role.setdefault(pid, role)
     value_mapping = _prepare_backfill_value_mapping(
         source_data,
         map_id=map_id,
@@ -8999,10 +9077,16 @@ def _fill_template_fields_with_submit_enhanced(
             measured_s = ""
         if _placeholder_text_looks_like_criterion(measured_s):
             return picked
-        if _v_parse_num is not None and measured_s and _v_parse_num(measured_s) is None:
+        crit_is_bool = str(crit or "").strip().lower() in ("true", "false")
+        if (
+            not crit_is_bool
+            and _v_parse_num is not None
+            and measured_s
+            and _v_parse_num(measured_s) is None
+        ):
             if not re.search(r"[≤≥≦≧＜＞<>]", measured_s):
                 return picked
-        auto = verdict_from_measurement(str(measured), crit) if measured_s else ""
+        auto = verdict_from_measurement(str(measured), crit) if (measured_s or crit_is_bool) else ""
         if auto == "不合格":
             return str(field.get("failLabel") or "不合格").strip()
         if auto == "合格":
@@ -9527,7 +9611,10 @@ def _prepare_backfill_value_mapping(
         and getattr(task_obj, "output_target", None) == LibraryTask.OUTPUT_REPORT
     )
     report_pdf_field_ids = (
-        _collect_template_pdf_field_ids(report_template_fields)
+        _collect_report_reserved_pdf_field_ids(
+            report_template_fields,
+            steps_for_report or None,
+        )
         if is_report_output
         else frozenset()
     )
@@ -9545,13 +9632,21 @@ def _prepare_backfill_value_mapping(
             flat_schema = _flatten_unified_form_steps_to_fields(steps)
             if flat_schema:
                 _apply_template_field_sources_to_mapping(
-                    value_mapping, source_data, flat_schema, task_obj=task_obj
+                    value_mapping,
+                    source_data,
+                    flat_schema,
+                    task_obj=task_obj,
+                    skip_pdf_field_ids=report_pdf_field_ids or None,
                 )
             _inject_step_section_qc_key_aliases(value_mapping, steps)
             site_fields = parsed.get("fields") or []
             if isinstance(site_fields, list):
                 _apply_template_field_sources_to_mapping(
-                    value_mapping, source_data, site_fields, task_obj=task_obj
+                    value_mapping,
+                    source_data,
+                    site_fields,
+                    task_obj=task_obj,
+                    skip_pdf_field_ids=report_pdf_field_ids or None,
                 )
 
         layered = (
@@ -9586,7 +9681,11 @@ def _prepare_backfill_value_mapping(
                 source_data,
                 report_pdf_field_ids=report_pdf_field_ids,
             )
-        _merge_site_dynamic_semantics_into_value_mapping(value_mapping, merged_site_sem)
+        _merge_site_dynamic_semantics_into_value_mapping(
+            value_mapping,
+            merged_site_sem,
+            skip_pdf_field_ids=report_pdf_field_ids or None,
+        )
         insp_type_for_crit = _resolve_inspection_type_display(
             source_data, project, report_task=task_obj
         )
@@ -9684,7 +9783,12 @@ def _prepare_backfill_value_mapping(
             source_data,
             bindings,
             report_parsed_template={
-                "fields": report_template_fields if isinstance(report_template_fields, list) else []
+                "fields": report_template_fields if isinstance(report_template_fields, list) else [],
+                **(
+                    {"formSchema": {"steps": steps_for_report}}
+                    if steps_for_report
+                    else {}
+                ),
             },
             ordered_submit_payloads=ordered_submit_payloads,
         )
@@ -9733,6 +9837,7 @@ def _prepare_backfill_value_mapping(
         _merged_site_steps_for_instrument_backfill(
             task_no, project, task_obj, report_steps=steps_for_report or None
         ),
+        skip_pdf_field_ids=report_pdf_field_ids or None,
     )
     # 单 PDF 文本格 id「检测仪器」常与委托编号等同槽 f1，submitPath 未挂上 instruments 时只会命中单行；强制与列表别名一致。
     _ins_merged = (inst_aliases.get("检测仪器列表") or inst_aliases.get("检测仪器汇总") or "").strip()
@@ -9796,9 +9901,26 @@ def _prepare_backfill_value_mapping(
             task_obj=task_obj,
         )
         if explicit_site_field_snapshot:
-            from apps.core.htmlpdf_report_mapping_service import restore_explicit_report_site_field_mapping
+            from apps.core.htmlpdf_report_mapping_service import (
+                apply_explicit_site_field_peer_verdicts,
+                restore_explicit_report_site_field_mapping,
+            )
 
             restore_explicit_report_site_field_mapping(value_mapping, explicit_site_field_snapshot)
+            apply_explicit_site_field_peer_verdicts(
+                value_mapping,
+                source_data,
+                bindings,
+                report_parsed_template={
+                    "fields": report_template_fields if isinstance(report_template_fields, list) else [],
+                    **(
+                        {"formSchema": {"steps": steps_for_report}}
+                        if steps_for_report
+                        else {}
+                    ),
+                },
+                ordered_submit_payloads=ordered_submit_payloads,
+            )
     return value_mapping
 
 
