@@ -1,0 +1,20 @@
+{% if guide_prev or guide_next %}
+<nav class="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm sm:flex-row sm:items-center sm:justify-between" aria-label="章节翻页">
+    <div class="min-w-0">
+        {% if guide_prev %}
+            <span class="text-slate-500">上一篇：</span>
+            <a href="{% url 'coordinator_usage_guide_page' page=guide_prev.slug %}" class="font-medium text-amber-800 hover:underline">{{ guide_prev.title }}</a>
+        {% else %}
+            <span class="text-slate-400">上一篇：无（已是第一篇）</span>
+        {% endif %}
+    </div>
+    <div class="min-w-0 text-right">
+        {% if guide_next %}
+            <span class="text-slate-500">下一篇：</span>
+            <a href="{% url 'coordinator_usage_guide_page' page=guide_next.slug %}" class="font-medium text-amber-800 hover:underline">{{ guide_next.title }}</a>
+        {% else %}
+            <span class="text-slate-400">下一篇：无（已是最后一篇）</span>
+        {% endif %}
+    </div>
+</nav>
+{% endif %}

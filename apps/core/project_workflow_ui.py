@@ -252,6 +252,20 @@ def user_eligible_for_workflow_role(user, workflow_role: str) -> bool:
     return rank > 0 and rank >= workflow_role_rank(workflow_role)
 
 
+def count_unique_workflow_member_users(members: List[Any]) -> int:
+    """流程岗位登记的去重用户数（同一用户兼任多岗只计一人）。"""
+    ids: set[int] = set()
+    for m in members or []:
+        uid = getattr(m, "user_id", None)
+        if uid is None:
+            user = getattr(m, "user", None)
+            if user is not None:
+                uid = getattr(user, "pk", None)
+        if uid is not None:
+            ids.add(int(uid))
+    return len(ids)
+
+
 def build_workflow_dispatch_role_panels(
     users: List[Any],
     members_by_role: List[Dict[str, Any]],
@@ -397,7 +411,7 @@ def build_workbench_pipeline_status(
             if has_primary:
                 parts.append("已指定统筹人")
             if has_workflow:
-                parts.append(f"{workflow_member_count} 名岗位参与人")
+                parts.append(f"{workflow_member_count} 名参与人")
             if has_assign:
                 parts.append(f"{assignee_count} 人已同步 App 任务")
             detail = " · ".join(parts) if parts else "待指定统筹人并登记岗位"

@@ -2121,6 +2121,40 @@ def _is_report_output_task(task_obj) -> bool:
     )
 
 
+def _is_report_staff_inspector_signature_image_field(field: dict, *, task_obj=None) -> bool:
+    """报告 PDF：仪器及检测人员章中检测员签字 image 槽填提交用户名，不用现场签名图。"""
+    if not _is_report_output_task(task_obj):
+        return False
+    if (field.get("fieldType") or "").lower() != "image":
+        return False
+    if _field_template_section_key(field) != "site_instruments_staff":
+        return False
+    from utils.frontend_schema_rule_engine import _signature_role_from_label
+
+    label = str(field.get("id") or field.get("title") or field.get("placeholder") or "")
+    role_tuple = _signature_role_from_label(label)
+    if role_tuple and role_tuple[0] == "inspector":
+        return True
+    return "主要检测人员" in label and "陪同" not in label
+
+
+def _fill_report_inspector_name_text_field(
+    field: dict,
+    *,
+    inspection_case,
+    project,
+    task_no: str,
+    source_data: dict,
+) -> bool:
+    name = _resolve_submitter_display_name(inspection_case, project, task_no, source_data)
+    if not name.strip():
+        return False
+    field["fieldType"] = "text"
+    field["content"] = name.strip()
+    field["imageData"] = ""
+    return True
+
+
 def _htmlpdf_fill_font_pt(task_obj=None) -> float:
     """现场记录五号 10.5pt；报告小四 12pt。"""
     return (
@@ -7846,6 +7880,15 @@ def _is_signature_image_text(v) -> bool:
         return False
 
 
+def _is_signature_image_reference(v) -> bool:
+    """内联 base64 或已落盘的库内签名 PNG 路径。"""
+    if _is_signature_image_text(v):
+        return True
+    from apps.api.inspection_submit_payload_service import _is_stored_media_path
+
+    return _is_stored_media_path(v)
+
+
 def _library_media_url_to_relative(url: str) -> str:
     """将 /media/file_library/... 或库相对路径规范为 FILE_LIBRARY_ROOT 下相对路径。"""
     s = (url or "").strip().replace("\\", "/")
@@ -8326,7 +8369,11 @@ def _build_dynamic_data_semantic_mapping(
     return _build_dynamic_data_semantic_mapping_from_steps(steps, source_data, amb)
 
 
-def _collect_signature_values(source_data: dict) -> dict[str, str]:
+def _collect_signature_values(
+    source_data: dict,
+    *,
+    report_template_steps: list | None = None,
+) -> dict[str, str]:
     """
     从 submit payload 中收集签名值：
     1) 顶层 signatures 对象（兼容 author/reviewer/approver 及扩展角色）
@@ -8339,7 +8386,7 @@ def _collect_signature_values(source_data: dict) -> dict[str, str]:
     if isinstance(signatures, dict):
         for k, v in signatures.items():
             key = str(k or "").strip()
-            if key and _is_signature_image_text(v):
+            if key and _is_signature_image_reference(v):
                 out[key] = v
 
     from apps.api.inspection_submit_payload_service import (
@@ -8347,8 +8394,13 @@ def _collect_signature_values(source_data: dict) -> dict[str, str]:
         _pdf_field_to_signature_role_map,
     )
 
-    sig_field_ids = _dynamic_signature_field_ids(source_data)
-    pdf_to_role = _pdf_field_to_signature_role_map(source_data)
+    template_obj = (
+        {"steps": report_template_steps}
+        if isinstance(report_template_steps, list) and report_template_steps
+        else None
+    )
+    sig_field_ids = _dynamic_signature_field_ids(source_data, template_obj=template_obj)
+    pdf_to_role = _pdf_field_to_signature_role_map(source_data, template_obj=template_obj)
 
     # 2) schema fields where type=signature
     steps = source_data.get("steps")
@@ -8371,9 +8423,9 @@ def _collect_signature_values(source_data: dict) -> dict[str, str]:
                     if str(fld.get("type") or "").lower() != "signature":
                         continue
                     val = fld.get("value")
-                    if not _is_signature_image_text(val):
+                    if not _is_signature_image_reference(val):
                         val = fld.get("defaultValue")
-                    if not _is_signature_image_text(val):
+                    if not _is_signature_image_reference(val):
                         continue
                     src = fld.get("source") if isinstance(fld.get("source"), dict) else {}
                     submit_path = str(src.get("submitPath") or "").strip()
@@ -8404,7 +8456,7 @@ def _collect_signature_values(source_data: dict) -> dict[str, str]:
             key = str(k or "").strip()
             if not key or key not in sig_field_ids:
                 continue
-            if not _is_signature_image_text(v):
+            if not _is_signature_image_reference(v):
                 continue
             out[key] = v
             role = pdf_to_role.get(key)
@@ -8446,7 +8498,12 @@ def _fill_template_fields_with_submit_enhanced(
     3) pdfFieldId 仅在上述之后作为兜底，减少多模板合并后 f 编号串位；
     4) 特殊「典型值」检测条件/检测结果仍可在末段做行对齐拼接；单项判定第二遍推算。
     """
-    signature_values = _collect_signature_values(source_data)
+    signature_values = _collect_signature_values(
+        source_data,
+        report_template_steps=report_template_steps
+        if isinstance(report_template_steps, list)
+        else None,
+    )
     from utils.frontend_schema_rule_engine import collect_signature_pdf_bindings
 
     _sig_template_obj = {
@@ -9114,19 +9171,29 @@ def _fill_template_fields_with_submit_enhanced(
         )
         if not is_sig_slot:
             return ""
-        picked = signature_values.get(pid) if pid else ""
-        if picked:
-            return picked
         role = _sig_pdf_to_role.get(pid or "")
+        if not role:
+            label_role = _signature_role_from_label(label)
+            if label_role:
+                role = label_role[0]
+        raw_candidates: list[object] = []
+        if pid:
+            raw_candidates.append(signature_values.get(pid))
         if role:
-            picked = signature_values.get(role)
-            if picked:
-                return picked
+            raw_candidates.append(signature_values.get(role))
+        sigs = source_data.get("signatures")
+        if isinstance(sigs, dict):
+            if role:
+                raw_candidates.append(sigs.get(role))
+            if pid:
+                raw_candidates.append(sigs.get(pid))
         dd = source_data.get("dynamicData")
         if isinstance(dd, dict) and pid:
-            val = dd.get(pid)
-            if _is_signature_image_text(val):
-                return val
+            raw_candidates.append(dd.get(pid))
+        for raw in raw_candidates:
+            b64 = _coerce_submit_image_value_to_pdf_base64(raw)
+            if b64:
+                return b64
         return ""
 
     for field in flat_report_fields:
@@ -9187,6 +9254,15 @@ def _fill_template_fields_with_submit_enhanced(
             )
             continue
         if field_type == "image":
+            if _is_report_staff_inspector_signature_image_field(field, task_obj=task_obj):
+                if _fill_report_inspector_name_text_field(
+                    field,
+                    inspection_case=inspection_case,
+                    project=project,
+                    task_no=task_no,
+                    source_data=source_data,
+                ):
+                    continue
             pid_img = _field_pdf_id(field)
             from utils.frontend_schema_rule_engine import _signature_role_from_label
 

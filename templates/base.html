@@ -163,6 +163,15 @@
                     {% endif %}
                 </div>
                 {% endif %}
+                {% if show_coordinator_usage_guide %}
+                <div class="px-2 pb-3 mb-2 border-b border-slate-700/60">
+                    <p class="px-4 py-1.5 text-xs font-medium text-slate-500">帮助</p>
+                    <a href="{% url 'coordinator_usage_guide' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 rounded-r-lg text-slate-200 hover:text-white border border-amber-600/40 bg-amber-900/20 hover:bg-amber-900/35">
+                        <i class="ri-book-open-line text-lg shrink-0"></i>
+                        <span>委托业务使用说明</span>
+                    </a>
+                </div>
+                {% endif %}
                 {% if show_backend_usage_guide %}
                 <div class="px-2 pb-3 mb-2 border-b border-slate-700/60">
                     <p class="px-4 py-1.5 text-xs font-medium text-slate-500">帮助</p>
@@ -239,6 +248,12 @@
                 <div class="flex items-center justify-between gap-4">
                     <h2 id="admin-page-title" class="text-base font-semibold tracking-tight text-slate-900 sm:text-lg">{% block page_title %}仪表盘{% endblock %}</h2>
                     <div class="flex items-center gap-3">
+                        {% if show_coordinator_usage_guide %}
+                        <a href="{% url 'coordinator_usage_guide' %}" class="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-950 shadow-sm hover:bg-amber-100">
+                            <i class="ri-book-open-line text-base text-amber-700"></i>
+                            委托业务使用说明
+                        </a>
+                        {% endif %}
                         {% if show_backend_usage_guide %}
                         <a href="{% url 'backend_usage_guide' %}" class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 shadow-sm hover:bg-slate-50">
                             <i class="ri-book-open-line text-base text-indigo-600"></i>

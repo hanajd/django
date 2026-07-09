@@ -92,10 +92,15 @@ from apps.core.library_access import (
     library_user_may_export_task_template_pdf_for_project,
     library_user_may_filled_pdf_toolchain,
     library_user_may_export_inspection_library_pdfs,
+    library_user_may_export_site_record_library_pdfs,
+    library_user_may_export_report_library_pdfs,
+    library_user_may_create_library_project,
+    library_user_is_coordinator_workflow_site_only_role,
     library_user_may_select_library_file_for_batch,
     library_user_may_use_htmlpdf_matrix_beta_controls,
     library_user_may_mock_inspection_submit,
     library_user_has_party_a_demo_restrictions,
+    library_user_may_view_coordinator_usage_guide,
     library_user_may_access_instrument_database,
     library_user_may_edit_instrument_database,
     library_user_is_test_peer,
@@ -118,6 +123,7 @@ from apps.core.usage_workflow_tour import (
     register_tour_task,
     tour_cleanup_and_clear_session,
     tour_start,
+    usage_workflow_tour_may_run,
 )
 from apps.core.commission_org_service import (
     build_commission_org_picker_tree,
@@ -172,11 +178,19 @@ from apps.core.commission_management_service import (
     commission_visible_subject_users,
     library_user_may_access_commission_manage,
 )
-from apps.core.instrument_inventory_service import apply_manual_instrument_assignment
+from apps.core.instrument_inventory_service import (
+    apply_manual_instrument_assignment,
+    build_ledger_instrument_checkout_catalog,
+    manual_checkin_instrument,
+    manual_checkout_instrument_to_detection_item,
+)
 from apps.core.project_equipment_service import (
+    active_project_task_nos,
     available_equipment_rows_for_project,
     bind_equipments_to_project,
     build_report_task_picker_catalog,
+    count_distinct_project_equipment,
+    count_project_detection_items,
     equipment_scope_label,
     hospital_for_project,
     preview_equipment_folder_tree_for_org,
@@ -199,6 +213,7 @@ from apps.core.project_workflow_ui import (
     build_workflow_dispatch_role_panels,
     build_workflow_role_user_picker,
     group_workflow_members_by_role,
+    count_unique_workflow_member_users,
     normalize_workbench_tab,
     user_eligible_for_workflow_role,
 )
@@ -710,6 +725,41 @@ _GUIDE_USAGE_SECTIONS = (
 )
 _GUIDE_USAGE_LOOKUP = {slug: (title, tpl) for slug, title, tpl in _GUIDE_USAGE_SECTIONS}
 
+_GUIDE_COORDINATOR_SECTIONS_FULL = (
+    ("overview", "整体工作顺序", "core/guide/coordinator/overview.html"),
+    ("commission", "委托管理", "core/guide/coordinator/commission.html"),
+    ("project", "项目工作台", "core/guide/coordinator/project.html"),
+    ("dispatch_export", "分工与报告导出", "core/guide/coordinator/dispatch_export.html"),
+    ("instruments", "检测仪器台账", "core/guide/coordinator/instruments.html"),
+    ("hospital", "医院信息管理", "core/guide/coordinator/hospital.html"),
+    ("users", "用户与岗位", "core/guide/coordinator/users.html"),
+    ("files", "文件库", "core/guide/coordinator/files.html"),
+    ("records", "现场记录与报告", "core/guide/coordinator/records.html"),
+    ("workflow", "检测流程岗位", "core/guide/coordinator/workflow.html"),
+    ("tips", "常见情况与排查", "core/guide/coordinator/tips.html"),
+)
+_GUIDE_COORDINATOR_SECTIONS_WORKFLOW = (
+    ("overview", "整体工作顺序", "core/guide/coordinator/overview_workflow.html"),
+    ("workflow", "我的岗位职责", "core/guide/coordinator/workflow.html"),
+    ("files", "文件库", "core/guide/coordinator/files_workflow.html"),
+    ("records", "现场记录与报告", "core/guide/coordinator/records_workflow.html"),
+    ("tips", "常见情况与排查", "core/guide/coordinator/tips.html"),
+)
+
+
+def _coordinator_guide_sections_for_user(user):
+    if library_user_is_commission_coordinator(user):
+        return _GUIDE_COORDINATOR_SECTIONS_FULL
+    return _GUIDE_COORDINATOR_SECTIONS_WORKFLOW
+
+
+_GUIDE_COORDINATOR_LOOKUP_FULL = {
+    slug: (title, tpl) for slug, title, tpl in _GUIDE_COORDINATOR_SECTIONS_FULL
+}
+_GUIDE_COORDINATOR_LOOKUP_WORKFLOW = {
+    slug: (title, tpl) for slug, title, tpl in _GUIDE_COORDINATOR_SECTIONS_WORKFLOW
+}
+
 
 @login_required
 def backend_usage_guide(request, page=None):
@@ -756,7 +806,7 @@ def backend_usage_guide(request, page=None):
 @require_POST
 def usage_workflow_tour_start(request):
     """开始「流程练习」会话：仅引导账号；会清理上次未结束的练习残留数据。"""
-    if not library_user_has_party_a_demo_restrictions(request.user):
+    if not usage_workflow_tour_may_run(request.user):
         return JsonResponse({"ok": False, "error": "forbidden"}, status=403)
     ok = tour_start(request)
     if not ok:
@@ -768,10 +818,54 @@ def usage_workflow_tour_start(request):
 @require_POST
 def usage_workflow_tour_finish(request):
     """结束练习：删除本会话在练习中登记的项目 / 任务模板 / 模板库文件，并清除会话键。"""
-    if not library_user_has_party_a_demo_restrictions(request.user):
+    if not usage_workflow_tour_may_run(request.user):
         return JsonResponse({"ok": False, "error": "forbidden"}, status=403)
     stats = tour_cleanup_and_clear_session(request)
     return JsonResponse({"ok": True, "deleted": stats})
+
+
+@login_required
+def coordinator_usage_guide(request, page=None):
+    """委托业务使用说明（委托统筹及其创建的检测流程岗位账号）。"""
+    if not library_user_may_view_coordinator_usage_guide(request.user):
+        messages.info(request, "当前账号暂不可查看该说明。")
+        return redirect(reverse("dashboard"))
+    is_coordinator = library_user_is_commission_coordinator(request.user)
+    sections = _coordinator_guide_sections_for_user(request.user)
+    lookup = _GUIDE_COORDINATOR_LOOKUP_FULL if is_coordinator else _GUIDE_COORDINATOR_LOOKUP_WORKFLOW
+    nav_items = [{"slug": slug, "title": title} for slug, title, _tpl in sections]
+    base_ctx = {
+        "guide_coordinator_is_coordinator": is_coordinator,
+        "guide_nav_items": nav_items,
+        "guide_url_namespace": "coordinator",
+    }
+    if page is None:
+        return render(
+            request,
+            "core/guide/coordinator/index.html",
+            {
+                **base_ctx,
+                "guide_page": "index",
+            },
+        )
+    if page not in lookup:
+        raise Http404("未找到该说明页")
+    title, template_name = lookup[page]
+    slugs = [s for s, _t, _p in sections]
+    idx = slugs.index(page)
+    prev_item = nav_items[idx - 1] if idx > 0 else None
+    next_item = nav_items[idx + 1] if idx < len(nav_items) - 1 else None
+    return render(
+        request,
+        template_name,
+        {
+            **base_ctx,
+            "guide_page": page,
+            "guide_section_title": title,
+            "guide_prev": prev_item,
+            "guide_next": next_item,
+        },
+    )
 
 
 def _database_device_list_url(
@@ -898,6 +992,56 @@ def database_device_list(request):
             messages.success(request, "检测仪器删除成功")
             return _list_redirect()
 
+        if action == "checkin":
+            device_id = (request.POST.get("device_id") or "").strip()
+            try:
+                device_pk = int(device_id)
+            except ValueError:
+                messages.error(request, "仪器不存在")
+                return _list_redirect()
+            ok, msg = manual_checkin_instrument(device_pk, user=request.user)
+            if ok:
+                messages.success(request, msg)
+            else:
+                messages.warning(request, msg)
+            return _list_redirect()
+
+        if action == "checkout":
+            device_id = (request.POST.get("device_id") or "").strip()
+            project_id_raw = (request.POST.get("project_id") or "").strip()
+            detection_key = (request.POST.get("detection_item_key") or "").strip()
+            scope = (request.POST.get("scope") or "").strip()
+            try:
+                device_pk = int(device_id)
+                project_pk = int(project_id_raw)
+            except ValueError:
+                messages.error(request, "请完整选择项目与检测项")
+                return _list_redirect()
+            project = LibraryProject.objects.filter(pk=project_pk, is_active=True).first()
+            if project is None:
+                messages.error(request, "委托项目不存在或已停用")
+                return _list_redirect()
+            if not library_user_may_mutate_project_workbench(request.user, project):
+                messages.error(request, "无权修改该项目的仪器分配")
+                return _list_redirect()
+            if library_user_has_party_a_demo_restrictions(request.user):
+                scoped = list(library_user_scoped_project_ids(request.user))
+                if scoped and project.pk not in scoped:
+                    messages.error(request, "无权操作该项目")
+                    return _list_redirect()
+            ok, msg = manual_checkout_instrument_to_detection_item(
+                device_pk,
+                project_pk,
+                detection_key,
+                scope,
+                user=request.user,
+            )
+            if ok:
+                messages.success(request, msg)
+            else:
+                messages.warning(request, msg)
+            return _list_redirect()
+
     editing_device = None
     edit_id = (request.GET.get("edit") or "").strip()
     if edit_id:
@@ -957,6 +1101,10 @@ def database_device_list(request):
         "devices": devices,
         "editing_device": editing_device,
         "active_projects": active_projects,
+        "active_projects_checkout": [
+            {"id": int(p.pk), "code": p.code or "", "name": p.name or ""}
+            for p in active_projects
+        ],
         "instrument_stats": instrument_stats,
         "search_q": search_q,
         "status_filter": status_filter,
@@ -964,6 +1112,34 @@ def database_device_list(request):
         "can_edit_instrument_database": can_edit,
     }
     return render(request, "core/database_device_list.html", context)
+
+
+@login_required
+def database_device_checkout_options(request):
+    """台账出库弹窗：按项目返回可绑定的委托设备与检测项（JSON）。"""
+    if not library_user_may_edit_instrument_database(request.user):
+        return JsonResponse({"ok": False, "error": "forbidden"}, status=403)
+    try:
+        project_id = int(request.GET.get("project_id") or 0)
+        instrument_id = int(request.GET.get("instrument_id") or 0)
+    except (TypeError, ValueError):
+        return JsonResponse({"ok": False, "error": "invalid_params"}, status=400)
+    if project_id <= 0 or instrument_id <= 0:
+        return JsonResponse({"ok": False, "error": "invalid_params"}, status=400)
+
+    project = LibraryProject.objects.filter(pk=project_id, is_active=True).first()
+    instrument = InstrumentCatalog.objects.filter(pk=instrument_id, is_active=True).first()
+    if project is None or instrument is None:
+        return JsonResponse({"ok": False, "error": "not_found"}, status=404)
+    if not library_user_may_mutate_project_workbench(request.user, project):
+        return JsonResponse({"ok": False, "error": "no_project_access"}, status=403)
+    if library_user_has_party_a_demo_restrictions(request.user):
+        scoped = list(library_user_scoped_project_ids(request.user))
+        if scoped and project.pk not in scoped:
+            return JsonResponse({"ok": False, "error": "no_project_access"}, status=403)
+
+    catalog = build_ledger_instrument_checkout_catalog(project, instrument)
+    return JsonResponse({"ok": True, **catalog})
 
 
 @login_required
@@ -2662,9 +2838,12 @@ def library_projects(request):
         from apps.core.commission_workflow_progress import effective_workflow_stage
 
         task_display = task_no_display_index(selected_project)
+        active_task_nos = active_project_task_nos(selected_project)
+        subs_qs = InspectionSubmission.objects.filter(project=selected_project)
+        if active_task_nos:
+            subs_qs = subs_qs.filter(task_no__in=active_task_nos)
         subs = (
-            InspectionSubmission.objects.filter(project=selected_project)
-            .select_related("case", "case__workflow_state", "created_by")
+            subs_qs.select_related("case", "case__workflow_state", "created_by")
             .order_by("-updated_at")[:600]
         )
         for s in subs:
@@ -2881,9 +3060,7 @@ def library_projects(request):
             explorer_org_child_levels.append((lv, label))
 
     can_assign_tasks = library_user_can_assign_tasks_to_participants(request.user)
-    can_create_library_project = can_assign_tasks or role_has(
-        request.user, "perm_create_library_project"
-    )
+    can_create_library_project = library_user_may_create_library_project(request.user)
     picker_org_for_create = explorer_org if explorer_project is None else None
     create_project_picker_initial = {
         "orgId": picker_org_for_create.pk if picker_org_for_create else None,
@@ -2975,8 +3152,10 @@ def library_projects(request):
         picker_users_source,
         workflow_members_by_role,
     )
+    workflow_member_user_count = count_unique_workflow_member_users(workflow_members)
     assignment_sync_summary = build_assignment_sync_summary(project_scoped_assignment_records)
-    project_equipment_count = len(project_commission_equipment_cards)
+    project_equipment_count = count_distinct_project_equipment(selected_project)
+    project_detection_item_count = count_project_detection_items(selected_project)
     project_instrument_dispatch_panel: dict = {}
     if selected_project:
         from apps.core.instrument_inventory_service import build_project_instrument_dispatch_panel
@@ -2988,7 +3167,7 @@ def library_projects(request):
         selected_project,
         equipment_count=project_equipment_count,
         assignee_count=len(project_assignees),
-        workflow_member_count=len(workflow_members),
+        workflow_member_count=workflow_member_user_count,
         submission_count=len(project_submissions),
         instrument_panel=project_instrument_dispatch_panel or None,
     )
@@ -3034,6 +3213,7 @@ def library_projects(request):
             "project_assignees": project_assignees,
             "project_submissions": project_submissions,
             "workflow_members": workflow_members,
+            "workflow_member_user_count": workflow_member_user_count,
             "assignable_workflow_users": assignable_workflow_users,
             "project_workflow_cases": project_workflow_cases,
             "workflow_stage_definitions": workflow_stage_definitions,
@@ -3078,6 +3258,7 @@ def library_projects(request):
             "role_ladder": ROLE_LADDER,
             "process_steps_reference": PROCESS_STEPS_REFERENCE,
             "project_equipment_count": project_equipment_count,
+            "project_detection_item_count": project_detection_item_count,
             "project_instrument_dispatch_panel": project_instrument_dispatch_panel,
             "can_mock_inspection_submit": can_mock_inspection_submit,
             "mock_inspection_submit_api_url": reverse("library_project_mock_inspection_submit"),
@@ -5028,7 +5209,7 @@ def file_library(request):
             dt = request.POST.get("date_to", "").strip()
             up = request.POST.get("uploader", "").strip()
             return redirect(reverse("file_library") + _file_library_query_string(tab, df, dt, up, project_selected))
-        if not library_user_may_export_inspection_library_pdfs(request.user):
+        if not library_user_may_export_site_record_library_pdfs(request.user):
             messages.error(request, "当前角色无权执行手动导出 PDF")
             df = request.POST.get("date_from", "").strip()
             dt = request.POST.get("date_to", "").strip()
@@ -5165,9 +5346,14 @@ def file_library(request):
         if tab_post not in ("inspection_submit", "site_record"):
             messages.error(request, "仅支持在「检测提交」或「现场记录」分类执行文件夹导出报告")
             return redirect(redir)
-        if not library_user_may_export_inspection_library_pdfs(request.user):
-            messages.error(request, "当前角色无权执行导出报告")
-            return redirect(redir)
+        if action == "export_site_folder_report":
+            if not library_user_may_export_report_library_pdfs(request.user):
+                messages.error(request, "当前角色无权执行导出报告")
+                return redirect(redir)
+        elif action == "export_report_folder_merged":
+            if not library_user_may_export_report_library_pdfs(request.user):
+                messages.error(request, "当前角色无权执行导出合并报告")
+                return redirect(redir)
 
         project_key, report_key, site_key = _folder_export_keys_from_post(request)
         if not project_key or project_key == "none" or not project_key.isdigit():
@@ -5238,7 +5424,7 @@ def file_library(request):
             dt = request.POST.get("date_to", "").strip()
             up = request.POST.get("uploader", "").strip()
             return redirect(reverse("file_library") + _file_library_query_string(tab, df, dt, up, project_selected))
-        if not library_user_may_export_inspection_library_pdfs(request.user):
+        if not library_user_may_export_report_library_pdfs(request.user):
             messages.error(request, "当前角色无权执行手动导出报告")
             df = request.POST.get("date_from", "").strip()
             dt = request.POST.get("date_to", "").strip()
@@ -5366,7 +5552,7 @@ def file_library(request):
         if tab != "report":
             messages.error(request, "仅支持在「报告」分类执行报告合并")
             return redirect(reverse("file_library") + _file_library_query_string(tab, df, dt, up, project_selected))
-        if not library_user_may_export_inspection_library_pdfs(request.user):
+        if not library_user_may_export_report_library_pdfs(request.user):
             messages.error(request, "当前角色无权执行报告合并")
             return redirect(redir)
         if not library_export_merge_allowed_under_own_files_scope(request.user, project_selected_id):
@@ -5388,6 +5574,7 @@ def file_library(request):
             build_report_merge_overlay,
             collect_report_merge_source_rows,
             commission_no_from_merge_source_rows,
+            merge_row_toc_chapter_title,
         )
         from apps.api.inspection_report_make import build_merged_report_pdf_original_name
 
@@ -5405,7 +5592,6 @@ def file_library(request):
                 merge_errors.append(f"文件 id={pk} 不存在或不是「报告」分类")
 
         paths: list[str] = []
-        titles: list[str] = []
         project_pids_union: set[int] = set()
         for lf in report_files:
             if not library_file_access_allowed(request.user, lf):
@@ -5416,8 +5602,20 @@ def file_library(request):
                 continue
             abs_p = pipeline_service.library_absolute_path(lf.relative_path)
             paths.append(str(abs_p))
-            titles.append(lf.original_name)
             project_pids_union.update(lf.projects.values_list("pk", flat=True))
+
+        merge_rows = collect_report_merge_source_rows(report_files)
+        titles = []
+        path_order = {p: i for i, p in enumerate(paths)}
+        for row in merge_rows:
+            p = row.get("path") or ""
+            if p in path_order:
+                titles.append((path_order[p], merge_row_toc_chapter_title(row)))
+        titles = [t for _, t in sorted(titles, key=lambda x: x[0])]
+        if len(titles) < len(paths):
+            for i, pth in enumerate(paths):
+                if i >= len(titles):
+                    titles.append(merge_row_toc_chapter_title({"path": pth}))
 
         if merge_errors:
             _log_file_library_export_detail(
@@ -5441,7 +5639,6 @@ def file_library(request):
             if _code:
                 report_commission_code = str(_code)
 
-        merge_rows = collect_report_merge_source_rows(report_files)
         merge_overlay, merge_overlay_hint = build_report_merge_overlay(
             report_files, merge_time=timezone.now(), source_rows=merge_rows
         )
@@ -5827,9 +6024,14 @@ def file_library(request):
 
     can_batch_delete = role_has(request.user, "perm_file_delete")
     scope_export_ok = library_export_merge_allowed_under_own_files_scope(request.user, project_selected_id)
-    fill_export_ok = library_user_may_export_inspection_library_pdfs(request.user) and scope_export_ok
+    site_export_ok = library_user_may_export_site_record_library_pdfs(request.user) and scope_export_ok
+    report_export_ok = library_user_may_export_report_library_pdfs(request.user) and scope_export_ok
+    site_export_select_tabs = ("inspection_submit",)
+    if not library_user_is_coordinator_workflow_site_only_role(request.user):
+        site_export_select_tabs = ("inspection_submit", "site_record")
     file_library_row_selection = can_batch_delete or (
-        fill_export_ok and tab in ("inspection_submit", "site_record", "report")
+        (site_export_ok and tab in site_export_select_tabs)
+        or (report_export_ok and tab == "report")
     )
     file_library_table_colspan = 4 + (1 if file_library_row_selection else 0)
 
@@ -5837,7 +6039,7 @@ def file_library(request):
     quota_b = library_user_file_library_quota_bytes(request.user)
 
     folder_export_context = None
-    if fill_export_ok and tab in ("inspection_submit", "site_record") and file_library_nested_mode == "project_report_site":
+    if report_export_ok and tab in ("inspection_submit", "site_record") and file_library_nested_mode == "project_report_site":
         from apps.core.library_folder_service import _norm_path, _parse_segments
 
         segs = _parse_segments(_norm_path(fl_path))
@@ -5889,15 +6091,15 @@ def file_library(request):
             "file_library_row_selection": file_library_row_selection,
             "can_manual_export_submit_pdf": (
                 tab == "inspection_submit"
-                and fill_export_ok
+                and site_export_ok
             ),
             "can_manual_export_report_from_site_record": (
                 tab in ("inspection_submit", "site_record")
-                and fill_export_ok
+                and report_export_ok
             ),
             "can_merge_reports": (
                 tab == "report"
-                and fill_export_ok
+                and report_export_ok
             ),
             "folder_export_context": folder_export_context,
             "trash_days_notice": 30,

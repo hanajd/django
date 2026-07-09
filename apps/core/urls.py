@@ -17,9 +17,12 @@ urlpatterns = [
     path('help/usage/', views.backend_usage_guide, name='backend_usage_guide'),
     path('help/usage/tour/start/', views.usage_workflow_tour_start, name='usage_workflow_tour_start'),
     path('help/usage/tour/finish/', views.usage_workflow_tour_finish, name='usage_workflow_tour_finish'),
+    path('help/coordinator/<slug:page>/', views.coordinator_usage_guide, name='coordinator_usage_guide_page'),
+    path('help/coordinator/', views.coordinator_usage_guide, name='coordinator_usage_guide'),
     
     # 用户管理路由
     path('database/devices/', views.database_device_list, name='database_device_list'),
+    path('database/devices/checkout-options/', views.database_device_checkout_options, name='database_device_checkout_options'),
     path('users/', views.user_list, name='user_list'),
     path('users/create/', views.user_create, name='user_create'),
     path('users/<int:user_id>/edit/', views.user_edit, name='user_edit'),

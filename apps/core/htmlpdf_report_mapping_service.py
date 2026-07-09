@@ -288,10 +288,27 @@ def _is_bare_slot_concat_template(template: str) -> bool:
     return bool(_BARE_SLOT_CONCAT_TEMPLATE_RE.match(str(template or "").strip()))
 
 
+def _is_signature_path_mapped_value(val: str) -> bool:
+    """现场签字图路径不应映射进报告文本/人员栏。"""
+    s = str(val or "").strip()
+    if not s:
+        return False
+    if s.startswith("data:image/"):
+        return True
+    norm = s.replace("\\", "/").lower()
+    if "/signatures/" in norm:
+        return True
+    if norm.startswith("/media/") and norm.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
+        return True
+    return False
+
+
 def _is_implausible_mapped_site_value(val: str, label: str = "") -> bool:
     """过滤误映射的 label 长句（非现场实测值）。"""
     s = str(val or "").strip()
     if not s:
+        return True
+    if _is_signature_path_mapped_value(s):
         return True
     lab = str(label or "").strip()
     if lab and s == lab:
@@ -1588,12 +1605,18 @@ def apply_report_site_field_map_to_value_mapping(
         dd = payload.get("dynamicData") if isinstance(payload.get("dynamicData"), dict) else {}
         raw_dd = dd.get(site_pid)
         if raw_dd not in (None, "") and not isinstance(raw_dd, (dict, list)):
-            return str(raw_dd).strip()
+            s_dd = str(raw_dd).strip()
+            if _is_signature_path_mapped_value(s_dd):
+                return None
+            return s_dd
         tr = payload.get("testResult") if isinstance(payload.get("testResult"), dict) else {}
         sp_key = f"f{site_pid[1:]}" if site_pid.lower().startswith("f") and site_pid[1:].isdigit() else site_pid
         raw_tr = tr.get(site_pid) if site_pid in tr else tr.get(sp_key)
         if raw_tr not in (None, "") and not isinstance(raw_tr, (dict, list)):
-            return str(raw_tr).strip()
+            s_tr = str(raw_tr).strip()
+            if _is_signature_path_mapped_value(s_tr):
+                return None
+            return s_tr
         if not site_parsed:
             return None
         meta = _build_pdf_field_meta_index(site_parsed).get(
@@ -1604,7 +1627,10 @@ def apply_report_site_field_map_to_value_mapping(
 
             raw_sp = _nested_get_for_submit_with_rated_fallback(payload, str(meta["submitPath"]))
             if raw_sp not in (None, "") and not isinstance(raw_sp, (dict, list)):
-                return str(raw_sp).strip()
+                s_sp = str(raw_sp).strip()
+                if _is_signature_path_mapped_value(s_sp):
+                    return None
+                return s_sp
         site_field = None
         for sf in site_parsed.get("fields") or []:
             if isinstance(sf, dict) and str(sf.get("pdfFieldId") or "").strip() == site_pid:

@@ -278,6 +278,30 @@ def task_no_display_index(project: LibraryProject) -> dict[str, dict]:
     return index
 
 
+def count_distinct_project_equipment(project: LibraryProject | None) -> int:
+    """项目内去重后的受检设备台数（同一设备多种检测类型只计一台）。"""
+    if project is None:
+        return 0
+    return (
+        LibraryProjectEquipment.objects.filter(project=project)
+        .values("equipment_id")
+        .distinct()
+        .count()
+    )
+
+
+def active_project_task_nos(project: LibraryProject | None) -> frozenset[str]:
+    """当前立项配置下有效的现场记录 taskNo 集合。"""
+    if project is None:
+        return frozenset()
+    return frozenset(task_no_display_index(project).keys())
+
+
+def count_project_detection_items(project: LibraryProject | None) -> int:
+    """当前立项下的检测项数量（设备×现场记录任务，非物理台数）。"""
+    return len(active_project_task_nos(project))
+
+
 def available_equipments_for_project(
     project: LibraryProject,
     *,

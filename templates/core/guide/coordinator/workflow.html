@@ -1,0 +1,69 @@
+{% extends "core/guide/coordinator/section_base.html" %}
+{% block guide_section %}
+<section class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <h1 class="text-lg font-bold text-slate-900">{% if guide_coordinator_is_coordinator %}检测流程岗位{% else %}我的岗位职责{% endif %}</h1>
+    <p class="text-slate-700">检测业务在系统中拆为五个<strong>流程岗位</strong>，与 App 待办、文件库资料、项目流程登记一一对应。{% if guide_coordinator_is_coordinator %}委托统筹派工前请与下表对齐预期。{% else %}请对照您账号的岗位角色（登录后侧栏下方或用户管理中的「检测岗位」）阅读对应小节。{% endif %}</p>
+
+    <h2 class="text-base font-semibold text-slate-900">一、五类岗位总览</h2>
+    <table class="w-full border-collapse text-left text-sm">
+        <thead>
+            <tr class="border-b border-slate-200 text-slate-600">
+                <th class="py-2 pr-2 font-semibold">岗位</th>
+                <th class="py-2 pr-2 font-semibold">主要工作场所</th>
+                <th class="py-2 font-semibold">典型产出</th>
+            </tr>
+        </thead>
+        <tbody class="text-slate-700">
+            <tr class="border-b border-slate-100"><td class="py-2 pr-2 font-medium">检测员</td><td class="py-2 pr-2">App</td><td class="py-2">现场检测数据、检测提交</td></tr>
+            <tr class="border-b border-slate-100"><td class="py-2 pr-2 font-medium">校核员</td><td class="py-2 pr-2">App</td><td class="py-2">现场记录校核签字</td></tr>
+            <tr class="border-b border-slate-100"><td class="py-2 pr-2 font-medium">编制人</td><td class="py-2 pr-2">App 为主</td><td class="py-2">报告编制</td></tr>
+            <tr class="border-b border-slate-100"><td class="py-2 pr-2 font-medium">审核人</td><td class="py-2 pr-2">App 为主</td><td class="py-2">报告审核</td></tr>
+            <tr><td class="py-2 pr-2 font-medium">授权签字人</td><td class="py-2 pr-2">App + Web 文件库</td><td class="py-2">报告签发；权限较全</td></tr>
+        </tbody>
+    </table>
+
+    <h2 class="text-base font-semibold text-slate-900">二、检测员</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>登录 <strong>App</strong>，在待办中进入委托统筹已分配的项目与检测项。</li>
+        <li>按标准完成现场检测数据录入并<strong>提交</strong>。</li>
+        <li>可在 <span class="guide-nav">项目工作台</span> 查看已分配项目（只读）；在 <span class="guide-nav">文件库管理</span> → <span class="guide-ui">检测提交</span> 使用 <span class="guide-ui">手动导出 PDF</span> 生成现场记录。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">三、校核员</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>在 App 中对检测员提交的内容进行<strong>校核</strong>（签字/驳回以 App 为准）。</li>
+        <li>关注现场记录是否完整、读数是否合理；驳回后检测员需重新提交。</li>
+        <li>可在 <span class="guide-nav">项目工作台</span> 查看已分配项目（只读）；文件库核对现场记录与检测提交。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">四、编制人</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>在现场记录齐备后，在 App 完成<strong>报告编制</strong>环节。</li>
+        <li>可在文件库 <span class="guide-ui">报告</span> 分类查看或下载相关 PDF（若已生成）。</li>
+        <li>若被指定为项目主要负责人，可能可见 <span class="guide-nav">项目工作台</span> 与 <span class="guide-nav">委托管理</span>。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">五、审核人</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>在 App 对报告稿进行<strong>审核</strong>；通过或退回编制人修改。</li>
+        <li>数据范围较检测员更宽，文件库中可能看到项目内更多报告相关文件（仍受项目权限约束）。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">六、授权签字人</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>在 App 完成<strong>签发</strong>，为报告流程最后一环（以单位制度为准）。</li>
+        <li>该岗位在 Web 上权限相对更多：可见更多文件库分类写操作，并可能进入 <span class="guide-nav">委托管理</span> 查看进度。</li>
+        <li>仍不能创建用户或维护医院信息——此类事项由委托统筹负责。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">七、岗位衔接（委托统筹派工 checklist）</h2>
+    <ol class="list-decimal space-y-2 pl-5 text-slate-700">
+        <li>用户管理已建账号且岗位正确。</li>
+        <li>项目工作台 <span class="guide-ui">流程</span> 页已登记该人。</li>
+        <li><span class="guide-ui">分配</span> 页已向检测员同步任务。</li>
+        <li>各环节人员在 App 使用<strong>本人账号</strong>，勿代登。</li>
+    </ol>
+
+    <p class="rounded-lg bg-amber-50 px-3 py-2 text-slate-700">小结：本模块回答的是——<strong>「五个岗位各做什么、在 App 还是 Web、派工时要登记什么」</strong>。</p>
+</section>
+{% endblock %}

@@ -26,6 +26,7 @@ from apps.core.library_access import (
     library_inspection_act_on_all_projects,
     library_user_can_assign_tasks_to_participants,
     library_user_is_project_primary_responsible,
+    library_user_may_export_report_library_pdfs,
     role_can_upload_library_category,
     role_has,
 )
@@ -2039,6 +2040,9 @@ class InspectionTaskManualExportReportAPIView(_InspectionTaskAccessMixin, APIVie
 
     @transaction.atomic
     def post(self, request, task_no: str):
+        if not library_user_may_export_report_library_pdfs(request.user):
+            return _fail("当前角色无权导出报告", status.HTTP_403_FORBIDDEN)
+
         case, project, err_resp = self._resolve_case_project(request, task_no)
         if err_resp is not None:
             return err_resp

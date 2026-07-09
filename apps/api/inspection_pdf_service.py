@@ -1641,6 +1641,38 @@ def _per_report_title_line_for_merge(row: dict) -> str:
     return _friendly_library_report_stem(row.get("original_name") or "")
 
 
+def merge_row_toc_chapter_title(row: dict) -> str:
+    """合并报告目录一级章节名：设备名称（类型，型号：…）。"""
+    from utils.pdf_merge import (
+        build_single_report_toc_device_title,
+        toc_chapter_title_from_report_pdf,
+    )
+
+    sub = row.get("submit")
+    if isinstance(sub, dict):
+        ei = sub.get("equipmentInfo") or {}
+        if isinstance(ei, dict):
+            device = (
+                (ei.get("deviceName") or ei.get("name") or ei.get("f12") or "")
+                .strip()
+            )
+            model = (
+                (ei.get("model") or ei.get("deviceModel") or ei.get("f13") or "")
+                .strip()
+            )
+            dtype = (ei.get("deviceType") or "").strip()
+            if device or model:
+                return build_single_report_toc_device_title(
+                    device or dtype or "检测设备",
+                    dtype,
+                    model,
+                )
+    path = (row.get("path") or "").strip()
+    if path:
+        return toc_chapter_title_from_report_pdf(path)
+    return "检测设备"
+
+
 def build_report_merge_overlay(
     files_ordered: Sequence[LibraryFile],
     merge_time=None,

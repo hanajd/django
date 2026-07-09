@@ -1,0 +1,37 @@
+{% extends "core/guide/coordinator/section_base.html" %}
+{% block guide_section %}
+<section class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <h1 class="text-lg font-bold text-slate-900">医院信息管理</h1>
+    <p class="text-slate-700">入口：左侧 <span class="guide-nav">医院信息管理</span>。用于维护<strong>受检单位</strong>的组织结构与设备台账，供 <span class="guide-nav">项目工作台</span> 立项、App 填报及报告生成时引用。委托统筹账号可直接新建与编辑，<strong>无需</strong>先点「进入编辑模式」。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">一、页面结构</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li><strong>左侧树</strong>：医院 → 院区 → 科室，点击节点在右侧查看详情。</li>
+        <li><strong>右侧详情</strong>：机构基本信息、该科室下的受检设备列表。</li>
+        <li>顶栏或详情区提供 <span class="guide-ui">新建医院</span>、<span class="guide-ui">新建院区</span>、<span class="guide-ui">新建科室</span>、<span class="guide-ui">新建设备</span> 等入口（以界面为准）。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">二、推荐维护顺序</h2>
+    <ol class="list-decimal space-y-3 pl-5 text-slate-700">
+        <li><strong>新建医院</strong>：填写单位名称、地址、联系人等（字段以表单为准）。</li>
+        <li><strong>新建院区</strong>：同一医院下若有多个院区，分别建立。</li>
+        <li><strong>新建科室</strong>：在对应院区下建立科室节点。</li>
+        <li><strong>登记设备</strong>：在科室下添加受检设备，务必填写<strong>设备名称、型号、额定参数</strong>等；这些信息会出现在报告与合并目录中。</li>
+    </ol>
+
+    <h2 class="text-base font-semibold text-slate-900">三、编辑已有信息</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>在详情区点击 <span class="guide-ui">编辑</span> 可修改机构信息或设备资料。</li>
+        <li>设备搬迁到其他科室时，应在系统中调整归属，避免立项时挂错科室。</li>
+        <li>已用于历史项目的设备信息修改后，<strong>新生成</strong>的报告会使用新数据；已归档 PDF 不会自动变更。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">四、与立项、报告的关系</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>在 <span class="guide-nav">项目工作台</span> <span class="guide-ui">新建委托</span> 时，从本模块已维护的医院/科室/设备中选择，减少手工录入错误。</li>
+        <li>报告 PDF 中的「设备名称」「型号」等优先来自检测数据与设备登记；信息不全时合并报告目录可能显示为「检测设备」，维护好本页可减少此类问题。</li>
+    </ul>
+
+    <p class="rounded-lg bg-amber-50 px-3 py-2 text-slate-700">小结：医院信息管理回答的是——<strong>「受检单位与设备台账在哪里维护、立项前要先建好什么」</strong>。</p>
+</section>
+{% endblock %}

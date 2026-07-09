@@ -1,0 +1,56 @@
+{% extends "core/guide/coordinator/section_base.html" %}
+{% block guide_section %}
+<section class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <h1 class="text-lg font-bold text-slate-900">文件库</h1>
+    <p class="text-slate-700">入口：左侧 <span class="guide-nav">文件库管理</span>。委托统筹的文件库为<strong>精简版</strong>：侧重业务资料归档与 PDF 导出，不含版式维护。请关注顶部分类标签（<span class="guide-ui">紫底</span>）。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">一、您可见的分类</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li><span class="guide-ui">待识别文件</span>：待处理的上传件（若单位启用识别流程）。</li>
+        <li><span class="guide-ui">现场记录</span>：已形成的现场记录类 PDF。</li>
+        <li><span class="guide-ui">报告</span>：正式报告 PDF。</li>
+        <li><span class="guide-ui">附件</span>：补充说明、照片等。</li>
+        <li><span class="guide-ui">检测提交</span>：App 或流程产生的检测提交记录，常作为导出现场记录的来源。</li>
+        <li><span class="guide-ui">回收站</span>：已删除文件的恢复或彻底清理。</li>
+    </ul>
+    <p class="text-sm text-slate-600">无「数据文件」「模板」分类——版式由单位预先配置，不在委托统筹后台维护。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">二、导出类操作（重点）</h2>
+    <p class="text-slate-700">委托统筹在文件库可完成现场记录与报告导出。完整顺序与分工衔接见专篇 <span class="guide-nav">分工与报告导出</span>；此处为按钮速查。</p>
+    <table class="w-full border-collapse text-left text-sm">
+        <thead>
+            <tr class="border-b border-slate-200 text-slate-600">
+                <th class="py-2 pr-3 font-semibold">要做的事</th>
+                <th class="py-2 pr-3 font-semibold">分类</th>
+                <th class="py-2 font-semibold">常见按钮</th>
+            </tr>
+        </thead>
+        <tbody class="text-slate-700">
+            <tr class="border-b border-slate-100"><td class="py-2 pr-3">检测提交 → 现场记录 PDF</td><td class="py-2 pr-3"><span class="guide-ui">检测提交</span></td><td class="py-2"><span class="guide-ui">手动导出 PDF</span></td></tr>
+            <tr class="border-b border-slate-100"><td class="py-2 pr-3">多环节现场记录 → 一份报告</td><td class="py-2 pr-3"><span class="guide-ui">检测提交</span> / <span class="guide-ui">现场记录</span></td><td class="py-2">报告环节行 <span class="guide-ui">导出合并报告</span></td></tr>
+            <tr class="border-b border-slate-100"><td class="py-2 pr-3">勾选记录 → 报告</td><td class="py-2 pr-3"><span class="guide-ui">检测提交</span> / <span class="guide-ui">现场记录</span></td><td class="py-2"><span class="guide-ui">手动导出报告</span></td></tr>
+            <tr><td class="py-2 pr-3">多份报告 PDF → 合订本</td><td class="py-2 pr-3"><span class="guide-ui">报告</span></td><td class="py-2"><span class="guide-ui">报告合并</span>（至少 2 份）</td></tr>
+        </tbody>
+    </table>
+    <p class="mt-2 text-sm text-slate-600"><strong>注意：</strong><span class="guide-ui">导出合并报告</span>是把现场侧数据合成<strong>一份</strong>报告；<span class="guide-ui">报告合并</span>是把多份<strong>已有报告 PDF</strong> 合成一本带目录的合订件。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">三、勾选与删除规则</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>表格左侧<strong>复选框</strong>：对可见的检测提交、现场记录、报告可用于批量导出或合并。</li>
+        <li><strong>删除</strong>：一般只能删除<strong>本人上传</strong>的文件；他人或系统生成的文件通常无删除钮或操作被拒绝。</li>
+        <li>移入 <span class="guide-ui">回收站</span> 后可恢复；彻底删除不可恢复，请谨慎操作。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">四、上传与附件</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>可向 <span class="guide-ui">附件</span>、<span class="guide-ui">现场记录</span>、<span class="guide-ui">报告</span> 等分类上传单位制度允许的 PDF 或图片。</li>
+        <li>上传前确认已选对<strong>当前项目</strong>（若页面与项目绑定）。</li>
+        <li>账号有文件库配额限制时，页顶或上传失败提示会说明空间不足，需清理回收站或联系管理员扩容。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">五、与项目工作台的关系</h2>
+    <p class="text-slate-700">列表常按当前在 <span class="guide-nav">项目工作台</span> 选中的项目过滤。若列表为空，请先选中正确项目，并确认外业已在 App 提交检测数据。</p>
+
+    <p class="rounded-lg bg-amber-50 px-3 py-2 text-slate-700">小结：文件库回答的是——<strong>「资料分哪类放、如何导出与合并报告、谁能删谁能选」</strong>。</p>
+</section>
+{% endblock %}

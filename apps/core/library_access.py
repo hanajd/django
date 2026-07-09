@@ -133,6 +133,15 @@ COMMISSION_COORDINATOR_WORKFLOW_ROLE_CODES: FrozenSet[str] = frozenset(
 
 COMMISSION_COORDINATOR_ASSIGNABLE_ROLE_CODES: FrozenSet[str] = COMMISSION_COORDINATOR_WORKFLOW_ROLE_CODES
 
+# 委托统筹创建的现场两岗：可查看已分配项目、仅导出现场记录，不可编辑工作台
+COORDINATOR_WORKFLOW_SITE_ROLE_CODES: FrozenSet[str] = frozenset(
+    {"field_inspector", "site_reviewer"}
+)
+# 委托统筹创建的编制/审核/签发岗：可编辑已分配项目、可导出报告与合并报告
+COORDINATOR_WORKFLOW_REPORT_EDIT_ROLE_CODES: FrozenSet[str] = frozenset(
+    {"report_author", "report_auditor", "authorized_signatory"}
+)
+
 
 _ROLE_KIND_BADGE_CLASSES = {
     "slate": "bg-slate-100 text-slate-800 ring-1 ring-slate-200/80",
@@ -299,6 +308,55 @@ ROLE_DEFAULT_PERMS_BY_CODE[COMMISSION_COORDINATOR_ROLE_CODE] = {
 
 def library_user_is_commission_coordinator(user) -> bool:
     return _role_code(user) == COMMISSION_COORDINATOR_ROLE_CODE
+
+
+def library_user_is_coordinator_managed_workflow_user(user) -> bool:
+    """委托统筹创建的检测流程岗位账号（检测员、校核员、编制人、审核人、授权签字人）。"""
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if library_user_is_commission_coordinator(user):
+        return False
+    try:
+        profile = user.profile
+        if not profile.created_by_id:
+            return False
+        creator = profile.created_by
+        if not library_user_is_commission_coordinator(creator):
+            return False
+        code = profile.role.code if profile.role_id else ""
+        return code in COMMISSION_COORDINATOR_ASSIGNABLE_ROLE_CODES
+    except Exception:
+        return False
+
+
+def library_user_coordinator_workflow_role_code(user) -> str:
+    """若为由委托统筹创建的流程岗位，返回其角色 code，否则返回空字符串。"""
+    if not library_user_is_coordinator_managed_workflow_user(user):
+        return ""
+    try:
+        return (user.profile.role.code if user.profile.role_id else "") or ""
+    except Exception:
+        return ""
+
+
+def library_user_is_coordinator_workflow_site_only_role(user) -> bool:
+    """委托统筹创建的检测员 / 校核员（只读工作台 + 仅导出现场记录）。"""
+    return library_user_coordinator_workflow_role_code(user) in COORDINATOR_WORKFLOW_SITE_ROLE_CODES
+
+
+def library_user_is_coordinator_workflow_report_edit_role(user) -> bool:
+    """委托统筹创建的编制人 / 审核人 / 授权签字人（可编辑工作台 + 导出/合并报告）。"""
+    return (
+        library_user_coordinator_workflow_role_code(user)
+        in COORDINATOR_WORKFLOW_REPORT_EDIT_ROLE_CODES
+    )
+
+
+def library_user_may_view_coordinator_usage_guide(user) -> bool:
+    """是否可查看「委托业务使用说明」（委托统筹本人或其创建的流程岗位账号）。"""
+    return library_user_is_commission_coordinator(
+        user
+    ) or library_user_is_coordinator_managed_workflow_user(user)
 
 
 def file_library_tabs_for_user(user) -> list[dict]:
@@ -535,17 +593,45 @@ def library_user_may_filled_pdf_toolchain(user) -> bool:
     return role_has(user, "perm_process_pipeline") or role_has(user, "perm_htmlpdf")
 
 
-def library_user_may_export_inspection_library_pdfs(user) -> bool:
+def library_user_may_export_site_record_library_pdfs(user) -> bool:
     """
-    文件库：手动导出现场记录 PDF、由现场记录导出报告、合并报告等。
+    文件库：手动导出现场记录 PDF（检测提交 → 现场记录）。
 
-    委托统筹无模板编辑器权限，但需在文件库完成上述导出操作。
+    委托统筹创建的检测员 / 校核员仅具备此项导出能力。
     """
     if library_user_may_filled_pdf_toolchain(user):
         return True
     if library_user_is_commission_coordinator(user) and role_has(user, "perm_file_library"):
         return True
+    if library_user_is_coordinator_managed_workflow_user(user) and role_has(
+        user, "perm_file_library"
+    ):
+        return True
     return False
+
+
+def library_user_may_export_report_library_pdfs(user) -> bool:
+    """
+    文件库：由现场记录/提交导出报告、文件夹导出报告、合并报告 PDF 等。
+
+    委托统筹创建的编制人 / 审核人 / 授权签字人，以及委托统筹本人可用。
+    """
+    if library_user_may_filled_pdf_toolchain(user):
+        return True
+    if library_user_is_commission_coordinator(user) and role_has(user, "perm_file_library"):
+        return True
+    if library_user_is_coordinator_workflow_report_edit_role(user) and role_has(
+        user, "perm_file_library"
+    ):
+        return True
+    return False
+
+
+def library_user_may_export_inspection_library_pdfs(user) -> bool:
+    """文件库：任一类检测相关 PDF 导出（现场记录或报告）。"""
+    return library_user_may_export_site_record_library_pdfs(
+        user
+    ) or library_user_may_export_report_library_pdfs(user)
 
 
 _LIBRARY_EXPORT_SELECTABLE_CATEGORIES = frozenset(
@@ -566,11 +652,19 @@ def library_user_may_select_library_file_for_batch(user, lf) -> bool:
         return False
     if library_user_may_delete_library_file(user, lf):
         return True
-    if not library_user_may_export_inspection_library_pdfs(user):
-        return False
     if not library_file_access_allowed(user, lf):
         return False
-    return (getattr(lf, "category", None) or "") in _LIBRARY_EXPORT_SELECTABLE_CATEGORIES
+    cat = (getattr(lf, "category", None) or "").strip()
+    if cat == LibraryFile.CATEGORY_INSPECTION_SUBMIT:
+        return library_user_may_export_site_record_library_pdfs(user)
+    if cat == LibraryFile.CATEGORY_SITE_RECORD:
+        return (
+            library_user_may_export_site_record_library_pdfs(user)
+            or library_user_may_export_report_library_pdfs(user)
+        )
+    if cat == LibraryFile.CATEGORY_REPORT:
+        return library_user_may_export_report_library_pdfs(user)
+    return False
 
 
 def library_filter_tasks_for_template_management(queryset, user):
@@ -749,12 +843,26 @@ def library_user_can_delete_library_project(user, project) -> bool:
     return False
 
 
+def library_user_may_create_library_project(user) -> bool:
+    """是否可在项目工作台新建委托项目。"""
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if library_user_is_coordinator_managed_workflow_user(user):
+        return False
+    if library_user_can_assign_tasks_to_participants(user):
+        return True
+    return role_has(user, "perm_create_library_project")
+
+
 def library_user_may_mutate_project_workbench(user, project) -> bool:
     """
     是否可对「项目工作台」内指定项目进行委托、流程、分配等写操作（不含「文件」标签维护）。
     高权限分配者视为全项目；主要负责人限本项目；参与人须已有任务分配或为项目创建者。
+    委托统筹创建的检测员 / 校核员仅可查看，不可编辑。
     """
     if project is None or not getattr(user, "is_authenticated", False):
+        return False
+    if library_user_is_coordinator_workflow_site_only_role(user):
         return False
     if library_user_can_assign_tasks_to_participants(user):
         return True
@@ -770,6 +878,8 @@ def library_user_may_mutate_project_workbench(user, project) -> bool:
 def library_user_may_edit_project_files(user, project) -> bool:
     """是否可在项目工作台「文件」标签中关联/移除项目文件。主要负责人不可编辑项目文件。"""
     if project is None or not getattr(user, "is_authenticated", False):
+        return False
+    if library_user_is_coordinator_workflow_site_only_role(user):
         return False
     if library_user_is_project_primary_responsible(user, project):
         return False
@@ -989,12 +1099,17 @@ def library_export_merge_allowed_under_own_files_scope(user, project_selected_id
 
     除「授权签字人已选中被分配项目」外，对甲方演示等沙箱账号（仅本人 + 自建项目 + 不可分配他人任务）
     在存在可见项目时亦允许，避免必须先在文件库顶栏选项目才能导出。
+    委托统筹创建的流程岗位在已有分配/可见项目时允许导出（现场岗仅现场记录类按钮另判）。
     """
     if not library_scope_own_files_only(user):
         return True
     if library_signatory_assigned_project_selected(user, project_selected_id):
         return True
     if library_user_test_account_self_fill(user) and library_user_scoped_project_ids(user):
+        return True
+    if library_user_is_coordinator_managed_workflow_user(user) and library_user_scoped_project_ids(
+        user
+    ):
         return True
     return False
 
@@ -1160,8 +1275,10 @@ def role_ui_context(user) -> Dict[str, Any]:
     is_coordinator = code == COMMISSION_COORDINATOR_ROLE_CODE
     has_assign = library_user_can_assign_tasks_to_participants(user)
 
-    # 侧栏「项目管理」：现场检测两岗只做上传/校核，不进入项目配置页
+    # 侧栏「项目管理」：委托统筹创建的流程岗位可查看已分配项目；其他现场两岗不进入配置页
     if is_super or is_admin or has_assign or is_coordinator:
+        show_pm = role_has(user, "perm_file_library")
+    elif library_user_is_coordinator_managed_workflow_user(user):
         show_pm = role_has(user, "perm_file_library")
     elif code in ("field_inspector", "site_reviewer"):
         show_pm = False

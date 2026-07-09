@@ -7,8 +7,13 @@
     {% include "core/guide/partials/ui_styles.html" %}
     {% include "core/guide/partials/legend.html" %}
     <div id="guide-tour-hero" class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-        <p id="guide-intro" class="min-w-0 flex-1 text-slate-600">本说明按<strong>菜单与业务流程</strong>拆成多页；下方卡片可深入阅读。点击 <span class="guide-ui">开始流程练习</span> 将按推荐顺序进入<strong>真实业务页面</strong>，在关键步骤<strong>亲自创建项目、任务模板并挂接到项目</strong>；练习结束点「完成练习」后，系统会<strong>删除本次练习产生的新建数据</strong>，不影响正式业务。</p>
-        <div class="flex flex-wrap gap-2 shrink-0">
+        <p id="guide-intro" class="min-w-0 flex-1 text-slate-600">本说明按<strong>菜单与业务流程</strong>拆成多页；下方卡片可深入阅读。点击 <span class="guide-ui">开始流程练习</span> 将按推荐顺序进入<strong>真实业务页面</strong>，在关键步骤<strong>亲自创建项目、任务模板并挂接到项目</strong>。需要中途实操时，点引导浮层右上角 <span class="guide-ui">×</span> 可<strong>暂停</strong>（进度保留），回到本页点 <span class="guide-ui">继续练习</span> 即可接着做；点「完成练习」才会删除本次练习数据。</p>
+        <p id="guide-tour-pause-hint" class="hidden w-full rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-900">练习已暂停，您可先自由操作页面。准备好后点 <span class="guide-ui">继续练习</span>；若要清空重来请点 <span class="guide-ui">重新开始练习</span>。</p>
+        <div class="flex flex-wrap gap-2 shrink-0 w-full sm:w-auto">
+            <button type="button" id="btn-guide-continue" class="hidden inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow hover:bg-emerald-700">
+                <i class="ri-play-line text-base"></i>
+                继续练习
+            </button>
             <button type="button" id="btn-guide-start" class="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow hover:bg-indigo-700">
                 <i class="ri-compass-3-line text-base"></i>
                 开始流程练习

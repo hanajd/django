@@ -1,0 +1,39 @@
+{% extends "core/guide/coordinator/section_base.html" %}
+{% block guide_section %}
+<section class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <h1 class="text-lg font-bold text-slate-900">文件库</h1>
+    <p class="text-slate-700">入口：左侧 <span class="guide-nav">文件库管理</span>。流程岗位账号主要用于<strong>查看、上传或下载</strong>与本人工作相关的资料，现场检测主战场在 <strong>App</strong>。顶部分类因岗位略有差异，但常见为 <span class="guide-ui">现场记录</span>、<span class="guide-ui">报告</span>、<span class="guide-ui">检测提交</span>、<span class="guide-ui">附件</span>。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">一、各分类怎么用</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li><span class="guide-ui">检测提交</span>：App 提交后的记录，可在此核对是否已成功同步。</li>
+        <li><span class="guide-ui">现场记录</span>：检测员、校核员最常查看；可下载 PDF 核对或补传单位允许的材料。</li>
+        <li><span class="guide-ui">报告</span>：编制人、审核人、授权签字人更常接触；查看或下载报告稿。</li>
+        <li><span class="guide-ui">附件</span>：存放补充照片、说明文档，勿与正式记录/报告混放。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">二、数据范围</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>多数流程岗位默认<strong>仅能看到与本人相关的项目资料</strong>（由派工与流程登记决定）。</li>
+        <li>检测员、校核员可在 <span class="guide-nav">项目工作台</span> 打开已分配项目（只读）；也可在文件库按项目筛选。</li>
+        <li><strong>导出</strong>：检测员、校核员仅可在 <span class="guide-ui">检测提交</span> 使用 <span class="guide-ui">手动导出 PDF</span>；导出报告、报告合并仅限编制人、审核人、授权签字人。</li>
+        <li><strong>删除</strong>：一般只能删除<strong>本人上传</strong>的文件；系统生成或他人上传的文件无删除权限。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">三、您一般不需要做的事</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>维护 PDF 版式、编辑模板（无 <span class="guide-nav">模板编辑器</span> 权限）。</li>
+        <li>合并多份报告交付（仅编制人、审核人、授权签字人；检测员、校核员无此权限）。</li>
+        <li>创建用户、改医院设备信息。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">四、列表为空时</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>确认委托统筹是否已向您<strong>同步任务</strong>，且您已在 App 完成提交。</li>
+        <li>检查文件库顶部是否选对项目或分类标签。</li>
+        <li>仍无数据请联系委托统筹，勿使用他人账号代填。</li>
+    </ul>
+
+    <p class="rounded-lg bg-amber-50 px-3 py-2 text-slate-700">小结：文件库（流程岗位）回答的是——<strong>「提交后的资料在哪看、我能删什么、什么要找委托统筹」</strong>。</p>
+</section>
+{% endblock %}

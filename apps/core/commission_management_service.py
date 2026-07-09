@@ -214,7 +214,7 @@ def commission_projects_queryset(
         LibraryProject.objects.filter(is_active=True)
         .select_related("commission_org", "primary_responsible", "created_by")
         .prefetch_related("project_equipments")
-        .annotate(_equipment_count=Count("project_equipments", distinct=True))
+        .annotate(_equipment_count=Count("project_equipments__equipment_id", distinct=True))
     )
     if subject_user is not None and not commission_may_view_user_stats(viewer, subject_user):
         return qs.none()

@@ -2,7 +2,7 @@
 {% verbatim %}
 <script>
 (function () {
-    var STORAGE_KEY = 'usage_site_tour_v1';
+    var STORAGE_KEY_DEFAULT = 'usage_site_tour_v1';
     var TOUR_START_URL = '/help/usage/tour/start/';
     var TOUR_FINISH_URL = '/help/usage/tour/finish/';
     var driverFactory = window.driver && window.driver.js && window.driver.js.driver;
@@ -21,24 +21,39 @@
         }
     }
 
+    function getStorageKey() {
+        var m = getManifestRoot();
+        return (m && m.storage_key) || STORAGE_KEY_DEFAULT;
+    }
+
     function getTourState() {
         try {
-            var raw = sessionStorage.getItem(STORAGE_KEY);
+            var raw = sessionStorage.getItem(getStorageKey());
             return raw ? JSON.parse(raw) : null;
         } catch (e) {
             return null;
         }
     }
 
+    function isTourPaused() {
+        var st = getTourState();
+        return !!(st && st.active && st.paused);
+    }
+
+    function isTourInProgress() {
+        var st = getTourState();
+        return !!(st && st.active);
+    }
+
     function setTourState(obj) {
         try {
-            sessionStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
+            sessionStorage.setItem(getStorageKey(), JSON.stringify(obj));
         } catch (e) {}
     }
 
     function clearTourState() {
         try {
-            sessionStorage.removeItem(STORAGE_KEY);
+            sessionStorage.removeItem(getStorageKey());
         } catch (e) {}
     }
 
@@ -129,7 +144,7 @@
         var q = window.location.search || '';
         if (/manage_task=\d+/.test(q) && q.indexOf('new_task=1') === -1) {
             var j = segmentIndexById(manifest, 'task_post_create_tabs');
-            if (j >= 0) setTourState({ active: true, segmentIndex: j });
+            if (j >= 0) setTourState({ active: true, paused: false, segmentIndex: j, stepIndex: 0 });
         }
     }
 
@@ -143,7 +158,7 @@
         var q = window.location.search || '';
         if (cur && cur.id === 'task_post_create_tabs' && q.indexOf('edit_task=1') !== -1) {
             var j = segmentIndexById(manifest, 'task_bind_templates');
-            if (j >= 0) setTourState({ active: true, segmentIndex: j });
+            if (j >= 0) setTourState({ active: true, paused: false, segmentIndex: j, stepIndex: 0 });
         }
     }
 
@@ -205,11 +220,12 @@
             if (isLastSeg) {
                 postFinishOnce().finally(function () {
                     clearTourState();
+                    updateGuideTourButtons();
                     setTimeout(doDestroy, 0);
                 });
                 return;
             }
-            setTourState({ active: true, segmentIndex: segIndex + 1 });
+            setTourState({ active: true, paused: false, segmentIndex: segIndex + 1, stepIndex: 0 });
             var nxt = allSegs[segIndex + 1];
             var href = buildNextSegmentHref(nxt);
             setTimeout(function () {
@@ -234,12 +250,13 @@
         var doneBtnGlobal = isLastSeg ? finishLabel : '下一步';
         if (!driverSteps.length) {
             if (segIndex + 1 < segs.length) {
-                setTourState({ active: true, segmentIndex: segIndex + 1 });
+                setTourState({ active: true, paused: false, segmentIndex: segIndex + 1, stepIndex: 0 });
                 var nxt0 = segs[segIndex + 1];
                 window.location.href = buildNextSegmentHref(nxt0);
             } else {
                 postFinishOnce().finally(function () {
                     clearTourState();
+                    updateGuideTourButtons();
                 });
             }
             return;
@@ -247,8 +264,20 @@
         if (currentDriver && currentDriver.isActive()) {
             currentDriver.destroy();
         }
-        var startStep = pickInitialDriverStepIndex(segIndex, manifest);
+        var st = getTourState();
+        var startStep = 0;
+        if (st && st.paused && st.segmentIndex === segIndex && typeof st.stepIndex === 'number') {
+            startStep = st.stepIndex;
+        } else {
+            startStep = pickInitialDriverStepIndex(segIndex, manifest);
+        }
         if (startStep >= driverSteps.length) startStep = 0;
+        setTourState({
+            active: true,
+            paused: false,
+            segmentIndex: segIndex,
+            stepIndex: startStep,
+        });
         var inst = driverFactory({
             animate: false,
             showProgress: true,
@@ -267,8 +296,19 @@
             showButtons: ['next', 'previous', 'close'],
             smoothScroll: true,
             steps: driverSteps,
-            onHighlighted: function (el) {
+            onHighlighted: function (el, step, ctx) {
                 if (el && el.classList) el.classList.add('guide-tour-spotlight');
+                var drv = ctx && ctx.driver;
+                var activeIdx = startStep;
+                if (drv && typeof drv.getActiveIndex === 'function') {
+                    activeIdx = drv.getActiveIndex();
+                }
+                setTourState({
+                    active: true,
+                    paused: false,
+                    segmentIndex: segIndex,
+                    stepIndex: activeIdx,
+                });
             },
             onDeselected: function (el) {
                 if (el && el.classList) el.classList.remove('guide-tour-spotlight');
@@ -280,15 +320,7 @@
                 });
             },
             onCloseClick: function (_el, _step, opts) {
-                postFinishOnce().finally(function () {
-                    clearTourState();
-                    var d = currentDriver || (opts && opts.driver);
-                    setTimeout(function () {
-                        try {
-                            if (d && typeof d.destroy === 'function') d.destroy();
-                        } catch (e) {}
-                    }, 0);
-                });
+                pauseTour(opts);
             },
         });
         reattachLastStepNavigation(driverSteps, segIndex, segs, inst, finishLabel, '下一步');
@@ -299,11 +331,8 @@
     function startTour() {
         var manifest = getManifestRoot();
         if (!manifest || !manifest.segments || !manifest.segments.length) return;
-        if (resumeTimer) {
-            clearTimeout(resumeTimer);
-            resumeTimer = null;
-        }
-        if (currentDriver && currentDriver.isActive()) return;
+        destroyCurrentDriver();
+        clearTourState();
         window.__usageTourFinishPosted = false;
         postJson(TOUR_START_URL, {}).then(function (res) {
             if (!res.ok || !res.json || !res.json.ok) {
@@ -311,7 +340,7 @@
                 alert(err === 'forbidden' ? '当前账号无法开始流程练习。' : '无法开始练习，请稍后重试。');
                 return;
             }
-            setTourState({ active: true, segmentIndex: 0 });
+            setTourState({ active: true, paused: false, segmentIndex: 0, stepIndex: 0 });
             var first = manifest.segments[0];
             if (!matchSegment(first)) {
                 window.location.href = first.path + (first.search || '');
@@ -326,14 +355,8 @@
     function resetTour() {
         var manifest = getManifestRoot();
         if (!manifest || !manifest.segments || !manifest.segments.length) return;
-        if (resumeTimer) {
-            clearTimeout(resumeTimer);
-            resumeTimer = null;
-        }
+        destroyCurrentDriver();
         clearTourState();
-        if (currentDriver && currentDriver.isActive()) {
-            currentDriver.destroy();
-        }
         window.__usageTourFinishPosted = false;
         postJson(TOUR_FINISH_URL, {})
             .catch(function () {})
@@ -342,7 +365,7 @@
             })
             .then(function (res) {
                 if (!res.ok || !res.json || !res.json.ok) return;
-                setTourState({ active: true, segmentIndex: 0 });
+                setTourState({ active: true, paused: false, segmentIndex: 0, stepIndex: 0 });
                 var first = manifest.segments[0];
                 if (!matchSegment(first)) {
                     window.location.href = first.path + (first.search || '');
@@ -354,11 +377,98 @@
             });
     }
 
+    function pauseTour(opts) {
+        var st = getTourState() || {};
+        var idx = typeof st.segmentIndex === 'number' ? st.segmentIndex : 0;
+        var stepIdx = typeof st.stepIndex === 'number' ? st.stepIndex : 0;
+        var d = currentDriver || (opts && opts.driver);
+        if (d && typeof d.getActiveIndex === 'function') {
+            try {
+                stepIdx = d.getActiveIndex();
+            } catch (e) {}
+        }
+        destroyCurrentDriver();
+        setTourState({ active: true, paused: true, segmentIndex: idx, stepIndex: stepIdx });
+        updateGuideTourButtons();
+    }
+
+    function continueTour() {
+        var manifest = getManifestRoot();
+        var st = getTourState();
+        if (!manifest || !manifest.segments || !st || !st.active) return;
+        destroyCurrentDriver();
+        window.__usageTourFinishPosted = false;
+        var idx = typeof st.segmentIndex === 'number' ? st.segmentIndex : 0;
+        if (idx < 0 || idx >= manifest.segments.length) return;
+        var seg = manifest.segments[idx];
+        setTourState({
+            active: true,
+            paused: false,
+            segmentIndex: idx,
+            stepIndex: typeof st.stepIndex === 'number' ? st.stepIndex : 0,
+        });
+        if (!matchSegment(seg)) {
+            window.location.href = buildNextSegmentHref(seg);
+            return;
+        }
+        setTimeout(function () {
+            runSegment(idx);
+        }, 400);
+    }
+
+    function updateGuideTourButtons() {
+        var paused = isTourPaused();
+        var hero = document.getElementById('guide-tour-hero');
+        var hint = document.getElementById('guide-tour-pause-hint');
+        var bStart = document.getElementById('btn-guide-start');
+        var bContinue = document.getElementById('btn-guide-continue');
+        if (bContinue) {
+            if (paused) bContinue.classList.remove('hidden');
+            else bContinue.classList.add('hidden');
+        }
+        if (bStart) {
+            if (paused) bStart.classList.add('hidden');
+            else bStart.classList.remove('hidden');
+        }
+        if (hint) {
+            if (paused) hint.classList.remove('hidden');
+            else hint.classList.add('hidden');
+        }
+        if (hero) {
+            if (paused) hero.classList.add('ring-2', 'ring-amber-300');
+            else hero.classList.remove('ring-2', 'ring-amber-300');
+        }
+        ensurePauseFab(paused);
+    }
+
+    function ensurePauseFab(paused) {
+        var id = 'guide-tour-pause-fab';
+        var existing = document.getElementById(id);
+        if (!paused) {
+            if (existing) existing.remove();
+            return;
+        }
+        if (existing) return;
+        var el = document.createElement('button');
+        el.id = id;
+        el.type = 'button';
+        el.setAttribute('aria-label', '继续流程练习');
+        el.className =
+            'fixed bottom-6 right-6 z-[9999] inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg ring-2 ring-white hover:bg-emerald-700';
+        el.innerHTML = '<i class="ri-play-line text-lg"></i>继续练习';
+        el.addEventListener('click', function () {
+            continueTour();
+        });
+        document.body.appendChild(el);
+    }
+
     function tryResume() {
         bumpTourFromTaskCreate();
         bumpTabSwitchToBindSegment();
+        updateGuideTourButtons();
         var st = getTourState();
         if (!st || !st.active) return;
+        if (st.paused) return;
         if (resumeTimer) {
             clearTimeout(resumeTimer);
             resumeTimer = null;
@@ -366,16 +476,17 @@
         var manifest = getManifestRoot();
         if (!manifest || !manifest.segments) {
             clearTourState();
+            updateGuideTourButtons();
             return;
         }
         var segs = manifest.segments;
         var idx = typeof st.segmentIndex === 'number' ? st.segmentIndex : 0;
         if (idx >= segs.length) {
             clearTourState();
+            updateGuideTourButtons();
             return;
         }
         if (!matchSegment(segs[idx])) {
-            clearTourState();
             return;
         }
         resumeTimer = setTimeout(function () {
@@ -384,26 +495,60 @@
         }, 500);
     }
 
+    function destroyCurrentDriver() {
+        if (resumeTimer) {
+            clearTimeout(resumeTimer);
+            resumeTimer = null;
+        }
+        if (!currentDriver) return;
+        try {
+            if (typeof currentDriver.destroy === 'function') currentDriver.destroy();
+        } catch (e) {}
+        currentDriver = null;
+    }
+
     function wireUsageGuideIndexButtons() {
         if (!window.UsageSiteTour || !UsageSiteTour.hasManifest()) return;
         var b1 = document.getElementById('btn-guide-start');
         var b2 = document.getElementById('btn-guide-reset');
-        if (!b1 || b1.getAttribute('data-usage-tour-wired') === '1') return;
-        b1.setAttribute('data-usage-tour-wired', '1');
-        b1.addEventListener('click', function () {
-            if (UsageSiteTour.isDriverActive()) return;
-            UsageSiteTour.start();
-        });
-        if (b2) {
+        var b3 = document.getElementById('btn-guide-continue');
+        if (!b1 && !b3) return;
+        if (b1 && b1.getAttribute('data-usage-tour-wired') !== '1') {
+            b1.setAttribute('data-usage-tour-wired', '1');
+            b1.addEventListener('click', function () {
+                if (isTourPaused() && !window.confirm('当前练习已暂停。点「确定」将放弃暂停进度并从头开始；若要接着做请点「继续练习」。')) {
+                    return;
+                }
+                UsageSiteTour.start();
+            });
+        }
+        if (b2 && b2.getAttribute('data-usage-tour-wired') !== '1') {
+            b2.setAttribute('data-usage-tour-wired', '1');
             b2.addEventListener('click', function () {
                 UsageSiteTour.reset();
             });
         }
+        if (b3 && b3.getAttribute('data-usage-tour-wired') !== '1') {
+            b3.setAttribute('data-usage-tour-wired', '1');
+            b3.addEventListener('click', function () {
+                UsageSiteTour.continueTour();
+            });
+        }
+        updateGuideTourButtons();
+    }
+
+    function initUsageTourPage() {
+        tryResume();
+        wireUsageGuideIndexButtons();
+        updateGuideTourButtons();
     }
 
     window.UsageSiteTour = {
         start: startTour,
         reset: resetTour,
+        continueTour: continueTour,
+        pause: pauseTour,
+        isPaused: isTourPaused,
         hasManifest: function () {
             return !!document.getElementById('usage-site-tour-manifest-data');
         },
@@ -413,14 +558,11 @@
     };
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function () {
-            tryResume();
-            wireUsageGuideIndexButtons();
-        });
+        document.addEventListener('DOMContentLoaded', initUsageTourPage);
     } else {
-        tryResume();
-        wireUsageGuideIndexButtons();
+        initUsageTourPage();
     }
+    window.addEventListener('admin-pjax:loaded', initUsageTourPage);
 })();
 </script>
 {% endverbatim %}

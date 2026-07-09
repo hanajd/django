@@ -1,0 +1,45 @@
+{% extends "core/guide/coordinator/section_base.html" %}
+{% block guide_section %}
+<section class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <h1 class="text-lg font-bold text-slate-900">项目工作台</h1>
+    <p class="text-slate-700">入口：左侧 <span class="guide-nav">项目工作台</span>。这是委托统筹围绕<strong>单个检测项目</strong>配置与派工的中心：选项目、挂标准检测任务、登记流程岗位、向 App 侧同步任务。与 test 演示账号不同，您<strong>无需</strong>先去任务模板库维护版式——立项时可直接勾选系统已有的全部标准检测任务。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">一、先选项目</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>左侧列表点击一行即选中；右侧内容均对<strong>当前项目</strong>生效。</li>
+        <li>点击 <span class="guide-ui">新建委托</span> 可创建新项目：选择医院/院区/科室、挂载受检设备、填写委托基本信息（字段以表单为准）。</li>
+        <li>若列表为空，请先在 <span class="guide-nav">医院信息管理</span> 维护好委托单位与设备，再新建委托。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">二、委托立项：挂载设备与检测类型</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>选中项目后，打开顶栏 <span class="guide-ui">委托立项</span> 标签。</li>
+        <li>勾选受检设备、选择<strong>本次检测类型</strong>（须与医院信息中设备已绑定类型一致），保存。</li>
+        <li>系统将按类型挂载报告与现场记录相关任务模板。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">三、人员派工：分工与 App 同步</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>打开顶栏 <span class="guide-ui">人员派工</span> 标签（不是旧版「流程 / 分配」命名）。</li>
+        <li>指定<strong>项目统筹人</strong>（<span class="guide-ui">确认指定统筹人</span>）。</li>
+        <li>按岗位（检测员、校核员、编制人、审核人、授权签字人）展开 <span class="guide-ui">添加人员</span>，勾选用户并确认；登记后<strong>自动同步 App 任务</strong>。</li>
+        <li>完整步骤与导出报告衔接见专篇 <span class="guide-nav">分工与报告导出</span>。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">四、其他标签页</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li><span class="guide-ui">概览</span>：本项目办理顺序与待办摘要。</li>
+        <li><span class="guide-ui">仪器管理</span>：为本项目分配检测仪器（若业务需要）；分配与出库状态联动，详见 <span class="guide-nav">检测仪器台账</span>。</li>
+        <li><span class="guide-ui">进度跟踪</span>：各检测项提交、校核、编制进度。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">五、与委托管理、文件库的关系</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>配置完成后，日常进度在 <span class="guide-nav">委托管理</span> 跟踪。</li>
+        <li>外业提交的资料进入 <span class="guide-nav">文件库管理</span>；导出与合并步骤见 <span class="guide-nav">分工与报告导出</span> 专篇。</li>
+        <li>一台设备常对应一份报告，一个项目下多台设备则多份报告；详见「现场记录与报告」专篇。</li>
+    </ul>
+
+    <p class="rounded-lg bg-amber-50 px-3 py-2 text-slate-700">小结：项目工作台回答的是——<strong>「这个委托包含谁、做哪些检测、谁在什么环节、任务是否已推到 App」</strong>。</p>
+</section>
+{% endblock %}

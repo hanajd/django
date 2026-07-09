@@ -1,0 +1,32 @@
+{% extends "core/guide/coordinator/section_base.html" %}
+{% block guide_section %}
+<section class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <h1 class="text-lg font-bold text-slate-900">整体工作顺序</h1>
+    <p class="text-slate-700">您的账号由<strong>委托统筹</strong>创建，岗位为检测流程中的一环（检测员、校核员、编制人、审核人或授权签字人）。多数现场工作在 <strong>平板 App</strong> 完成；Web 后台主要用于查看、上传或下载与岗位相关的资料。请先确认委托统筹已在 <span class="guide-nav">项目工作台</span> 把您加入项目并<strong>同步了任务</strong>。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">一、您通常能看到哪些菜单</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li><span class="guide-nav">文件库管理</span>：按岗位不同，侧重 <span class="guide-ui">现场记录</span>、<span class="guide-ui">报告</span>、<span class="guide-ui">检测提交</span> 等（无模板维护、无文档识别）。</li>
+        <li><span class="guide-nav">项目工作台</span>：凡已被派工登记者均可进入，<strong>仅查看分配给您的项目</strong>。检测员、校核员为只读（可看进度）；编制人、审核人、授权签字人可编辑委托立项 / 派工 / 仪器管理等。</li>
+        <li><span class="guide-nav">委托管理</span>：若您被分配了项目任务或登记为流程成员，可查看与自己相关的委托进度。</li>
+        <li>无 <span class="guide-nav">用户管理</span>、<span class="guide-nav">医院信息管理</span>、<span class="guide-nav">任务模板库</span>、<span class="guide-nav">模板编辑器</span>。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">二、典型一天怎么配合系统</h2>
+    <ol class="list-decimal space-y-3 pl-5 text-slate-700">
+        <li>用<strong>本人账号</strong>登录 App，在待办列表进入委托统筹已分配的检测项目。</li>
+        <li>按岗位在 App 内完成填报、校核、编制、审核或签发（具体以 App 界面与单位制度为准）。</li>
+        <li>提交后，数据会进入 Web <span class="guide-nav">文件库管理</span> 的 <span class="guide-ui">检测提交</span> 或生成 <span class="guide-ui">现场记录</span> / <span class="guide-ui">报告</span> 类文件。</li>
+        <li>若需在 Web 补传附件或下载 PDF，进入文件库对应分类操作；一般只能删除<strong>本人上传</strong>的文件。</li>
+    </ol>
+
+    <h2 class="text-base font-semibold text-slate-900">三、遇到问题找谁</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>App 看不到项目或任务：联系<strong>委托统筹</strong>，确认是否已派工、是否选对账号登录。</li>
+        <li>需要改医院/设备信息、增删账号：由委托统筹在对应菜单处理，您无权限操作。</li>
+        <li>报告导出与合并：编制人、审核人、授权签字人可在文件库操作；检测员、校核员仅可在 <span class="guide-ui">检测提交</span> 使用 <span class="guide-ui">手动导出 PDF</span>（现场记录）。</li>
+    </ul>
+
+    <p class="rounded-lg bg-amber-50 px-3 py-2 text-slate-700">小结：流程岗位账号回答的是——<strong>「接到派工后，在 App 与文件库中完成本岗位环节」</strong>；详细分工见下一篇「我的岗位职责」。</p>
+</section>
+{% endblock %}

@@ -127,17 +127,23 @@
                 <div class="grid sm:grid-cols-3 gap-4 mb-6">
                     <div class="rounded-xl border border-slate-100 bg-slate-50/80 p-4">
                         <div class="text-xs font-medium text-slate-500 uppercase">委托设备</div>
-                        <div class="mt-1 text-2xl font-bold text-slate-900">{{ project_commission_equipment_cards|length }}</div>
+                        <div class="mt-1 text-2xl font-bold text-slate-900">{{ project_equipment_count }}</div>
+                        {% if project_commission_equipment_cards|length > project_equipment_count %}
+                        <p class="text-[11px] text-slate-500 mt-0.5">{{ project_commission_equipment_cards|length }} 项检测配置</p>
+                        {% endif %}
                         <a href="?project_id={{ selected_project_id }}{{ workbench_fl_query }}&tab=commission" class="mt-2 inline-block text-xs text-indigo-600 hover:underline">委托情况 →</a>
                     </div>
                     <div class="rounded-xl border border-slate-100 bg-slate-50/80 p-4">
                         <div class="text-xs font-medium text-slate-500 uppercase">岗位参与人</div>
-                        <div class="mt-1 text-2xl font-bold text-slate-900">{{ workflow_members|length }}</div>
+                        <div class="mt-1 text-2xl font-bold text-slate-900">{{ workflow_member_user_count }}</div>
                         <a href="?project_id={{ selected_project_id }}{{ workbench_fl_query }}&tab=dispatch" class="mt-2 inline-block text-xs text-indigo-600 hover:underline">人员派工 →</a>
                     </div>
                     <div class="rounded-xl border border-slate-100 bg-slate-50/80 p-4">
                         <div class="text-xs font-medium text-slate-500 uppercase">检测提交</div>
                         <div class="mt-1 text-2xl font-bold text-slate-900">{{ project_submissions|length }}</div>
+                        {% if project_detection_item_count %}
+                        <p class="text-[11px] text-slate-500 mt-0.5">当前立项 {{ project_detection_item_count }} 个检测项</p>
+                        {% endif %}
                         <a href="?project_id={{ selected_project_id }}{{ workbench_fl_query }}&tab=submissions" class="mt-2 inline-block text-xs text-indigo-600 hover:underline">进度跟踪 →</a>
                     </div>
                 </div>

@@ -6,7 +6,7 @@
 <div class="min-h-[calc(100vh-6rem)] bg-gradient-to-br from-slate-50 via-white to-indigo-50/30">
     <div class="max-w-[1680px] mx-auto px-4 sm:px-6 py-8">
         {# 页头 #}
-        <header class="mb-8 flex flex-wrap items-end justify-between gap-4">
+        <header id="guide-hospital-header" class="mb-8 flex flex-wrap items-end justify-between gap-4">
             <div>
                 <p class="text-xs font-semibold uppercase tracking-widest text-indigo-600/80 mb-1">委托单位主数据</p>
                 <h1 class="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">医院信息管理</h1>
@@ -25,7 +25,7 @@
 
         <div class="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
             {# 左侧：组织树卡片 #}
-            <div class="xl:col-span-4 space-y-4">
+            <div class="xl:col-span-4 space-y-4" id="guide-hospital-sidebar">
                 <article class="rounded-3xl bg-white/90 backdrop-blur-sm shadow-[0_8px_40px_-12px_rgba(15,23,42,0.12)] ring-1 ring-slate-200/60 overflow-hidden flex flex-col max-h-[min(78vh,44rem)]">
                     <div class="px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-rose-50/80 to-white">
                         <div class="flex items-center justify-between gap-2">
@@ -36,10 +36,12 @@
                                 组织架构
                             </h2>
                             {% if hospital_info_can_edit %}
+                            <span id="guide-hospital-create" class="inline-flex">
                             <button type="button" id="btn-open-create-org"
                                     class="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-900 text-white hover:bg-slate-800 transition">
                                 <i class="ri-add-line"></i> 新建
                             </button>
+                            </span>
                             {% endif %}
                         </div>
                         <input type="search" id="hospital-tree-filter" placeholder="搜索医院、院区、科室…"

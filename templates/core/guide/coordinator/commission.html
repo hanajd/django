@@ -1,0 +1,44 @@
+{% extends "core/guide/coordinator/section_base.html" %}
+{% block guide_section %}
+<section class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <h1 class="text-lg font-bold text-slate-900">委托管理</h1>
+    <p class="text-slate-700">入口：左侧 <span class="guide-nav">委托管理</span>。本页用于<strong>纵览委托进度与消息</strong>；具体的立项、挂任务、改设备、派工仍在 <span class="guide-nav">项目工作台</span> 完成。页顶说明与 <span class="guide-ui">新建委托</span>、<span class="guide-ui">项目工作台</span> 快捷按钮可帮助您在两处之间跳转。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">一、页面上有什么</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li><strong>汇总卡片</strong>：委托总数、已完成、未完成等概览（可按具体用户筛选时显示「某人相关项目」）。</li>
+        <li><strong>委托列表</strong>：每条委托对应一个检测项目，展示编号、受检单位、设备数量、进度等。</li>
+        <li><strong>签发进度</strong>：<strong>小委托</strong>（单台设备）常在列表中直接展示汇总进度条；<strong>大委托</strong>（≥2 台受检设备）请展开行查看各检测项明细进度。</li>
+        <li><strong>操作列</strong>：停用、删除废弃委托等（以界面实际按钮为准）；删除前请确认无仍需保留的资料。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">二、与项目工作台如何分工</h2>
+    <table class="w-full border-collapse text-left text-sm">
+        <thead>
+            <tr class="border-b border-slate-200 text-slate-600">
+                <th class="py-2 pr-3 font-semibold">要做的事</th>
+                <th class="py-2 font-semibold">去哪里</th>
+            </tr>
+        </thead>
+        <tbody class="text-slate-700">
+            <tr class="border-b border-slate-100"><td class="py-2 pr-3">新建委托、选医院与设备</td><td class="py-2"><span class="guide-nav">项目工作台</span></td></tr>
+            <tr class="border-b border-slate-100"><td class="py-2 pr-3">勾选检测任务、保存</td><td class="py-2"><span class="guide-nav">项目工作台</span></td></tr>
+            <tr class="border-b border-slate-100"><td class="py-2 pr-3">登记流程岗位、同步任务给检测员</td><td class="py-2"><span class="guide-nav">项目工作台</span></td></tr>
+            <tr class="border-b border-slate-100"><td class="py-2 pr-3">看整体完成度、谁还有待办</td><td class="py-2"><span class="guide-nav">委托管理</span></td></tr>
+            <tr><td class="py-2 pr-3">导出/合并报告 PDF</td><td class="py-2"><span class="guide-nav">文件库管理</span> → <span class="guide-ui">报告</span></td></tr>
+        </tbody>
+    </table>
+
+    <h2 class="text-base font-semibold text-slate-900">三、按人员查看</h2>
+    <p class="text-slate-700">若列表支持点选某检测流程岗位用户，可查看与其相关的委托汇总，便于督促外业进度。您作为委托统筹可查看您创建的团队账号相关统计；具体可见范围以页面实际展示为准。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">四、使用建议</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>每日先扫一眼「未完成」，再进 <span class="guide-nav">项目工作台</span> 处理卡点（缺人、缺任务勾选、设备未挂等）。</li>
+        <li>大委托不要只看总行进度，展开确认<strong>每一台设备、每一项检测</strong>是否都已提交。</li>
+        <li>进度长期不动时，先在 App 侧确认检测员是否已提交，再在流程页核对校核/编制岗位是否已登记。</li>
+    </ul>
+
+    <p class="rounded-lg bg-amber-50 px-3 py-2 text-slate-700">小结：委托管理回答的是——<strong>「所有委托进行得怎样、该催谁」</strong>；改配置请回项目工作台。</p>
+</section>
+{% endblock %}

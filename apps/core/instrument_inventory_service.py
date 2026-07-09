@@ -1854,3 +1854,288 @@ def auto_checkin_on_commission_end(
         user=user,
         note="委托结束自动入库",
     )
+
+
+def _remove_id_from_int_list(values: Iterable, instrument_id: int) -> list[int]:
+    pk = int(instrument_id)
+    out: list[int] = []
+    for x in values or []:
+        try:
+            if int(x) == pk:
+                continue
+        except (TypeError, ValueError):
+            continue
+        out.append(int(x))
+    return out
+
+
+def _strip_instrument_from_assigned_raw(raw: dict, instrument_id: int) -> dict:
+    """从项目 assigned_instrument_ids 各层列表中移除指定仪器编号。"""
+    if not isinstance(raw, dict):
+        return {}
+    out = dict(raw)
+    for scope in (SCOPE_QC, SCOPE_RP, "qc", "rp"):
+        if scope in out and isinstance(out[scope], list):
+            out[scope] = _remove_id_from_int_list(out[scope], instrument_id)
+    for key in ("byKind", "byRequirement"):
+        bucket = out.get(key)
+        if isinstance(bucket, dict):
+            out[key] = {
+                str(k): _remove_id_from_int_list(v, instrument_id)
+                for k, v in bucket.items()
+                if isinstance(v, list)
+            }
+    by_task = out.get("byTask")
+    if isinstance(by_task, dict):
+        out["byTask"] = {
+            str(k): _strip_instrument_from_assigned_raw(v, instrument_id)
+            if isinstance(v, dict)
+            else v
+            for k, v in by_task.items()
+        }
+    by_item = out.get("byDetectionItem")
+    if isinstance(by_item, dict):
+        out["byDetectionItem"] = {
+            str(k): _strip_instrument_from_assigned_raw(v, instrument_id)
+            if isinstance(v, dict)
+            else v
+            for k, v in by_item.items()
+        }
+    return out
+
+
+@transaction.atomic
+def manual_checkin_instrument(
+    instrument_id: int,
+    *,
+    user: User | None = None,
+    note: str = "",
+) -> tuple[bool, str]:
+    """
+    台账页手动落库：解除该仪器与全部项目的出库关联，并同步清理各项目分配列表。
+    用于项目侧已还但台账仍显示「已出库」、影响后续出库时的人工纠正。
+    """
+    try:
+        pk = int(instrument_id)
+    except (TypeError, ValueError):
+        return False, "仪器不存在"
+    if pk <= 0:
+        return False, "仪器不存在"
+
+    inst = (
+        InstrumentCatalog.objects.select_for_update()
+        .filter(pk=pk, is_active=True)
+        .first()
+    )
+    if inst is None:
+        return False, "仪器不存在或已停用"
+
+    active_project_ids = sorted(_active_checkout_project_ids(inst))
+    if not active_project_ids:
+        return False, f"仪器 {inst.code} 当前已在库，无需落库"
+
+    checkin_note = (note or "").strip() or "台账手动落库"
+    for project in LibraryProject.objects.filter(pk__in=active_project_ids):
+        InstrumentCheckoutLog.objects.create(
+            instrument=inst,
+            project=project,
+            event_type=InstrumentCheckoutLog.EVENT_CHECKIN,
+            performed_by=user,
+            note=checkin_note,
+        )
+        raw = getattr(project, "assigned_instrument_ids", None) or {}
+        stripped = _strip_instrument_from_assigned_raw(raw, pk)
+        if stripped != raw:
+            project.assigned_instrument_ids = stripped
+            project.save(update_fields=["assigned_instrument_ids", "updated_at"])
+
+    _sync_checkout_projects(inst, set(), user=user, touch_time=False)
+    n = len(active_project_ids)
+    if n == 1:
+        return True, f"仪器 {inst.code} 已落库（已解除 1 个项目关联）"
+    return True, f"仪器 {inst.code} 已落库（已解除 {n} 个项目关联）"
+
+
+def eligible_scopes_for_instrument_on_detection_item(
+    instrument: InstrumentCatalog,
+    item: dict,
+) -> list[str]:
+    """判断仪器可用于该检测项的质控/防护范围（与任务模板种类一致）。"""
+    if not item.get("hasTemplateKinds"):
+        return [SCOPE_QC, SCOPE_RP]
+    spec_key = instrument_kind_key(instrument.name, instrument.model or "")
+    scopes: list[str] = []
+    for scope in (SCOPE_QC, SCOPE_RP):
+        for kind_row in item.get("scopedKinds", {}).get(scope) or []:
+            k = instrument_kind_key(kind_row["name"], kind_row.get("model") or "")
+            if k == spec_key:
+                scopes.append(scope)
+                break
+    return scopes
+
+
+def _current_by_detection_item_for_project(
+    project: LibraryProject,
+) -> dict[str, dict[str, list[int]]]:
+    """读取项目当前按检测项的仪器分配（含从旧版按种类展开的结果）。"""
+    catalog = build_manual_instrument_picker_catalog(project)
+    items = catalog.get("items") or []
+    by_item: dict[str, dict[str, list[int]]] = {}
+    for item in items:
+        binding = item.get("selectedBinding") or {SCOPE_QC: [], SCOPE_RP: []}
+        by_item[item["key"]] = {
+            SCOPE_QC: _dedupe_id_list(binding.get(SCOPE_QC) or []),
+            SCOPE_RP: _dedupe_id_list(binding.get(SCOPE_RP) or []),
+        }
+    if by_item:
+        return by_item
+    raw = getattr(project, "assigned_instrument_ids", None) or {}
+    return normalize_project_by_detection_item(raw)
+
+
+def build_ledger_instrument_checkout_catalog(
+    project: LibraryProject,
+    instrument: InstrumentCatalog,
+) -> dict:
+    """
+    台账出库弹窗：按委托项目列出可绑定的「受检设备 × 现场记录」检测项。
+    选项与医院信息挂载的任务模板、项目工作台仪器管理一致。
+    """
+    detection_items = detection_items_for_project_instruments(project)
+    equipments_map: dict[int, dict] = {}
+    for item in detection_items:
+        eligible = eligible_scopes_for_instrument_on_detection_item(instrument, item)
+        if item.get("hasTemplateKinds") and not eligible:
+            continue
+        link_id = int(item["linkId"])
+        if link_id not in equipments_map:
+            equipments_map[link_id] = {
+                "linkId": link_id,
+                "equipmentTitle": item["equipmentTitle"],
+                "reportTaskLabel": item.get("reportTaskLabel") or "",
+                "detections": [],
+            }
+        equipments_map[link_id]["detections"].append(
+            {
+                "key": item["key"],
+                "siteTaskLabel": item["siteTaskLabel"],
+                "taskNo": item.get("taskNo") or "",
+                "taskCode": item.get("taskCode") or "",
+                "taskName": item.get("taskName") or "",
+                "detectionLabel": item["detectionLabel"],
+                "eligibleScopes": eligible,
+                "scopeOptions": [
+                    {
+                        "value": scope,
+                        "label": "质控（性能）"
+                        if scope == SCOPE_QC
+                        else "工作场所放射防护",
+                    }
+                    for scope in eligible
+                ],
+            }
+        )
+    equipments = list(equipments_map.values())
+    for eq in equipments:
+        eq["detections"].sort(
+            key=lambda d: (d.get("taskNo") or "", d.get("siteTaskLabel") or "")
+        )
+    equipments.sort(key=lambda e: e.get("equipmentTitle") or "")
+    empty_hint = ""
+    if not detection_items:
+        empty_hint = (
+            "该项目尚未挂载委托设备与现场记录任务，请先在项目工作台完成委托立项。"
+        )
+    elif not equipments:
+        empty_hint = (
+            "该仪器与当前项目各检测项要求的种类均不匹配，请核对任务模板绑定或更换仪器。"
+        )
+    return {
+        "projectId": project.pk,
+        "projectCode": project.code or "",
+        "projectName": project.name or "",
+        "instrument": {
+            "id": int(instrument.pk),
+            "code": instrument.code or "",
+            "name": instrument.name or "",
+            "model": instrument.model or "",
+        },
+        "equipments": equipments,
+        "hasOptions": bool(equipments),
+        "emptyHint": empty_hint,
+    }
+
+
+@transaction.atomic
+def manual_checkout_instrument_to_detection_item(
+    instrument_id: int,
+    project_id: int,
+    detection_item_key: str,
+    scope: str,
+    *,
+    user: User | None = None,
+) -> tuple[bool, str]:
+    """
+    台账手动出库：将仪器登记至指定项目的某一检测项（委托设备×现场记录），
+    并合并写入 assigned_instrument_ids 后同步出库状态。
+    """
+    scope = str(scope or "").strip()
+    if scope not in (SCOPE_QC, SCOPE_RP):
+        return False, "请选择质控或防护范围"
+
+    try:
+        inst_pk = int(instrument_id)
+        proj_pk = int(project_id)
+    except (TypeError, ValueError):
+        return False, "参数无效"
+
+    inst = (
+        InstrumentCatalog.objects.select_for_update()
+        .filter(pk=inst_pk, is_active=True)
+        .first()
+    )
+    if inst is None:
+        return False, "仪器不存在或已停用"
+
+    project = (
+        LibraryProject.objects.select_for_update()
+        .filter(pk=proj_pk, is_active=True)
+        .first()
+    )
+    if project is None:
+        return False, "委托项目不存在或已停用"
+
+    key = str(detection_item_key or "").strip()
+    valid_items = {
+        item["key"]: item for item in detection_items_for_project_instruments(project)
+    }
+    if key not in valid_items:
+        return False, "所选检测项不属于该项目或已失效，请重新选择"
+
+    item_meta = valid_items[key]
+    eligible = eligible_scopes_for_instrument_on_detection_item(inst, item_meta)
+    if scope not in eligible:
+        return False, "该仪器不能用于所选检测项的该范围"
+
+    by_item = _current_by_detection_item_for_project(project)
+    binding = by_item.get(key) or {SCOPE_QC: [], SCOPE_RP: []}
+    scope_ids = list(binding.get(scope) or [])
+    if inst_pk not in scope_ids:
+        scope_ids.append(inst_pk)
+    binding = {
+        SCOPE_QC: _dedupe_id_list(binding.get(SCOPE_QC) or []),
+        SCOPE_RP: _dedupe_id_list(binding.get(SCOPE_RP) or []),
+    }
+    binding[scope] = _dedupe_id_list(scope_ids)
+    by_item[key] = binding
+
+    result = apply_manual_instrument_assignment(
+        project,
+        {},
+        by_detection_item=by_item,
+        user=user,
+        checkout=True,
+    )
+    if not result.ok:
+        return False, result.message or "出库失败"
+    return True, result.message or f"仪器 {inst.code} 已出库至项目 {project.code}"

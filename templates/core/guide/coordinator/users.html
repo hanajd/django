@@ -1,0 +1,44 @@
+{% extends "core/guide/coordinator/section_base.html" %}
+{% block guide_section %}
+<section class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <h1 class="text-lg font-bold text-slate-900">用户与岗位</h1>
+    <p class="text-slate-700">入口：左侧 <span class="guide-nav">用户管理</span>。委托统筹可在此为检测团队<strong>创建账号并指定检测流程岗位</strong>。与系统管理员不同，您<strong>不能</strong>分配「委托统筹」「模板编辑」等角色，也<strong>不能</strong>管理他人创建的账号。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">一、可创建的岗位（五类）</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li><strong>检测员</strong>（field_inspector）：现场检测与 App 填报。</li>
+        <li><strong>校核员</strong>（site_reviewer）：现场记录校核。</li>
+        <li><strong>编制人</strong>（report_author）：报告编制。</li>
+        <li><strong>审核人</strong>（report_auditor）：报告审核。</li>
+        <li><strong>授权签字人</strong>（authorized_signatory）：报告签发，权限相对更全（含部分文件库写操作）。</li>
+    </ul>
+    <p class="text-sm text-slate-600">创建用户时表单中显示为「检测岗位」下拉，必选其一。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">二、新建账号步骤</h2>
+    <ol class="list-decimal space-y-3 pl-5 text-slate-700">
+        <li>点击 <span class="guide-ui">新建用户</span>（或列表页同等入口）。</li>
+        <li>填写登录名、姓名、初始密码等必填项。</li>
+        <li>在「检测岗位」中选择岗位角色，<strong>保存</strong>。</li>
+        <li>将账号与初始密码安全告知本人；首次登录建议修改密码（若单位启用该策略）。</li>
+    </ol>
+
+    <h2 class="text-base font-semibold text-slate-900">三、管理范围与限制</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>用户列表<strong>仅显示您本人创建</strong>的上述五类岗位账号。</li>
+        <li>可编辑、重置密码、停用或删除这些账号；无法查看或修改其他委托统筹或系统管理员建立的账号。</li>
+        <li>无 <span class="guide-nav">角色管理</span>、<span class="guide-nav">菜单管理</span> 入口；岗位权限由系统预置，不能在后台自行改权限矩阵。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">四、创建后还要做什么</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>在 <span class="guide-nav">项目工作台</span> 对应项目的 <span class="guide-ui">流程</span> 页把人员登记到正确岗位。</li>
+        <li>在 <span class="guide-ui">分配</span> 页向检测员等<strong>同步任务</strong>，否则 App 无待办。</li>
+        <li>告知对方可阅读侧栏 <span class="guide-nav">委托业务使用说明</span>（流程岗位版），了解本岗职责。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">五、一人多岗说明</h2>
+    <p class="text-slate-700">每个账号对应<strong>一个</strong>检测岗位角色。若同一人兼多岗，单位可为其建多个账号，或在流程上由不同岗位账号依次操作；具体以贵单位制度为准。</p>
+
+    <p class="rounded-lg bg-amber-50 px-3 py-2 text-slate-700">小结：用户管理回答的是——<strong>「谁能登录系统、是什么岗位、谁可以维护这些账号」</strong>。</p>
+</section>
+{% endblock %}

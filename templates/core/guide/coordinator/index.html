@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}委托业务使用说明 · 总览{% endblock %}
+{% block page_title %}委托业务使用说明{% endblock %}
+
+{% block content %}
+<div id="guide-app-root" class="mx-auto max-w-3xl space-y-6 pb-12 text-sm leading-relaxed text-slate-700" data-guide-page="index">
+    {% include "core/guide/partials/ui_styles.html" %}
+    {% include "core/guide/partials/legend.html" %}
+
+    <div id="guide-tour-hero" class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-white px-4 py-3 shadow-sm">
+        <p id="guide-intro" class="min-w-0 flex-1 text-slate-600">
+            {% if guide_coordinator_is_coordinator %}
+            本说明按<strong>菜单与业务流程</strong>拆成多页。点击 <span class="guide-ui">开始流程练习</span> 将进入真实页面（医院信息 → 建用户 → 立项派工 → 委托管理 → 文件库）。需要中途实操时，点引导浮层 <span class="guide-ui">×</span> 可<strong>暂停</strong>，回来说明页点 <span class="guide-ui">继续练习</span>；仅「完成练习」会删除本次登记的新建项目。
+            {% else %}
+            点击 <span class="guide-ui">开始导读练习</span> 将浏览文件库与岗位说明。点浮层 <span class="guide-ui">×</span> 可暂停，稍后在说明页点 <span class="guide-ui">继续练习</span> 接着看。
+            {% endif %}
+        </p>
+        <p id="guide-tour-pause-hint" class="hidden w-full rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">练习已暂停，可先自由操作。点 <span class="guide-ui">继续练习</span> 恢复引导；点 <span class="guide-ui">重新开始</span> 则清空进度重来。</p>
+        <div class="flex flex-wrap gap-2 shrink-0 w-full sm:w-auto">
+            <button type="button" id="btn-guide-continue" class="hidden inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow hover:bg-emerald-700">
+                <i class="ri-play-line text-base"></i>
+                继续练习
+            </button>
+            <button type="button" id="btn-guide-start" class="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white shadow hover:bg-amber-700">
+                <i class="ri-compass-3-line text-base"></i>
+                {% if guide_coordinator_is_coordinator %}开始流程练习{% else %}开始导读练习{% endif %}
+            </button>
+            <button type="button" id="btn-guide-reset" class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                <i class="ri-refresh-line text-base"></i>
+                重新开始
+            </button>
+        </div>
+    </div>
+
+    <div class="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 shadow-sm">
+        {% if guide_coordinator_is_coordinator %}
+        <p class="text-slate-700">本说明面向<strong>委托统筹</strong>账号：帮助您从「维护委托单位与人员」到「立项、派工、跟踪进度、导出与合并报告」完整走通业务。左侧菜单与下方卡片一一对应，建议按推荐顺序阅读。</p>
+        {% else %}
+        <p class="text-slate-700">本说明面向<strong>委托统筹创建的检测流程岗位</strong>账号（检测员、校核员、编制人、审核人、授权签字人等）。您的主要工作在 App 与 <span class="guide-nav">文件库管理</span> 中完成；下文按岗位说明日常操作与注意事项。</p>
+        {% endif %}
+    </div>
+
+    {% include "core/guide/coordinator/partials/nav.html" %}
+
+    {% if guide_coordinator_is_coordinator %}
+    <p class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-600 shadow-sm">
+        推荐阅读顺序：<span class="guide-nav">整体工作顺序</span> → <span class="guide-nav">医院信息管理</span> → <span class="guide-nav">用户与岗位</span> → <span class="guide-nav">项目工作台</span> → <span class="guide-nav">分工与报告导出</span> → <span class="guide-nav">检测仪器台账</span> → <span class="guide-nav">委托管理</span> → <span class="guide-nav">文件库</span>；给团队分工前请浏览 <span class="guide-nav">检测流程岗位</span>；遇问题看「常见情况与排查」。
+    </p>
+
+    <div id="guide-card-deck" class="grid gap-4 sm:grid-cols-2">
+        <article class="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 class="text-base font-bold text-slate-900">整体工作顺序</h2>
+            <p class="mt-2 flex-1 text-slate-600">委托统筹在系统中的职责边界、可见菜单、从建用户到出报告的推荐步骤。</p>
+            <a href="{% url 'coordinator_usage_guide_page' page='overview' %}" class="mt-3 inline-flex text-sm font-medium text-amber-800 hover:underline">打开完整说明 →</a>
+        </article>
+        <article class="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 class="text-base font-bold text-slate-900">委托管理</h2>
+            <p class="mt-2 flex-1 text-slate-600">查看委托进度与提醒、区分大小委托、与项目工作台的衔接。</p>
+            <a href="{% url 'coordinator_usage_guide_page' page='commission' %}" class="mt-3 inline-flex text-sm font-medium text-amber-800 hover:underline">打开完整说明 →</a>
+        </article>
+        <article class="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 class="text-base font-bold text-slate-900">项目工作台</h2>
+            <p class="mt-2 flex-1 text-slate-600">委托立项、人员派工、仪器管理与进度跟踪。</p>
+            <a href="{% url 'coordinator_usage_guide_page' page='project' %}" class="mt-3 inline-flex text-sm font-medium text-amber-800 hover:underline">打开完整说明 →</a>
+        </article>
+        <article class="flex flex-col rounded-xl border border-amber-200 bg-amber-50/40 p-4 shadow-sm sm:col-span-2">
+            <h2 class="text-base font-bold text-slate-900">分工与报告导出</h2>
+            <p class="mt-2 flex-1 text-slate-600">人员派工、导出现场记录、导出报告、报告合并合订的完整逐步说明。</p>
+            <a href="{% url 'coordinator_usage_guide_page' page='dispatch_export' %}" class="mt-3 inline-flex text-sm font-medium text-amber-800 hover:underline">打开完整说明 →</a>
+        </article>
+        <article class="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 class="text-base font-bold text-slate-900">检测仪器台账</h2>
+            <p class="mt-2 flex-1 text-slate-600">登记编号与证书、在库/出库状态、与项目仪器管理的关系及手动落库。</p>
+            <a href="{% url 'coordinator_usage_guide_page' page='instruments' %}" class="mt-3 inline-flex text-sm font-medium text-amber-800 hover:underline">打开完整说明 →</a>
+        </article>
+        <article class="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 class="text-base font-bold text-slate-900">医院信息管理</h2>
+            <p class="mt-2 flex-1 text-slate-600">维护医院、院区、科室与受检设备，供立项与报告引用。</p>
+            <a href="{% url 'coordinator_usage_guide_page' page='hospital' %}" class="mt-3 inline-flex text-sm font-medium text-amber-800 hover:underline">打开完整说明 →</a>
+        </article>
+        <article class="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 class="text-base font-bold text-slate-900">用户与岗位</h2>
+            <p class="mt-2 flex-1 text-slate-600">创建检测流程岗位账号、可分配角色范围、仅能管理本人创建的用户。</p>
+            <a href="{% url 'coordinator_usage_guide_page' page='users' %}" class="mt-3 inline-flex text-sm font-medium text-amber-800 hover:underline">打开完整说明 →</a>
+        </article>
+        <article class="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 class="text-base font-bold text-slate-900">文件库</h2>
+            <p class="mt-2 flex-1 text-slate-600">可见分类、导出现场记录与报告、合并报告、勾选与删除规则。</p>
+            <a href="{% url 'coordinator_usage_guide_page' page='files' %}" class="mt-3 inline-flex text-sm font-medium text-amber-800 hover:underline">打开完整说明 →</a>
+        </article>
+        <article class="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 class="text-base font-bold text-slate-900">现场记录与报告</h2>
+            <p class="mt-2 flex-1 text-slate-600">项目、设备、现场记录与报告的对应关系；多份报告合并交付。</p>
+            <a href="{% url 'coordinator_usage_guide_page' page='records' %}" class="mt-3 inline-flex text-sm font-medium text-amber-800 hover:underline">打开完整说明 →</a>
+        </article>
+        <article class="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 class="text-base font-bold text-slate-900">检测流程岗位</h2>
+            <p class="mt-2 flex-1 text-slate-600">五类岗位在 App 与 Web 的分工，便于派工前与团队对齐预期。</p>
+            <a href="{% url 'coordinator_usage_guide_page' page='workflow' %}" class="mt-3 inline-flex text-sm font-medium text-amber-800 hover:underline">打开完整说明 →</a>
+        </article>
+        <article class="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:col-span-2">
+            <h2 class="text-base font-bold text-slate-900">常见情况与排查</h2>
+            <p class="mt-2 flex-1 text-slate-600">列表空、按钮灰、导出失败、合并目录异常、看不到菜单等自查思路。</p>
+            <a href="{% url 'coordinator_usage_guide_page' page='tips' %}" class="mt-3 inline-flex text-sm font-medium text-amber-800 hover:underline">打开完整说明 →</a>
+        </article>
+    </div>
+    {% else %}
+    <p class="rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-600 shadow-sm">
+        推荐阅读顺序：<span class="guide-nav">整体工作顺序</span> → <span class="guide-nav">我的岗位职责</span> → <span class="guide-nav">文件库</span> → <span class="guide-nav">现场记录与报告</span> →「常见情况与排查」。
+    </p>
+
+    <div id="guide-card-deck" class="grid gap-4 sm:grid-cols-2">
+        <article class="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 class="text-base font-bold text-slate-900">整体工作顺序</h2>
+            <p class="mt-2 flex-1 text-slate-600">从接到任务到提交现场记录、参与报告环节，您在系统中的位置。</p>
+            <a href="{% url 'coordinator_usage_guide_page' page='overview' %}" class="mt-3 inline-flex text-sm font-medium text-amber-800 hover:underline">打开完整说明 →</a>
+        </article>
+        <article class="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 class="text-base font-bold text-slate-900">我的岗位职责</h2>
+            <p class="mt-2 flex-1 text-slate-600">检测员、校核员、编制人、审核人、授权签字人各自应做什么。</p>
+            <a href="{% url 'coordinator_usage_guide_page' page='workflow' %}" class="mt-3 inline-flex text-sm font-medium text-amber-800 hover:underline">打开完整说明 →</a>
+        </article>
+        <article class="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 class="text-base font-bold text-slate-900">文件库</h2>
+            <p class="mt-2 flex-1 text-slate-600">现场记录、报告、检测提交等分类；上传、预览与本人数据范围。</p>
+            <a href="{% url 'coordinator_usage_guide_page' page='files' %}" class="mt-3 inline-flex text-sm font-medium text-amber-800 hover:underline">打开完整说明 →</a>
+        </article>
+        <article class="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 class="text-base font-bold text-slate-900">现场记录与报告</h2>
+            <p class="mt-2 flex-1 text-slate-600">现场记录与正式报告的区别；与 App 填报的衔接。</p>
+            <a href="{% url 'coordinator_usage_guide_page' page='records' %}" class="mt-3 inline-flex text-sm font-medium text-amber-800 hover:underline">打开完整说明 →</a>
+        </article>
+        <article class="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:col-span-2">
+            <h2 class="text-base font-bold text-slate-900">常见情况与排查</h2>
+            <p class="mt-2 flex-1 text-slate-600">App 看不到项目、文件库为空、无法删除他人文件等常见问题。</p>
+            <a href="{% url 'coordinator_usage_guide_page' page='tips' %}" class="mt-3 inline-flex text-sm font-medium text-amber-800 hover:underline">打开完整说明 →</a>
+        </article>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

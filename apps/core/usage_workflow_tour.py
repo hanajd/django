@@ -10,12 +10,24 @@ from typing import Any, Dict, List
 
 from django.db import transaction
 
-from apps.core.library_access import library_user_has_party_a_demo_restrictions
+from apps.core.library_access import (
+    library_user_has_party_a_demo_restrictions,
+    library_user_may_view_coordinator_usage_guide,
+)
 from apps.core.models import LibraryFile, LibraryProject, LibraryTask
 
 logger = logging.getLogger(__name__)
 
 SESSION_KEY = "usage_workflow_tour"
+
+
+def usage_workflow_tour_may_run(user) -> bool:
+    """是否可开始/结束流程练习（test 演示账号或委托业务说明受众）。"""
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if library_user_has_party_a_demo_restrictions(user):
+        return True
+    return library_user_may_view_coordinator_usage_guide(user)
 
 
 def tour_session(request) -> Dict[str, Any]:
@@ -39,7 +51,7 @@ def _touch(request) -> Dict[str, Any]:
 def tour_start(request) -> bool:
     if not getattr(request.user, "is_authenticated", False):
         return False
-    if not library_user_has_party_a_demo_restrictions(request.user):
+    if not usage_workflow_tour_may_run(request.user):
         return False
     # 若上次练习未正常结束，先清掉残留登记，避免孤儿数据
     tour_cleanup_and_clear_session(request)

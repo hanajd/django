@@ -1,0 +1,63 @@
+{% extends "core/guide/coordinator/section_base.html" %}
+{% block guide_section %}
+<section class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <h1 class="text-lg font-bold text-slate-900">检测仪器台账</h1>
+    <p class="text-slate-700">入口：左侧 <span class="guide-nav">检测仪器台账</span>。本页登记每台检测仪器的<strong>编号、名称型号、证书</strong>，并查看<strong>在库 / 已出库</strong>状态。仪器编号与项目派工、现场检测记录关联，请保持资料准确、及时纠正异常占用。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">一、台账里有什么</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li><strong>一行一台仪器</strong>：编号 <code class="text-xs bg-slate-100 px-1 rounded">code</code> 全局唯一；名称 + 型号相同的多条记录表示「同种多台设备」。</li>
+        <li><strong>在库</strong>：未关联任何进行中的项目出库记录，可供新项目分配。</li>
+        <li><strong>已出库</strong>：已登记至一个或多个检测项目（列表「出库项目」列展示最近关联项目）。</li>
+        <li>页顶统计卡片可快速查看在库 / 已出库数量；支持按编号、证书检索及按状态筛选。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">二、与项目工作台的关系</h2>
+    <p class="text-slate-700">任务模板通常绑定仪器<strong>种类</strong>（名称 + 型号），不绑具体编号。具体编号在项目中分配：</p>
+    <ol class="list-decimal space-y-2 pl-5 text-slate-700">
+        <li><span class="guide-nav">项目工作台</span> → 选中项目 → <span class="guide-ui">仪器管理</span>：查看本项目所需种类、手动调整分配（若业务需要）。</li>
+        <li><span class="guide-nav">项目工作台</span> → <span class="guide-ui">人员派工</span>：同步 App 任务时，系统按种类从<strong>在库</strong>仪器中按编号顺序自动挑选并出库。</li>
+        <li>分配结果写入项目的仪器分配记录，同时更新本台账的出库状态。</li>
+    </ol>
+    <p class="text-sm text-slate-600">完整派工与导出流程见 <span class="guide-nav">分工与报告导出</span>；项目各标签说明见 <span class="guide-nav">项目工作台</span>。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">三、自动出库 / 入库（正常情况）</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li><strong>出库</strong>：项目派工保存、手动分配仪器、或进入检测环节自动分配时，对应编号登记为「已出库」。</li>
+        <li><strong>入库</strong>：在项目 <span class="guide-ui">仪器管理</span> 中取消该仪器绑定并保存，或委托结束（项目停用）时，系统自动解除本项目关联；仅当所有项目都不再占用时才恢复「在库」。</li>
+        <li>同种多台仪器按台账<strong>编号升序</strong>依次占用（如 JL-001 → JL-002）。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">四、维护资料（新增 / 编辑）</h2>
+    <p class="text-slate-700">具备维护权限的账号可点 <span class="guide-ui">新增仪器</span> 或行内 <span class="guide-ui">编辑资料</span>，填写编号、设备名称、型号、检定单位、证书编号与有效期等。<strong>编辑资料不会改变出库状态</strong>。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">五、台账手动出库</h2>
+    <p class="text-slate-700">行内点 <span class="guide-ui">出库</span>，按顺序选择：</p>
+    <ol class="list-decimal space-y-2 pl-5 text-slate-700">
+        <li><strong>委托项目</strong>：进行中的检测项目。</li>
+        <li><strong>受检设备</strong>：该项目委托立项已挂载的设备（与医院信息、任务模板一致）。</li>
+        <li><strong>检测（现场记录）</strong>：该设备下需使用仪器的现场记录环节；选项来自医院信息挂载的报告/现场记录任务链。</li>
+        <li>若模板同时要求质控与防护仪器，还需选择<strong>仪器用途</strong>（质控或防护）。</li>
+    </ol>
+    <p class="text-sm text-slate-600">确认后将仪器写入该项目对应检测项的分配记录，并登记出库；与 <span class="guide-nav">项目工作台</span> · <span class="guide-ui">仪器管理</span> 手动分配效果一致。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">六、手动落库（异常纠正）</h2>
+    <p class="text-slate-700">若出现<strong>项目侧仪器已归还或分配已取消，但台账仍显示「已出库」</strong>，会导致后续项目无法出库该编号。此时可在本页对已出库行点 <span class="guide-ui">落库</span>：</p>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>将仪器恢复为<strong>在库</strong>，解除与<strong>全部</strong>关联项目的出库记录。</li>
+        <li>同步从各项目的仪器分配列表中移除该编号（避免项目仍绑定已入库仪器）。</li>
+        <li>操作前会弹出确认；编辑弹窗内对已出库仪器也可点 <span class="guide-ui">落库</span>。</li>
+    </ul>
+    <p class="rounded-lg border border-amber-100 bg-amber-50/50 px-3 py-2 text-sm text-slate-800"><strong>注意：</strong>落库是纠正台账与实际情况不一致的手段，<strong>不能代替</strong>正常的项目内仪器分配流程。仪器仍在现场使用时请勿落库。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">七、常见问题</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li><strong>出库弹窗无设备/检测项</strong>：确认项目已在工作台完成委托立项；仪器种类须与任务模板要求一致。</li>
+        <li><strong>派工提示同种在库不足</strong>：筛选「仅已出库」查看占用情况；确认前序项目是否已结束或应对占用仪器落库。</li>
+        <li><strong>看不到新增 / 落库按钮</strong>：需业务登记、派工或管理员等维护权限；只读账号仅可查看。</li>
+        <li><strong>多台设备共用一台仪器</strong>：系统支持一机多项目共用；落库会一次性解除全部项目关联，请确认无项目仍在使用该编号。</li>
+    </ul>
+
+    <p class="rounded-lg bg-amber-50 px-3 py-2 text-slate-700">小结：台账回答的是——<strong>「每台仪器的资料与在库状态」</strong>；项目内分配与自动出库在 <span class="guide-nav">项目工作台</span> · <span class="guide-ui">仪器管理</span> / <span class="guide-ui">人员派工</span> 完成，异常占用在本页 <span class="guide-ui">落库</span> 纠正。</p>
+</section>
+{% endblock %}

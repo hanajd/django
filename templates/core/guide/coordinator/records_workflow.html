@@ -1,0 +1,34 @@
+{% extends "core/guide/coordinator/section_base.html" %}
+{% block guide_section %}
+<section class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <h1 class="text-lg font-bold text-slate-900">现场记录与报告</h1>
+    <p class="text-slate-700">作为检测流程岗位，您需要理解<strong>现场记录</strong>与<strong>报告</strong>在业务上的区别，以及自己在哪一环把数据「送出去」。成品存放在 <span class="guide-nav">文件库管理</span> 不同分类中；多数填报在 <strong>App</strong> 完成。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">一、两者分别是什么</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li><strong>现场记录</strong>：单次或单阶段的实测过程、读数、签字等，偏「过程留痕」。</li>
+        <li><strong>报告</strong>：在数据与现场材料齐备、经审核后形成的<strong>正式结论</strong>，偏「对外交付」。</li>
+        <li>业务上常见：<strong>一份报告会汇总多份现场记录</strong>；一个项目多台设备则会有<strong>多份报告</strong>。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">二、各岗位通常触达哪一类</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li><strong>检测员</strong>：App 填报，产生检测提交与现场记录素材。</li>
+        <li><strong>校核员</strong>：App 校核现场记录相关环节。</li>
+        <li><strong>编制人</strong>：参与报告编制，可能在 App 或 Web 查看 <span class="guide-ui">报告</span> 草稿。</li>
+        <li><strong>审核人 / 授权签字人</strong>：报告审核与签发，完成后报告进入 <span class="guide-ui">报告</span> 分类。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">三、在文件库中如何核对</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>提交后可在 <span class="guide-ui">检测提交</span> 查看是否同步成功。</li>
+        <li>现场记录 PDF 在 <span class="guide-ui">现场记录</span>；正式报告在 <span class="guide-ui">报告</span>。</li>
+        <li>若本岗环节已完成但文件库仍无对应 PDF，联系委托统筹确认导出是否已由后台触发，或流程上一岗是否未完成。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">四、合并报告</h2>
+    <p class="text-slate-700">多份设备报告合成一本合订本通常由<strong>委托统筹</strong>在后台操作。您只需保证本设备、本岗位的 App 数据与签字完整准确。</p>
+
+    <p class="rounded-lg bg-amber-50 px-3 py-2 text-slate-700">小结：本模块回答的是——<strong>「记录与报告各是什么、我这一环做完后资料在哪出现」</strong>。</p>
+</section>
+{% endblock %}

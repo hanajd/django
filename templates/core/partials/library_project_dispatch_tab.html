@@ -1,5 +1,5 @@
 {# 项目工作台 · 人员派工 #}
-<div class="space-y-6">
+<div id="guide-project-dispatch" class="space-y-6">
     <div class="rounded-xl border border-indigo-100 bg-indigo-50/40 p-5">
         <h3 class="text-base font-semibold text-slate-900 mb-2">人员派工</h3>
         <p class="text-xs text-slate-600 max-w-3xl mb-4">
@@ -69,8 +69,8 @@
                 <h4 class="text-base font-semibold text-slate-900">流程岗位参与人</h4>
                 <p class="text-xs text-slate-600 mt-1 max-w-2xl">按岗位展开「添加人员」：先勾选一名用户，再点确认；已登记人员显示在各自岗位下。</p>
             </div>
-            <span class="text-xs px-2.5 py-1 rounded-full {% if workflow_members %}bg-emerald-100 text-emerald-800{% else %}bg-slate-100 text-slate-600{% endif %} font-medium">
-                共 {{ workflow_members|length }} 人
+            <span class="text-xs px-2.5 py-1 rounded-full {% if workflow_member_user_count %}bg-emerald-100 text-emerald-800{% else %}bg-slate-100 text-slate-600{% endif %} font-medium">
+                共 {{ workflow_member_user_count }} 人
             </span>
         </div>
 

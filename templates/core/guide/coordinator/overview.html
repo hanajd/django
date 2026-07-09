@@ -1,0 +1,51 @@
+{% extends "core/guide/coordinator/section_base.html" %}
+{% block guide_section %}
+<section class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <h1 class="text-lg font-bold text-slate-900">整体工作顺序</h1>
+    <p class="text-slate-700"><strong>委托统筹</strong>负责在精简后台中完成「委托单位资料 → 团队账号 → 立项派工 → 进度跟踪 → 资料归档与报告交付」。与演示账号（test）不同，您<strong>没有</strong> <span class="guide-nav">任务模板库</span>、<span class="guide-nav">模板编辑器</span>、<span class="guide-nav">文档识别</span> 等版式维护入口；检测版式由单位预先配置，您直接使用全部标准任务模板立项即可。</p>
+
+    <h2 class="text-base font-semibold text-slate-900">一、您能看到哪些菜单</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li><span class="guide-nav">文件库管理</span>：待识别文件、现场记录、报告、附件、检测提交、回收站（无「数据文件」「模板」分类）。</li>
+        <li><span class="guide-nav">项目工作台</span>：选项目、挂检测任务、登记流程岗位、向参与人同步任务。</li>
+        <li><span class="guide-nav">委托管理</span>：查看委托进度、消息提醒、按人员汇总（立项细节仍在项目工作台）。</li>
+        <li><span class="guide-nav">医院信息管理</span>：维护医院、院区、科室与受检设备。</li>
+        <li><span class="guide-nav">检测仪器台账</span>：查看与维护检测仪器资料（证书、有效期等）；异常占用时可手动 <span class="guide-ui">落库</span>。详见专篇 <span class="guide-nav">检测仪器台账</span>。</li>
+        <li><span class="guide-nav">用户管理</span>：创建并管理您本人建立的检测流程岗位账号。</li>
+        <li><span class="guide-nav">委托业务使用说明</span>：即本站，随时可查阅。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">二、推荐业务顺序（委托统筹）</h2>
+    <ol class="list-decimal space-y-4 pl-5 text-slate-700">
+        <li>
+            <strong>维护委托单位与设备</strong><br>
+            进入 <span class="guide-nav">医院信息管理</span>，新建或选择医院 → 院区 → 科室，登记受检设备（名称、型号、额定参数等）。后续立项与报告会引用这些信息。
+        </li>
+        <li>
+            <strong>创建团队账号</strong><br>
+            进入 <span class="guide-nav">用户管理</span>，为检测员、校核员、编制人、审核人、授权签字人等<strong>检测流程岗位</strong>分别建账号。您只能分配这五类岗位，且只能编辑/删除<strong>本人创建</strong>的账号。
+        </li>
+        <li>
+            <strong>立项与挂任务</strong><br>
+            在 <span class="guide-nav">项目工作台</span> 点击 <span class="guide-ui">新建委托</span>（或从 <span class="guide-nav">委托管理</span> 跳转），选中项目后勾选本项目要做的标准检测任务并 <span class="guide-ui">保存</span>。无需进入任务模板库——系统已开放全部任务模板供您选用。
+        </li>
+        <li>
+            <strong>人员分工与 App 派工</strong><br>
+            在 <span class="guide-nav">项目工作台</span> → <span class="guide-ui">人员派工</span> 指定统筹人、登记检测员等各岗位参与人；登记后任务自动同步到 App。详见 <span class="guide-nav">分工与报告导出</span> 第二节。
+        </li>
+        <li>
+            <strong>跟踪进度</strong><br>
+            日常在 <span class="guide-nav">委托管理</span> 查看各委托完成度与提醒；需要改设备、改人员时回到 <span class="guide-nav">项目工作台</span>。
+        </li>
+        <li>
+            <strong>导出现场记录、报告与合并交付</strong><br>
+            App 提交后，在 <span class="guide-nav">文件库管理</span> 依次：<span class="guide-ui">手动导出 PDF</span>（现场记录）→ <span class="guide-ui">导出合并报告</span> / <span class="guide-ui">手动导出报告</span>（单台报告）→ <span class="guide-ui">报告合并</span>（多份报告合订）。逐步说明见 <span class="guide-nav">分工与报告导出</span>。
+        </li>
+    </ol>
+
+    <h2 class="text-base font-semibold text-slate-900">三、与检测流程岗位的分工</h2>
+    <p class="text-slate-700">您创建的账号主要在 <strong>App</strong> 完成现场检测与签字；部分岗位会在 Web <span class="guide-nav">文件库管理</span> 上传或查看资料。派工前建议阅读本站 <span class="guide-nav">检测流程岗位</span> 一篇，与团队对齐「谁填、谁校、谁编审、谁签发」。</p>
+
+    <p class="rounded-lg bg-amber-50 px-3 py-2 text-slate-700">小结：委托统筹回答的是——<strong>「从维护委托方资料、建团队、立项派工，到在文件库完成导出与合并交付」</strong>在后台分别点哪里、按什么顺序做。</p>
+</section>
+{% endblock %}

@@ -1197,18 +1197,29 @@ def build_single_report_toc_device_title(
     device_type: str,
     device_model: str,
 ) -> str:
-    """目录一级章节名：{设备名称}（{设备类型}，型号：{设备型号}）。"""
+    """
+    目录一级章节名：{设备名称}（{设备类型}，型号：{设备型号}）。
+
+    若设备名已含类型括号（如「…（CT）」），在括号内追加型号，不再重复类型。
+    """
     name = _normalize_rp_phrase_spacing((device_name or "").strip()) or "检测设备"
-    dtype_raw = (device_type or "").strip()
     model = (device_model or "").strip()
-    abbr = extract_modality_abbr_from_title(dtype_raw or name or model) or dtype_raw
-    type_part = abbr or dtype_raw
+    dtype_raw = (device_type or "").strip()
+    m_paren = re.match(r"^(.+?)（([^）]+)）$", name)
+    if m_paren:
+        base = m_paren.group(1).strip() or name
+        type_part = m_paren.group(2).strip()
+    else:
+        base = name
+        type_part = (
+            extract_modality_abbr_from_title(dtype_raw or name or model) or dtype_raw
+        )
     if model and type_part:
-        return f"{name}（{type_part}，型号：{model}）"
+        return f"{base}（{type_part}，型号：{model}）"
     if model:
-        return f"{name}（型号：{model}）"
-    if type_part:
-        return f"{name}（{type_part}）"
+        return f"{base}（型号：{model}）"
+    if type_part and not m_paren:
+        return f"{base}（{type_part}）"
     return name
 
 
@@ -1287,7 +1298,7 @@ def _apply_commission_suffix_to_report_no_display(report_no: str, commission_suf
 
 
 def _toc_level1_title_from_pdf_filename(title: Optional[str], pdf_path: str) -> str:
-    """目录一级行：直接取该份报告 PDF 文件名（去掉 .pdf），与合并勾选顺序一致。"""
+    """目录一级行：优先使用传入标题；否则取 PDF 文件名（去掉 .pdf）。"""
     raw = (title or "").strip() or os.path.basename(pdf_path or "")
     base, ext = os.path.splitext(raw)
     if ext.lower() == ".pdf":
@@ -1297,6 +1308,219 @@ def _toc_level1_title_from_pdf_filename(title: Optional[str], pdf_path: str) -> 
     if len(name) > 118:
         return name[:115] + "…"
     return name
+
+
+_REPORT_DEVICE_INLINE_STOP_RE = re.compile(
+    r"(?:设备名称|仪器名称|产品名称|设备型号|设备规格型号|产品型号|型号|设备类型|"
+    r"设备编号|序列号|产品编号|生产厂家|制造商|制造厂商|受检编号|检测日期|检测类型|"
+    r"额定参数|设备所在场所|所在场所|注册证号)\s*[：:]"
+)
+
+
+def _trim_pdf_labeled_field_value(raw: str) -> str:
+    t = re.sub(r"\s+", " ", (raw or "").strip())
+    if not t:
+        return ""
+    m = _REPORT_DEVICE_INLINE_STOP_RE.search(t)
+    if m and m.start() > 0:
+        t = t[: m.start()].strip()
+    return t.rstrip(" ：:，,;；")[:200]
+
+
+def _extract_labeled_field_from_report_text(text: str, patterns: Sequence[str]) -> str:
+    blob = text or ""
+    for pat in patterns:
+        for m in re.finditer(pat, blob, re.MULTILINE):
+            val = _trim_pdf_labeled_field_value(m.group(1))
+            if val:
+                return val
+    return ""
+
+
+def _report_results_section_text(pdf_path: str, *, max_pages: int = 4) -> str:
+    """拼接报告 PDF「三、检测结果」节正文（用于字段识别）。"""
+    if not fitz or not pdf_path or not os.path.isfile(pdf_path):
+        return ""
+    rng = detect_sanjian_jiance_jieguo_page_range(pdf_path)
+    if rng is None:
+        return ""
+    start, end = rng
+    doc = fitz.open(pdf_path)
+    try:
+        chunks: List[str] = []
+        for pi in range(start, min(end, start + max(1, int(max_pages)))):
+            chunks.append(doc[pi].get_text("text") or "")
+        return "\n".join(chunks)
+    finally:
+        doc.close()
+
+
+def _collapse_pdf_text_for_labels(text: str) -> str:
+    """去掉空白，便于匹配竖排「设/备/名/称」等标签。"""
+    return re.sub(r"\s+", "", text or "")
+
+
+def _normalize_pdf_field_value(raw: str) -> str:
+    return re.sub(r"\s+", " ", (raw or "").strip())
+
+
+def _extract_device_fields_from_vertical_labels(text: str) -> Tuple[str, str, str]:
+    """从竖排或横排「设备名称 / 设备型号」标签区取值，保留型号内空格。"""
+    blob = text or ""
+    device_name = ""
+    device_model = ""
+    device_type = ""
+    m = re.search(
+        r"设\s*备\s*名\s*称\s*(.+?)\s*设\s*备\s*型\s*号",
+        blob,
+        re.DOTALL,
+    )
+    if m:
+        device_name = _normalize_pdf_field_value(m.group(1))[:200]
+    m = re.search(
+        r"设\s*备\s*型\s*号\s*(.+?)\s*额\s*定\s*参\s*数",
+        blob,
+        re.DOTALL,
+    )
+    if m:
+        device_model = _normalize_pdf_field_value(m.group(1))[:120]
+    m = re.search(
+        r"设\s*备\s*类\s*型\s*(.+?)\s*(?:设\s*备\s*名\s*称|设\s*备\s*型\s*号|额\s*定\s*参\s*数)",
+        blob,
+        re.DOTALL,
+    )
+    if m:
+        device_type = _normalize_pdf_field_value(m.group(1))[:80]
+    return device_name, device_model, device_type
+
+
+def _extract_device_fields_from_collapsed_text(collapsed: str) -> Tuple[str, str, str]:
+    c = collapsed or ""
+    device_name = ""
+    device_model = ""
+    device_type = ""
+    m = re.search(
+        r"设备名称(.+?)(?=设备型号|仪器名称|产品名称|设备类型)",
+        c,
+    )
+    if m:
+        device_name = m.group(1).strip()
+    m = re.search(
+        r"设备型号(.+?)(?=额定参数|生产厂家|生产厂|设备编号|设备所在场所|检测日期|检测依据)",
+        c,
+    )
+    if m:
+        device_model = m.group(1).strip()
+    m = re.search(r"设备类型(.+?)(?=设备名称|设备型号|额定参数|生产厂家)", c)
+    if m:
+        device_type = m.group(1).strip()
+    return device_name, device_model, device_type
+
+
+def extract_device_fields_from_report_results_section(
+    pdf_path: str,
+) -> Tuple[str, str, str]:
+    """
+    从单份报告 PDF「三、检测结果」节识别设备名称、型号、设备类型。
+
+    返回 (device_name, device_model, device_type)，未识别到则为空串。
+    """
+    text = _report_results_section_text(pdf_path)
+    if not text.strip():
+        return "", "", ""
+    device_name, device_model, device_type = _extract_device_fields_from_vertical_labels(text)
+    if not device_name and not device_model:
+        collapsed = _collapse_pdf_text_for_labels(text)
+        device_name, device_model, device_type = _extract_device_fields_from_collapsed_text(
+            collapsed
+        )
+    if not device_name:
+        device_name = _extract_labeled_field_from_report_text(
+            text,
+            (
+                r"设备名称\s*[：:]\s*([^\n\r]+)",
+                r"仪器名称\s*[：:]\s*([^\n\r]+)",
+                r"产品名称\s*[：:]\s*([^\n\r]+)",
+            ),
+        )
+    if not device_model:
+        device_model = _extract_labeled_field_from_report_text(
+            text,
+            (
+                r"设备型号\s*[：:]\s*([^\n\r]+)",
+                r"设备规格型号\s*[：:]\s*([^\n\r]+)",
+                r"产品型号\s*[：:]\s*([^\n\r]+)",
+                r"(?<!设备)(?<!产品)型号\s*[：:]\s*([^\n\r]+)",
+            ),
+        )
+    if not device_type:
+        device_type = _extract_labeled_field_from_report_text(
+            text,
+            (r"设备类型\s*[：:]\s*([^\n\r]+)",),
+        )
+    return device_name, device_model, device_type
+
+
+def toc_chapter_title_from_report_pdf(pdf_path: str) -> str:
+    """合并目录一级章节名：优先从「三、检测结果」节读取设备名称与型号。"""
+    device_name, device_model, device_type = extract_device_fields_from_report_results_section(
+        pdf_path
+    )
+    if device_name or device_model:
+        return build_single_report_toc_device_title(
+            device_name or device_type or "检测设备",
+            device_type,
+            device_model,
+        )
+    return "检测设备"
+
+
+def _collect_merged_section_toc_minor_entries(
+    pdf_path: str,
+    section_start_page_0: int,
+    section_end_page_exclusive: int,
+    section_ordinal_1based: int,
+    merged_section_start_phys_1based: int,
+) -> List[Tuple[str, int, int]]:
+    """
+    扫描单份报告「三、检测结果」节内全部 n.k 小节标题。
+
+    返回 (目录左文, 报告正文页码, 节内页偏移 0-based)。
+    """
+    if not fitz:
+        return []
+    n_ord = max(1, int(section_ordinal_1based))
+    seen: Dict[Tuple[int, str], Tuple[int, int]] = {}
+    doc = fitz.open(pdf_path)
+    try:
+        lo = max(0, int(section_start_page_0))
+        hi = min(int(section_end_page_exclusive), doc.page_count)
+        for pi in range(lo, hi):
+            offset = pi - lo
+            merged_phys = int(merged_section_start_phys_1based) + offset
+            rp = _report_body_page_from_physical_1based(merged_phys)
+            if rp <= 0:
+                continue
+            for raw_line in (doc[pi].get_text("text") or "").splitlines():
+                line = raw_line.strip()
+                if not line or len(line) > 160:
+                    continue
+                parsed = _parse_report_toc_minor_line(line)
+                if parsed is None:
+                    continue
+                _maj, mino, rest = parsed
+                key = (mino, rest)
+                if key not in seen:
+                    seen[key] = (rp, offset)
+    finally:
+        doc.close()
+    out: List[Tuple[str, int, int]] = []
+    for (mino, rest), (rp, offset) in sorted(
+        seen.items(), key=lambda kv: (kv[1][0], kv[0][0], kv[0][1])
+    ):
+        left = f"{n_ord}.{mino}  {rest}"
+        out.append((left, rp, offset))
+    return out
 
 
 def _cn_ordinal_major(i: int) -> str:
@@ -2480,6 +2704,35 @@ def _norm_toc_text(s: Any) -> str:
     return re.sub(r"\s+", " ", str(s or "").strip())
 
 
+def _toc_minor_heading_rest_is_valid(rest: str) -> bool:
+    """目录小节标题须含中文语义，排除表格读数如「1.52 kV」「3.4 lp/mm」。"""
+    t = _norm_toc_text(rest)
+    if len(t) < 4:
+        return False
+    if not re.search(r"[\u4e00-\u9fff]", t):
+        return False
+    compact = re.sub(r"\s+", "", t)
+    if re.fullmatch(r"[\d\.\s]+", compact):
+        return False
+    return True
+
+
+def _parse_report_toc_minor_line(line: str) -> Optional[Tuple[int, int, str]]:
+    """
+    解析报告小节行「n.k  标题」。仅接受 k 为个位数（1–9）且标题含中文，避免误判检测数据。
+    """
+    m = _TOC_MINOR_LINE_RE.match((line or "").strip())
+    if not m:
+        return None
+    maj, mino = int(m.group(1)), int(m.group(2))
+    rest = _norm_toc_text(m.group(3))
+    if maj < 1 or mino < 1 or mino > 9:
+        return None
+    if not _toc_minor_heading_rest_is_valid(rest):
+        return None
+    return maj, mino, rest
+
+
 _MERGE_COVER_LEFT_LABEL_MAX_X0_PT = 200.0
 
 
@@ -3285,14 +3538,14 @@ def _find_single_report_toc_subsection_physical_pages(
             line = raw_line.strip()
             if not line:
                 continue
-            m = _TOC_MINOR_LINE_RE.match(line)
-            if not m:
+            parsed = _parse_report_toc_minor_line(line)
+            if parsed is None:
                 continue
-            maj, mino = int(m.group(1)), int(m.group(2))
-            rest = re.sub(r"\s+", "", m.group(3))
-            if maj == 1 and mino == 1 and "质量控制" in rest and qc_phys is None:
+            maj, mino, rest = parsed
+            compact = re.sub(r"\s+", "", rest)
+            if maj == 1 and mino == 1 and "质量控制" in compact and qc_phys is None:
                 qc_phys = phys
-            if maj == 1 and mino == 2 and "工作场所放射防护" in rest and rp_phys is None:
+            if maj == 1 and mino == 2 and "工作场所放射防护" in compact and rp_phys is None:
                 rp_phys = phys
         if qc_phys is not None and rp_phys is not None:
             break
@@ -3393,9 +3646,10 @@ def _collect_single_report_toc_entries(
                 if len(title) >= 4:
                     _push("major", title, phys)
                 continue
-            m_min = _TOC_MINOR_LINE_RE.match(line)
+            m_min = _parse_report_toc_minor_line(line)
             if m_min:
-                title = f"{m_min.group(1)}.{m_min.group(2)}  {_norm_toc_text(m_min.group(3))}"
+                maj, mino, rest = m_min
+                title = f"{maj}.{mino}  {rest}"
                 if len(title) >= 6:
                     _push("minor", title, phys)
 
@@ -6576,7 +6830,7 @@ def merge_report_pdfs_header_toc_sections(
     其余页「第 x 页」仍为物理页 − 2；目录页在全文替换页码时也强制为第 2 页。
 
     目录页：白底 + 底层居中水印（见 merged_report_watermark.png 或环境变量 MERGED_REPORT_WATERMARK_PNG），
-    再按固定几何绘制「目  录」与两级目录行（「一、{PDF 文件名} …」「{n}.1  质量控制检测项目及结果 …」）。
+    再按固定几何绘制「目  录」与两级目录行（一级为设备名称（类型，型号：…），二级为节内全部 n.k 小节及页码）。
     不再读取「目录样例」PDF；目录与页眉坐标均以代码内常量为准，按当前页宽高相对 A4 基准缩放。
 
     合并结束后：除封面、声明外，页眉统一为左上「报告编号：{report_no}」、右上「第 x 页/共 y 页」，
@@ -6592,9 +6846,9 @@ def merge_report_pdfs_header_toc_sections(
     paths = [p for p in pdf_paths if p and os.path.isfile(p) and os.path.getsize(p) > 0]
     if len(paths) < 2:
         return None, "至少需要两份有效 PDF"
-    titles = list(section_titles) if section_titles else [os.path.basename(p) for p in paths]
+    titles = list(section_titles) if section_titles else []
     while len(titles) < len(paths):
-        titles.append(os.path.basename(paths[len(titles)]))
+        titles.append(toc_chapter_title_from_report_pdf(paths[len(titles)]))
 
     section_specs: List[Tuple[str, int, int]] = []
     for p in paths:
@@ -6657,8 +6911,8 @@ def merge_report_pdfs_header_toc_sections(
 
             y = float(geom["first_entry_baseline"])
             for i, (pth, a, b) in enumerate(section_specs):
-                raw_title = titles[i] if i < len(titles) else os.path.basename(pth)
-                level1 = _toc_level1_title_from_pdf_filename(raw_title, pth)
+                raw_title = titles[i] if i < len(titles) else ""
+                level1 = (raw_title or "").strip() or toc_chapter_title_from_report_pdf(pth)
                 major = _cn_ordinal_major(i)
                 left_main = f"{major}、{level1}"
                 dest_0 = nh + 1 + sum(section_page_counts[:i])
@@ -6680,18 +6934,35 @@ def merge_report_pdfs_header_toc_sections(
                 link_plan.append((rect_m, dest_0))
                 y += line_step
 
-                span = b - a
-                if span >= 2:
-                    sub_left = f"{i + 1}.1  质量控制检测项目及结果"
-                    p_sub_display = _report_body_page_from_physical_1based(
-                        section_start_physical_1based[i] + 1
-                    )
-                    dest_sub_0 = dest_0 + 1
+                minor_entries = _collect_merged_section_toc_minor_entries(
+                    pth,
+                    a,
+                    b,
+                    i + 1,
+                    section_start_physical_1based[i],
+                )
+                if not minor_entries and (b - a) >= 2:
+                    minor_entries = [
+                        (
+                            f"{i + 1}.1  质量控制检测项目及结果",
+                            _report_body_page_from_physical_1based(
+                                section_start_physical_1based[i] + 1
+                            ),
+                            1,
+                        )
+                    ]
+                sub_lm = float(geom.get("sub_left_x") or (lm + 22.0))
+                for sub_left, p_sub_display, page_offset in minor_entries:
+                    if y > h - 72:
+                        break
+                    if p_sub_display <= 0:
+                        continue
+                    dest_sub_0 = dest_0 + page_offset
                     rect_s = _draw_toc_row_leader_rightnum(
                         page,
                         y,
                         w,
-                        float(geom.get("sub_left_x") or (lm + 22.0)),
+                        sub_lm,
                         rm,
                         sub_left,
                         p_sub_display,

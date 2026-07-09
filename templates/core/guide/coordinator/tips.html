@@ -1,0 +1,56 @@
+{% extends "core/guide/coordinator/section_base.html" %}
+{% block guide_section %}
+<section class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <h1 class="text-lg font-bold text-slate-900">常见情况与排查</h1>
+    <p class="text-slate-700">下列问题多由前置步骤或权限范围引起。<span class="guide-nav">灰底</span>为菜单名，<span class="guide-ui">紫底</span>为页内按钮或分类。</p>
+
+    {% if guide_coordinator_is_coordinator %}
+    <h2 class="text-base font-semibold text-slate-900">一、委托统筹专用</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li><strong>找不到任务模板库 / 模板编辑器</strong>：属正常，委托统筹使用系统预置的全部标准任务，在 <span class="guide-nav">项目工作台</span> 直接勾选任务即可。</li>
+        <li><strong>用户管理列表为空</strong>：仅显示您本人创建的流程岗位账号；需点 <span class="guide-ui">新建用户</span>。</li>
+        <li><strong>无法编辑某用户</strong>：该账号非您创建，或岗位不在五类流程岗位内。</li>
+        <li><strong>医院信息无法保存</strong>：检查必填项；新建医院/科室无需「编辑模式」，直接在浏览页操作。</li>
+        <li><strong>App 无待办</strong>：检查 <span class="guide-ui">人员派工</span> 是否已登记该人（见「分工与报告导出」）。</li>
+        <li><strong>混淆两种「合并」</strong>：<span class="guide-ui">导出合并报告</span>（现场→一份报告）与 <span class="guide-ui">报告合并</span>（多份报告 PDF 合订）不同，见专篇第五节。</li>
+        <li><strong>仪器仍显示已出库、新项目派不出库</strong>：到 <span class="guide-nav">检测仪器台账</span> 筛选「仅已出库」，确认前序项目是否已结束；若仪器已实际归还，点 <span class="guide-ui">落库</span> 恢复在库（见「检测仪器台账」专篇）。</li>
+        <li><strong>报告合并目录不对</strong>：输入须为各设备单台原始报告；检查医院信息中设备名称型号；合并后目检目录。</li>
+        <li><strong>导出按钮灰色</strong>：App 未提交、未勾选文件、分类不对，或无导出权限。</li>
+    </ul>
+    {% else %}
+    <h2 class="text-base font-semibold text-slate-900">一、流程岗位专用</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li><strong>App 没有待办项目</strong>：联系委托统筹确认是否已在 <span class="guide-ui">人员派工</span> 登记并同步任务，是否用本人账号登录。</li>
+        <li><strong>看不到项目工作台</strong>：须已被统筹在 <span class="guide-ui">人员派工</span> 登记并同步任务；左侧应出现 <span class="guide-nav">项目工作台</span>，列表仅含分配给您的项目。</li>
+        <li><strong>文件库为空</strong>：确认 App 是否已提交；确认顶部项目筛选与分类标签。</li>
+        <li><strong>无法删除文件</strong>：只能删本人上传的；系统生成文件需联系委托统筹处理。</li>
+        <li><strong>无法导出报告 / 合并报告</strong>：检测员、校核员仅可在文件库 <span class="guide-ui">检测提交</span> 使用 <span class="guide-ui">手动导出 PDF</span>（现场记录）；导出报告与报告合并需编制人及以上岗位。</li>
+        <li><strong>项目工作台只能查看不能改</strong>：检测员、校核员可打开已分配项目查看进度，委托立项 / 派工 / 仪器管理为只读；编制人、审核人、授权签字人可编辑。</li>
+    </ul>
+    {% endif %}
+
+    <h2 class="text-base font-semibold text-slate-900">二、列表是空的</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>在 <span class="guide-nav">项目工作台</span> 确认已<strong>选中项目</strong>（若页面与项目绑定）。</li>
+        <li>确认检测任务已勾选并 <span class="guide-ui">保存</span>。</li>
+        <li>文件库检查是否点对了顶部分类标签。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">三、按钮灰色或无权</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>阅读页顶灰色说明：常见为未勾选文件、份数不足、流程未走完。</li>
+        <li>流程岗位删除他人文件会被拒绝，属权限设计。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">四、左侧没有某个菜单</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700">
+        <li>菜单由<strong>角色</strong>决定：委托统筹与五类流程岗位可见项不同，并非漏配。</li>
+        <li>需要模板维护、角色管理等能力时，联系单位系统管理员，非委托统筹权限范围。</li>
+    </ul>
+
+    <h2 class="text-base font-semibold text-slate-900">五、与单位制度不一致时</h2>
+    <p class="text-slate-700 text-sm">若贵单位另有书面制度或培训材料，以单位规定为准；本说明描述委托业务账号的常见默认用法。</p>
+
+    <p class="rounded-lg bg-amber-50 px-3 py-2 text-slate-700">仍无法解决时，流程岗位请联系<strong>委托统筹</strong>；委托统筹可联系单位系统管理员。</p>
+</section>
+{% endblock %}

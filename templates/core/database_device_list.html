@@ -9,7 +9,7 @@
             <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">数据库管理</p>
             <h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-900">检测仪器台账</h1>
             <p class="mt-1.5 max-w-2xl text-sm text-slate-600 leading-relaxed">
-                点<strong>编辑资料</strong>维护编号、证书等。<strong>出库/入库已自动化</strong>：项目进入检测环节（派工同步）时自动出库，委托结束（项目停用）时自动入库；本页仅查看状态。
+                点<strong>编辑资料</strong>维护编号、证书等。出库/入库通常随<strong>项目派工</strong>自动同步；也可点 <strong>出库</strong> 手动指定委托项目、受检设备与检测项；异常占用可用 <strong>落库</strong> 恢复在库。
             </p>
         </div>
         {% if can_edit_instrument_database %}
@@ -123,6 +123,26 @@
                                class="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 shadow-sm">
                                 <i class="ri-edit-line"></i> 编辑资料
                             </a>
+                            <button type="button"
+                                    class="ledger-checkout-open inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                                    data-device-id="{{ d.id }}"
+                                    data-device-code="{{ d.code }}"
+                                    data-device-name="{{ d.name }}"
+                                    data-device-model="{{ d.model|default:'' }}">
+                                <i class="ri-external-link-line"></i> 出库
+                            </button>
+                            {% if d.checkout_project_id %}
+                            <form method="post" class="inline" onsubmit="return confirm('确定将仪器 {{ d.code }} 落库？\n\n将解除与全部关联项目的出库关系，并同步清理各项目上的仪器分配记录。');">
+                                {% csrf_token %}
+                                <input type="hidden" name="list_q" value="{{ search_q }}">
+                                <input type="hidden" name="list_status" value="{{ status_filter }}">
+                                <input type="hidden" name="action" value="checkin">
+                                <input type="hidden" name="device_id" value="{{ d.id }}">
+                                <button type="submit" class="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100">
+                                    <i class="ri-inbox-archive-line"></i> 落库
+                                </button>
+                            </form>
+                            {% endif %}
                             <form method="post" class="inline" onsubmit="return confirm('确定删除仪器 {{ d.code }}？此操作不可恢复。');">
                                 {% csrf_token %}
                                 <input type="hidden" name="list_q" value="{{ search_q }}">
@@ -176,6 +196,22 @@
                     {% if can_edit_instrument_database %}
                     <a href="{% url 'database_device_list' %}?edit={{ d.id }}{% if search_q %}&q={{ search_q|urlencode }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}"
                        class="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white">编辑资料</a>
+                    <button type="button"
+                            class="ledger-checkout-open rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900"
+                            data-device-id="{{ d.id }}"
+                            data-device-code="{{ d.code }}"
+                            data-device-name="{{ d.name }}"
+                            data-device-model="{{ d.model|default:'' }}">出库</button>
+                    {% if d.checkout_project_id %}
+                    <form method="post" class="inline" onsubmit="return confirm('确定将仪器 {{ d.code }} 落库？将解除全部项目关联。');">
+                        {% csrf_token %}
+                        <input type="hidden" name="list_q" value="{{ search_q }}">
+                        <input type="hidden" name="list_status" value="{{ status_filter }}">
+                        <input type="hidden" name="action" value="checkin">
+                        <input type="hidden" name="device_id" value="{{ d.id }}">
+                        <button type="submit" class="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800">落库</button>
+                    </form>
+                    {% endif %}
                     {% endif %}
                 </div>
             </article>
@@ -187,6 +223,88 @@
 </div>
 
 {% if can_edit_instrument_database %}
+{{ active_projects_checkout|json_script:"ledger-checkout-projects-data" }}
+<div id="ledger-checkout-backdrop"
+     class="fixed inset-0 z-[120] bg-slate-900/45 backdrop-blur-[2px] hidden"
+     aria-hidden="true"></div>
+<div id="ledger-checkout-sheet"
+     class="fixed inset-0 z-[130] flex items-center justify-center p-3 sm:p-6 pointer-events-none hidden"
+     role="dialog" aria-modal="true" aria-labelledby="ledger-checkout-title">
+    <div class="pointer-events-auto relative w-full max-w-lg max-h-[min(92vh,40rem)] flex flex-col rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200/80 overflow-hidden">
+        <div class="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 shrink-0 bg-gradient-to-r from-amber-50/90 to-white">
+            <div class="min-w-0">
+                <h2 id="ledger-checkout-title" class="text-base font-semibold text-slate-900">仪器出库</h2>
+                <p id="ledger-checkout-subtitle" class="text-xs text-slate-600 mt-0.5 truncate">选择委托项目、受检设备与现场记录检测项</p>
+            </div>
+            <button type="button" id="ledger-checkout-close" class="rounded-lg p-2 text-slate-500 hover:bg-slate-100 shrink-0" aria-label="关闭">
+                <i class="ri-close-line text-xl"></i>
+            </button>
+        </div>
+        <form method="post" id="ledger-checkout-form" class="flex flex-col flex-1 min-h-0">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="checkout">
+            <input type="hidden" name="list_q" value="{{ search_q }}">
+            <input type="hidden" name="list_status" value="{{ status_filter }}">
+            <input type="hidden" name="device_id" id="ledger-checkout-device-id" value="">
+            <input type="hidden" name="detection_item_key" id="ledger-checkout-detection-key" value="">
+            <input type="hidden" name="scope" id="ledger-checkout-scope" value="">
+
+            <div class="flex-1 overflow-y-auto px-5 py-4 space-y-4 min-h-0">
+                <div class="rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-sm">
+                    <span class="text-slate-500">当前仪器</span>
+                    <span id="ledger-checkout-instrument-label" class="font-mono font-semibold text-slate-900 ml-1">—</span>
+                </div>
+
+                <label class="block">
+                    <span class="text-xs font-medium text-slate-600 mb-1 block">委托项目 <span class="text-red-500">*</span></span>
+                    <select name="project_id" id="ledger-checkout-project" required
+                            class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20">
+                        <option value="">请选择项目…</option>
+                        {% for p in active_projects %}
+                        <option value="{{ p.id }}">{{ p.code }} · {{ p.name }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+
+                <div id="ledger-checkout-loading" class="hidden text-xs text-slate-500 flex items-center gap-2">
+                    <i class="ri-loader-4-line animate-spin"></i> 正在加载设备与检测项…
+                </div>
+                <p id="ledger-checkout-hint" class="hidden text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2"></p>
+
+                <label class="block" id="ledger-checkout-equipment-wrap">
+                    <span class="text-xs font-medium text-slate-600 mb-1 block">受检设备 <span class="text-red-500">*</span></span>
+                    <select id="ledger-checkout-equipment" disabled
+                            class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 disabled:bg-slate-50 disabled:text-slate-400">
+                        <option value="">请先选择项目</option>
+                    </select>
+                </label>
+
+                <label class="block" id="ledger-checkout-detection-wrap">
+                    <span class="text-xs font-medium text-slate-600 mb-1 block">检测（现场记录） <span class="text-red-500">*</span></span>
+                    <select id="ledger-checkout-detection" disabled
+                            class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 disabled:bg-slate-50 disabled:text-slate-400">
+                        <option value="">请先选择设备</option>
+                    </select>
+                    <p id="ledger-checkout-detection-desc" class="mt-1 text-[11px] text-slate-500 hidden"></p>
+                </label>
+
+                <fieldset id="ledger-checkout-scope-wrap" class="hidden">
+                    <legend class="text-xs font-medium text-slate-600 mb-2">仪器用途 <span class="text-red-500">*</span></legend>
+                    <div id="ledger-checkout-scope-options" class="flex flex-wrap gap-3 text-sm text-slate-700"></div>
+                </fieldset>
+            </div>
+
+            <div class="shrink-0 border-t border-slate-100 px-5 py-4 flex flex-wrap justify-end gap-2 bg-slate-50/60">
+                <button type="button" id="ledger-checkout-cancel" class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">取消</button>
+                <button type="submit" id="ledger-checkout-submit" disabled
+                        class="rounded-xl bg-amber-600 px-5 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                    确认出库
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <div id="instrument-sheet-backdrop"
      class="fixed inset-0 z-[100] bg-slate-900/45 backdrop-blur-[2px] {% if not show_device_form %}hidden{% endif %}"
      aria-hidden="true"></div>
@@ -217,7 +335,7 @@
                 {% if editing_device %}<input type="hidden" name="device_id" value="{{ editing_device.id }}">{% endif %}
                 {% if editing_device and editing_device.checkout_project_id %}
                 <p class="sm:col-span-2 text-xs text-amber-800 bg-amber-50 border border-amber-200/80 rounded-xl px-3 py-2">
-                    该仪器当前已出库至项目「{{ editing_device.checkout_project.code }}」，保存后仅更新资料，不会自动入库。
+                    该仪器当前已出库{% if editing_device.checkout_project %}至项目「{{ editing_device.checkout_project.code }}」{% endif %}。保存资料不会自动入库；若仪器已实际归还，请点下方 <span class="font-semibold">落库</span>。
                 </p>
                 {% endif %}
                 <label class="block">
@@ -260,10 +378,27 @@
                     <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700">
                         <i class="ri-save-3-line"></i> {% if editing_device %}保存{% else %}创建{% endif %}
                     </button>
+                    {% if editing_device and editing_device.checkout_project_id %}
+                    <button type="submit"
+                            form="instrument-checkin-form"
+                            class="inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
+                            onclick="return confirm('确定将仪器 {{ editing_device.code }} 落库？\n\n将解除与全部关联项目的出库关系。');">
+                        <i class="ri-inbox-archive-line"></i> 落库
+                    </button>
+                    {% endif %}
                     <a href="{% url 'database_device_list' %}{% if search_q or status_filter %}?{% endif %}{% if search_q %}q={{ search_q|urlencode }}{% endif %}{% if search_q and status_filter %}&{% endif %}{% if status_filter %}status={{ status_filter }}{% endif %}"
                        class="instrument-sheet-close inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">取消</a>
                 </div>
             </form>
+            {% if editing_device and editing_device.checkout_project_id %}
+            <form id="instrument-checkin-form" method="post" class="hidden">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="checkin">
+                <input type="hidden" name="device_id" value="{{ editing_device.id }}">
+                <input type="hidden" name="list_q" value="{{ search_q }}">
+                <input type="hidden" name="list_status" value="{{ status_filter }}">
+            </form>
+            {% endif %}
             {% endif %}
         </div>
     </div>
@@ -314,6 +449,280 @@
     {% if show_device_form %}
     openSheet();
     {% endif %}
+})();
+</script>
+<script>
+(function () {
+    var optionsUrl = "{% url 'database_device_checkout_options' %}";
+    var backdrop = document.getElementById('ledger-checkout-backdrop');
+    var sheet = document.getElementById('ledger-checkout-sheet');
+    if (!backdrop || !sheet) return;
+
+    var form = document.getElementById('ledger-checkout-form');
+    var deviceIdInput = document.getElementById('ledger-checkout-device-id');
+    var deviceLabel = document.getElementById('ledger-checkout-instrument-label');
+    var projectSelect = document.getElementById('ledger-checkout-project');
+    var equipmentSelect = document.getElementById('ledger-checkout-equipment');
+    var detectionSelect = document.getElementById('ledger-checkout-detection');
+    var detectionHint = document.getElementById('ledger-checkout-detection-desc');
+    var scopeWrap = document.getElementById('ledger-checkout-scope-wrap');
+    var scopeOptions = document.getElementById('ledger-checkout-scope-options');
+    var scopeInput = document.getElementById('ledger-checkout-scope');
+    var detectionKeyInput = document.getElementById('ledger-checkout-detection-key');
+    var emptyEl = document.getElementById('ledger-checkout-hint');
+    var loadingEl = document.getElementById('ledger-checkout-loading');
+    var submitBtn = document.getElementById('ledger-checkout-submit');
+
+    var catalogCache = null;
+    var currentDeviceId = 0;
+
+    function esc(s) {
+        return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    }
+
+    function setSelectOptions(sel, placeholder, options, getValue, getLabel) {
+        if (!sel) return;
+        var html = '<option value="">' + esc(placeholder) + '</option>';
+        (options || []).forEach(function (opt) {
+            html += '<option value="' + esc(String(getValue(opt))) + '">' + esc(getLabel(opt)) + '</option>';
+        });
+        sel.innerHTML = html;
+    }
+
+    function resetCascade(from) {
+        if (from === 'all') {
+            catalogCache = null;
+        }
+        if (from === 'project' || from === 'all') {
+            setSelectOptions(equipmentSelect, '请先选择项目…', [], function () {}, function () { return ''; });
+            if (equipmentSelect) equipmentSelect.disabled = true;
+        }
+        if (from === 'project' || from === 'equipment' || from === 'all') {
+            setSelectOptions(detectionSelect, '请先选择设备…', [], function () {}, function () { return ''; });
+            if (detectionSelect) detectionSelect.disabled = true;
+            if (detectionHint) {
+                detectionHint.classList.add('hidden');
+                detectionHint.textContent = '';
+            }
+        }
+        if (scopeWrap) scopeWrap.classList.add('hidden');
+        if (scopeOptions) scopeOptions.innerHTML = '';
+        if (scopeInput) scopeInput.value = '';
+        if (detectionKeyInput) detectionKeyInput.value = '';
+        if (from === 'all' && emptyEl) emptyEl.classList.add('hidden');
+        updateSubmitState();
+    }
+
+    function selectedEquipment() {
+        if (!catalogCache || !equipmentSelect || !equipmentSelect.value) return null;
+        var linkId = parseInt(equipmentSelect.value, 10);
+        return (catalogCache.equipments || []).find(function (e) { return e.linkId === linkId; }) || null;
+    }
+
+    function selectedDetection() {
+        var eq = selectedEquipment();
+        if (!eq || !detectionSelect || !detectionSelect.value) return null;
+        return (eq.detections || []).find(function (d) { return d.key === detectionSelect.value; }) || null;
+    }
+
+    function renderScopeOptions(det) {
+        if (!scopeWrap || !scopeOptions || !scopeInput) return;
+        var scopes = (det && det.scopeOptions) ? det.scopeOptions : [];
+        scopeOptions.innerHTML = '';
+        if (!scopes.length) {
+            scopeWrap.classList.add('hidden');
+            scopeInput.value = '';
+            return;
+        }
+        if (scopes.length === 1) {
+            scopeWrap.classList.add('hidden');
+            scopeInput.value = scopes[0].value;
+            return;
+        }
+        scopeWrap.classList.remove('hidden');
+        scopeInput.value = scopes[0].value;
+        scopes.forEach(function (sc, idx) {
+            var id = 'ledger-checkout-scope-' + sc.value;
+            var label = document.createElement('label');
+            label.className = 'inline-flex items-center gap-2 cursor-pointer';
+            label.innerHTML = '<input type="radio" name="ledger_checkout_scope_pick" class="text-amber-600" id="' + id + '" value="' + esc(sc.value) + '"' + (idx === 0 ? ' checked' : '') + '> <span>' + esc(sc.label) + '</span>';
+            scopeOptions.appendChild(label);
+        });
+        scopeOptions.querySelectorAll('input[type=radio]').forEach(function (radio) {
+            radio.addEventListener('change', function () {
+                scopeInput.value = radio.value;
+                updateSubmitState();
+            });
+        });
+    }
+
+    function updateSubmitState() {
+        if (!submitBtn) return;
+        var det = selectedDetection();
+        var scopeOk = !!(scopeInput && scopeInput.value);
+        var hasOptions = catalogCache && catalogCache.hasOptions;
+        submitBtn.disabled = !(det && scopeOk && hasOptions);
+    }
+
+    function populateEquipment() {
+        if (!catalogCache) return;
+        var list = catalogCache.equipments || [];
+        setSelectOptions(
+            equipmentSelect,
+            list.length ? '请选择受检设备…' : '无可选设备',
+            list,
+            function (e) { return e.linkId; },
+            function (e) { return e.equipmentTitle; }
+        );
+        if (equipmentSelect) equipmentSelect.disabled = !list.length;
+        resetCascade('equipment');
+        if (emptyEl) {
+            if (!catalogCache.hasOptions && catalogCache.emptyHint) {
+                emptyEl.textContent = catalogCache.emptyHint;
+                emptyEl.classList.remove('hidden');
+            } else {
+                emptyEl.classList.add('hidden');
+            }
+        }
+        updateSubmitState();
+    }
+
+    function populateDetection() {
+        var eq = selectedEquipment();
+        var list = eq ? (eq.detections || []) : [];
+        setSelectOptions(
+            detectionSelect,
+            list.length ? '请选择检测项…' : '该设备下无匹配检测',
+            list,
+            function (d) { return d.key; },
+            function (d) {
+                var no = d.taskNo ? (d.taskNo + ' · ') : '';
+                return no + d.siteTaskLabel;
+            }
+        );
+        if (detectionSelect) detectionSelect.disabled = !list.length;
+        if (detectionHint) {
+            detectionHint.classList.add('hidden');
+            detectionHint.textContent = '';
+        }
+        renderScopeOptions(null);
+        if (detectionKeyInput) detectionKeyInput.value = '';
+        updateSubmitState();
+    }
+
+    function onDetectionChange() {
+        var det = selectedDetection();
+        if (detectionKeyInput) detectionKeyInput.value = det ? det.key : '';
+        if (detectionHint && det) {
+            detectionHint.textContent = det.detectionLabel || '';
+            detectionHint.classList.toggle('hidden', !det.detectionLabel);
+        }
+        renderScopeOptions(det);
+        updateSubmitState();
+    }
+
+    function loadCatalog(projectId) {
+        if (!projectId || !currentDeviceId) return;
+        resetCascade('all');
+        if (loadingEl) loadingEl.classList.remove('hidden');
+        fetch(optionsUrl + '?project_id=' + encodeURIComponent(projectId) + '&instrument_id=' + encodeURIComponent(currentDeviceId), {
+            credentials: 'same-origin',
+            headers: { 'Accept': 'application/json' }
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (loadingEl) loadingEl.classList.add('hidden');
+                if (!data.ok) {
+                    if (emptyEl) {
+                        emptyEl.textContent = data.error === 'no_project_access' ? '无权操作该项目' : '加载失败，请重试';
+                        emptyEl.classList.remove('hidden');
+                    }
+                    return;
+                }
+                catalogCache = data;
+                populateEquipment();
+            })
+            .catch(function () {
+                if (loadingEl) loadingEl.classList.add('hidden');
+                if (emptyEl) {
+                    emptyEl.textContent = '加载失败，请检查网络后重试';
+                    emptyEl.classList.remove('hidden');
+                }
+            });
+    }
+
+    function openCheckout(btn) {
+        currentDeviceId = parseInt(btn.getAttribute('data-device-id') || '0', 10);
+        var code = btn.getAttribute('data-device-code') || '';
+        var name = btn.getAttribute('data-device-name') || '';
+        var model = btn.getAttribute('data-device-model') || '';
+        if (deviceIdInput) deviceIdInput.value = String(currentDeviceId);
+        if (deviceLabel) {
+            deviceLabel.textContent = code + (name ? (' · ' + name + (model ? (' ' + model) : '')) : '');
+        }
+        if (projectSelect) projectSelect.value = '';
+        resetCascade('all');
+        backdrop.classList.remove('hidden');
+        sheet.classList.remove('hidden');
+        document.body.classList.add('overflow-hidden');
+        if (projectSelect) projectSelect.focus();
+    }
+
+    function closeCheckout() {
+        backdrop.classList.add('hidden');
+        sheet.classList.add('hidden');
+        document.body.classList.remove('overflow-hidden');
+        catalogCache = null;
+        currentDeviceId = 0;
+    }
+
+    document.querySelectorAll('.ledger-checkout-open').forEach(function (btn) {
+        btn.addEventListener('click', function () { openCheckout(btn); });
+    });
+
+    ['ledger-checkout-close', 'ledger-checkout-cancel'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('click', closeCheckout);
+    });
+    backdrop.addEventListener('click', closeCheckout);
+
+    if (projectSelect) {
+        projectSelect.addEventListener('change', function () {
+            var pid = projectSelect.value;
+            if (!pid) {
+                resetCascade('all');
+                return;
+            }
+            loadCatalog(pid);
+        });
+    }
+    if (equipmentSelect) {
+        equipmentSelect.addEventListener('change', populateDetection);
+    }
+    if (detectionSelect) {
+        detectionSelect.addEventListener('change', onDetectionChange);
+    }
+
+    if (form) {
+        form.addEventListener('submit', function (e) {
+            var det = selectedDetection();
+            if (!det || !scopeInput || !scopeInput.value) {
+                e.preventDefault();
+                return;
+            }
+            if (detectionKeyInput) detectionKeyInput.value = det.key;
+            var eq = selectedEquipment();
+            var projOpt = projectSelect && projectSelect.selectedOptions[0];
+            var msg = '确定将仪器出库至以下位置？\n\n项目：' + (projOpt ? projOpt.text : '') +
+                '\n设备：' + (eq ? eq.equipmentTitle : '') +
+                '\n检测：' + (det.detectionLabel || det.siteTaskLabel);
+            if (!confirm(msg)) e.preventDefault();
+        });
+    }
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && sheet && !sheet.classList.contains('hidden')) closeCheckout();
+    });
 })();
 </script>
 {% endif %}
