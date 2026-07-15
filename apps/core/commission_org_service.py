@@ -146,7 +146,8 @@ def find_or_create_commission_org_chain(
         level=CommissionOrganization.LEVEL_HOSPITAL,
         parent=None,
         name=hospital_name,
-        defaults={"created_by": user, "is_active": True},
+        is_active=True,
+        defaults={"created_by": user},
     )
     leaf = hospital
     campus_name = (campus_name or "").strip()
@@ -155,7 +156,8 @@ def find_or_create_commission_org_chain(
             level=CommissionOrganization.LEVEL_CAMPUS,
             parent=hospital,
             name=campus_name,
-            defaults={"created_by": user, "is_active": True},
+            is_active=True,
+            defaults={"created_by": user},
         )
         leaf = campus
     department_name = (department_name or "").strip()
@@ -165,7 +167,8 @@ def find_or_create_commission_org_chain(
             level=CommissionOrganization.LEVEL_DEPARTMENT,
             parent=parent,
             name=department_name,
-            defaults={"created_by": user, "is_active": True},
+            is_active=True,
+            defaults={"created_by": user},
         )
         leaf = dept
     return leaf
@@ -242,7 +245,13 @@ def move_commission_org_to_parent(
     err = validate_child_level(new_parent, org.level)
     if err:
         return err
-    if CommissionOrganization.objects.filter(parent=new_parent, name=org.name).exclude(pk=org.pk).exists():
+    if (
+        CommissionOrganization.objects.filter(
+            parent=new_parent, name=org.name, is_active=True
+        )
+        .exclude(pk=org.pk)
+        .exists()
+    ):
         return "目标下已存在相同名称"
     org.parent = new_parent
     org.save(update_fields=["parent", "updated_at"])
@@ -277,7 +286,9 @@ def create_commission_org_node(
     if err:
         return None, err
     if level == CommissionOrganization.LEVEL_HOSPITAL:
-        if CommissionOrganization.objects.filter(parent__isnull=True, name=name).exists():
+        if CommissionOrganization.objects.filter(
+            parent__isnull=True, name=name, is_active=True
+        ).exists():
             return None, "该医院名称已存在"
         org = CommissionOrganization.objects.create(
             level=level,
@@ -287,7 +298,7 @@ def create_commission_org_node(
             created_by=user,
         )
         return org, None
-    if CommissionOrganization.objects.filter(parent=parent, name=name).exists():
+    if CommissionOrganization.objects.filter(parent=parent, name=name, is_active=True).exists():
         return None, f"同级下已存在「{name}」"
     org = CommissionOrganization.objects.create(
         level=level,

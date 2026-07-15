@@ -71,6 +71,53 @@ def is_standard_commission_code(text: str) -> bool:
     return bool(PROJECT_CODE_RE.fullmatch(str(text or "").strip()))
 
 
+# 手动录入：标准 6 位、兼容旧 8 位，或 4～12 位纯数字（历史委托号）
+_MANUAL_PROJECT_CODE_RE = re.compile(r"^\d{4,12}$")
+
+
+def normalize_manual_project_code(text: str) -> str:
+    """去掉首尾空白；空串表示「交给系统自动编号」。"""
+    return str(text or "").strip()
+
+
+def validate_manual_project_code(
+    text: str,
+    *,
+    exclude_pk: int | None = None,
+) -> tuple[str | None, str]:
+    """
+    校验手动填写的委托编号。
+
+    Returns:
+        (normalized_code, error_message)
+        - 输入为空：返回 (None, "")，调用方应走自动编号或保留原编号。
+        - 合法：返回 (code, "")。
+        - 非法：返回 (None, 错误说明)。
+    """
+    code = normalize_manual_project_code(text)
+    if not code:
+        return None, ""
+    if not _MANUAL_PROJECT_CODE_RE.fullmatch(code):
+        return (
+            None,
+            "委托编号须为 4～12 位数字（推荐格式：两位年份 + 四位流水，如 260001）",
+        )
+    qs = LibraryProject.objects.filter(code=code)
+    if exclude_pk is not None:
+        qs = qs.exclude(pk=exclude_pk)
+    if qs.exists():
+        return None, f"委托编号「{code}」已被其它项目占用，请换一个编号"
+    return code, ""
+
+
+def suggest_next_project_code(*, now=None) -> str:
+    """给出下一个可用的标准委托编号（仅作界面提示，创建时仍以实际分配为准）。"""
+    try:
+        return generate_library_project_code(now=now)
+    except ValueError:
+        return ""
+
+
 def project_public_id(project: LibraryProject | None) -> str:
     """对外展示的委托编号（projectId / commissionNo）。"""
     if project is None:

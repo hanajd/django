@@ -2027,7 +2027,7 @@ def _equipment_semantics_from_pdf_slots(
     *,
     site_template_parsed: dict | None = None,
 ) -> dict[str, str]:
-    """从 equipmentInfo 解析设备信息；有现场模板时按 hierarchyKey/label 定位 f 槽（CT：f12 名称、f13 型号）。"""
+    """从 equipmentInfo 解析设备信息；有现场模板时按 hierarchyKey/label 定位 f 槽，禁止用跨模板 f 号兜底。"""
     if not isinstance(ei, dict):
         ei = {}
     if not isinstance(tr, dict):
@@ -2042,11 +2042,11 @@ def _equipment_semantics_from_pdf_slots(
 
     device_name = (
         _pick_ei_value_by_site_field_semantics(ei, site_template_parsed, "设备名称")
-        or _pick("deviceName", "name", "f11", "f12")
+        or _pick("deviceName", "name")
     )
     model = (
         _pick_ei_value_by_site_field_semantics(ei, site_template_parsed, "设备型号")
-        or _pick("model", "deviceModel", "f12", "f13")
+        or _pick("model", "deviceModel")
     )
     serial = (
         _pick_ei_value_by_site_field_semantics(
@@ -2065,11 +2065,11 @@ def _equipment_semantics_from_pdf_slots(
     )
     kv_s = (
         _pick_ei_value_by_site_field_semantics(ei, site_template_parsed, "额定参数_kV", "额定kV")
-        or _pick("kv", "f11", "f13")
+        or _pick("kv")
     )
     ma_s = (
         _pick_ei_value_by_site_field_semantics(ei, site_template_parsed, "额定参数_mA", "额定mA")
-        or _pick("ma", "f14")
+        or _pick("ma")
     )
     if not kv_s and tr.get("kv") not in (None, ""):
         kv_s = str(tr.get("kv")).strip()
@@ -2093,6 +2093,68 @@ def _equipment_semantics_from_pdf_slots(
         "kv": kv_s,
         "ma": ma_s,
     }
+
+
+def _compose_rated_params_display(
+    value_mapping: dict | None,
+    source_data: dict | None = None,
+) -> str:
+    """合并额定 kV/mA 为报告常用格式（如 122kV/345mA）；优先语义键，其次 equipmentInfo/testResult。"""
+    if not isinstance(value_mapping, dict):
+        value_mapping = {}
+    kv_r = _value_mapping_scalar_str(value_mapping, "额定参数_kV") or _value_mapping_scalar_str(
+        value_mapping, "额定kV"
+    )
+    ma_r = _value_mapping_scalar_str(value_mapping, "额定参数_mA") or _value_mapping_scalar_str(
+        value_mapping, "额定mA"
+    )
+    if source_data and isinstance(source_data, dict):
+        ei = source_data.get("equipmentInfo") if isinstance(source_data.get("equipmentInfo"), dict) else {}
+        tr = source_data.get("testResult") if isinstance(source_data.get("testResult"), dict) else {}
+        if not kv_r:
+            rkv = ei.get("kv") if ei.get("kv") not in (None, "") else tr.get("kv")
+            kv_r = "" if rkv in (None, "") else str(rkv).strip()
+        if not ma_r:
+            rma = ei.get("ma") if ei.get("ma") not in (None, "") else tr.get("ma")
+            ma_r = "" if rma in (None, "") else str(rma).strip()
+    chunks: list[str] = []
+    if kv_r:
+        chunks.append(kv_r if str(kv_r).rstrip().endswith("kV") else f"{kv_r}kV")
+    if ma_r:
+        chunks.append(ma_r if str(ma_r).rstrip().endswith("mA") else f"{ma_r}mA")
+    if len(chunks) == 2:
+        return f"{chunks[0]}/{chunks[1]}"
+    if chunks:
+        return chunks[0]
+    return ""
+
+
+def _field_semantic_is_combined_rated_params(field: dict) -> bool:
+    joined = " ".join(_field_semantic_candidate_keys(field)).replace(" ", "")
+    if "额定参数" not in joined and joined not in ("额定",):
+        return False
+    if "_kV" in joined or "_mA" in joined:
+        return False
+    if joined.rstrip().endswith("kV") or joined.rstrip().endswith("mA"):
+        return False
+    return True
+
+
+def _reconcile_rated_params_value_mapping(
+    value_mapping: dict,
+    source_data: dict | None = None,
+) -> None:
+    """派生/模糊映射可能污染「额定参数」；有 kV/mA 分项时以分项合并为准。"""
+    if not isinstance(value_mapping, dict):
+        return
+    composed = _compose_rated_params_display(value_mapping, source_data)
+    if not composed:
+        return
+    value_mapping["额定参数"] = composed
+    value_mapping["额定"] = composed
+    existing_f14 = str(value_mapping.get("f14") or "").strip()
+    if not existing_f14 or existing_f14 == "/":
+        value_mapping["f14"] = composed
 
 
 def _is_report_preserve_original_pdf_field(field: dict, *, task_obj=None) -> bool:
@@ -8794,6 +8856,10 @@ def _fill_template_fields_with_submit_enhanced(
         date_slot = _pick_test_date_table_slot_value(field, source_data, value_mapping)
         if date_slot is not None:
             return date_slot
+        if ft == "text" and _field_semantic_is_combined_rated_params(field):
+            composed_rated = _compose_rated_params_display(value_mapping, source_data)
+            if composed_rated:
+                return composed_rated
         for k in candidates:
             if k and k in value_mapping:
                 got = _scalar_fillable(value_mapping.get(k), allow_bool=(ft == "check"))
@@ -8836,27 +8902,9 @@ def _fill_template_fields_with_submit_enhanced(
             is_kv_cell = "_kV" in jc or joined.rstrip().endswith("kV")
             is_ma_cell = "_mA" in jc or joined.rstrip().endswith("mA")
             if not is_kv_cell and not is_ma_cell:
-                kv_r = _value_mapping_scalar_str(value_mapping, "额定参数_kV") or _value_mapping_scalar_str(
-                    value_mapping, "额定kV"
-                )
-                ma_r = _value_mapping_scalar_str(value_mapping, "额定参数_mA") or _value_mapping_scalar_str(
-                    value_mapping, "额定mA"
-                )
-                ei2 = source_data.get("equipmentInfo") if isinstance(source_data.get("equipmentInfo"), dict) else {}
-                tr2 = source_data.get("testResult") if isinstance(source_data.get("testResult"), dict) else {}
-                if not kv_r:
-                    rkv = ei2.get("kv") if ei2.get("kv") not in (None, "") else tr2.get("kv")
-                    kv_r = "" if rkv in (None, "") else str(rkv).strip()
-                if not ma_r:
-                    rma = ei2.get("ma") if ei2.get("ma") not in (None, "") else tr2.get("ma")
-                    ma_r = "" if rma in (None, "") else str(rma).strip()
-                segs = []
-                if kv_r:
-                    segs.append(f"{kv_r}kV")
-                if ma_r:
-                    segs.append(f"{ma_r}mA")
-                if segs:
-                    return "；".join(segs)
+                composed_rated = _compose_rated_params_display(value_mapping, source_data)
+                if composed_rated:
+                    return composed_rated
             elif is_kv_cell and not is_ma_cell:
                 ei2 = source_data.get("equipmentInfo") if isinstance(source_data.get("equipmentInfo"), dict) else {}
                 tr2 = source_data.get("testResult") if isinstance(source_data.get("testResult"), dict) else {}
@@ -9969,6 +10017,7 @@ def _prepare_backfill_value_mapping(
         _strip_report_preserve_original_keys_from_mapping(value_mapping)
         _strip_report_cover_overlay_pdf_ids_from_mapping(value_mapping, task_obj)
     _sanitize_inspected_unit_address_mapping(value_mapping)
+    _reconcile_rated_params_value_mapping(value_mapping, source_data)
     if is_report_output:
         _reconcile_report_basic_info_value_mapping(
             value_mapping,

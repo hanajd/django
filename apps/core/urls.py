@@ -27,6 +27,8 @@ urlpatterns = [
     path('users/create/', views.user_create, name='user_create'),
     path('users/<int:user_id>/edit/', views.user_edit, name='user_edit'),
     path('users/<int:user_id>/delete/', views.user_delete, name='user_delete'),
+    path('account/signatures/', views.signature_manage, name='signature_manage'),
+    path('users/<int:user_id>/signatures/', views.signature_manage, name='user_signature_manage'),
     
     # 角色管理路由
     path('roles/', views.role_list, name='role_list'),

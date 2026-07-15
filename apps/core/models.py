@@ -654,13 +654,13 @@ class CommissionOrganization(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["name"],
-                condition=models.Q(parent__isnull=True),
-                name="uniq_commission_hospital_name",
+                condition=models.Q(parent__isnull=True, is_active=True),
+                name="uniq_commission_hospital_name_active",
             ),
             models.UniqueConstraint(
                 fields=["parent", "name"],
-                condition=models.Q(parent__isnull=False),
-                name="uniq_commission_org_sibling_name",
+                condition=models.Q(parent__isnull=False, is_active=True),
+                name="uniq_commission_org_sibling_name_active",
             ),
         ]
 
@@ -1708,6 +1708,101 @@ class InspectionCaseWorkflowState(models.Model):
         return f"{self.case_id} / {self.stage}"
 
 
+# 报告 PDF 第三页签字槽（使用审计 / 叠印记录）
+REPORT_SIGNATURE_SLOT_CHOICES = (
+    ("reportAuthor", _("报告编制人签字位")),
+    ("reportAuditor", _("报告审核人签字位")),
+    ("authorizedSignatory", _("报告授权人签字位")),
+    ("issueDate", _("报告签发日期")),
+)
+
+
+class CaseReportSignatureRecord(models.Model):
+    """报告环节电子签字记录：每次叠印生成新版本报告并留痕。"""
+
+    SLOT_REPORT_AUTHOR = "reportAuthor"
+    SLOT_REPORT_AUDITOR = "reportAuditor"
+    SLOT_AUTHORIZED_SIGNATORY = "authorizedSignatory"
+    SLOT_ISSUE_DATE = "issueDate"
+    SLOT_CHOICES = REPORT_SIGNATURE_SLOT_CHOICES
+
+    case = models.ForeignKey(
+        InspectionCase,
+        on_delete=models.CASCADE,
+        related_name="report_signature_records",
+        verbose_name=_("案件"),
+    )
+    project = models.ForeignKey(
+        "LibraryProject",
+        on_delete=models.CASCADE,
+        related_name="report_signature_records",
+        verbose_name=_("项目"),
+    )
+    submission = models.ForeignKey(
+        "InspectionSubmission",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="report_signature_records",
+        verbose_name=_("检测提交"),
+    )
+    task_no = models.CharField(max_length=64, blank=True, default="", db_index=True, verbose_name=_("任务编号"))
+    workflow_stage = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        verbose_name=_("签字时环节"),
+    )
+    slot = models.CharField(max_length=32, choices=SLOT_CHOICES, db_index=True, verbose_name=_("签字位"))
+    signer = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="report_signature_records",
+        verbose_name=_("签名人"),
+    )
+    user_signature = models.ForeignKey(
+        "UserSignature",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="report_signature_records",
+        verbose_name=_("签名版本"),
+    )
+    signature_sha256 = models.CharField(max_length=64, blank=True, default="", verbose_name=_("签名内容哈希"))
+    report_file = models.ForeignKey(
+        "LibraryFile",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="report_signature_records",
+        verbose_name=_("叠印后报告"),
+    )
+    report_sha256_before = models.CharField(max_length=64, blank=True, default="", verbose_name=_("叠印前报告哈希"))
+    report_sha256_after = models.CharField(max_length=64, blank=True, default="", verbose_name=_("叠印后报告哈希"))
+    overlay_page = models.PositiveSmallIntegerField(default=0, verbose_name=_("叠印页码"))
+    overlay_rect = models.JSONField(default=list, blank=True, verbose_name=_("叠印区域"))
+    sign_version = models.PositiveIntegerField(default=1, verbose_name=_("签字序号"))
+    signed_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name=_("签字时间"))
+
+    class Meta:
+        verbose_name = _("报告签字记录")
+        verbose_name_plural = verbose_name
+        ordering = ["case_id", "task_no", "sign_version", "id"]
+        indexes = [
+            models.Index(fields=["case", "task_no", "-signed_at"]),
+            models.Index(fields=["project", "-signed_at"]),
+        ]
+
+    def __str__(self):
+        return f"case={self.case_id} {self.slot} v{self.sign_version}"
+
+    @property
+    def slot_label(self) -> str:
+        return dict(self.SLOT_CHOICES).get(self.slot, self.slot)
+
+
 class InstrumentCatalog(models.Model):
     """仪器主数据：维护仪器编号、名称、型号及检定/校准信息。"""
 
@@ -1802,3 +1897,182 @@ class InstrumentCheckoutLog(models.Model):
 
     def __str__(self):
         return f"{self.instrument.code} {self.event_type} @ {self.performed_at:%Y-%m-%d %H:%M}"
+
+
+def user_signature_image_upload_to(instance, filename: str) -> str:
+    ext = ".png"
+    if filename and "." in filename:
+        ext = filename[filename.rfind(".") :].lower()
+        if ext not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+            ext = ".png"
+    return f"user_signatures/{instance.user_id}/signature{ext}"
+
+
+# 项目/现场模板中的签字槽位（非用户个人签名分类）
+PROJECT_SIGNATURE_SLOT_CHOICES = (
+    ("inspector", _("检测员签字位")),
+    ("checker", _("校核员签字位")),
+    ("accompanyingPerson", _("陪同人签字位")),
+)
+
+SIGNATURE_USAGE_SLOT_CHOICES = PROJECT_SIGNATURE_SLOT_CHOICES + REPORT_SIGNATURE_SLOT_CHOICES
+
+
+class UserSignature(models.Model):
+    """用户手写签名主档：每人一份，插入项目时按模板签字位选用。"""
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="user_signatures",
+        verbose_name=_("用户"),
+    )
+    image = models.ImageField(
+        upload_to=user_signature_image_upload_to,
+        verbose_name=_("签名图片"),
+    )
+    content_sha256 = models.CharField(max_length=64, blank=True, default="", db_index=True, verbose_name=_("内容哈希"))
+    original_filename = models.CharField(max_length=255, blank=True, default="", verbose_name=_("原始文件名"))
+    version = models.PositiveIntegerField(default=1, verbose_name=_("版本号"))
+    is_active = models.BooleanField(default=True, db_index=True, verbose_name=_("启用"))
+    uploaded_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="user_signature_uploads",
+        verbose_name=_("上传操作人"),
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("创建时间"))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_("更新时间"))
+
+    class Meta:
+        verbose_name = _("用户签名")
+        verbose_name_plural = verbose_name
+        ordering = ["user_id", "-version"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user"],
+                condition=models.Q(is_active=True),
+                name="uniq_user_signature_active",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user", "-updated_at"]),
+        ]
+
+    def __str__(self):
+        return f"user={self.user_id} v{self.version}"
+
+
+class UserSignatureEvent(models.Model):
+    """用户签名上传/替换/使用审计。"""
+
+    EVENT_UPLOADED = "uploaded"
+    EVENT_REPLACED = "replaced"
+    EVENT_USED_SITE_RECORD = "used_site_record"
+    EVENT_USED_REPORT = "used_report"
+    EVENT_USED_SUBMIT = "used_submit"
+    EVENT_USED_REPORT_SIGN = "used_report_sign"
+    EVENT_CHOICES = (
+        (EVENT_UPLOADED, _("首次上传")),
+        (EVENT_REPLACED, _("重新上传/替换")),
+        (EVENT_USED_SITE_RECORD, _("用于现场记录")),
+        (EVENT_USED_REPORT, _("用于报告")),
+        (EVENT_USED_SUBMIT, _("用于检测提交")),
+        (EVENT_USED_REPORT_SIGN, _("用于报告环节签字")),
+    )
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="signature_events",
+        verbose_name=_("签名所属用户"),
+    )
+    user_signature = models.ForeignKey(
+        UserSignature,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="events",
+        verbose_name=_("签名版本"),
+    )
+    role = models.CharField(
+        max_length=32,
+        choices=SIGNATURE_USAGE_SLOT_CHOICES,
+        blank=True,
+        default="",
+        db_index=True,
+        verbose_name=_("项目签字位置"),
+        help_text=_("现场/报告模板签字槽；个人签名库不按此分类"),
+    )
+    event_type = models.CharField(max_length=32, choices=EVENT_CHOICES, db_index=True, verbose_name=_("事件类型"))
+    actor = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="signature_event_actions",
+        verbose_name=_("操作人"),
+    )
+    project = models.ForeignKey(
+        "LibraryProject",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="signature_events",
+        verbose_name=_("项目"),
+    )
+    case = models.ForeignKey(
+        "InspectionCase",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="signature_events",
+        verbose_name=_("检测案件"),
+    )
+    submission = models.ForeignKey(
+        "InspectionSubmission",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="signature_events",
+        verbose_name=_("检测提交"),
+    )
+    task_no = models.CharField(max_length=64, blank=True, default="", db_index=True, verbose_name=_("任务编号"))
+    task_code = models.CharField(max_length=128, blank=True, default="", verbose_name=_("任务模板代码"))
+    output_target = models.CharField(max_length=32, blank=True, default="", verbose_name=_("产出类型"))
+    library_file = models.ForeignKey(
+        "LibraryFile",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="signature_events",
+        verbose_name=_("关联文件"),
+    )
+    snapshot_path = models.CharField(max_length=512, blank=True, default="", verbose_name=_("使用时的文件路径"))
+    content_sha256 = models.CharField(max_length=64, blank=True, default="", verbose_name=_("内容哈希快照"))
+    detail = models.JSONField(default=dict, blank=True, verbose_name=_("附加信息"))
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name=_("发生时间"))
+
+    class Meta:
+        verbose_name = _("用户签名事件")
+        verbose_name_plural = verbose_name
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["user", "-created_at"]),
+            models.Index(fields=["user", "event_type", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} {self.event_type} {self.role} @ {self.created_at:%Y-%m-%d %H:%M}"
+
+    @property
+    def event_type_label(self) -> str:
+        return dict(self.EVENT_CHOICES).get(self.event_type, self.event_type)
+
+    @property
+    def role_label(self) -> str:
+        if not (self.role or "").strip():
+            return "—"
+        return dict(SIGNATURE_USAGE_SLOT_CHOICES).get(self.role, self.role)

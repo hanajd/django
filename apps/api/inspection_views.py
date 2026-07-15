@@ -1816,6 +1816,21 @@ def execute_inspection_submit_for_task(
                 "reason": pdf_reason or "",
             }
         )
+    try:
+        from apps.core.user_signature_service import record_signature_usage_from_submission
+
+        record_signature_usage_from_submission(
+            actor=user,
+            submission=obj,
+            payload=storage_payload,
+            generation_results=generation_results,
+        )
+    except Exception:
+        logger.exception(
+            "signature usage audit failed task_no=%s submission_id=%s",
+            task_no,
+            getattr(obj, "pk", None),
+        )
     return {
         "taskNo": task_no,
         "status": obj.status,
@@ -2279,6 +2294,20 @@ class InspectionSignatureUploadAPIView(_InspectionTaskAccessMixin, APIView):
             project_ids=[project.pk],
         )
         _attach_inspection_submit_files_to_site_tasks(created, task_no, project, request.user)
+
+        try:
+            from apps.core.user_signature_service import record_signature_usage_from_report_upload
+
+            record_signature_usage_from_report_upload(
+                actor=request.user,
+                submission=obj,
+                report_api_role=role,
+                raw_png=raw,
+                task_no=task_no,
+                library_files=created,
+            )
+        except Exception:
+            logger.exception("report signature usage audit failed task_no=%s", task_no)
 
         return _ok(
             "签名上传成功",

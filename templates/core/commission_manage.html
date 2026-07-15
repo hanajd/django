@@ -296,6 +296,50 @@
                                                     {% if item.has_checker_signature %}
                                                     <p class="mt-1 text-[10px] text-teal-700">已含校核签名，校核已完成，进度至少至编制环节</p>
                                                     {% endif %}
+                                                    {% with rs=item.report_signature %}
+                                                    {% if rs.enabled or rs.pending_label or rs.no_report_hint %}
+                                                    <div class="mt-2 rounded-lg border border-amber-100 bg-amber-50/60 px-2.5 py-2 text-[10px] text-amber-950">
+                                                        <p class="font-semibold text-amber-900">报告电子签字</p>
+                                                        {% if rs.report_file_name %}
+                                                        <p class="mt-0.5 text-slate-600 truncate" title="{{ rs.report_file_name }}">当前报告：{{ rs.report_file_name }}
+                                                            {% if rs.report_download_url %}
+                                                            <a href="{{ rs.report_download_url }}" class="ml-1 text-indigo-700 underline" target="_blank" rel="noopener">下载</a>
+                                                            {% endif %}
+                                                        </p>
+                                                        {% endif %}
+                                                        <ul class="mt-1 space-y-0.5">
+                                                            {% for s in rs.slots %}
+                                                            <li class="flex flex-wrap items-center gap-1">
+                                                                <span class="text-slate-600">{{ s.label }}：</span>
+                                                                {% if s.signed %}
+                                                                <span class="text-emerald-700">✓ {{ s.signer|default:"已签" }}{% if s.signed_at %} · {{ s.signed_at|date:"m-d H:i" }}{% endif %}</span>
+                                                                {% else %}
+                                                                <span class="text-slate-400">待签</span>
+                                                                {% endif %}
+                                                            </li>
+                                                            {% endfor %}
+                                                        </ul>
+                                                        {% if rs.pending_label %}
+                                                        <p class="mt-1 font-medium text-indigo-700">{{ rs.pending_label }}</p>
+                                                        {% endif %}
+                                                        {% if rs.no_report_hint %}
+                                                        <p class="mt-1 text-rose-700">{{ rs.no_report_hint }}</p>
+                                                        {% elif rs.no_signature_hint %}
+                                                        <p class="mt-1 text-rose-700">{{ rs.no_signature_hint }} <a href="{% url 'signature_manage' %}" class="underline">去上传</a></p>
+                                                        {% endif %}
+                                                        {% if rs.timeline %}
+                                                        <details class="mt-1">
+                                                            <summary class="cursor-pointer text-indigo-700 hover:underline">签字版本记录（{{ rs.timeline|length }}）</summary>
+                                                            <ul class="mt-1 space-y-0.5 pl-2 text-slate-600">
+                                                                {% for t in rs.timeline %}
+                                                                <li>v{{ t.version }} {{ t.slot_label }} · {{ t.signer }} · {{ t.signed_at|date:"Y-m-d H:i" }}{% if t.sha256_short %} · {{ t.sha256_short }}{% endif %}</li>
+                                                                {% endfor %}
+                                                            </ul>
+                                                        </details>
+                                                        {% endif %}
+                                                    </div>
+                                                    {% endif %}
+                                                    {% endwith %}
                                                 </td>
                                                 <td class="px-3 py-3 text-slate-800">{{ item.stage_label }}</td>
                                                 <td class="px-3 py-3 text-slate-600">{{ item.submission_status }}</td>
@@ -316,7 +360,7 @@
                                                         {% with act=item.advance_actions.0 %}
                                                         <form method="post" class="inline">
                                                             {% csrf_token %}
-                                                            <input type="hidden" name="action" value="advance_workflow">
+                                                            <input type="hidden" name="action" value="{{ act.action|default:'advance_workflow' }}">
                                                             <input type="hidden" name="project_id" value="{{ row.project.pk }}">
                                                             <input type="hidden" name="task_no" value="{{ item.task_no }}">
                                                             <input type="hidden" name="target_stage" value="{{ act.target_stage }}">
@@ -324,8 +368,8 @@
                                                             {% if scope_filter %}<input type="hidden" name="scope" value="{{ scope_filter }}">{% endif %}
                                                             {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
                                                             {% if search %}<input type="hidden" name="search" value="{{ search }}">{% endif %}
-                                                            <button type="submit" class="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-indigo-700 whitespace-nowrap">
-                                                                <i class="ri-skip-forward-line"></i> {{ act.label }}
+                                                            <button type="submit" class="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium text-white whitespace-nowrap {% if act.requires_report_signature %}bg-amber-600 hover:bg-amber-700{% else %}bg-indigo-600 hover:bg-indigo-700{% endif %}">
+                                                                <i class="{% if act.requires_report_signature %}ri-quill-pen-line{% else %}ri-skip-forward-line{% endif %}"></i> {{ act.label }}
                                                             </button>
                                                         </form>
                                                         {% endwith %}
@@ -339,7 +383,7 @@
                                                                 {% for act in item.advance_actions %}
                                                                 <form method="post">
                                                                     {% csrf_token %}
-                                                                    <input type="hidden" name="action" value="advance_workflow">
+                                                                    <input type="hidden" name="action" value="{{ act.action|default:'advance_workflow' }}">
                                                                     <input type="hidden" name="project_id" value="{{ row.project.pk }}">
                                                                     <input type="hidden" name="task_no" value="{{ item.task_no }}">
                                                                     <input type="hidden" name="target_stage" value="{{ act.target_stage }}">
@@ -347,7 +391,7 @@
                                                                     {% if scope_filter %}<input type="hidden" name="scope" value="{{ scope_filter }}">{% endif %}
                                                                     {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
                                                                     {% if search %}<input type="hidden" name="search" value="{{ search }}">{% endif %}
-                                                                    <button type="submit" class="commission-action-item w-full text-left px-3 py-2 text-[11px] text-slate-800 hover:bg-indigo-50">{{ act.label }}</button>
+                                                                    <button type="submit" class="commission-action-item w-full text-left px-3 py-2 text-[11px] {% if act.requires_report_signature %}text-amber-900 hover:bg-amber-50{% else %}text-slate-800 hover:bg-indigo-50{% endif %}">{{ act.label }}</button>
                                                                 </form>
                                                                 {% endfor %}
                                                             </div>

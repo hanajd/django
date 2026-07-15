@@ -1729,18 +1729,24 @@ def _collect_point_data_fields(
         label_role = _column_role(sem, field)
         if label_role in (_COLUMN_READING, _COLUMN_MEAN, _COLUMN_REPORT, _COLUMN_ANNUAL_DOSE):
             role = label_role
+        item_id = _norm(field.get("id") or "")
+        # 「栏位N」等无语义标签格：先按窄列双组 x 带定角色，避免被 page<5 / data_cell 过滤掉。
+        if item_id.startswith("栏位"):
+            band_slot = _narrow_dual_slot_for_x(_field_sort_x(field))
+            if band_slot.startswith("reading_"):
+                role = _COLUMN_READING
+                slot = band_slot
+            elif band_slot in ("mean_m", "mean_m_2"):
+                role = _COLUMN_MEAN
+                slot = band_slot
+            elif band_slot in ("report_d", "report_d_2"):
+                role = _COLUMN_REPORT
+                slot = band_slot
         if role not in (_COLUMN_READING, _COLUMN_MEAN, _COLUMN_REPORT, _COLUMN_ANNUAL_DOSE):
             if not _is_rp_measurement_data_cell(field, layout):
                 continue
             role = _COLUMN_READING
             slot = ""
-        item_id = _norm(field.get("id") or "")
-        if item_id.startswith("栏位"):
-            band_slot = _narrow_dual_slot_for_x(_field_sort_x(field))
-            if band_slot in ("mean_m", "mean_m_2"):
-                role = _COLUMN_MEAN
-            elif band_slot in ("report_d", "report_d_2"):
-                role = _COLUMN_REPORT
         pt = _protection_row_coordinate_key(field)
         if not pt:
             continue
@@ -2860,33 +2866,30 @@ def apply_report_formulas_to_pdf_fields(
     bindings = chapter.get("fieldBindings") if isinstance(chapter.get("fieldBindings"), list) else None
     if not bindings:
         bindings = build_field_bindings_from_pdf_fields(fields, chapter=chapter)
-    col_layout = resolve_protection_table_layout(fields)
-    by_report: Dict[str, tuple[Dict[str, Any], int]] = {}
-    for b in bindings:
-        if not isinstance(b, dict):
+    by_pid = {
+        export_field_pdf_id(field): field
+        for field in (fields or [])
+        if isinstance(field, dict) and export_field_pdf_id(field)
+    }
+    for binding in bindings or []:
+        if not isinstance(binding, dict):
+            continue
+        pt = _norm(binding.get("radiationPoint") or "")
+        if "本底" in pt or "序号本底" in pt:
             continue
         for group in (1, 2):
-            pid = _norm(b.get(_binding_report_key(group=group)) or "")
-            if pid:
-                by_report[pid] = (b, group)
-    for field in fields or []:
-        if not isinstance(field, dict):
-            continue
-        if not is_protection_pdf_field(field):
-            continue
-        if is_background_level_pdf_field(field):
-            continue
-        slot = protection_data_column_slot(field, col_layout)
-        if slot not in ("report_d", "report_d_2"):
-            continue
-        pid = field_pdf_field_id(field)
-        binding, group = by_report.get(pid) or ({}, 1)
-        apply_chapter_report_rules_to_field(
-            field,
-            rules,
-            binding,
-            report_group=group,
-        )
+            report_pid = _norm(binding.get(_binding_report_key(group=group)) or "")
+            if not report_pid or report_pid not in by_pid:
+                continue
+            report_field = by_pid[report_pid]
+            if is_background_level_pdf_field(report_field) or is_background_range_pdf_field(report_field):
+                continue
+            apply_chapter_report_rules_to_field(
+                report_field,
+                rules,
+                binding,
+                report_group=group,
+            )
 
 
 def export_report_value_rules_for_frontend(

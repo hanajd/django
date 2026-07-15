@@ -33,6 +33,17 @@
                                    class="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
                         </div>
                         <div>
+                            <label for="create-picker-project-code" class="block text-xs font-medium text-slate-600 mb-1">委托编号（可选）</label>
+                            <input type="text" name="project_code" id="create-picker-project-code"
+                                   inputmode="numeric" autocomplete="off" maxlength="12"
+                                   placeholder="{% if suggested_project_code %}留空则自动生成，建议下一号：{{ suggested_project_code }}{% else %}留空则自动生成，例如 260001{% endif %}"
+                                   class="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                   pattern="\d{4,12}">
+                            <p class="mt-1 text-[11px] text-slate-500 leading-relaxed">
+                                推荐格式：两位年份 + 四位流水（如 <span class="font-mono">260001</span>）。录入老项目时可直接填写历史编号；留空则系统自动分配。
+                            </p>
+                        </div>
+                        <div>
                             <label class="block text-xs font-medium text-slate-600 mb-1">委托单位（文件夹逐级进入）*</label>
                             <div id="create-picker-selected-label" class="mb-2 px-3 py-2 rounded-lg bg-indigo-50 text-sm text-indigo-900 border border-indigo-100 min-h-[2.5rem] flex items-center">
                                 <span class="text-slate-400">请进入并选择医院 / 院区 / 科室</span>

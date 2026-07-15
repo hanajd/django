@@ -1,0 +1,233 @@
+{% extends 'base.html' %}
+
+{% block page_title %}签名管理{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-6xl space-y-6">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">个人</p>
+            <h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-900">签名管理</h1>
+            {% if viewing_other %}
+            <p class="mt-1 text-sm text-slate-600">查看用户 <strong>{{ target_user.username }}</strong> 的签名与使用记录</p>
+            {% else %}
+            <p class="mt-1 text-sm text-slate-600">每人维护一份手写签名；在检测提交或报告生成时，按需插入到对应签字位（检测员、校核、陪同等）。</p>
+            {% endif %}
+        </div>
+        {% if viewing_other %}
+        <a href="{% url 'user_list' %}" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50">
+            <i class="ri-arrow-left-line"></i>返回用户列表
+        </a>
+        {% endif %}
+    </div>
+
+    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04]">
+        <div class="flex flex-col gap-6 md:flex-row md:items-start">
+            <div class="flex-1">
+                <div class="flex items-start justify-between gap-2">
+                    <div>
+                        <h2 class="text-base font-semibold text-slate-900">我的签名</h2>
+                        <p class="mt-1 text-xs text-slate-500">个人签名库不按角色分类；项目内签字位由检测流程决定。</p>
+                    </div>
+                    {% if signature_card.signature %}
+                    <span class="shrink-0 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">v{{ signature_card.version }}</span>
+                    {% else %}
+                    <span class="shrink-0 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-500">未上传</span>
+                    {% endif %}
+                </div>
+
+                <div id="signature-preview-box" class="mt-4 flex min-h-[120px] max-w-md items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/80 p-4 transition-colors">
+                    <img id="signature-preview-img"
+                        {% if signature_card.image_url %}src="{{ signature_card.image_url }}"{% endif %}
+                        alt="手写签名"
+                        class="max-h-28 max-w-full object-contain{% if not signature_card.image_url %} hidden{% endif %}">
+                    <span id="signature-preview-empty" class="text-sm text-slate-400{% if signature_card.image_url %} hidden{% endif %}">暂无签名图片</span>
+                </div>
+
+                <p id="signature-preview-hint" class="mt-2 hidden text-xs font-medium text-amber-600">
+                    <i class="ri-eye-line align-middle"></i>
+                    <span class="align-middle">待保存预览，确认无误后点击「保存签名」</span>
+                </p>
+
+                {% if signature_card.updated_at %}
+                <p class="mt-2 text-xs text-slate-500">最近更新：{{ signature_card.updated_at|date:"Y-m-d H:i" }}</p>
+                {% endif %}
+            </div>
+
+            {% if not viewing_other %}
+            <div class="w-full md:max-w-sm">
+                <form method="post" enctype="multipart/form-data" id="signature-upload-form" class="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="upload">
+                    <p class="text-sm font-semibold text-slate-900">
+                        {% if signature_card.signature %}重新上传签名{% else %}上传签名{% endif %}
+                    </p>
+
+                    <label for="signature-file-input"
+                        class="group flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-blue-300 bg-blue-50/80 px-4 py-6 text-center transition hover:border-blue-500 hover:bg-blue-100/70 focus-within:ring-2 focus-within:ring-blue-500 focus-within:ring-offset-2">
+                        <span class="inline-flex h-12 w-12 items-center justify-center rounded-full bg-blue-600 text-white shadow-md transition group-hover:bg-blue-700">
+                            <i class="ri-upload-cloud-2-line text-2xl"></i>
+                        </span>
+                        <span class="text-base font-semibold text-blue-700">选择签名图片</span>
+                        <span class="text-xs text-slate-500">点击此区域选择文件</span>
+                        <input type="file" id="signature-file-input" name="signature_file"
+                            accept="image/png,image/jpeg,image/webp,image/gif"
+                            class="sr-only">
+                    </label>
+
+                    <p id="signature-file-name" class="hidden truncate rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700" aria-live="polite"></p>
+                    <p class="text-xs text-slate-500">支持 PNG、JPEG、GIF、WebP，不超过 2MB。</p>
+
+                    <button type="submit" class="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                        保存签名
+                    </button>
+                </form>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ring-1 ring-slate-900/[0.04]">
+        <div class="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+                <h2 class="text-base font-semibold text-slate-900">签名使用与变更记录</h2>
+                <p class="mt-0.5 text-xs text-slate-500">共 {{ event_total }} 条；「项目签字位」仅在使用审计中出现</p>
+            </div>
+            <form method="get" class="flex items-center gap-2">
+                <select name="event_type" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800">
+                    <option value="">全部类型</option>
+                    {% for val, label in event_type_choices %}
+                    <option value="{{ val }}" {% if event_type == val %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">筛选</button>
+            </form>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-slate-100 text-left text-sm">
+                <thead class="bg-slate-50">
+                    <tr>
+                        <th class="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">时间</th>
+                        <th class="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">类型</th>
+                        <th class="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">项目签字位</th>
+                        <th class="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">说明</th>
+                        <th class="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">操作人</th>
+                        <th class="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">版本</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-50">
+                    {% for row in event_rows %}
+                    <tr class="hover:bg-slate-50/60">
+                        <td class="whitespace-nowrap px-5 py-3 text-slate-700">{{ row.event.created_at|date:"Y-m-d H:i:s" }}</td>
+                        <td class="px-5 py-3 text-slate-800">{{ row.event.event_type_label }}</td>
+                        <td class="px-5 py-3 text-slate-700">{{ row.event.role_label }}</td>
+                        <td class="px-5 py-3 text-slate-600">{{ row.summary }}</td>
+                        <td class="px-5 py-3 text-slate-600">{{ row.actor_display }}</td>
+                        <td class="px-5 py-3 text-slate-500">
+                            {% if row.event.user_signature %}v{{ row.event.user_signature.version }}{% else %}—{% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="6" class="px-5 py-10 text-center text-sm text-slate-500">暂无记录。上传签名后，在检测提交或报告签名使用时会自动记入此处。</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if event_pages > 1 %}
+        <div class="flex items-center justify-between border-t border-slate-100 px-5 py-3 text-sm text-slate-600">
+            <span>第 {{ event_page }} / {{ event_pages }} 页</span>
+            <div class="flex gap-2">
+                {% if event_page > 1 %}
+                <a href="?page={{ event_page|add:'-1' }}{% if event_type %}&event_type={{ event_type }}{% endif %}" class="rounded-lg border border-slate-200 px-3 py-1.5 hover:bg-slate-50">上一页</a>
+                {% endif %}
+                {% if event_page < event_pages %}
+                <a href="?page={{ event_page|add:'1' }}{% if event_type %}&event_type={{ event_type }}{% endif %}" class="rounded-lg border border-slate-200 px-3 py-1.5 hover:bg-slate-50">下一页</a>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% if not viewing_other %}
+<script>
+(function () {
+    var input = document.getElementById('signature-file-input');
+    var nameEl = document.getElementById('signature-file-name');
+    var previewImg = document.getElementById('signature-preview-img');
+    var previewEmpty = document.getElementById('signature-preview-empty');
+    var previewHint = document.getElementById('signature-preview-hint');
+    var previewBox = document.getElementById('signature-preview-box');
+    if (!input || !previewImg) return;
+
+    var initialSrc = previewImg.getAttribute('src') || '';
+    var pendingObjectUrl = null;
+
+    function revokePendingUrl() {
+        if (pendingObjectUrl) {
+            URL.revokeObjectURL(pendingObjectUrl);
+            pendingObjectUrl = null;
+        }
+    }
+
+    function showSavedPreview() {
+        revokePendingUrl();
+        if (initialSrc) {
+            previewImg.src = initialSrc;
+            previewImg.classList.remove('hidden');
+            previewEmpty.classList.add('hidden');
+        } else {
+            previewImg.removeAttribute('src');
+            previewImg.classList.add('hidden');
+            previewEmpty.classList.remove('hidden');
+        }
+        previewHint.classList.add('hidden');
+        if (previewBox) {
+            previewBox.classList.remove('border-amber-300', 'bg-amber-50/80');
+            previewBox.classList.add('border-slate-200', 'bg-slate-50/80');
+        }
+    }
+
+    input.addEventListener('change', function () {
+        revokePendingUrl();
+        var file = input.files && input.files[0];
+        if (!file) {
+            if (nameEl) {
+                nameEl.textContent = '';
+                nameEl.classList.add('hidden');
+            }
+            showSavedPreview();
+            return;
+        }
+
+        if (nameEl) {
+            nameEl.textContent = '已选择：' + file.name;
+            nameEl.classList.remove('hidden');
+        }
+
+        if (!file.type || file.type.indexOf('image/') !== 0) {
+            if (nameEl) {
+                nameEl.textContent = '请选择图片文件（PNG、JPEG、GIF、WebP）';
+                nameEl.classList.remove('hidden');
+            }
+            showSavedPreview();
+            return;
+        }
+
+        pendingObjectUrl = URL.createObjectURL(file);
+        previewImg.src = pendingObjectUrl;
+        previewImg.classList.remove('hidden');
+        previewEmpty.classList.add('hidden');
+        previewHint.classList.remove('hidden');
+        if (previewBox) {
+            previewBox.classList.remove('border-slate-200', 'bg-slate-50/80');
+            previewBox.classList.add('border-amber-300', 'bg-amber-50/80');
+        }
+    });
+})();
+</script>
+{% endif %}
+{% endblock %}

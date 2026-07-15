@@ -76,6 +76,9 @@
                                 <a href="{% url 'user_edit' user.id %}" class="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm font-medium text-blue-600 transition hover:bg-blue-50">
                                     <i class="ri-edit-line"></i> 编辑
                                 </a>
+                                <a href="{% url 'user_signature_manage' user.id %}" class="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm font-medium text-slate-600 transition hover:bg-slate-100">
+                                    <i class="ri-quill-pen-line"></i> 签名
+                                </a>
                                 <a href="{% url 'user_delete' user.id %}" class="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm font-medium text-red-600 transition hover:bg-red-50">
                                     <i class="ri-delete-bin-line"></i> 删除
                                 </a>

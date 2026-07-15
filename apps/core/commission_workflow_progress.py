@@ -48,6 +48,21 @@ MANUAL_ADVANCE_STEPS: tuple[tuple[str, str, str], ...] = (
     ),
 )
 
+# 报告三环节：须叠印个人签名后推进（委托管理 Web）
+REPORT_SIGN_ADVANCE_TARGETS: frozenset[str] = frozenset(
+    {
+        InspectionCaseWorkflowState.STAGE_REPORT_AUDIT,
+        InspectionCaseWorkflowState.STAGE_REPORT_SIGN,
+        InspectionCaseWorkflowState.STAGE_ISSUED,
+    }
+)
+
+REPORT_SIGN_ADVANCE_LABELS: dict[str, str] = {
+    InspectionCaseWorkflowState.STAGE_REPORT_AUDIT: "使用我的签名，确认编制完成",
+    InspectionCaseWorkflowState.STAGE_REPORT_SIGN: "使用我的签名，确认审核通过",
+    InspectionCaseWorkflowState.STAGE_ISSUED: "使用我的签名并签发",
+}
+
 _GLOBAL_ROLE_TO_WORKFLOW: Dict[str, str] = {
     "field_inspector": LibraryProjectWorkflowMember.ROLE_FIELD_INSPECTOR,
     "site_reviewer": LibraryProjectWorkflowMember.ROLE_SITE_REVIEWER,
@@ -164,7 +179,17 @@ def manual_advance_actions_for_item(
             {
                 "target_stage": target_stage,
                 "workflow_role": workflow_role,
-                "label": label,
+                "label": (
+                    REPORT_SIGN_ADVANCE_LABELS.get(target_stage, label)
+                    if target_stage in REPORT_SIGN_ADVANCE_TARGETS
+                    else label
+                ),
+                "action": (
+                    "sign_and_advance_workflow"
+                    if target_stage in REPORT_SIGN_ADVANCE_TARGETS
+                    else "advance_workflow"
+                ),
+                "requires_report_signature": target_stage in REPORT_SIGN_ADVANCE_TARGETS,
             }
         )
     return out

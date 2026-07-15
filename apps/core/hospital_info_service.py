@@ -970,13 +970,17 @@ def save_org_hospital_info(
     dup = False
     if org.level == CommissionOrganization.LEVEL_HOSPITAL:
         dup = (
-            CommissionOrganization.objects.filter(parent__isnull=True, name=name)
+            CommissionOrganization.objects.filter(
+                parent__isnull=True, name=name, is_active=True
+            )
             .exclude(pk=org.pk)
             .exists()
         )
     elif org.parent_id:
         dup = (
-            CommissionOrganization.objects.filter(parent_id=org.parent_id, name=name)
+            CommissionOrganization.objects.filter(
+                parent_id=org.parent_id, name=name, is_active=True
+            )
             .exclude(pk=org.pk)
             .exists()
         )

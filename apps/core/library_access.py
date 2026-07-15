@@ -848,6 +848,11 @@ def library_user_may_create_library_project(user) -> bool:
     if not getattr(user, "is_authenticated", False):
         return False
     if library_user_is_coordinator_managed_workflow_user(user):
+        # 授权签字人：即使由委托统筹创建，也可在工作台新建委托项目
+        if _role_code(user) == "authorized_signatory" and role_has(
+            user, "perm_create_library_project"
+        ):
+            return True
         return False
     if library_user_can_assign_tasks_to_participants(user):
         return True

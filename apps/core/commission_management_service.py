@@ -35,6 +35,7 @@ from apps.core.commission_workflow_progress import (
     submission_has_checker_signature,
 )
 from apps.core.project_equipment_service import project_equipment_cards
+from apps.core.report_signature_service import build_report_signature_status
 
 # 绑定 ≥2 台受检设备视为大委托（不在列表展示逐条签发进度）
 LARGE_COMMISSION_MIN_DEVICES = 2
@@ -337,6 +338,13 @@ def build_commission_project_item_progress(
                 stage = _submission_workflow_stage(sub)
                 bar = build_issuance_progress_bar(stage or None)
                 case_id = sub.case_id if sub else None
+                case_obj = sub.case if sub and sub.case_id else None
+                report_sig = build_report_signature_status(
+                    case=case_obj,
+                    project=project,
+                    submission=sub,
+                    viewer=viewer,
+                )
                 items.append(
                     {
                         "item_key": f"{project.pk}-{task_no}",
@@ -357,6 +365,7 @@ def build_commission_project_item_progress(
                             effective_stage=stage or "",
                             has_case=bool(case_id),
                         ),
+                        "report_signature": report_sig,
                     }
                 )
         else:
@@ -376,6 +385,7 @@ def build_commission_project_item_progress(
                     "submission_status": "—",
                     "progress_bar": build_issuance_progress_bar(None),
                     "advance_actions": [],
+                    "report_signature": {"enabled": False, "slots": [], "timeline": []},
                 }
             )
 
@@ -404,6 +414,12 @@ def build_commission_project_item_progress(
                     effective_stage=stage or "",
                     has_case=bool(sub.case_id),
                 ),
+                "report_signature": build_report_signature_status(
+                    case=sub.case if sub.case_id else None,
+                    project=project,
+                    submission=sub,
+                    viewer=viewer,
+                ),
             }
         )
 
@@ -423,6 +439,7 @@ def build_commission_project_item_progress(
                 "submission_status": "—",
                 "progress_bar": build_issuance_progress_bar(None),
                 "advance_actions": [],
+                "report_signature": {"enabled": False, "slots": [], "timeline": []},
             }
         )
     return items

@@ -1344,6 +1344,104 @@ def user_delete(request, user_id):
 
 
 @login_required
+def signature_manage(request, user_id: int | None = None):
+    """用户手写签名：每人一份，上传与使用审计（本人；管理员可查看他人）。"""
+    from apps.core.models import UserSignatureEvent
+    from apps.core.user_signature_service import (
+        format_event_summary,
+        get_active_user_signature,
+        list_signature_events,
+        read_uploaded_signature_file,
+        save_user_signature,
+    )
+
+    target_user = request.user
+    viewing_other = False
+    if user_id is not None:
+        r = _require_perm(request, "perm_manage_users")
+        if r:
+            return r
+        target_user = get_object_or_404(User, pk=user_id)
+        viewing_other = target_user.pk != request.user.pk
+        if viewing_other and not library_user_may_manage_target_user(request.user, target_user):
+            messages.error(request, "无权查看该用户的签名")
+            return redirect("user_list")
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        if action == "upload":
+            uploaded = request.FILES.get("signature_file")
+            if not uploaded:
+                messages.error(request, "请选择签名图片文件")
+            else:
+                try:
+                    raw, orig_name = read_uploaded_signature_file(uploaded)
+                    save_user_signature(
+                        target_user,
+                        raw,
+                        actor=request.user,
+                        original_filename=orig_name,
+                    )
+                    messages.success(request, "签名已保存")
+                except ValueError as exc:
+                    messages.error(request, str(exc))
+                except Exception:
+                    logger.exception("user signature upload failed user=%s", target_user.pk)
+                    messages.error(request, "签名保存失败，请稍后重试")
+        redirect_name = "user_signature_manage" if viewing_other else "signature_manage"
+        redirect_kwargs = {"user_id": target_user.pk} if viewing_other else {}
+        return redirect(reverse(redirect_name, kwargs=redirect_kwargs))
+
+    sig = get_active_user_signature(target_user)
+    signature_card = {
+        "signature": sig,
+        "image_url": sig.image.url if sig and sig.image else "",
+        "version": sig.version if sig else 0,
+        "updated_at": sig.updated_at if sig else None,
+    }
+
+    event_type = (request.GET.get("event_type") or "").strip()
+    try:
+        page_no = max(1, int(request.GET.get("page") or 1))
+    except (TypeError, ValueError):
+        page_no = 1
+    page_size = 30
+    offset = (page_no - 1) * page_size
+    events, event_total = list_signature_events(
+        target_user,
+        event_type=event_type,
+        limit=page_size,
+        offset=offset,
+    )
+    event_rows = [
+        {
+            "event": ev,
+            "summary": format_event_summary(ev),
+            "actor_display": (
+                (ev.actor.get_full_name() or ev.actor.username) if ev.actor_id else "—"
+            ),
+        }
+        for ev in events
+    ]
+    import math
+
+    event_pages = max(1, math.ceil(event_total / page_size))
+
+    context = {
+        "target_user": target_user,
+        "viewing_other": viewing_other,
+        "signature_card": signature_card,
+        "event_rows": event_rows,
+        "event_total": event_total,
+        "event_page": page_no,
+        "event_pages": event_pages,
+        "event_type": event_type,
+        "event_type_choices": UserSignatureEvent.EVENT_CHOICES,
+    }
+    return render(request, "core/signature_manage.html", context)
+
+
+@login_required
 def role_list(request):
     """角色列表视图"""
     r = _require_perm(request, "perm_manage_roles")
@@ -1886,6 +1984,20 @@ def library_projects(request):
                 )
             if new_name:
                 proj.name = new_name
+            from apps.core.project_numbering import validate_manual_project_code
+
+            new_code, code_err = validate_manual_project_code(
+                request.POST.get("project_code") or "",
+                exclude_pk=proj.pk,
+            )
+            if code_err:
+                messages.error(request, code_err)
+                return redirect(
+                    reverse("library_projects")
+                    + f"?project_id={pid}&tab={request.POST.get('tab', 'overview')}"
+                )
+            if new_code:
+                proj.code = new_code
             proj.commission_org = org
             proj.commission_organization = org.full_display_name
             proj.save()
@@ -1900,10 +2012,7 @@ def library_projects(request):
             )
 
         if action == "create_project":
-            if not (
-                library_user_can_assign_tasks_to_participants(request.user)
-                or role_has(request.user, "perm_create_library_project")
-            ):
+            if not library_user_may_create_library_project(request.user):
                 messages.error(request, "当前角色无权创建项目")
                 return redirect(reverse("library_projects"))
             org_id_raw = (request.POST.get("commission_org_id") or "").strip()
@@ -1925,34 +2034,55 @@ def library_projects(request):
             if not name:
                 messages.error(request, "项目名称不能为空")
                 return redirect(reverse("library_projects"))
-            try:
-                code = _gen_project_code()
-            except ValueError as exc:
-                messages.error(request, str(exc))
-                return redirect(reverse("library_projects"))
+            from apps.core.project_numbering import validate_manual_project_code
             from django.db import IntegrityError
 
+            manual_code, code_err = validate_manual_project_code(
+                request.POST.get("project_code") or ""
+            )
+            if code_err:
+                messages.error(request, code_err)
+                return redirect(reverse("library_projects"))
+
             row = None
-            for _attempt in range(4):
+            if manual_code:
                 try:
                     row = LibraryProject.objects.create(
-                        code=code,
+                        code=manual_code,
                         name=name,
                         commission_org=org,
                         commission_organization=org.full_display_name,
                         created_by=request.user,
                     )
-                    break
                 except IntegrityError:
-                    try:
-                        code = _gen_project_code()
-                    except ValueError as exc:
-                        messages.error(request, str(exc))
-                        return redirect(reverse("library_projects"))
-            if row is None:
-                messages.error(request, "委托编号生成冲突，请重试")
-                return redirect(reverse("library_projects"))
+                    messages.error(request, f"委托编号「{manual_code}」已被占用，请换一个编号")
+                    return redirect(reverse("library_projects"))
             else:
+                try:
+                    code = _gen_project_code()
+                except ValueError as exc:
+                    messages.error(request, str(exc))
+                    return redirect(reverse("library_projects"))
+                for _attempt in range(4):
+                    try:
+                        row = LibraryProject.objects.create(
+                            code=code,
+                            name=name,
+                            commission_org=org,
+                            commission_organization=org.full_display_name,
+                            created_by=request.user,
+                        )
+                        break
+                    except IntegrityError:
+                        try:
+                            code = _gen_project_code()
+                        except ValueError as exc:
+                            messages.error(request, str(exc))
+                            return redirect(reverse("library_projects"))
+                if row is None:
+                    messages.error(request, "委托编号生成冲突，请重试")
+                    return redirect(reverse("library_projects"))
+            if row is not None:
                 register_tour_project(request, row.pk)
                 task_ids = []
                 for x in request.POST.getlist("task_ids"):
@@ -3061,6 +3191,11 @@ def library_projects(request):
 
     can_assign_tasks = library_user_can_assign_tasks_to_participants(request.user)
     can_create_library_project = library_user_may_create_library_project(request.user)
+    suggested_project_code = ""
+    if can_create_library_project:
+        from apps.core.project_numbering import suggest_next_project_code
+
+        suggested_project_code = suggest_next_project_code()
     picker_org_for_create = explorer_org if explorer_project is None else None
     create_project_picker_initial = {
         "orgId": picker_org_for_create.pk if picker_org_for_create else None,
@@ -3244,6 +3379,7 @@ def library_projects(request):
             "project_commission_equipment_cards": project_commission_equipment_cards,
             "project_available_equipment_rows": project_available_equipment_rows,
             "can_create_library_project": can_create_library_project,
+            "suggested_project_code": suggested_project_code,
             "create_project_picker_initial": create_project_picker_initial,
             "create_wizard_config": create_wizard_config,
             "project_report_task_options": project_report_task_options,
@@ -3327,10 +3463,7 @@ def library_project_create_wizard_options(request):
     gx = _require_perm(request, "perm_file_library")
     if gx:
         return gx
-    if not (
-        library_user_can_assign_tasks_to_participants(request.user)
-        or role_has(request.user, "perm_create_library_project")
-    ):
+    if not library_user_may_create_library_project(request.user):
         return JsonResponse({"ok": False, "message": "无权创建项目"}, status=403)
     raw = (request.GET.get("org_id") or "").strip()
     try:
@@ -3490,6 +3623,33 @@ def commission_manage(request):
             else:
                 n, _ = LibraryTaskAssignment.objects.filter(project=project, assignee=assignee).delete()
                 messages.success(request, f"已撤回 {assignee.username} 在项目「{project.name}」上的 {n} 条分配")
+        elif action == "sign_and_advance_workflow":
+            from apps.core.commission_management_service import commission_accessible_project_ids
+            from apps.core.report_signature_service import apply_report_signature_and_advance
+
+            if project.pk not in commission_accessible_project_ids(request.user):
+                messages.error(request, "无权操作该委托")
+                return redirect(redir + tab_q)
+            task_no = (request.POST.get("task_no") or "").strip()
+            target_stage = (request.POST.get("target_stage") or "").strip()
+            sub = (
+                InspectionSubmission.objects.filter(project=project, task_no=task_no)
+                .select_related("case", "case__workflow_state")
+                .first()
+            )
+            if sub is None:
+                messages.error(request, "未找到对应检测提交")
+            else:
+                ok, msg = apply_report_signature_and_advance(
+                    user=request.user,
+                    project=project,
+                    submission=sub,
+                    target_stage=target_stage,
+                )
+                if ok:
+                    messages.success(request, msg)
+                else:
+                    messages.error(request, msg)
         elif action == "advance_workflow":
             from apps.core.commission_management_service import commission_accessible_project_ids
             from apps.core.commission_workflow_progress import apply_manual_workflow_advance
@@ -3507,16 +3667,24 @@ def commission_manage(request):
             if sub is None:
                 messages.error(request, "未找到对应检测提交")
             else:
-                ok, msg = apply_manual_workflow_advance(
-                    user=request.user,
-                    project=project,
-                    submission=sub,
-                    target_stage=target_stage,
-                )
-                if ok:
-                    messages.success(request, msg)
+                from apps.core.commission_workflow_progress import REPORT_SIGN_ADVANCE_TARGETS
+
+                if target_stage in REPORT_SIGN_ADVANCE_TARGETS:
+                    messages.error(
+                        request,
+                        "编制/审核/签发环节须使用「使用我的签名」按钮，系统会将签名叠印至报告后再推进",
+                    )
                 else:
-                    messages.error(request, msg)
+                    ok, msg = apply_manual_workflow_advance(
+                        user=request.user,
+                        project=project,
+                        submission=sub,
+                        target_stage=target_stage,
+                    )
+                    if ok:
+                        messages.success(request, msg)
+                    else:
+                        messages.error(request, msg)
         elif action == "deactivate_project":
             if not library_user_can_delete_library_project(request.user, project):
                 messages.error(request, "无权停用该项目")

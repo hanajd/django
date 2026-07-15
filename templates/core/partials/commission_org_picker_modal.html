@@ -22,6 +22,15 @@
 
                 <div class="px-5 py-4 space-y-4 overflow-y-auto flex-1 min-h-0">
                     <div>
+                        <label for="picker-project-code" class="block text-xs font-medium text-slate-600 mb-1">委托编号</label>
+                        <input type="text" name="project_code" id="picker-project-code" required
+                               value="{{ selected_project.code }}"
+                               inputmode="numeric" autocomplete="off" maxlength="12"
+                               class="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                               pattern="\d{4,12}">
+                        <p class="mt-1 text-[11px] text-slate-500">可手动修改（4～12 位数字）；须全局唯一。推荐 <span class="font-mono">260001</span> 格式。</p>
+                    </div>
+                    <div>
                         <label for="picker-project-name" class="block text-xs font-medium text-slate-600 mb-1">项目名称</label>
                         <input type="text" name="project_name" id="picker-project-name" required
                                value="{{ selected_project.name }}"
