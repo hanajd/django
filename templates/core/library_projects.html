@@ -50,6 +50,16 @@
                         {% if selected_project.primary_responsible %}
                         <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">主要负责人：{{ selected_project.primary_responsible.username }}</span>
                         {% endif %}
+                        <button type="button"
+                                data-biz-log-open
+                                data-biz-log-scope="project"
+                                data-biz-log-project="{{ selected_project.pk }}"
+                                data-biz-log-title="委托项目 · 操作日志"
+                                class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium text-slate-500 ring-1 ring-slate-200/90 hover:text-indigo-700 hover:ring-indigo-200 bg-white/80"
+                                title="查看本项目写库操作日志">
+                            <i class="ri-history-line text-xs"></i>
+                            日志
+                        </button>
                         {% if not selected_project.is_active %}
                         <span class="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">已停用</span>
                         {% endif %}
@@ -331,4 +341,5 @@
 })();
 </script>
 {% include "core/partials/library_explorer_dnd_include.html" %}
+{% include "core/partials/biz_operation_log_dialog.html" %}
 {% endblock %}

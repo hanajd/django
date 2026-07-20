@@ -2076,3 +2076,86 @@ class UserSignatureEvent(models.Model):
         if not (self.role or "").strip():
             return "—"
         return dict(SIGNATURE_USAGE_SLOT_CHOICES).get(self.role, self.role)
+
+
+class BizOperationLog(models.Model):
+    """医院信息 / 委托项目相关写库操作日志（增删改、派工等）。"""
+
+    SCOPE_HOSPITAL = "hospital"
+    SCOPE_PROJECT = "project"
+    SCOPE_CHOICES = [
+        (SCOPE_HOSPITAL, _("医院信息")),
+        (SCOPE_PROJECT, _("委托项目")),
+    ]
+
+    ACTION_CREATE = "create"
+    ACTION_UPDATE = "update"
+    ACTION_DELETE = "delete"
+    ACTION_DISPATCH = "dispatch"
+    ACTION_BIND = "bind"
+    ACTION_UNBIND = "unbind"
+    ACTION_OTHER = "other"
+    ACTION_CHOICES = [
+        (ACTION_CREATE, _("添加")),
+        (ACTION_UPDATE, _("编辑")),
+        (ACTION_DELETE, _("删除")),
+        (ACTION_DISPATCH, _("派工")),
+        (ACTION_BIND, _("绑定")),
+        (ACTION_UNBIND, _("解绑")),
+        (ACTION_OTHER, _("其他")),
+    ]
+
+    scope = models.CharField(max_length=16, choices=SCOPE_CHOICES, db_index=True, verbose_name=_("范围"))
+    action = models.CharField(max_length=16, choices=ACTION_CHOICES, db_index=True, verbose_name=_("操作类型"))
+    organization = models.ForeignKey(
+        "CommissionOrganization",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="biz_operation_logs",
+        verbose_name=_("关联机构"),
+    )
+    project = models.ForeignKey(
+        "LibraryProject",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="biz_operation_logs",
+        verbose_name=_("关联项目"),
+    )
+    entity_type = models.CharField(max_length=64, blank=True, default="", db_index=True, verbose_name=_("对象类型"))
+    entity_id = models.PositiveIntegerField(null=True, blank=True, verbose_name=_("对象 ID"))
+    summary = models.CharField(max_length=512, verbose_name=_("操作摘要"))
+    detail = models.JSONField(default=dict, blank=True, verbose_name=_("详情"))
+    actor = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="biz_operation_logs",
+        verbose_name=_("操作人"),
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name=_("操作时间"))
+
+    class Meta:
+        verbose_name = _("业务操作日志")
+        verbose_name_plural = verbose_name
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["scope", "-created_at"]),
+            models.Index(fields=["organization", "-created_at"]),
+            models.Index(fields=["project", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.scope}:{self.action} {self.summary[:40]}"
+
+    @property
+    def action_label(self) -> str:
+        return dict(self.ACTION_CHOICES).get(self.action, self.action)
+
+    @property
+    def actor_label(self) -> str:
+        if self.actor_id is None:
+            return "（已删除用户）"
+        return self.actor.get_username()

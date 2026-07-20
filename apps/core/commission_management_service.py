@@ -662,6 +662,7 @@ def build_commission_message_center(
                 for i in my_pending
                 if i.get("progress_updated_at")
             ]
+            first_act = (my_pending[0].get("advance_actions") or [None])[0]
             notices.append(
                 {
                     "kind": "my_workflow",
@@ -672,11 +673,16 @@ def build_commission_message_center(
                     "project_name": p.name,
                     "equipment_title": "",
                     "task_no": "",
+                    "stage_code": my_pending[0].get("stage_code") or "",
                     "stage_label": my_pending[0].get("stage_label") or "—",
                     "message": f"大委托 {p.code}：{len(my_pending)} 项待您处理",
                     "detail": sample or f"共 {eq_count} 台设备",
                     "updated_at": max(ts_list, default=p.updated_at),
                     "workbench_url": f"?project_id={p.pk}&tab=submissions",
+                    "advance_action": first_act if isinstance(first_act, dict) else None,
+                    "target_stage": (first_act or {}).get("target_stage", "")
+                    if isinstance(first_act, dict)
+                    else "",
                 }
             )
             continue
@@ -701,12 +707,14 @@ def build_commission_message_center(
                         "project_name": p.name,
                         "equipment_title": item.get("equipment_title") or "—",
                         "task_no": task_no,
+                        "stage_code": item.get("stage_code") or "",
                         "stage_label": item.get("stage_label") or "—",
                         "message": f"待您{act['label']}：{item.get('equipment_title') or task_no}",
                         "detail": f"{p.code} · task {task_no} · {item.get('stage_label') or '—'}",
                         "updated_at": item.get("progress_updated_at") or p.updated_at,
                         "workbench_url": f"?project_id={p.pk}&tab=submissions",
                         "advance_action": act,
+                        "target_stage": act.get("target_stage") or "",
                     }
                 )
                 continue
@@ -727,6 +735,7 @@ def build_commission_message_center(
                         "project_name": p.name,
                         "equipment_title": item.get("equipment_title") or "—",
                         "task_no": task_no,
+                        "stage_code": stage_code,
                         "stage_label": item.get("stage_label") or "—",
                         "message": f"进度更新：{item.get('equipment_title') or task_no}",
                         "detail": f"{p.code} · {item.get('stage_label') or '—'}",
@@ -743,6 +752,9 @@ def build_commission_message_center(
 
     notices.sort(key=_sort_key)
     items = notices[:max_items]
+    from apps.core.workflow_hub_service import enrich_commission_notices_with_hub_links
+
+    enrich_commission_notices_with_hub_links(items)
     return {
         "items": items,
         "my_workflow_count": sum(1 for n in notices if n.get("kind") == "my_workflow"),

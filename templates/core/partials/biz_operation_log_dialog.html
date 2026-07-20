@@ -1,0 +1,97 @@
+{# 医院信息 / 委托项目操作日志弹层；由 data-biz-log-open 按钮打开 #}
+<dialog id="biz-operation-log-dialog" class="rounded-2xl shadow-2xl border-0 p-0 w-full max-w-lg backdrop:bg-slate-900/40">
+    <div class="p-4 max-h-[min(80vh,32rem)] flex flex-col">
+        <div class="flex items-center justify-between gap-2 mb-3 shrink-0">
+            <div>
+                <h3 class="text-sm font-semibold text-slate-900" id="biz-log-title">操作日志</h3>
+                <p class="text-[10px] text-slate-500 mt-0.5">仅记录写库相关操作；默认最多保留约 5000 条 / 180 天</p>
+            </div>
+            <button type="button" id="biz-log-close" class="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100" title="关闭">
+                <i class="ri-close-line text-lg"></i>
+            </button>
+        </div>
+        <div id="biz-log-list" class="flex-1 overflow-y-auto space-y-2 text-sm min-h-[8rem]">
+            <p class="text-center text-slate-400 py-8 text-xs">加载中…</p>
+        </div>
+    </div>
+</dialog>
+<script>
+(function () {
+    var dlg = document.getElementById('biz-operation-log-dialog');
+    var listEl = document.getElementById('biz-log-list');
+    var titleEl = document.getElementById('biz-log-title');
+    var closeBtn = document.getElementById('biz-log-close');
+    if (!dlg || !listEl) return;
+    var apiUrl = "{% url 'biz_operation_logs_api' %}";
+
+    function esc(s) {
+        return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    }
+
+    function actionBadge(label, action) {
+        var cls = 'bg-slate-100 text-slate-700';
+        if (action === 'create' || action === 'bind') cls = 'bg-emerald-50 text-emerald-800';
+        else if (action === 'delete' || action === 'unbind') cls = 'bg-rose-50 text-rose-800';
+        else if (action === 'update') cls = 'bg-amber-50 text-amber-900';
+        else if (action === 'dispatch') cls = 'bg-indigo-50 text-indigo-800';
+        return '<span class="inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium ' + cls + '">' + esc(label) + '</span>';
+    }
+
+    function openLogs(scope, opts) {
+        opts = opts || {};
+        titleEl.textContent = opts.title || (scope === 'hospital' ? '医院信息 · 操作日志' : '委托项目 · 操作日志');
+        listEl.innerHTML = '<p class="text-center text-slate-400 py-8 text-xs">加载中…</p>';
+        dlg.showModal();
+        var q = 'scope=' + encodeURIComponent(scope);
+        if (opts.orgId) q += '&organization_id=' + encodeURIComponent(opts.orgId);
+        if (opts.projectId) q += '&project_id=' + encodeURIComponent(opts.projectId);
+        fetch(apiUrl + '?' + q, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.ok) {
+                    listEl.innerHTML = '<p class="text-center text-rose-600 py-6 text-xs">' + esc(data.message || '加载失败') + '</p>';
+                    return;
+                }
+                var rows = data.items || [];
+                if (!rows.length) {
+                    listEl.innerHTML = '<p class="text-center text-slate-400 py-8 text-xs">暂无写库操作记录</p>';
+                    return;
+                }
+                listEl.innerHTML = rows.map(function (row) {
+                    var meta = esc(row.created_at) + ' · ' + esc(row.actor);
+                    var sub = '';
+                    if (row.organization_label) sub += '<p class="text-[10px] text-slate-500 mt-0.5 truncate">' + esc(row.organization_label) + '</p>';
+                    if (row.project_label) sub += '<p class="text-[10px] text-slate-500 mt-0.5 truncate">' + esc(row.project_label) + '</p>';
+                    return '<div class="rounded-xl bg-slate-50/90 ring-1 ring-slate-200/70 px-3 py-2">' +
+                        '<div class="flex items-start justify-between gap-2">' +
+                        '<p class="text-xs text-slate-900 leading-snug flex-1 min-w-0">' + esc(row.summary) + '</p>' +
+                        actionBadge(row.action_label, row.action) +
+                        '</div>' +
+                        '<p class="text-[10px] text-slate-500 mt-1">' + meta + '</p>' + sub +
+                        '</div>';
+                }).join('');
+            })
+            .catch(function () {
+                listEl.innerHTML = '<p class="text-center text-rose-600 py-6 text-xs">网络错误，请稍后重试</p>';
+            });
+    }
+
+    if (closeBtn) closeBtn.addEventListener('click', function () { dlg.close(); });
+    dlg.addEventListener('click', function (e) {
+        if (e.target === dlg) dlg.close();
+    });
+
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-biz-log-open]');
+        if (!btn) return;
+        e.preventDefault();
+        openLogs(btn.getAttribute('data-biz-log-scope') || 'hospital', {
+            orgId: btn.getAttribute('data-biz-log-org') || '',
+            projectId: btn.getAttribute('data-biz-log-project') || '',
+            title: btn.getAttribute('data-biz-log-title') || ''
+        });
+    });
+
+    window.openBizOperationLogs = openLogs;
+})();
+</script>

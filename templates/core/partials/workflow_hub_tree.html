@@ -1,0 +1,202 @@
+{# 浏览模式切换 + 搜索 + 医院/时间 → 委托 → 设备 树 #}
+{% with vm=view_mode|default:'hospital' %}
+<div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+    <div class="px-4 py-3 border-b border-slate-100 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div class="inline-flex rounded-xl bg-slate-100 p-1 text-sm">
+            <a href="?view=hospital{% if project_search %}&q={{ project_search|urlencode }}{% endif %}{% if tab %}&tab={{ tab }}{% endif %}"
+               class="rounded-lg px-3 py-1.5 font-medium {% if vm == 'hospital' %}bg-white text-slate-900 shadow-sm{% else %}text-slate-600 hover:text-slate-900{% endif %}">按医院</a>
+            <a href="?view=time{% if project_search %}&q={{ project_search|urlencode }}{% endif %}{% if tab %}&tab={{ tab }}{% endif %}"
+               class="rounded-lg px-3 py-1.5 font-medium {% if vm == 'time' %}bg-white text-slate-900 shadow-sm{% else %}text-slate-600 hover:text-slate-900{% endif %}">按时间</a>
+        </div>
+        <form method="get" class="flex gap-2 w-full lg:w-auto">
+            <input type="hidden" name="view" value="{{ vm }}">
+            {% if tab %}<input type="hidden" name="tab" value="{{ tab }}">{% endif %}
+            <input type="search" name="q" value="{{ project_search|default:'' }}" placeholder="搜索医院 / 委托 / 设备"
+                   class="w-full lg:w-72 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100">
+            <button type="submit" class="shrink-0 rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800">搜索</button>
+            {% if project_search %}
+            <a href="?view={{ vm }}{% if tab %}&tab={{ tab }}{% endif %}" class="shrink-0 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50">清除</a>
+            {% endif %}
+        </form>
+    </div>
+
+    {% if not has_tree %}
+    <div class="px-5 py-14 text-center text-sm text-slate-400">
+        {% if project_search %}未找到匹配结果，试试其他关键词{% else %}暂无可见内容{% endif %}
+    </div>
+    {% else %}
+    <ul class="hub-tree divide-y divide-slate-100">
+        {% for group in tree_groups %}
+        <li>
+            <details class="hub-tree-details" {% if group.open %}open{% endif %}>
+                <summary class="hub-tree-summary hub-tree-row hub-tree-l1">
+                    <i class="hub-tree-chevron ri-arrow-right-s-line" aria-hidden="true"></i>
+                    <div class="min-w-0 flex-1">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="text-sm font-semibold text-slate-900">{{ group.title }}</span>
+                            {% if group.attention %}
+                            <span class="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-800">{{ group.badge_label }}</span>
+                            {% else %}
+                            <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">{{ group.badge_label }}</span>
+                            {% endif %}
+                        </div>
+                        <p class="text-xs text-slate-500 mt-0.5">{{ group.commissions|length }} 个委托</p>
+                    </div>
+                </summary>
+                <ul class="hub-tree-children hub-tree-l2-wrap">
+                    {% for c in group.commissions %}
+                    <li>
+                        <details class="hub-tree-details" {% if c.open %}open{% endif %}>
+                            <summary class="hub-tree-summary hub-tree-row hub-tree-l2">
+                                <i class="hub-tree-chevron ri-arrow-right-s-line" aria-hidden="true"></i>
+                                <div class="min-w-0 flex-1">
+                                    <p class="text-sm font-medium text-slate-900">
+                                        <span class="font-semibold">{{ c.code }}</span>
+                                        <span class="text-slate-500 font-normal"> · {{ c.name }}</span>
+                                    </p>
+                                    <p class="text-xs {% if c.attention %}text-indigo-700 font-medium{% else %}text-slate-500{% endif %} mt-0.5">{{ c.badge_label }}</p>
+                                </div>
+                            </summary>
+                            <ul class="hub-tree-children hub-tree-l3-wrap">
+                                {% for eq in c.equipments %}
+                                <li>
+                                    <details class="hub-tree-details hub-tree-equip" {% if eq.open %}open{% endif %}>
+                                        <summary class="hub-tree-summary hub-tree-row hub-tree-l3">
+                                            <i class="hub-tree-chevron ri-arrow-right-s-line" aria-hidden="true"></i>
+                                            <span class="text-sm font-medium text-slate-800 truncate">{{ eq.equipment_title }}</span>
+                                            <span class="ml-auto text-[11px] text-slate-400 tabular-nums">
+                                                {{ eq.leaves|length }}{% if eq.history_count %}<span class="text-slate-300"> · 历史 {{ eq.history_count }}</span>{% endif %}
+                                            </span>
+                                        </summary>
+                                        <div class="hub-tree-leaves">
+                                            {% for leaf in eq.leaves %}
+                                            {% include "core/partials/workflow_hub_tree_leaf.html" with leaf=leaf project_id=c.project_id %}
+                                            {% empty %}
+                                            {% if not eq.history_count %}
+                                            <p class="px-3 py-3 text-xs text-slate-400">暂无条目</p>
+                                            {% endif %}
+                                            {% endfor %}
+                                            {% if eq.history_count %}
+                                            <details class="hub-tree-history">
+                                                <summary class="hub-tree-history-summary">
+                                                    <i class="ri-history-line" aria-hidden="true"></i>
+                                                    历史记录
+                                                    <span class="tabular-nums text-slate-400">{{ eq.history_count }}</span>
+                                                </summary>
+                                                <div class="hub-tree-history-list">
+                                                    {% for leaf in eq.history_leaves %}
+                                                    {% include "core/partials/workflow_hub_tree_leaf.html" with leaf=leaf project_id=c.project_id %}
+                                                    {% endfor %}
+                                                </div>
+                                            </details>
+                                            {% endif %}
+                                        </div>
+                                    </details>
+                                </li>
+                                {% empty %}
+                                <li class="px-3 py-3 text-xs text-slate-400">该委托下暂无条目</li>
+                                {% endfor %}
+                            </ul>
+                        </details>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </details>
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</div>
+<style>
+.hub-tree-summary {
+    list-style: none;
+    cursor: pointer;
+}
+.hub-tree-summary::-webkit-details-marker { display: none; }
+.hub-tree-row {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+}
+.hub-tree-chevron {
+    flex-shrink: 0;
+    color: #94a3b8;
+    font-size: 1.125rem;
+    line-height: 1;
+    transition: transform 0.15s ease;
+}
+.hub-tree-details[open] > .hub-tree-summary > .hub-tree-chevron {
+    transform: rotate(90deg);
+    color: #64748b;
+}
+.hub-tree-l1 {
+    padding: 0.875rem 1rem;
+}
+.hub-tree-l1:hover { background: rgba(248, 250, 252, 0.9); }
+.hub-tree-l2-wrap {
+    margin: 0;
+    padding: 0 0 0.35rem 0;
+    list-style: none;
+    background: #f8fafc;
+    border-top: 1px solid #f1f5f9;
+}
+.hub-tree-l2 {
+    padding: 0.75rem 1rem 0.75rem 2.25rem;
+    border-bottom: 1px solid #f1f5f9;
+}
+.hub-tree-l2:hover { background: rgba(255, 255, 255, 0.7); }
+.hub-tree-l3-wrap {
+    margin: 0;
+    padding: 0.35rem 0.75rem 0.75rem 2.75rem;
+    list-style: none;
+    background: #f1f5f9;
+}
+.hub-tree-equip {
+    margin-bottom: 0.4rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.75rem;
+    background: #fff;
+    overflow: hidden;
+}
+.hub-tree-equip:last-child { margin-bottom: 0; }
+.hub-tree-l3 {
+    padding: 0.625rem 0.75rem;
+}
+.hub-tree-l3:hover { background: #f8fafc; }
+.hub-tree-leaves {
+    border-top: 1px solid #f1f5f9;
+    background: #fff;
+}
+.hub-tree-leaves > div {
+    padding-left: 2rem;
+}
+.hub-tree-history {
+    border-top: 1px solid #f1f5f9;
+}
+.hub-tree-history-summary {
+    list-style: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.55rem 0.75rem 0.55rem 2rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #64748b;
+    background: #f8fafc;
+}
+.hub-tree-history-summary::-webkit-details-marker { display: none; }
+.hub-tree-history-summary:hover {
+    color: #334155;
+    background: #f1f5f9;
+}
+.hub-tree-history-list {
+    background: #fafafa;
+    border-top: 1px solid #f1f5f9;
+}
+.hub-tree-history-list > div {
+    padding-left: 2rem;
+    opacity: 0.92;
+}
+</style>
+{% endwith %}

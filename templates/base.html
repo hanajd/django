@@ -108,16 +108,10 @@
                         <i class="ri-folder-2-line text-lg"></i>
                         <span>文件库管理</span>
                     </a>
-                    {% if ui_sidebar_show_project_management %}
-                    <a id="sidebar-link-project-workbench" href="{% url 'library_projects' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
-                        <i class="ri-layout-grid-line text-lg"></i>
-                        <span>项目工作台</span>
-                    </a>
-                    {% endif %}
-                    {% if ui_sidebar_show_commission_manage %}
-                    <a id="sidebar-link-commission-manage" href="{% url 'commission_manage' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
-                        <i class="ri-clipboard-line text-lg"></i>
-                        <span>委托管理</span>
+                    {% if can_access_instrument_database %}
+                    <a id="sidebar-link-instrument-database" href="{% url 'database_device_list' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
+                        <i class="ri-flask-line text-lg"></i>
+                        <span>检测仪器台账</span>
                     </a>
                     {% endif %}
                     {% if show_hospital_info_nav %}
@@ -126,12 +120,39 @@
                         <span>医院信息管理</span>
                     </a>
                     {% endif %}
-                    {% if can_access_instrument_database %}
-                    <a id="sidebar-link-instrument-database" href="{% url 'database_device_list' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
-                        <i class="ri-flask-line text-lg"></i>
-                        <span>检测仪器台账</span>
+                    {% if ui_sidebar_show_commission_manage %}
+                    <a id="sidebar-link-commission-manage" href="{% url 'commission_manage' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
+                        <i class="ri-clipboard-line text-lg"></i>
+                        <span>委托管理</span>
                     </a>
                     {% endif %}
+                    {% if ui_sidebar_show_project_management %}
+                    <a id="sidebar-link-project-workbench" href="{% url 'library_projects' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
+                        <i class="ri-layout-grid-line text-lg"></i>
+                        <span>项目工作台</span>
+                    </a>
+                    {% elif role_perm.perm_file_library and not show_library_task_nav %}
+                    <a id="sidebar-link-project-workbench" href="{% url 'library_projects' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
+                        <i class="ri-layout-grid-line text-lg"></i>
+                        <span>项目工作台</span>
+                    </a>
+                    {% endif %}
+                    <a id="sidebar-link-site-records-hub" href="{% url 'workflow_hub_site_records' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
+                        <i class="ri-file-list-3-line text-lg"></i>
+                        <span>原始记录查看</span>
+                    </a>
+                    <a id="sidebar-link-report-generate-hub" href="{% url 'workflow_hub_report_generate' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
+                        <i class="ri-draft-line text-lg"></i>
+                        <span>报告生成及预览</span>
+                    </a>
+                    <a id="sidebar-link-review-sign-hub" href="{% url 'workflow_hub_review_sign' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
+                        <i class="ri-shield-check-line text-lg"></i>
+                        <span>审核签发</span>
+                    </a>
+                    <a id="sidebar-link-report-download-hub" href="{% url 'workflow_hub_report_download' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
+                        <i class="ri-download-2-line text-lg"></i>
+                        <span>报告导出及下载</span>
+                    </a>
                     {% if ui_sidebar_show_user_management %}
                     <a id="sidebar-link-user-management" href="{% url 'user_list' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
                         <i class="ri-team-line text-lg"></i>
@@ -142,11 +163,6 @@
                     <a id="sidebar-link-task-templates" href="{% url 'library_task_management' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
                         <i class="ri-stack-line text-lg"></i>
                         <span>任务模板库</span>
-                    </a>
-                    {% elif role_perm.perm_file_library and not ui_sidebar_show_project_management %}
-                    <a id="sidebar-link-project-workbench" href="{% url 'library_projects' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
-                        <i class="ri-layout-grid-line text-lg"></i>
-                        <span>项目工作台</span>
                     </a>
                     {% endif %}
                     {% if not hide_process_pipeline %}

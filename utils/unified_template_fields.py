@@ -31,7 +31,7 @@ def pdf_field_reading_order_key(field: Dict[str, Any]) -> tuple:
 
 
 def reindex_pdf_field_ids_by_list_order(fields: List[Any]) -> List[Dict[str, Any]]:
-    """按模板/编辑器 fields 数组顺序赋 f1..fN，与 HTMLPDF 侧栏、画板角标一致（不按坐标排序）。
+    """按列表顺序压成连续 f1..fN（显式整理编号时用；日常导入/保存不再调用）。
 
     若 f 号发生变化，会同步 remap 各栏 ``fieldExpression`` / 条件公式 / 判定中的 f 引用。
     """
@@ -60,14 +60,37 @@ def reindex_pdf_field_ids_by_reading_order(fields: List[Any]) -> List[Dict[str, 
     return reindex_pdf_field_ids_by_list_order(fields)
 
 
+def _pdf_field_num(pid: str) -> int | None:
+    raw = str(pid or "").strip().lower()
+    if not _PDF_ID.match(raw):
+        return None
+    try:
+        return int(raw[1:])
+    except (TypeError, ValueError):
+        return None
+
+
+def allocate_next_pdf_field_id(used: set[int]) -> str:
+    """先补 1…max 内最小空缺，再取 max+1。"""
+    n = 1
+    while n in used:
+        n += 1
+    used.add(n)
+    return f"f{n}"
+
+
 def materialize_unified_pdf_fields(
     fields: List[Any],
     *,
-    reindex_pdf_field_ids: bool = True,
+    reindex_pdf_field_ids: bool = False,
 ) -> List[Dict[str, Any]]:
-    """Expand ``rect`` shorthands and apply safe defaults. Idempotent for full rows."""
+    """Expand ``rect`` shorthands and apply safe defaults. Idempotent for full rows.
+
+    默认保留已有 ``pdfFieldId``（不按列表重排）；仅对缺失/非法编号按空缺补号。
+    传入 ``reindex_pdf_field_ids=True`` 时可强制压成连续 f1…fN。
+    """
     out: List[Dict[str, Any]] = []
-    for idx, raw in enumerate(fields or []):
+    for raw in fields or []:
         if not isinstance(raw, dict):
             continue
         f: Dict[str, Any] = dict(raw)
@@ -109,14 +132,26 @@ def materialize_unified_pdf_fields(
             f.setdefault("placeholder", fid)
             f.setdefault("title", str(f.get("placeholder") or fid).strip() or fid)
 
-        pid = str(f.get("pdfFieldId") or "").strip()
-        if not _PDF_ID.match(pid):
-            iid = str(f.get("id") or "").strip()
-            if _PDF_ID.match(iid):
-                f["pdfFieldId"] = iid
-            else:
-                f["pdfFieldId"] = f"f{idx + 1}"
         out.append(f)
+
+    used: set[int] = set()
+    for f in out:
+        for key in ("pdfFieldId", "id"):
+            num = _pdf_field_num(str(f.get(key) or ""))
+            if num is not None:
+                used.add(num)
+
+    for f in out:
+        pid = str(f.get("pdfFieldId") or "").strip()
+        if _PDF_ID.match(pid):
+            f["pdfFieldId"] = pid.lower()
+            continue
+        iid = str(f.get("id") or "").strip()
+        if _PDF_ID.match(iid):
+            f["pdfFieldId"] = iid.lower()
+            continue
+        f["pdfFieldId"] = allocate_next_pdf_field_id(used)
+
     if reindex_pdf_field_ids:
         return reindex_pdf_field_ids_by_list_order(out)
     return out
@@ -124,7 +159,10 @@ def materialize_unified_pdf_fields(
 
 def compact_unified_pdf_fields_for_storage(fields: List[Any]) -> List[Dict[str, Any]]:
     """Write minimal ``pdf.fields`` rows (``rect`` + omitted defaults) for library template JSON."""
-    materialized = materialize_unified_pdf_fields([f for f in fields or [] if isinstance(f, dict)])
+    materialized = materialize_unified_pdf_fields(
+        [f for f in fields or [] if isinstance(f, dict)],
+        reindex_pdf_field_ids=False,
+    )
     return [_field_dict_to_compact_row(m) for m in materialized]
 
 
@@ -313,6 +351,8 @@ def _field_dict_to_compact_row(mf: Dict[str, Any]) -> Dict[str, Any]:
         rules = mf.get("fieldExpressionRules")
     if isinstance(rules, list) and rules:
         out["formulaRules"] = rules
+    if mf.get("fieldFormulaUserOverride") is True:
+        out["fieldFormulaUserOverride"] = True
     jct = mf.get("judgmentCriteriaByTestType")
     if isinstance(jct, dict) and jct:
         out["judgmentCriteriaByTestType"] = jct

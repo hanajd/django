@@ -63,16 +63,14 @@ def _binding_is_dual_capable(binding: dict) -> bool:
 
 
 def _rp_chapter_from_frontend(frontend_obj: dict) -> dict | None:
-    chapter = frontend_obj.get("radiationProtectionChapter")
-    if isinstance(chapter, dict):
-        return chapter
     for key in ("formSchema", "form_schema"):
         container = frontend_obj.get(key)
         if isinstance(container, dict):
             nested = container.get("radiationProtectionChapter")
             if isinstance(nested, dict):
                 return nested
-    return None
+    chapter = frontend_obj.get("radiationProtectionChapter")
+    return chapter if isinstance(chapter, dict) else None
 
 
 def _rp_bindings_indicate_dual_group(bindings: list[dict], frontend_obj: dict) -> bool:

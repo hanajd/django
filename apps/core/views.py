@@ -117,6 +117,7 @@ from apps.core.library_access import (
     role_has_htmlpdf,
     role_permission_groups_for_edit,
 )
+from apps.core.biz_operation_log import record_biz_operation
 from apps.core.usage_workflow_tour import (
     register_tour_library_file,
     register_tour_project,
@@ -250,6 +251,7 @@ from apps.core.hospital_info_service import (
     upsert_org_contact,
 )
 from apps.core.models import (
+    BizOperationLog,
     CommissionOrgContact,
     CommissionOrgEquipment,
     CommissionOrganization,
@@ -406,8 +408,11 @@ def _sync_radiation_protection_chapter_state(
     )
     if isinstance(existing, dict) and isinstance(existing.get("reportValueRules"), list):
         chapter["reportValueRules"] = existing.get("reportValueRules")
+    if isinstance(existing, dict) and isinstance(existing.get("annualDoseRules"), list):
+        chapter["annualDoseRules"] = existing.get("annualDoseRules")
     try:
         from radiation_detection_report.chapter5_field_sync import (
+            apply_annual_dose_formulas_to_pdf_fields,
             apply_background_formulas_to_pdf_fields,
             apply_mean_formulas_to_pdf_fields,
             apply_report_formulas_to_pdf_fields,
@@ -415,6 +420,7 @@ def _sync_radiation_protection_chapter_state(
 
         apply_mean_formulas_to_pdf_fields(normalized_fields, chapter=chapter)
         apply_report_formulas_to_pdf_fields(normalized_fields, chapter=chapter)
+        apply_annual_dose_formulas_to_pdf_fields(normalized_fields, chapter=chapter)
         apply_background_formulas_to_pdf_fields(normalized_fields, chapter=chapter)
     except Exception:
         pass
@@ -427,16 +433,19 @@ def _sync_radiation_protection_chapter_state(
 
 
 def _merge_form_schema_extras(payload: dict, extras: dict) -> dict:
-    """Write schema extensions both to root runtime JSON and unified formSchema."""
+    """Write schema extensions only into ``formSchema`` (avoid root/formSchema dual copy)."""
     if not isinstance(payload, dict) or not isinstance(extras, dict) or not extras:
         return payload
     form_schema = payload.get("formSchema") if isinstance(payload.get("formSchema"), dict) else None
+    if form_schema is None:
+        form_schema = {}
+        payload["formSchema"] = form_schema
     for key, val in extras.items():
         if val in (None, "", [], {}):
             continue
-        payload[key] = val
-        if form_schema is not None:
-            form_schema[key] = val
+        form_schema[key] = val
+        # 历史双写：根级同名键删除，只保留 formSchema 一处
+        payload.pop(key, None)
     return payload
 
 
@@ -2109,6 +2118,16 @@ def library_projects(request):
                     request,
                     f"已创建项目：{row.commission_organization} · {row.name}（{row.code}）",
                 )
+                record_biz_operation(
+                    actor=request.user,
+                    scope=BizOperationLog.SCOPE_PROJECT,
+                    action=BizOperationLog.ACTION_CREATE,
+                    summary=f"创建委托项目：{row.name}（{row.code}）",
+                    organization=row.commission_org,
+                    project=row,
+                    entity_type="library_project",
+                    entity_id=row.pk,
+                )
                 fl = f"{row.commission_org.folder_path()}/p-{row.pk}"
                 next_tab = "commission"
                 raw_eq_ids = []
@@ -2236,6 +2255,16 @@ def library_projects(request):
                     )
                     if added:
                         messages.success(request, f"已向本次委托加入 {added} 台设备，相关任务模板已同步到项目")
+                        record_biz_operation(
+                            actor=request.user,
+                            scope=BizOperationLog.SCOPE_PROJECT,
+                            action=BizOperationLog.ACTION_BIND,
+                            summary=f"委托立项：加入 {added} 台设备",
+                            organization=proj.commission_org,
+                            project=proj,
+                            entity_type="library_project_equipment",
+                            detail={"added": added},
+                        )
                     for e in errs:
                         messages.warning(request, e)
                     if not added and not errs:
@@ -2278,6 +2307,16 @@ def library_projects(request):
                     messages.error(request, err)
                 else:
                     messages.success(request, "已从本次委托中移除该设备")
+                    record_biz_operation(
+                        actor=request.user,
+                        scope=BizOperationLog.SCOPE_PROJECT,
+                        action=BizOperationLog.ACTION_UNBIND,
+                        summary="委托立项：移除设备",
+                        organization=proj.commission_org,
+                        project=proj,
+                        entity_type="library_project_equipment",
+                        entity_id=link_id or None,
+                    )
             else:
                 try:
                     link_id = int(request.POST.get("link_id", "") or 0)
@@ -2558,6 +2597,16 @@ def library_projects(request):
                                 request,
                                 f"已向 {assignee.username} 分配项目「{project.name}」下 {created_count} 个任务模板，"
                                 f"并同步 {file_n} 个模板文件到项目。",
+                            )
+                            record_biz_operation(
+                                actor=request.user,
+                                scope=BizOperationLog.SCOPE_PROJECT,
+                                action=BizOperationLog.ACTION_DISPATCH,
+                                summary=f"派工：向 {assignee.username} 分配 {created_count} 个任务",
+                                organization=project.commission_org,
+                                project=project,
+                                entity_type="library_task_assignment",
+                                detail={"assignee_id": assignee.pk, "created_count": created_count},
                             )
                         else:
                             messages.info(
@@ -2840,6 +2889,16 @@ def library_projects(request):
                             if synced:
                                 msg += f"，已自动同步 {synced} 条 App 任务"
                             messages.success(request, msg)
+                            record_biz_operation(
+                                actor=request.user,
+                                scope=BizOperationLog.SCOPE_PROJECT,
+                                action=BizOperationLog.ACTION_DISPATCH,
+                                summary=f"派工：登记 {u.username} → {role_label}",
+                                organization=proj.commission_org,
+                                project=proj,
+                                entity_type="workflow_member",
+                                detail={"user_id": u.pk, "workflow_role": wf_role},
+                            )
                         else:
                             messages.info(request, f"{u.username} 已在该岗位登记，无需重复添加")
             else:
@@ -2859,6 +2918,15 @@ def library_projects(request):
                     ).delete()
                     row.delete()
                     messages.success(request, f"已移除 {uname} 的岗位登记并撤回其 App 任务")
+                    record_biz_operation(
+                        actor=request.user,
+                        scope=BizOperationLog.SCOPE_PROJECT,
+                        action=BizOperationLog.ACTION_UNBIND,
+                        summary=f"派工：移除 {uname} 的岗位登记",
+                        organization=proj.commission_org,
+                        project=proj,
+                        entity_type="workflow_member",
+                    )
             redir_role = (request.POST.get("workflow_role") or "").strip()
             redir_q = f"?project_id={proj.pk}&tab=dispatch"
             if redir_role:
@@ -2891,6 +2959,15 @@ def library_projects(request):
                 )
                 return redirect(reverse("library_projects") + f"?project_id={proj.pk}")
             messages.success(request, f"已删除项目：{label}")
+            record_biz_operation(
+                actor=request.user,
+                scope=BizOperationLog.SCOPE_PROJECT,
+                action=BizOperationLog.ACTION_DELETE,
+                summary=f"删除委托项目：{label}",
+                project=None,
+                entity_type="library_project",
+                detail={"project_label": label},
+            )
             return redirect(reverse("library_projects"))
 
     all_library_tasks = LibraryTask.objects.order_by("code")
@@ -3486,6 +3563,274 @@ def library_project_create_wizard_options(request):
             "equipment_rows": [eq for folder in folders for eq in folder.get("equipments", [])],
         }
     )
+
+
+@login_required
+def workflow_hub_site_records(request):
+    """原始记录查看：按医院/时间 → 委托 → 设备浏览现场记录。"""
+    from apps.core.workflow_hub_service import (
+        VIEW_HOSPITAL,
+        build_hub_query,
+        build_site_record_hub,
+        workflow_hub_nav_allowed,
+    )
+
+    gx = _require_perm(request, "perm_file_library")
+    if gx:
+        return gx
+    if not workflow_hub_nav_allowed(request.user):
+        messages.error(request, "无权访问原始记录查看")
+        return redirect(reverse("dashboard"))
+    try:
+        project_id = int((request.GET.get("project_id") or "").strip() or 0)
+    except ValueError:
+        project_id = 0
+    task_no = (request.GET.get("task_no") or "").strip()
+    search = (request.GET.get("q") or "").strip()
+    view = (request.GET.get("view") or VIEW_HOSPITAL).strip()
+    hub = build_site_record_hub(
+        request.user, project_id=project_id, task_no=task_no, search=search, view=view
+    )
+    return render(
+        request,
+        "core/workflow_hub_site_records.html",
+        {
+            **hub,
+            "hub_filter_q": build_hub_query(
+                project_id=project_id, task_no=task_no, view=hub.get("view_mode") or view
+            ),
+        },
+    )
+
+
+@login_required
+def workflow_hub_report_generate(request):
+    """报告生成及预览：编制 / 预览分 Tab，签名推进。"""
+    from apps.core.workflow_hub_service import (
+        VIEW_HOSPITAL,
+        build_hub_query,
+        build_report_generate_hub,
+        workflow_hub_nav_allowed,
+    )
+
+    gx = _require_perm(request, "perm_file_library")
+    if gx:
+        return gx
+    if not workflow_hub_nav_allowed(request.user):
+        messages.error(request, "无权访问报告生成及预览")
+        return redirect(reverse("dashboard"))
+
+    redir_name = "workflow_hub_report_generate"
+    if request.method == "POST":
+        _workflow_hub_handle_advance_post(request, redirect_name=redir_name)
+        try:
+            filter_pid = int((request.POST.get("filter_project_id") or request.GET.get("project_id") or 0) or 0)
+        except ValueError:
+            filter_pid = 0
+        filter_task = (request.POST.get("filter_task_no") or request.GET.get("task_no") or "").strip()
+        tab = (request.POST.get("filter_tab") or request.GET.get("tab") or "generate").strip()
+        view = (request.POST.get("filter_view") or request.GET.get("view") or VIEW_HOSPITAL).strip()
+        return redirect(
+            reverse(redir_name)
+            + build_hub_query(project_id=filter_pid, task_no=filter_task, tab=tab, view=view)
+        )
+
+    try:
+        project_id = int((request.GET.get("project_id") or "").strip() or 0)
+    except ValueError:
+        project_id = 0
+    task_no = (request.GET.get("task_no") or "").strip()
+    tab = (request.GET.get("tab") or "").strip()
+    search = (request.GET.get("q") or "").strip()
+    view = (request.GET.get("view") or VIEW_HOSPITAL).strip()
+    hub = build_report_generate_hub(
+        request.user,
+        project_id=project_id,
+        task_no=task_no,
+        tab=tab,
+        search=search,
+        view=view,
+    )
+    return render(
+        request,
+        "core/workflow_hub_report_generate.html",
+        {
+            **hub,
+            "hub_filter_q": build_hub_query(
+                project_id=project_id,
+                task_no=task_no,
+                tab=hub.get("tab") or tab,
+                view=hub.get("view_mode") or view,
+            ),
+        },
+    )
+
+
+@login_required
+def workflow_hub_review_sign(request):
+    """审核签发：待审核 / 待签发树，本页签名推进。"""
+    from apps.core.workflow_hub_service import (
+        VIEW_HOSPITAL,
+        build_hub_query,
+        build_review_sign_hub,
+        workflow_hub_nav_allowed,
+    )
+
+    gx = _require_perm(request, "perm_file_library")
+    if gx:
+        return gx
+    if not workflow_hub_nav_allowed(request.user):
+        messages.error(request, "无权访问审核签发")
+        return redirect(reverse("dashboard"))
+
+    redir_name = "workflow_hub_review_sign"
+    if request.method == "POST":
+        _workflow_hub_handle_advance_post(request, redirect_name=redir_name)
+        try:
+            filter_pid = int((request.POST.get("filter_project_id") or request.GET.get("project_id") or 0) or 0)
+        except ValueError:
+            filter_pid = 0
+        filter_task = (request.POST.get("filter_task_no") or request.GET.get("task_no") or "").strip()
+        tab = (request.POST.get("filter_tab") or request.GET.get("tab") or "").strip()
+        view = (request.POST.get("filter_view") or request.GET.get("view") or VIEW_HOSPITAL).strip()
+        return redirect(
+            reverse(redir_name)
+            + build_hub_query(project_id=filter_pid, task_no=filter_task, tab=tab, view=view)
+        )
+
+    try:
+        project_id = int((request.GET.get("project_id") or "").strip() or 0)
+    except ValueError:
+        project_id = 0
+    task_no = (request.GET.get("task_no") or "").strip()
+    tab = (request.GET.get("tab") or "").strip()
+    search = (request.GET.get("q") or "").strip()
+    view = (request.GET.get("view") or VIEW_HOSPITAL).strip()
+    hub = build_review_sign_hub(
+        request.user,
+        project_id=project_id,
+        task_no=task_no,
+        tab=tab,
+        search=search,
+        view=view,
+    )
+    return render(
+        request,
+        "core/workflow_hub_review_sign.html",
+        {
+            **hub,
+            "hub_filter_q": build_hub_query(
+                project_id=project_id,
+                task_no=task_no,
+                tab=hub.get("tab") or "",
+                view=hub.get("view_mode") or view,
+            ),
+        },
+    )
+
+
+@login_required
+def workflow_hub_report_download(request):
+    """报告导出及下载：按医院/时间浏览报告。"""
+    from apps.core.workflow_hub_service import (
+        VIEW_HOSPITAL,
+        build_hub_query,
+        build_report_download_hub,
+        workflow_hub_nav_allowed,
+    )
+
+    gx = _require_perm(request, "perm_file_library")
+    if gx:
+        return gx
+    if not workflow_hub_nav_allowed(request.user):
+        messages.error(request, "无权访问报告导出及下载")
+        return redirect(reverse("dashboard"))
+    try:
+        project_id = int((request.GET.get("project_id") or "").strip() or 0)
+    except ValueError:
+        project_id = 0
+    task_no = (request.GET.get("task_no") or "").strip()
+    search = (request.GET.get("q") or "").strip()
+    view = (request.GET.get("view") or VIEW_HOSPITAL).strip()
+    hub = build_report_download_hub(
+        request.user, project_id=project_id, task_no=task_no, search=search, view=view
+    )
+    return render(
+        request,
+        "core/workflow_hub_report_download.html",
+        {
+            **hub,
+            "hub_filter_q": build_hub_query(
+                project_id=project_id, task_no=task_no, view=hub.get("view_mode") or view
+            ),
+        },
+    )
+
+
+
+def _workflow_hub_handle_advance_post(request, *, redirect_name: str) -> None:
+    """枢纽页推进：复用委托管理同一套签名/手动推进服务。"""
+    from apps.core.commission_management_service import commission_accessible_project_ids
+    from apps.core.commission_workflow_progress import (
+        REPORT_SIGN_ADVANCE_TARGETS,
+        apply_manual_workflow_advance,
+    )
+    from apps.core.report_signature_service import apply_report_signature_and_advance
+
+    action = (request.POST.get("action") or "").strip()
+    try:
+        project_id = int(request.POST.get("project_id", "") or 0)
+    except ValueError:
+        project_id = 0
+    project = (
+        LibraryProject.objects.filter(pk=project_id, is_active=True).first() if project_id else None
+    )
+    if project is None:
+        messages.error(request, "项目无效")
+        return
+    if project.pk not in commission_accessible_project_ids(request.user):
+        messages.error(request, "无权操作该委托")
+        return
+    task_no = (request.POST.get("task_no") or "").strip()
+    target_stage = (request.POST.get("target_stage") or "").strip()
+    sub = (
+        InspectionSubmission.objects.filter(project=project, task_no=task_no)
+        .select_related("case", "case__workflow_state")
+        .first()
+    )
+    if sub is None:
+        messages.error(request, "未找到对应检测提交")
+        return
+    if action == "sign_and_advance_workflow":
+        ok, msg = apply_report_signature_and_advance(
+            user=request.user,
+            project=project,
+            submission=sub,
+            target_stage=target_stage,
+        )
+        if ok:
+            messages.success(request, msg)
+        else:
+            messages.error(request, msg)
+    elif action == "advance_workflow":
+        if target_stage in REPORT_SIGN_ADVANCE_TARGETS:
+            messages.error(
+                request,
+                "编制/审核/签发环节须使用「使用我的签名」按钮，系统会将签名叠印至报告后再推进",
+            )
+        else:
+            ok, msg = apply_manual_workflow_advance(
+                user=request.user,
+                project=project,
+                submission=sub,
+                target_stage=target_stage,
+            )
+            if ok:
+                messages.success(request, msg)
+            else:
+                messages.error(request, msg)
+    else:
+        messages.error(request, "未知操作")
 
 
 @login_required
@@ -9719,6 +10064,15 @@ def hospital_info_manage(request):
                 messages.error(request, err)
                 return _redir(edit=hospital_info_edit)
             messages.success(request, f"已添加{org.level_label}：{org.full_display_name}")
+            record_biz_operation(
+                actor=request.user,
+                scope=BizOperationLog.SCOPE_HOSPITAL,
+                action=BizOperationLog.ACTION_CREATE,
+                summary=f"添加{org.level_label}：{org.full_display_name}",
+                organization=org,
+                entity_type="commission_organization",
+                entity_id=org.pk,
+            )
             fl_path = org.folder_path()
             return _redir(edit=hospital_info_edit)
 
@@ -9742,6 +10096,15 @@ def hospital_info_manage(request):
                 fl_path = org.folder_path()
                 return _redir(edit=True)
             messages.success(request, f"已删除{org.level_label}：{org.name}")
+            record_biz_operation(
+                actor=request.user,
+                scope=BizOperationLog.SCOPE_HOSPITAL,
+                action=BizOperationLog.ACTION_DELETE,
+                summary=f"删除{org.level_label}：{org.name}",
+                organization=org,
+                entity_type="commission_organization",
+                entity_id=org.pk,
+            )
             fl_path = parent_path
             return _redir(edit=False)
 
@@ -9784,6 +10147,15 @@ def hospital_info_manage(request):
                 request,
                 "已保存合并报告绑定" if only_merged else "已保存机构信息",
             )
+            record_biz_operation(
+                actor=request.user,
+                scope=BizOperationLog.SCOPE_HOSPITAL,
+                action=BizOperationLog.ACTION_UPDATE,
+                summary=("更新合并报告绑定" if only_merged else f"编辑机构信息：{org.name}"),
+                organization=org,
+                entity_type="commission_organization",
+                entity_id=org.pk,
+            )
             fl_path = org.folder_path()
             return _redir(edit=False)
 
@@ -9809,6 +10181,15 @@ def hospital_info_manage(request):
                 messages.error(request, err)
                 return _redir(edit=True)
             messages.success(request, f"已保存联系人：{row.name}")
+            record_biz_operation(
+                actor=request.user,
+                scope=BizOperationLog.SCOPE_HOSPITAL,
+                action=BizOperationLog.ACTION_UPDATE if cid else BizOperationLog.ACTION_CREATE,
+                summary=f"{'编辑' if cid else '添加'}联系人：{row.name}",
+                organization=org,
+                entity_type="commission_org_contact",
+                entity_id=row.pk,
+            )
             fl_path = org.folder_path()
             return _redir(edit=False)
 
@@ -9822,8 +10203,20 @@ def hospital_info_manage(request):
                 messages.error(request, "联系人不存在")
             else:
                 fl_path = row.organization.folder_path()
+                contact_name = row.name
+                contact_org = row.organization
+                contact_id = row.pk
                 row.delete()
                 messages.success(request, "已删除联系人")
+                record_biz_operation(
+                    actor=request.user,
+                    scope=BizOperationLog.SCOPE_HOSPITAL,
+                    action=BizOperationLog.ACTION_DELETE,
+                    summary=f"删除联系人：{contact_name}",
+                    organization=contact_org,
+                    entity_type="commission_org_contact",
+                    entity_id=contact_id,
+                )
             return _redir(edit=False)
 
         if action == "save_equipment":
@@ -9864,6 +10257,41 @@ def hospital_info_manage(request):
                 messages.error(request, "所选检测任务模板无效")
                 return _redir(edit=True)
             is_new_equipment = eid is None
+
+            # 批量添加：[{"device_type":"CT","quantity":2}, ...]
+            batch_items: list[dict] = []
+            if is_new_equipment and "equipment_batch" in request.POST:
+                batch_raw = (request.POST.get("equipment_batch") or "").strip()
+                if batch_raw:
+                    try:
+                        loaded_batch = json_std.loads(batch_raw)
+                    except json.JSONDecodeError:
+                        messages.error(request, "批量设备数据格式无效")
+                        return _redir(edit=True)
+                    if not isinstance(loaded_batch, list) or not loaded_batch:
+                        messages.error(request, "请至少勾选一种设备类型")
+                        return _redir(edit=True)
+                    total_qty = 0
+                    for raw_item in loaded_batch:
+                        if not isinstance(raw_item, dict):
+                            continue
+                        dt = str(raw_item.get("device_type") or "").strip()
+                        try:
+                            qty = int(raw_item.get("quantity") or 0)
+                        except (TypeError, ValueError):
+                            qty = 0
+                        if not dt or qty < 1:
+                            continue
+                        qty = min(qty, 99)
+                        total_qty += qty
+                        batch_items.append({"device_type": dt, "quantity": qty})
+                    if not batch_items:
+                        messages.error(request, "请至少勾选一种设备类型，并设置台数")
+                        return _redir(edit=True)
+                    if total_qty > 200:
+                        messages.error(request, "单次最多添加 200 台设备，请分批操作")
+                        return _redir(edit=True)
+
             parsed_bindings = None
             if "report_task_bindings" in request.POST:
                 bindings_raw = (request.POST.get("report_task_bindings") or "[]").strip()
@@ -9885,12 +10313,8 @@ def hospital_info_manage(request):
                         "请至少添加一种检测类型并选择报告任务模板",
                     )
                     return _redir(edit=True)
-            auto_bind = is_new_equipment and parsed_bindings is None
-            row, err = upsert_department_equipment(
-                dept,
-                equipment_id=eid,
-                name=request.POST.get("equipment_name", ""),
-                device_type=request.POST.get("equipment_device_type", ""),
+
+            shared_kwargs = dict(
                 model=request.POST.get("equipment_model", ""),
                 serial_no=request.POST.get("equipment_serial_no", ""),
                 manufacturer=request.POST.get("equipment_manufacturer", ""),
@@ -9898,15 +10322,81 @@ def hospital_info_manage(request):
                 notes=request.POST.get("equipment_notes", ""),
                 report_file_id=parsed_report_f,
                 report_task_id=parsed_task,
-                report_task_bindings=parsed_bindings,
-                auto_bind_templates=auto_bind,
                 user=request.user,
                 bind_org_for_report=org_ctx if org_ctx.pk != dept.pk else None,
+            )
+
+            if batch_items:
+                created_names: list[str] = []
+                created_count = 0
+                type_counts: dict[str, int] = {}
+                for item in batch_items:
+                    dt = item["device_type"]
+                    for _ in range(item["quantity"]):
+                        row, err = upsert_department_equipment(
+                            dept,
+                            equipment_id=None,
+                            name="",
+                            device_type=dt,
+                            report_task_bindings=None,
+                            auto_bind_templates=True,
+                            **shared_kwargs,
+                        )
+                        if err:
+                            if created_count:
+                                messages.warning(
+                                    request,
+                                    f"已添加 {created_count} 台后中断：{err}",
+                                )
+                            else:
+                                messages.error(request, err)
+                            fl_path = org_ctx.folder_path()
+                            return _redir(edit=True)
+                        created_count += 1
+                        created_names.append(row.name)
+                        type_counts[dt] = type_counts.get(dt, 0) + 1
+                type_summary = "、".join(
+                    f"{k}×{v}" for k, v in type_counts.items()
+                )
+                messages.success(
+                    request,
+                    f"已批量添加 {created_count} 台设备（{type_summary}）",
+                )
+                record_biz_operation(
+                    actor=request.user,
+                    scope=BizOperationLog.SCOPE_HOSPITAL,
+                    action=BizOperationLog.ACTION_CREATE,
+                    summary=f"批量添加设备 {created_count} 台（{type_summary}）",
+                    organization=org_ctx,
+                    entity_type="commission_org_equipment",
+                    detail={"type_counts": type_counts, "department_id": dept.pk},
+                )
+                fl_path = org_ctx.folder_path()
+                return _redir(edit=False)
+
+            auto_bind = is_new_equipment and parsed_bindings is None
+            row, err = upsert_department_equipment(
+                dept,
+                equipment_id=eid,
+                name=request.POST.get("equipment_name", ""),
+                device_type=request.POST.get("equipment_device_type", ""),
+                report_task_bindings=parsed_bindings,
+                auto_bind_templates=auto_bind,
+                **shared_kwargs,
             )
             if err:
                 messages.error(request, err)
                 return _redir(edit=True)
             messages.success(request, f"已保存设备：{row.name}")
+            record_biz_operation(
+                actor=request.user,
+                scope=BizOperationLog.SCOPE_HOSPITAL,
+                action=BizOperationLog.ACTION_UPDATE if not is_new_equipment else BizOperationLog.ACTION_CREATE,
+                summary=f"{'编辑' if not is_new_equipment else '添加'}设备：{row.name}",
+                organization=org_ctx,
+                entity_type="commission_org_equipment",
+                entity_id=row.pk,
+            )
             fl_path = org_ctx.folder_path()
             return _redir(edit=False)
 
@@ -9931,6 +10421,16 @@ def hospital_info_manage(request):
                 return _redir(edit=True)
             if added:
                 messages.success(request, f"已向项目「{proj.name}」关联 {added} 个检测任务")
+                record_biz_operation(
+                    actor=request.user,
+                    scope=BizOperationLog.SCOPE_PROJECT,
+                    action=BizOperationLog.ACTION_BIND,
+                    summary=f"设备「{eq.name}」关联项目「{proj.name}」任务 {added} 个",
+                    organization=eq.department,
+                    project=proj,
+                    entity_type="commission_org_equipment",
+                    entity_id=eq.pk,
+                )
             else:
                 messages.info(request, f"项目「{proj.name}」已包含该设备所需的检测任务")
             fl_path = (request.POST.get("fl_path") or "").strip() or eq.department.folder_path()
@@ -9950,10 +10450,23 @@ def hospital_info_manage(request):
                 fl_path = row.department.folder_path()
                 dept_id = row.department_id
                 dt = (row.device_type or "").strip()
+                eq_name = row.name
+                eq_id = row.pk
+                eq_org = row.department
                 row.delete()
                 if dt:
                     renumber_equipment_instances_for_type(dept_id, dt)
                 messages.success(request, "已删除设备")
+                record_biz_operation(
+                    actor=request.user,
+                    scope=BizOperationLog.SCOPE_HOSPITAL,
+                    action=BizOperationLog.ACTION_DELETE,
+                    summary=f"删除设备：{eq_name}",
+                    organization=eq_org,
+                    entity_type="commission_org_equipment",
+                    entity_id=eq_id,
+                    detail={"department_id": dept_id, "device_type": dt},
+                )
             return _redir(edit=False)
 
         if action == "sync_equipment_from_report":
@@ -10162,6 +10675,73 @@ def _hospital_info_equipment_access(
     root = eq.department.hospital_root()
     org_ctx = root
     return eq, org_ctx, None
+
+
+@login_required
+def biz_operation_logs_api(request):
+    """医院信息 / 委托项目写库操作日志（只读 JSON）。"""
+    gx = _require_perm(request, "perm_file_library")
+    if gx:
+        return gx
+    if request.method != "GET":
+        return JsonResponse({"ok": False, "message": "仅支持 GET"}, status=405)
+
+    from apps.core.biz_operation_log import (
+        hospital_logs_for_org_subtree,
+        serialize_biz_operation_log,
+    )
+    from apps.core.models import BizOperationLog
+
+    scope = (request.GET.get("scope") or "").strip().lower()
+    limit = 100
+    try:
+        limit = min(200, max(1, int(request.GET.get("limit") or 100)))
+    except (TypeError, ValueError):
+        limit = 100
+
+    if scope == BizOperationLog.SCOPE_HOSPITAL:
+        org_id = None
+        try:
+            org_id = int(request.GET.get("organization_id") or 0) or None
+        except (TypeError, ValueError):
+            org_id = None
+        if org_id:
+            org = CommissionOrganization.objects.filter(pk=org_id, is_active=True).first()
+            if org is None:
+                return JsonResponse({"ok": False, "message": "机构不存在"}, status=404)
+            qs = hospital_logs_for_org_subtree(org)
+        else:
+            qs = (
+                BizOperationLog.objects.filter(scope=BizOperationLog.SCOPE_HOSPITAL)
+                .select_related("actor", "organization", "project")
+                .order_by("-created_at", "-id")
+            )
+        items = [serialize_biz_operation_log(r) for r in qs[:limit]]
+        return JsonResponse({"ok": True, "items": items, "scope": scope})
+
+    if scope == BizOperationLog.SCOPE_PROJECT:
+        project_id = None
+        try:
+            project_id = int(request.GET.get("project_id") or 0) or None
+        except (TypeError, ValueError):
+            project_id = None
+        if not project_id:
+            return JsonResponse({"ok": False, "message": "请指定项目"}, status=400)
+        project = LibraryProject.objects.filter(pk=project_id).first()
+        if project is None:
+            return JsonResponse({"ok": False, "message": "项目不存在"}, status=404)
+        qs = (
+            BizOperationLog.objects.filter(
+                scope=BizOperationLog.SCOPE_PROJECT,
+                project_id=project_id,
+            )
+            .select_related("actor", "organization", "project")
+            .order_by("-created_at", "-id")
+        )
+        items = [serialize_biz_operation_log(r) for r in qs[:limit]]
+        return JsonResponse({"ok": True, "items": items, "scope": scope})
+
+    return JsonResponse({"ok": False, "message": "scope 须为 hospital 或 project"}, status=400)
 
 
 @login_required

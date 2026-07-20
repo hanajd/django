@@ -1,6 +1,6 @@
 {# 设备历史（浏览/编辑均可查看）；编辑与加入项目弹窗仅编辑模式 #}
 {% if hospital_info_edit %}
-<dialog id="equipment-edit-dialog" class="rounded-3xl shadow-2xl border-0 p-0 w-full max-w-lg backdrop:bg-slate-900/40">
+<dialog id="equipment-edit-dialog" class="rounded-3xl shadow-2xl border-0 p-0 w-full max-w-xl backdrop:bg-slate-900/40">
     <form method="post" id="equipment-edit-form" class="p-6 max-h-[min(90vh,40rem)] overflow-y-auto">
         {% csrf_token %}
         <input type="hidden" name="edit" value="1">
@@ -50,10 +50,47 @@
         <input type="hidden" name="department_id" id="eq-form-department" value="{% if explorer_org %}{{ explorer_org.pk }}{% endif %}">
         {% endif %}
         {{ equipment_dept_picker|json_script:"eq-dept-picker-data" }}
-        <div class="space-y-3">
+        <input type="hidden" name="equipment_batch" id="eq-form-batch" value="">
+        {# —— 批量添加：多类型 + 同种多台 —— #}
+        <div id="eq-form-batch-block" class="space-y-3">
+            <div>
+                <div class="flex items-center justify-between gap-2">
+                    <span class="text-xs font-medium text-slate-600">选择设备类型与台数 *</span>
+                    <span class="text-[10px] text-slate-400">可多选；同种可设多台</span>
+                </div>
+                <div id="eq-form-batch-types" class="mt-2 max-h-52 overflow-y-auto rounded-xl ring-1 ring-slate-200 bg-slate-50/80 divide-y divide-slate-100">
+                    {% for dt in equipment_device_type_choices %}
+                    <label class="flex items-center gap-2 px-3 py-2 hover:bg-white/80 cursor-pointer"
+                           data-batch-type-row data-device-type="{{ dt|escape }}">
+                        <input type="checkbox" class="rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                               data-batch-type-check value="{{ dt|escape }}">
+                        <span class="flex-1 min-w-0 text-sm text-slate-800 truncate">{{ dt }}</span>
+                        <input type="number" min="1" max="99" value="1" disabled
+                               data-batch-type-qty
+                               class="w-16 px-2 py-1 text-sm text-center rounded-lg bg-white ring-1 ring-slate-200 border-0 disabled:opacity-40"
+                               title="台数" aria-label="{{ dt }} 台数">
+                        <span class="text-[10px] text-slate-400 shrink-0">台</span>
+                    </label>
+                    {% empty %}
+                    <p class="px-3 py-4 text-xs text-slate-500 text-center">暂无可用设备类型，请先在任务模板库配置</p>
+                    {% endfor %}
+                </div>
+                <p id="eq-form-batch-summary" class="mt-1.5 text-[10px] text-violet-700 hidden"></p>
+            </div>
+            <details class="rounded-xl bg-slate-50/80 ring-1 ring-slate-200/80 open:pb-2">
+                <summary class="cursor-pointer px-3 py-2 text-xs font-medium text-slate-600 select-none">共用信息（可选，应用到本次全部设备）</summary>
+                <div class="px-3 pb-2 space-y-2">
+                    <input type="text" id="eq-form-batch-mfr" placeholder="厂家" class="w-full px-3 py-2 text-sm rounded-xl bg-white ring-1 ring-slate-200 border-0">
+                    <input type="text" id="eq-form-batch-loc" placeholder="设备位置" class="w-full px-3 py-2 text-sm rounded-xl bg-white ring-1 ring-slate-200 border-0">
+                    <input type="text" id="eq-form-batch-notes" placeholder="备注" class="w-full px-3 py-2 text-sm rounded-xl bg-white ring-1 ring-slate-200 border-0">
+                </div>
+            </details>
+        </div>
+        {# —— 单台编辑 —— #}
+        <div id="eq-form-single-block" class="space-y-3 hidden">
             <label class="block">
                 <span class="text-xs font-medium text-slate-600">设备类型 *</span>
-                <select name="equipment_device_type" id="eq-form-device-type" required
+                <select name="equipment_device_type" id="eq-form-device-type"
                         class="mt-1 w-full px-3 py-2 text-sm rounded-xl bg-slate-50 ring-1 ring-slate-200 border-0">
                     <option value="">— 请选择设备类型 —</option>
                     {% for dt in equipment_device_type_choices %}
@@ -75,7 +112,7 @@
         <div id="eq-form-pending-block" class="mt-3 space-y-2">
             <div id="eq-form-auto-bind-hint" class="rounded-2xl bg-emerald-50/90 p-3 ring-1 ring-emerald-100 text-xs text-emerald-900 leading-relaxed">
                 <p class="font-medium">添加时将自动绑定报告模板</p>
-                <p class="mt-1 text-emerald-800/90">同科室同类型多台将自动编号为<strong>设备1、设备2</strong>并合并展示。报告模板按任务库「验收检测」「状态检测」+ 设备类型文件夹自动绑定。</p>
+                <p class="mt-1 text-emerald-800/90">可一次勾选多种设备类型，并为每种设置台数；同科室同类型将自动编号为<strong>设备1、设备2</strong>并合并展示。报告模板按任务库「验收检测」「状态检测」+ 设备类型文件夹自动绑定。</p>
             </div>
             <div id="eq-form-manual-bindings-wrap" class="hidden rounded-2xl bg-amber-50/80 p-3 ring-1 ring-amber-100 space-y-2">
                 <p class="text-xs font-medium text-amber-900">手动调整检测类别与报告模板（可选）</p>
@@ -182,6 +219,12 @@
     var deptPicker = deptPickerEl ? JSON.parse(deptPickerEl.textContent) : { mode: 'none' };
     var campusSelect = document.getElementById('eq-form-campus');
     var deptSelect = document.getElementById('eq-form-department');
+    var batchBlock = document.getElementById('eq-form-batch-block');
+    var singleBlock = document.getElementById('eq-form-single-block');
+    var batchHidden = document.getElementById('eq-form-batch');
+    var batchSummaryEl = document.getElementById('eq-form-batch-summary');
+    var eqFormEl = document.getElementById('equipment-edit-form');
+    var eqFormIsEdit = false;
 
     function populateDepartmentsForCampus(campusKey, selectedDeptId) {
         if (!deptSelect || deptPicker.mode !== 'campus_then_department') return;
@@ -434,7 +477,97 @@
         }
     }
 
+    function collectBatchItems() {
+        var items = [];
+        document.querySelectorAll('[data-batch-type-row]').forEach(function (row) {
+            var check = row.querySelector('[data-batch-type-check]');
+            var qtyInp = row.querySelector('[data-batch-type-qty]');
+            if (!check || !check.checked) return;
+            var qty = parseInt(qtyInp && qtyInp.value, 10);
+            if (isNaN(qty) || qty < 1) qty = 1;
+            if (qty > 99) qty = 99;
+            items.push({
+                device_type: check.value || row.getAttribute('data-device-type') || '',
+                quantity: qty
+            });
+        });
+        return items.filter(function (it) { return !!(it.device_type || '').trim(); });
+    }
+
+    function refreshBatchSummary() {
+        if (!batchSummaryEl) return;
+        var items = collectBatchItems();
+        if (!items.length) {
+            batchSummaryEl.classList.add('hidden');
+            batchSummaryEl.textContent = '';
+            return;
+        }
+        var total = 0;
+        var parts = items.map(function (it) {
+            total += it.quantity;
+            return it.device_type + ' ×' + it.quantity;
+        });
+        batchSummaryEl.textContent = '将添加 ' + items.length + ' 种、共 ' + total + ' 台：' + parts.join('、');
+        batchSummaryEl.classList.remove('hidden');
+    }
+
+    function resetBatchTypeChecks(presetDeviceType) {
+        document.querySelectorAll('[data-batch-type-row]').forEach(function (row) {
+            var check = row.querySelector('[data-batch-type-check]');
+            var qtyInp = row.querySelector('[data-batch-type-qty]');
+            var dt = row.getAttribute('data-device-type') || '';
+            var on = !!(presetDeviceType && dt === presetDeviceType);
+            if (check) check.checked = on;
+            if (qtyInp) {
+                qtyInp.value = '1';
+                qtyInp.disabled = !on;
+            }
+        });
+        var batchMfr = document.getElementById('eq-form-batch-mfr');
+        var batchLoc = document.getElementById('eq-form-batch-loc');
+        var batchNotes = document.getElementById('eq-form-batch-notes');
+        if (batchMfr) batchMfr.value = '';
+        if (batchLoc) batchLoc.value = '';
+        if (batchNotes) batchNotes.value = '';
+        if (batchHidden) batchHidden.value = '';
+        refreshBatchSummary();
+    }
+
+    function bindBatchTypeRows() {
+        document.querySelectorAll('[data-batch-type-row]').forEach(function (row) {
+            var check = row.querySelector('[data-batch-type-check]');
+            var qtyInp = row.querySelector('[data-batch-type-qty]');
+            if (!check) return;
+            check.addEventListener('change', function () {
+                if (qtyInp) {
+                    qtyInp.disabled = !check.checked;
+                    if (check.checked && (!qtyInp.value || parseInt(qtyInp.value, 10) < 1)) {
+                        qtyInp.value = '1';
+                    }
+                }
+                refreshBatchSummary();
+            });
+            if (qtyInp) {
+                qtyInp.addEventListener('input', refreshBatchSummary);
+                qtyInp.addEventListener('change', function () {
+                    var n = parseInt(qtyInp.value, 10);
+                    if (isNaN(n) || n < 1) qtyInp.value = '1';
+                    else if (n > 99) qtyInp.value = '99';
+                    refreshBatchSummary();
+                });
+            }
+        });
+    }
+    bindBatchTypeRows();
+
     function setUiAddVsEdit(isEdit) {
+        eqFormIsEdit = !!isEdit;
+        if (batchBlock) batchBlock.classList.toggle('hidden', isEdit);
+        if (singleBlock) singleBlock.classList.toggle('hidden', !isEdit);
+        if (deviceTypeSelect) {
+            if (isEdit) deviceTypeSelect.setAttribute('required', 'required');
+            else deviceTypeSelect.removeAttribute('required');
+        }
         if (manualBindingsWrap) manualBindingsWrap.classList.toggle('hidden', !isEdit);
         if (autoBindHint) autoBindHint.classList.toggle('hidden', isEdit);
         if (bindingsHidden) {
@@ -443,6 +576,10 @@
             } else {
                 bindingsHidden.removeAttribute('name');
             }
+        }
+        if (batchHidden) {
+            if (isEdit) batchHidden.removeAttribute('name');
+            else batchHidden.setAttribute('name', 'equipment_batch');
         }
         var nameInput = document.getElementById('eq-form-name');
         if (nameInput) {
@@ -456,6 +593,9 @@
         var isEdit = !!(eq && eq.id);
         setUiAddVsEdit(isEdit);
         document.getElementById('eq-form-equipment-id').value = eq ? eq.id : '';
+        if (!isEdit) {
+            resetBatchTypeChecks(eq && eq.device_type ? String(eq.device_type) : '');
+        }
         if (deviceTypeSelect) {
             deviceTypeSelect.value = eq && eq.device_type ? String(eq.device_type) : '';
         }
@@ -464,10 +604,10 @@
                 instanceHintEl.textContent = '当前：' + eq.instance_label;
                 instanceHintEl.classList.remove('hidden');
             } else {
-                refreshInstanceHint();
+                instanceHintEl.classList.add('hidden');
             }
         }
-        document.getElementById('eq-form-name').value = eq ? eq.name : '';
+        document.getElementById('eq-form-name').value = eq ? (eq.name || '') : '';
         document.getElementById('eq-form-model').value = eq ? (eq.model || '') : '';
         document.getElementById('eq-form-serial').value = eq ? (eq.serial_no || '') : '';
         document.getElementById('eq-form-mfr').value = eq ? (eq.manufacturer || '') : '';
@@ -508,8 +648,43 @@
         }
     }
 
+    if (eqFormEl) {
+        eqFormEl.addEventListener('submit', function (e) {
+            if (eqFormIsEdit) {
+                if (batchHidden) batchHidden.value = '';
+                return;
+            }
+            var items = collectBatchItems();
+            if (!items.length) {
+                e.preventDefault();
+                alert('请至少勾选一种设备类型，并设置台数');
+                return;
+            }
+            var total = items.reduce(function (s, it) { return s + it.quantity; }, 0);
+            if (total > 200) {
+                e.preventDefault();
+                alert('单次最多添加 200 台设备，请分批操作');
+                return;
+            }
+            if (batchHidden) {
+                batchHidden.value = JSON.stringify(items);
+                batchHidden.setAttribute('name', 'equipment_batch');
+            }
+            var batchMfr = document.getElementById('eq-form-batch-mfr');
+            var batchLoc = document.getElementById('eq-form-batch-loc');
+            var batchNotes = document.getElementById('eq-form-batch-notes');
+            var mfr = document.getElementById('eq-form-mfr');
+            var loc = document.getElementById('eq-form-loc');
+            var notes = document.getElementById('eq-form-notes');
+            if (mfr) mfr.value = batchMfr ? batchMfr.value : '';
+            if (loc) loc.value = batchLoc ? batchLoc.value : '';
+            if (notes) notes.value = batchNotes ? batchNotes.value : '';
+            if (deviceTypeSelect) deviceTypeSelect.value = '';
+        });
+    }
+
     window.hospitalInfoOpenEquipmentForm = function (equipmentId, presetDeviceType) {
-        document.getElementById('eq-form-title').textContent = equipmentId ? '编辑设备' : '添加设备';
+        document.getElementById('eq-form-title').textContent = equipmentId ? '编辑设备' : '批量添加设备';
         var url = apiBase + (equipmentId ? ('?equipment_id=' + equipmentId) : ('?fl_path={{ fl_path|urlencode }}'));
         if (!equipmentId && presetDeviceType) {
             url += '&device_type=' + encodeURIComponent(presetDeviceType);
@@ -521,12 +696,14 @@
                 if (data.department_picker && data.department_picker.mode) {
                     deptPicker = data.department_picker;
                 }
-                fillForm(data.equipment, data.status);
-                if (!equipmentId && presetDeviceType && deviceTypeSelect) {
-                    deviceTypeSelect.value = presetDeviceType;
-                    refreshInstanceHint();
-                } else if (!equipmentId) {
-                    refreshInstanceHint();
+                var eqPayload = data.equipment || null;
+                if (!equipmentId && presetDeviceType) {
+                    eqPayload = eqPayload || {};
+                    eqPayload.device_type = presetDeviceType;
+                }
+                fillForm(eqPayload, data.status);
+                if (!equipmentId) {
+                    resetBatchTypeChecks(presetDeviceType || '');
                 }
                 if (equipmentId && !eqBindingsState.length) {
                     addBindingRow();

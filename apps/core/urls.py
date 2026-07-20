@@ -56,7 +56,16 @@ urlpatterns = [
         name='library_project_mock_inspection_submit',
     ),
     path('files/commission-manage/', views.commission_manage, name='commission_manage'),
+    path('files/hub/site-records/', views.workflow_hub_site_records, name='workflow_hub_site_records'),
+    path('files/hub/report-generate/', views.workflow_hub_report_generate, name='workflow_hub_report_generate'),
+    path('files/hub/review-sign/', views.workflow_hub_review_sign, name='workflow_hub_review_sign'),
+    path('files/hub/report-download/', views.workflow_hub_report_download, name='workflow_hub_report_download'),
     path('files/hospital-info/', views.hospital_info_manage, name='hospital_info_manage'),
+    path(
+        'files/biz-operation-logs/',
+        views.biz_operation_logs_api,
+        name='biz_operation_logs_api',
+    ),
     path(
         'files/hospital-info/api/equipment/',
         views.hospital_info_equipment_api,

@@ -192,6 +192,8 @@ if(f12>=f13, f4*f5, if(f12<f13, avg(f1,f2,f3), ""))
 | 仅 **一条** 规则且 `condition` 为空 | 视为 **默认公式**，直接自动计算 |
 | 同时存在 `fieldExpression`（兜底） | 所有自动规则未命中时，可用兜底表达式 |
 
+**`type` 硬性要求（与 Flutter 对齐）：** 凡带 `formulaRules` / 需自动或人工选公式的栏位，导出必须为 **`type: "computed"`**。公式选择下拉**只**在 `computed` 上渲染；挂在 `number`/`text` 上会出现「有公式但选不了」。详见 [`条件公式与前端type约定.md`](./条件公式与前端type约定.md)。
+
 **已废弃、请勿再实现：** `requiresManualSelection`、`selectionMode`、`formulaSelectionMode`、`requiresManualFormulaSelection`、`judgmentRuleSets` 等。旧模板载入时后端/编辑器会剥离或迁移。
 
 ### 3.3 完整栏位样例（条件公式 + 判定）

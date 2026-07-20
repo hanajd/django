@@ -14,14 +14,25 @@
                     维护医院、院区、科室信息与设备；未检测设备绑定报告模板时，按与<strong>任务模板库</strong>相同的目录（检测类型 → 设备类型 → 报告）点选；已检测设备关联成品 PDF 报告。
                 </p>
             </div>
-            {% if show_library_task_nav %}
-            <a href="{% url 'library_task_management' %}"
-               class="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-white text-sm font-medium text-slate-700 shadow-sm ring-1 ring-slate-200/80 hover:ring-indigo-200 hover:text-indigo-700 transition">
-                <i class="ri-stack-line text-lg"></i>
-                任务模板库
-            </a>
-            {% endif %}
-        </header>
+            <div class="flex flex-wrap items-center gap-2 shrink-0">
+                <button type="button"
+                        data-biz-log-open
+                        data-biz-log-scope="hospital"
+                        {% if explorer_org %}data-biz-log-org="{{ explorer_org.pk }}"{% endif %}
+                        data-biz-log-title="医院信息 · 操作日志"
+                        class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-slate-500 bg-white/80 ring-1 ring-slate-200/80 hover:text-indigo-700 hover:ring-indigo-200 transition"
+                        title="查看写库操作日志">
+                    <i class="ri-history-line text-sm"></i>
+                    日志
+                </button>
+                {% if show_library_task_nav %}
+                <a href="{% url 'library_task_management' %}"
+                   class="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-white text-sm font-medium text-slate-700 shadow-sm ring-1 ring-slate-200/80 hover:ring-indigo-200 hover:text-indigo-700 transition">
+                    <i class="ri-stack-line text-lg"></i>
+                    任务模板库
+                </a>
+                {% endif %}
+            </div>        </header>
 
         <div class="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
             {# 左侧：组织树卡片 #}
@@ -135,4 +146,5 @@
     });
 })();
 </script>
+{% include "core/partials/biz_operation_log_dialog.html" %}
 {% endblock %}

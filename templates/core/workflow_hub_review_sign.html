@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block page_title %}审核签发{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-7xl space-y-6">
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">报告流程 · 审核 / 签发</p>
+            <h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-900">审核签发</h1>
+            <p class="mt-1 text-sm text-slate-600 max-w-2xl">
+                按医院或时间处理审核、签发。请先在
+                <a href="{% url 'signature_manage' %}" class="text-indigo-600 underline font-medium">签名管理</a>
+                维护签名。
+            </p>
+        </div>
+        <div class="flex flex-wrap gap-2 shrink-0">
+            <a href="{% url 'workflow_hub_report_generate' %}?view={{ view_mode|default:'hospital' }}" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                <i class="ri-draft-line"></i> 报告编制
+            </a>
+            <a href="{% url 'commission_manage' %}" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                <i class="ri-clipboard-line"></i> 委托管理
+            </a>
+        </div>
+    </div>
+
+    <div class="flex flex-wrap gap-2">
+        <a href="?view={{ view_mode|default:'hospital' }}{% if project_search %}&q={{ project_search|urlencode }}{% endif %}&tab=all"
+           class="rounded-full px-3 py-1.5 text-xs font-medium {% if tab == 'all' %}bg-slate-900 text-white{% else %}bg-slate-100 text-slate-700 hover:bg-slate-200{% endif %}">全部</a>
+        <a href="?view={{ view_mode|default:'hospital' }}{% if project_search %}&q={{ project_search|urlencode }}{% endif %}&tab=audit"
+           class="rounded-full px-3 py-1.5 text-xs font-medium {% if tab == 'audit' %}bg-indigo-600 text-white{% else %}bg-indigo-50 text-indigo-800 hover:bg-indigo-100{% endif %}">仅待审核</a>
+        <a href="?view={{ view_mode|default:'hospital' }}{% if project_search %}&q={{ project_search|urlencode }}{% endif %}&tab=sign"
+           class="rounded-full px-3 py-1.5 text-xs font-medium {% if tab == 'sign' %}bg-amber-600 text-white{% else %}bg-amber-50 text-amber-900 hover:bg-amber-100{% endif %}">仅待签发</a>
+    </div>
+
+    {% include "core/partials/workflow_hub_tree.html" %}
+</div>
+{% endblock %}

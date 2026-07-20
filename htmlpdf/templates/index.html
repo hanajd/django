@@ -1926,7 +1926,7 @@
     <div class="main">
         <aside class="sidebar">
             <h3>填写区列表</h3>
-            <p class="sidebar-hint">点击列表或 PDF 上的填写框即可定位栏位；标签可直接修改。需要自动计算或合格判断时，点击行内「规则」打开编辑弹窗。侧栏序号、画板角标与 <code>pdfFieldId</code>（如 f42）一致：第 N 项即为 <code>fN</code>，保存模板时按当前列表顺序重排。</p>
+            <p class="sidebar-hint">点击列表或 PDF 上的填写框即可定位栏位；标签可直接修改。需要自动计算或合格判断时，点击行内「规则」打开编辑弹窗。侧栏角标与 <code>pdfFieldId</code>（如 f42）一致且稳定：删除栏位不会改动其它框的编号；新建时优先补回空缺号，再递增新号。</p>
             <div id="reportMappingPanel">
                 <div style="font-size:13px;font-weight:600;color:#1d2129;">报告 ← 现场记录映射</div>
                 <p class="sidebar-hint" style="margin:6px 0 0;">与回填一致：医院/设备等相同 submitPath 会自动标为「规则映射」（蓝框/规）；检测数据等点「映」或双击报告栏位，在<strong>悬浮映射窗口</strong>的现场记录 PDF 上点选单元格；文本模板支持换行与缩进。<strong>勾选框</strong>等场景可用「条件映射」：判断条件填 <code>{1}</code> / <code>!{1}</code> 写入不同文本，全部未命中则留空。保存坐标模板时仅写入手动映射。</p>
@@ -3891,8 +3891,32 @@
             });
         }
 
+        function collectUsedPdfFieldNums(fieldList) {
+            const used = new Set();
+            (fieldList || fields || []).forEach(f => {
+                if (!f) return;
+                [f.pdfFieldId, f.id].forEach(raw => {
+                    const m = /^f(\d+)$/i.exec(String(raw || '').trim());
+                    if (m) used.add(Number(m[1]));
+                });
+            });
+            return used;
+        }
+
+        /** 先补 1…max 内最小空缺，再取 max+1；删除后其它栏位编号保持不变。 */
+        function allocateNextPdfFieldId(fieldList) {
+            const list = fieldList || fields;
+            const used = collectUsedPdfFieldNums(list);
+            let n = 1;
+            while (used.has(n)) n += 1;
+            let max = 0;
+            used.forEach(v => { if (v > max) max = v; });
+            fieldIdSeq = Math.max(Number(fieldIdSeq) || 1, max + 1, n + 1);
+            return 'f' + n;
+        }
+
         function nextId() {
-            return 'f' + fieldIdSeq++;
+            return allocateNextPdfFieldId(fields);
         }
 
         function normalizeFieldId(rawId, fallbackIndex) {
@@ -3916,16 +3940,19 @@
             });
         }
 
-        /** 画板/侧栏序号：与 fields 数组下标一致（第 N 项 = 下标 N-1），不按坐标重排。 */
+        /** 画板/侧栏角标：取稳定 pdfFieldId 数字部分（可留空、可不连续）。 */
         function fieldCanvasOrdinal(f) {
             if (!f) return 0;
+            const pid = String(f.pdfFieldId || f.id || '').trim();
+            const m = /^f(\d+)$/i.exec(pid);
+            if (m) return Number(m[1]);
             const idx = fields.indexOf(f);
             return idx >= 0 ? idx + 1 : 0;
         }
 
         /**
-         * 按 fields 列表顺序将 pdfFieldId 定为 f1、f2…（与侧栏、画板角标严格一致，不按 page/y/x 排序）。
-         * 返回旧 f 号 → 新 f 号映射，供公式/命名标记等重绑。
+         * 【仅手动整理编号时用】按列表顺序压成连续 f1…fN，并 remap 公式引用。
+         * 日常删除/新建/保存不再调用，避免联动错乱。
          */
         function reindexPdfFieldIds(fieldList, opts) {
             const list = fieldList || fields;
@@ -3957,6 +3984,8 @@
                     && templateContext.radiationProtectionChapter) {
                     remapPdfFieldRefsOnConditionalRules(
                         templateContext.radiationProtectionChapter.reportValueRules, remap);
+                    remapPdfFieldRefsOnConditionalRules(
+                        templateContext.radiationProtectionChapter.annualDoseRules, remap);
                 }
             }
             return { remap, changed };
@@ -4015,7 +4044,7 @@
             return s;
         }
 
-        /** 重排 pdfFieldId 并同步画板 DOM / 选中态 / 命名标记引用。 */
+        /** 重排 pdfFieldId（仅手动整理编号时使用）并同步画板 DOM / 选中态 / 命名标记引用。 */
         function applyPdfFieldIdRenumber(remountCanvas) {
             const { remap, changed } = reindexPdfFieldIds(fields, { remapExpressions: true });
             if (!changed) {
@@ -4034,13 +4063,30 @@
 
         /** 批量挂载画板栏位（避免在 mountField 内重复全表 updateFieldBadges，约 O(n²)）。 */
         function mountAllFields() {
-            fields.forEach((f, idx) => mountField(f, idx + 1));
+            fields.forEach(f => mountField(f));
             updateFieldBadges();
         }
 
+        /** 仅为缺失/非法 pdfFieldId 的栏位补号（补空缺），不改动已有合法 f 号。 */
         function ensurePdfFieldIds(fieldList) {
-            reindexPdfFieldIds(fieldList || fields, { remapExpressions: true });
-            return fieldList;
+            const list = fieldList || fields;
+            (list || []).forEach(f => {
+                if (!f) return;
+                const pid = String(f.pdfFieldId || '').trim();
+                if (/^f\d+$/i.test(pid)) {
+                    f.pdfFieldId = pid.toLowerCase();
+                    return;
+                }
+                const iid = String(f.id || '').trim();
+                if (/^f\d+$/i.test(iid)) {
+                    f.pdfFieldId = iid.toLowerCase();
+                    return;
+                }
+                const neu = allocateNextPdfFieldId(list);
+                f.pdfFieldId = neu;
+                if (!String(f.id || '').trim()) f.id = neu;
+            });
+            return list;
         }
 
         function normalizeFieldSize(field) {
@@ -4200,7 +4246,10 @@
                 if (!Array.isArray(block.rules)) block.rules = [];
                 block.combine = block.combine === 'or' ? 'or' : 'and';
                 block.logicExpression = block.logicExpression != null ? String(block.logicExpression) : '';
-                block.rules = block.rules.map((r, i) => normalizeConditionalRuleRow(r, i));
+                // 原地规范化，避免把编辑器仍在引用的规则对象换成新副本
+                block.rules.forEach((r, i) => {
+                    Object.assign(r, normalizeConditionalRuleRow(r, i));
+                });
             });
             ensureJudgmentObj(f);
             return f.judgmentRuleSets;
@@ -4310,7 +4359,10 @@
                     f.formulaRules = [];
                 }
             }
-            f.formulaRules = f.formulaRules.map((r, i) => normalizeConditionalRuleRow(r, i));
+            // 原地规范化，保持数组与对象引用稳定，供条件公式编辑器绑定
+            f.formulaRules.forEach((r, i) => {
+                Object.assign(r, normalizeConditionalRuleRow(r, i));
+            });
             delete f.fieldExpressionRules;
             return f.formulaRules;
         }
@@ -4363,12 +4415,23 @@
         function createConditionalRulesEditor(cfg) {
             const wrap = document.createElement('div');
             wrap.className = 'conditional-rules-editor';
+            // 每次 render 重建；父级只注册一个 commit，避免旧 DOM 钩子用过期值回写
+            let cardCommits = [];
+            const commitAllCards = () => {
+                cardCommits.forEach(fn => {
+                    try { fn(); } catch (err) { console.warn('conditional rule commit', err); }
+                });
+            };
+            if (Array.isArray(cfg.commitHooks)) {
+                cfg.commitHooks.push(commitAllCards);
+            }
 
             const render = () => {
+                cardCommits = [];
                 wrap.innerHTML = '';
                 const hint = document.createElement('p');
                 hint.className = 'formula-judgment-hint';
-                hint.textContent = cfg.hint || '每条含：条件说明、判断条件（可空）、公式/判定表达式。不填判断条件时，现场人员需人工选择适用公式。';
+                hint.textContent = cfg.hint || '点击「添加公式」按需新增。判断条件可留空；多条且均无条件时，现场需人工选择适用公式。';
                 wrap.appendChild(hint);
 
                 (cfg.rules || []).forEach((rule, idx) => {
@@ -4377,7 +4440,7 @@
                     const head = document.createElement('div');
                     head.className = 'conditional-rule-head';
                     const headTitle = document.createElement('span');
-                    headTitle.textContent = '条件 ' + (idx + 1);
+                    headTitle.textContent = (cfg.cardTitlePrefix || '公式') + ' ' + (idx + 1);
                     head.appendChild(headTitle);
                     if (cfg.allowDelete !== false) {
                         const delBtn = document.createElement('button');
@@ -4385,6 +4448,8 @@
                         delBtn.className = 'formula-tool-btn danger';
                         delBtn.textContent = '删除';
                         delBtn.addEventListener('click', () => {
+                            // 先把当前 DOM 写回规则，再删，避免未提交的输入丢失
+                            commitAllCards();
                             cfg.rules.splice(idx, 1);
                             if (cfg.onChange) cfg.onChange();
                             render();
@@ -4412,7 +4477,7 @@
 
                     const labelLbl = document.createElement('div');
                     labelLbl.className = 'formula-input-label';
-                    labelLbl.textContent = '条件说明';
+                    labelLbl.textContent = '说明（可选）';
                     const labelIn = document.createElement('input');
                     labelIn.type = 'text';
                     labelIn.value = String(rule.label || '');
@@ -4424,12 +4489,12 @@
                     });
                     const condLbl = document.createElement('div');
                     condLbl.className = 'formula-input-label';
-                    condLbl.textContent = '判断条件（可空）';
+                    condLbl.textContent = '判断条件（可空，按需填写）';
                     const condIn = document.createElement('textarea');
                     condIn.spellcheck = false;
                     condIn.rows = 2;
                     condIn.value = String(rule.condition || '');
-                    condIn.placeholder = cfg.conditionPlaceholder || '例：f12>=f13；留空则需现场人工选择公式';
+                    condIn.placeholder = cfg.conditionPlaceholder || '例：f12>=f13；留空则无需条件 / 需现场人工选择';
                     condIn.addEventListener('input', () => {
                         rule.condition = condIn.value;
                         syncRuleMeta();
@@ -4463,20 +4528,18 @@
                         syncRuleMeta();
                         if (cfg.onChange) cfg.onChange();
                     });
-                    if (Array.isArray(cfg.commitHooks)) {
-                        cfg.commitHooks.push(() => {
-                            rule.label = String(labelIn.value || '');
-                            rule.condition = String(condIn.value || '');
-                            let val = String(exprIn.value || '');
-                            if (typeof cfg.normalizeExpression === 'function') {
-                                val = cfg.normalizeExpression(val);
-                                exprIn.value = val;
-                            }
-                            rule.expression = val;
-                            rule.formula = val;
-                            syncRuleMeta();
-                        });
-                    }
+                    cardCommits.push(() => {
+                        rule.label = String(labelIn.value || '');
+                        rule.condition = String(condIn.value || '');
+                        let val = String(exprIn.value || '');
+                        if (typeof cfg.normalizeExpression === 'function') {
+                            val = cfg.normalizeExpression(val);
+                            exprIn.value = val;
+                        }
+                        rule.expression = val;
+                        rule.formula = val;
+                        syncRuleMeta();
+                    });
                     card.appendChild(labelLbl);
                     card.appendChild(labelIn);
                     card.appendChild(condLbl);
@@ -4490,11 +4553,12 @@
                 const addBtn = document.createElement('button');
                 addBtn.type = 'button';
                 addBtn.className = 'primary';
-                addBtn.textContent = '添加条件';
+                addBtn.textContent = cfg.addButtonLabel || '添加公式';
                 addBtn.addEventListener('click', () => {
+                    commitAllCards();
                     cfg.rules.push({
                         id: newConditionalRuleId(),
-                        label: '条件' + (cfg.rules.length + 1),
+                        label: '公式' + (cfg.rules.length + 1),
                         condition: '',
                         expression: '',
                         formula: ''
@@ -5279,6 +5343,10 @@
         function renderFormulaPanel() {
             const host = document.getElementById('fieldFormulaPanel');
             if (!host) return;
+            // 弹窗仍开着时若重建面板，先提交当前 DOM，避免未落盘的编辑被 innerHTML 清掉
+            if (formulaModalOpen && typeof formulaPanelCommitFn === 'function') {
+                try { formulaPanelCommitFn(); } catch (err) { console.warn('formula panel pre-render commit', err); }
+            }
             formulaPanelCommitFn = null;
             host.innerHTML = '';
             if (formulaModalChapterMode) {
@@ -5889,12 +5957,28 @@
             return {
                 chapterKey: 'site_radiation_protection',
                 meanFormula: { mode: 'per_row_avg', groups: 1, description: '同点位三次测量读数取平均' },
-                reportValueRules: [
-                    { id: 'rule_ge_response', label: '出束时间≥仪器响应时间', condition: '', formula: '' },
-                    { id: 'rule_lt_response', label: '出束时间＜仪器响应时间', condition: '', formula: '' }
-                ],
+                reportValueRules: [],
+                annualDoseRules: [],
                 fieldBindings: []
             };
+        }
+
+        /** 去掉无条件且无公式的占位壳，避免一打开就出现「默认条件」卡片 */
+        function pruneEmptyChapterFormulaRules(rules) {
+            return (Array.isArray(rules) ? rules : []).filter(r => {
+                if (!r || typeof r !== 'object') return false;
+                const cond = String(r.condition || '').trim();
+                const expr = String(r.expression != null ? r.expression : (r.formula || '')).trim();
+                return !!(cond || expr);
+            });
+        }
+
+        function isAnnualDoseFieldLabel(text) {
+            const compact = String(text || '').replace(/\s+/g, '');
+            if (!compact) return false;
+            if (compact.includes('年剂量')) return true;
+            if (/估算mSv/i.test(compact)) return true;
+            return compact.includes('估算') && /msv/i.test(compact);
         }
 
         function reportRulesIndicateDualGroup(ch) {
@@ -5951,6 +6035,7 @@
             const readings = byRole('测量读数M');
             const means = byRole('测量均值Mbar');
             const reports = byRole('报出值D');
+            const annuals = byRole('年剂量估算');
             const readKeys1 = ['reading_1', 'reading_2', 'reading_3'];
             const readKeys2 = ['reading_1_2', 'reading_2_2', 'reading_3_2'];
             if (dualGroup) {
@@ -5964,8 +6049,37 @@
                 readKeys1.forEach((k, i) => { if (readings[i]) out[k] = readings[i].pid; });
                 if (means[0]) out.mean_m = means[0].pid;
                 if (reports[0]) out.report_d = reports[0].pid;
+                if (reports[1]) out.report_d_2 = reports[1].pid;
+            }
+            if (annuals.length) {
+                out.annual_dose_msv = annuals[annuals.length - 1].pid;
+            } else if (reports.length >= 2) {
+                // 两组报出值右侧多余列（常为估算 mSv，OCR 成「测量值」）才绑定年剂量
+                const reportMaxX = Math.max(reports[0].x0, reports[1].x0);
+                const used = new Set(Object.values(out).filter(Boolean));
+                const trailing = items
+                    .filter(it => it.pid && !used.has(it.pid) && Number(it.x0) > reportMaxX + 2)
+                    .sort((a, b) => a.x0 - b.x0);
+                if (trailing.length) {
+                    const last = trailing[trailing.length - 1];
+                    const blob = String(last.role || '') + ' ' + String(last.pid || '');
+                    // 仅接受年剂量角色，或未占用的「测量值」尾列
+                    if (last.role === '年剂量估算' || last.role === '测量读数M') {
+                        Object.keys(out).forEach(k => { if (out[k] === last.pid) out[k] = ''; });
+                        out.annual_dose_msv = last.pid;
+                    }
+                }
             }
             return out;
+        }
+
+        function chapterHasAnnualDoseColumn(ch) {
+            const bindings = (ch && Array.isArray(ch.fieldBindings)) ? ch.fieldBindings : [];
+            if (bindings.some(b => String((b && b.annual_dose_msv) || '').trim())) return true;
+            return fields.some(f => (
+                isRadiationProtectionChapterField(f)
+                && (radiationColumnRole(f) === '年剂量估算' || isAnnualDoseFieldLabel(fieldDisplayLabel(f)))
+            ));
         }
 
         function syncRadiationProtectionMeanFormulaMode(ch) {
@@ -6008,6 +6122,9 @@
             const ch = templateContext.radiationProtectionChapter;
             if (!Array.isArray(ch.reportValueRules)) {
                 ch.reportValueRules = defaultRadiationProtectionChapter().reportValueRules;
+            }
+            if (!Array.isArray(ch.annualDoseRules)) {
+                ch.annualDoseRules = [];
             }
             return ch;
         }
@@ -6101,10 +6218,15 @@
 
         function radiationColumnRole(f) {
             const sem = getAutoSemantic(f);
-            if (sem.radiationColumn) return String(sem.radiationColumn);
+            if (sem.radiationColumn) {
+                const col = String(sem.radiationColumn);
+                if (isAnnualDoseFieldLabel(col)) return '年剂量估算';
+                return col;
+            }
             if (sem.meanOfReadings) return '测量均值Mbar';
             const ph = fieldDisplayLabel(f);
             if (/^序号_r\d+/i.test(ph) && isRpTableSeqField(f)) return '序号';
+            if (isAnnualDoseFieldLabel(ph)) return '年剂量估算';
             if (ph.includes('报出')) return '报出值D';
             if (ph.includes('均值') || ph.includes('平均')) return '测量均值Mbar';
             if (ph.includes('读数')) return '测量读数M';
@@ -6183,15 +6305,7 @@
         }
 
         function defaultRadiationReportRulesForGroup(group) {
-            const base = defaultRadiationProtectionChapter().reportValueRules.slice();
-            if (Number(group) !== 2) return base;
-            return base.map((r, i) => ({
-                id: String(r.id || ('rule_g2_' + i)) + '_g2',
-                label: String(r.label || '') + '（第二组）',
-                condition: '',
-                expression: '',
-                formula: ''
-            }));
+            return [];
         }
 
         function isRadiationProtectionChapterField(f) {
@@ -6315,11 +6429,13 @@
             const pointItems = {};
             fields.forEach(f => {
                 if (!isRadiationProtectionChapterField(f)) return;
+                // 本底两行（十读数+范围）不得进入测量点 fieldBindings
+                if (isRadiationProtectionBackgroundField(f)) return;
                 const sem = getAutoSemantic(f);
                 const pid = String(f.pdfFieldId || f.id || '').trim();
                 if (!pid) return;
                 const role = radiationColumnRole(f);
-                if (role !== '测量读数M' && role !== '测量均值Mbar' && role !== '报出值D') return;
+                if (role !== '测量读数M' && role !== '测量均值Mbar' && role !== '报出值D' && role !== '年剂量估算') return;
                 const pt = protectionRowCoordinateKey(f);
                 if (!pt) return;
                 const slot = protectionDataColumnSlot(f);
@@ -6336,7 +6452,7 @@
                     seq_no: '',
                     reading_1: '', reading_2: '', reading_3: '', mean_m: '',
                     reading_1_2: '', reading_2_2: '', reading_3_2: '', mean_m_2: '',
-                    report_d: '', report_d_2: '', remark: ''
+                    report_d: '', report_d_2: '', annual_dose_msv: '', remark: ''
                 };
                 if (dualGroup) {
                     Object.assign(row, assignSlotsToProtectionPointRow(items, true));
@@ -6352,6 +6468,7 @@
             });
             fields.forEach(f => {
                 if (!isRadiationProtectionChapterField(f)) return;
+                if (isRadiationProtectionBackgroundField(f)) return;
                 const sem = getAutoSemantic(f);
                 const pid = String(f.pdfFieldId || f.id || '').trim();
                 if (!pid) return;
@@ -6364,7 +6481,7 @@
                     seq_no: '',
                     reading_1: '', reading_2: '', reading_3: '', mean_m: '',
                     reading_1_2: '', reading_2_2: '', reading_3_2: '', mean_m_2: '',
-                    report_d: '', report_d_2: '', remark: ''
+                    report_d: '', report_d_2: '', annual_dose_msv: '', remark: ''
                 };
                 if (role === '序号') row.seq_no = pid;
                 else if (role === '备注') row.remark = pid;
@@ -6379,6 +6496,7 @@
             const ch = ensureRadiationProtectionChapter();
             syncRadiationProtectionMeanFormulaMode(ch);
             ch.fieldBindings = buildRadiationProtectionBindingsFromFields();
+            ch.backgroundBinding = buildRadiationBackgroundBinding();
             return ch;
         }
 
@@ -6431,6 +6549,15 @@
             };
             fields.forEach(f => {
                 if (!f || !isRadiationProtectionChapterField(f)) return;
+                // 本底区：不写均值 avg，并强制清掉误套上的 avg（忽略 override）
+                if (isRadiationProtectionBackgroundField(f)) {
+                    const fe = String(f.fieldExpression || '').trim();
+                    if (/^avg\s*\(/i.test(fe)) {
+                        f.fieldExpression = '';
+                        delete f.fieldFormulaUserOverride;
+                    }
+                    return;
+                }
                 if (fieldHasFormulaUserOverride(f)) return;
                 const pid = String(f.pdfFieldId || f.id || '').trim().toLowerCase();
                 if (!pid) return;
@@ -6440,6 +6567,8 @@
                 }
                 const group = meanPidToGroup.get(pid);
                 if (!group) return;
+                const label = fieldDisplayLabel(f) + ' ' + String(f.id || '');
+                if (label.includes('报出') || isAnnualDoseFieldLabel(label)) return;
                 const binding = findBindingForMeanPid(pid, protectionRowCoordinateKey(f));
                 if (!binding) return;
                 const expr = meanExpressionForBindingRow(binding, group);
@@ -6451,18 +6580,371 @@
             });
         }
 
+        function findFieldByPdfFieldId(pid) {
+            const key = String(pid || '').trim().toLowerCase();
+            if (!key) return null;
+            return fields.find(f => String(f.pdfFieldId || f.id || '').trim().toLowerCase() === key) || null;
+        }
+
+        function fieldCompactRect(f) {
+            if (!f) return null;
+            if (f.page != null && f.x != null && f.y != null) {
+                return {
+                    page: Number(f.page) || 0,
+                    x: Number(f.x) || 0,
+                    y: Number(f.y) || 0,
+                    w: Number(f.w) || 0,
+                    h: Number(f.h) || 0
+                };
+            }
+            const r = f.rect;
+            if (Array.isArray(r) && r.length >= 5) {
+                return {
+                    page: Number(r[0]) || 0,
+                    x: Number(r[1]) || 0,
+                    y: Number(r[2]) || 0,
+                    w: Number(r[3]) || 0,
+                    h: Number(r[4]) || 0
+                };
+            }
+            return null;
+        }
+
+        /**
+         * 本底：第五章防护表末页最后两行（①–⑤ / ⑥–⑩ 共十格）+ 报出值。
+         * 按栏位坐标取末页表体最后两行，不依赖 placeholder/label，也不用密排阈值。
+         */
+        function inferRadiationBackgroundGeometry() {
+            const bands = protectionColumnBandsForLayout(false);
+            const xLo = Number((bands.reading_1 && bands.reading_1.x0) || 232);
+            const xHi = Number((bands.report_d && bands.report_d.x0) || 668.5);
+            const byRow = {};
+            const reportCells = [];
+            fields.forEach(f => {
+                if (!isRadiationProtectionChapterField(f)) return;
+                const rc = fieldCompactRect(f);
+                if (!rc || Number(rc.page) < 5) return;
+                const pid = String(f.pdfFieldId || f.id || '').trim().toLowerCase();
+                if (!pid) return;
+                const xc = rc.x + rc.w / 2;
+                const pt = protectionRowCoordinateKey(f);
+                const item = { pid: pid, page: Number(rc.page) || 0, x0: rc.x, y0: rc.y, y1: rc.y + rc.h, xc: xc, pt: pt };
+                if (xc >= xHi - 2) {
+                    reportCells.push(item);
+                    return;
+                }
+                if (xc >= xLo - 2 && xc < xHi + 2) {
+                    byRow[pt] = byRow[pt] || [];
+                    byRow[pt].push(item);
+                }
+            });
+            // 表体行：读数～均值带内 ≥3 格，再取末页最后两行
+            const body = Object.keys(byRow)
+                .filter(pt => byRow[pt].length >= 3)
+                .map(pt => ({ pt: pt, items: byRow[pt].slice().sort((a, b) => a.x0 - b.x0 || a.pid.localeCompare(b.pid)) }))
+                .sort((a, b) => a.items[0].page - b.items[0].page || a.items[0].y0 - b.items[0].y0);
+            if (!body.length) return { pids: new Set(), bbox: null, rowKeys: new Set(), reportPid: '' };
+
+            const lastPage = body[body.length - 1].items[0].page;
+            const pageRows = body.filter(d => d.items[0].page === lastPage);
+            const cluster = pageRows.length >= 2 ? pageRows.slice(-2) : pageRows.slice(-1);
+
+            const readings = [];
+            const rowKeys = new Set();
+            cluster.forEach(c => {
+                rowKeys.add(c.pt);
+                c.items.forEach(it => readings.push(it));
+            });
+            readings.sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0);
+            const readingTen = readings.slice(0, 10);
+            if (!readingTen.length) return { pids: new Set(), bbox: null, rowKeys: new Set(), reportPid: '' };
+            const y0 = Math.min.apply(null, readingTen.map(r => r.y0));
+            const y1 = Math.max.apply(null, readingTen.map(r => r.y1));
+            const page = readingTen[0].page;
+            const pids = new Set(readingTen.map(r => r.pid));
+
+            const yMid = (y0 + y1) / 2;
+            let reportPid = '';
+            let best = 1e9;
+            reportCells.forEach(it => {
+                if (it.page !== page) return;
+                if (it.y1 < y0 - 4 || it.y0 > y1 + 4) return;
+                const dist = Math.abs((it.y0 + it.y1) / 2 - yMid);
+                if (dist < best) {
+                    best = dist;
+                    reportPid = it.pid;
+                }
+            });
+            if (reportPid) pids.add(reportPid);
+
+            return {
+                pids: pids,
+                rowKeys: rowKeys,
+                reportPid: reportPid,
+                bbox: {
+                    page: page,
+                    x0: xLo,
+                    y0: y0 - 2,
+                    x1: Number((bands.report_d && bands.report_d.x1) || 810.82),
+                    y1: y1 + 2
+                }
+            };
+        }
+
+        function getRadiationBackgroundRegion() {
+            // 始终以第五章表末两行几何为准；已存 backgroundBinding 仅作 pid 补充
+            const geo = inferRadiationBackgroundGeometry();
+            const pids = new Set(geo.pids || []);
+            const ch = (templateContext && templateContext.radiationProtectionChapter) || {};
+            const bb = ch.backgroundBinding;
+            if (bb && typeof bb === 'object') {
+                const report = String(bb.report_d || '').trim().toLowerCase();
+                if (report) pids.add(report);
+                for (let i = 1; i <= 10; i++) {
+                    const p = String(bb['bg_reading_' + i] || '').trim().toLowerCase();
+                    if (p) pids.add(p);
+                }
+            }
+            return { pids: pids, bbox: geo.bbox, rowKeys: geo.rowKeys || new Set() };
+        }
+
+        function isRadiationProtectionBackgroundField(f) {
+            if (!f) return false;
+            const pid = String(f.pdfFieldId || f.id || '').trim().toLowerCase();
+            const region = getRadiationBackgroundRegion();
+            if (region.pids && pid && region.pids.has(pid)) return true;
+            if (region.rowKeys) {
+                const pt = protectionRowCoordinateKey(f);
+                if (pt && region.rowKeys.has(pt)) return true;
+            }
+            if (region.bbox) {
+                const rc = fieldCompactRect(f);
+                if (rc) {
+                    const yMid = rc.y + rc.h / 2;
+                    const pageOk = !region.bbox.page || !rc.page || region.bbox.page === rc.page;
+                    if (pageOk && yMid >= region.bbox.y0 && yMid <= region.bbox.y1
+                        && rc.x + rc.w >= region.bbox.x0 && rc.x <= region.bbox.x1) {
+                        const role = radiationColumnRole(f);
+                        if (role === '测量读数M' || role === '测量均值Mbar' || role === '报出值D'
+                            || !role) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        function isRadiationBackgroundReportField(f) {
+            if (!f) return false;
+            const geo = inferRadiationBackgroundGeometry();
+            const pid = String(f.pdfFieldId || f.id || '').trim().toLowerCase();
+            return !!(geo.reportPid && pid === geo.reportPid);
+        }
+
+        function buildRadiationBackgroundBinding() {
+            const geo = inferRadiationBackgroundGeometry();
+            const readings = [];
+            if (geo.pids && geo.pids.size) {
+                const bands = protectionColumnBandsForLayout(false);
+                const xLo = Number((bands.reading_1 && bands.reading_1.x0) || 232);
+                const xHi = Number((bands.report_d && bands.report_d.x0) || 668.5);
+                fields.forEach(f => {
+                    const pid = String(f.pdfFieldId || f.id || '').trim().toLowerCase();
+                    if (!pid || !geo.pids.has(pid) || pid === geo.reportPid) return;
+                    const rc = fieldCompactRect(f);
+                    if (!rc) return;
+                    const xc = rc.x + rc.w / 2;
+                    if (xc < xLo - 2 || xc >= xHi + 2) return;
+                    readings.push({ pid: pid, x0: rc.x, y0: rc.y });
+                });
+            }
+            readings.sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0);
+            const out = {
+                kind: 'background',
+                report_d: geo.reportPid || '',
+                bbox: geo.bbox || null,
+                page: geo.bbox ? geo.bbox.page : 0
+            };
+            readings.slice(0, 10).forEach((r, i) => {
+                out['bg_reading_' + (i + 1)] = r.pid;
+            });
+            if (geo.bbox) {
+                out.radiationPoint = 'rp_p' + geo.bbox.page + '_y' + Math.round(((geo.bbox.y0 + geo.bbox.y1) / 2) * 10) / 10;
+            }
+            return out;
+        }
+
+        /** 将章节公式中的 {mean}/{mean2}/{report}… 替换为该行绑定的 f 号。 */
+        function substituteRadiationRowTokens(expr, binding, reportGroup) {
+            const g = Number(reportGroup) === 2 ? 2 : 1;
+            const meanKey = g === 2 ? 'mean_m_2' : 'mean_m';
+            const reportKey = g === 2 ? 'report_d_2' : 'report_d';
+            const mean = String((binding && (binding[meanKey] || binding.mean_m)) || '').trim();
+            const mean2 = String((binding && binding.mean_m_2) || '').trim();
+            const report = String((binding && (binding[reportKey] || binding.report_d)) || '').trim();
+            const report2 = String((binding && binding.report_d_2) || '').trim();
+            let out = String(expr || '');
+            const repl = [
+                ['{mean2}', mean2], ['{mean}', mean],
+                ['{report2}', report2], ['{report}', report],
+                ['__ROW_MEAN2__', mean2], ['__ROW_MEAN__', mean],
+                ['__ROW_REPORT2__', report2], ['__ROW_REPORT__', report]
+            ];
+            const readingKeys1 = ['reading_1', 'reading_2', 'reading_3'];
+            const readingKeys2 = ['reading_1_2', 'reading_2_2', 'reading_3_2'];
+            readingKeys1.forEach((k, idx) => {
+                const v = String((binding && binding[k]) || '').trim();
+                repl.push(['__ROW_READING' + (idx + 1) + '__', v]);
+                repl.push(['{reading' + (idx + 1) + '}', v]);
+            });
+            readingKeys2.forEach((k, idx) => {
+                const v = String((binding && binding[k]) || '').trim();
+                repl.push(['__ROW_READING' + (idx + 1) + '_2__', v]);
+                repl.push(['{reading' + (idx + 1) + '_2}', v]);
+            });
+            repl.forEach(([token, fid]) => {
+                if (token && fid) out = out.split(token).join(fid);
+            });
+            return out.trim();
+        }
+
+        function filterChapterReportRulesForGroup(rules, reportGroup) {
+            const g = Number(reportGroup) === 2 ? 2 : 1;
+            return (Array.isArray(rules) ? rules : []).filter(rule => {
+                const expr = String((rule && (rule.expression || rule.formula)) || '');
+                if (!expr.trim()) return false;
+                if (g === 1 && expr.includes('{mean2}') && !expr.includes('{mean}')) return false;
+                if (g === 2 && expr.includes('{mean}') && !expr.includes('{mean2}') && !/mean2/i.test(expr)) return false;
+                return true;
+            });
+        }
+
+        function compileChapterConditionalExpression(rules, substituter, defaultExpr) {
+            const sub = typeof substituter === 'function' ? substituter : (s => s);
+            const parts = [];
+            (rules || []).forEach(rule => {
+                const cond = sub(String((rule && rule.condition) || '').trim());
+                const expr = sub(String((rule && (rule.expression || rule.formula)) || '').trim());
+                if (cond && expr) parts.push([cond, expr]);
+            });
+            if (!parts.length) return sub(String(defaultExpr || '').trim());
+            let tail = sub(String(defaultExpr || '').trim()) || '""';
+            for (let i = parts.length - 1; i >= 0; i--) {
+                tail = 'if(' + parts[i][0] + ',' + parts[i][1] + ',' + tail + ')';
+            }
+            return tail;
+        }
+
+        /**
+         * 章节公式强制写入单个报出值/年剂量栏位（完成时调用）。
+         * condition 非空 → fieldExpression(if…)；全空 condition → 单条写 fieldExpression，多条写 formulaRules。
+         */
+        function applyChapterRulesToReportField(field, rules, binding, reportGroup) {
+            if (!field || !binding) return;
+            if (isRadiationProtectionBackgroundField(field)) return;
+            const groupRules = filterChapterReportRulesForGroup(rules, reportGroup);
+            const substituter = (s) => substituteRadiationRowTokens(s, binding, reportGroup);
+            const meanKey = Number(reportGroup) === 2 ? 'mean_m_2' : 'mean_m';
+            const meanPid = String(binding[meanKey] || '').trim();
+            if (meanPid) field.chapterMeanPdfFieldId = meanPid;
+
+            clearFieldFormulaUserOverride(field);
+            const autoExpr = compileChapterConditionalExpression(groupRules, substituter, '');
+            const manual = [];
+            groupRules.forEach((rule, i) => {
+                const cond = String((rule && rule.condition) || '').trim();
+                const expr = String((rule && (rule.expression || rule.formula)) || '').trim();
+                if (cond || !expr) return;
+                const row = normalizeConditionalRuleRow(rule, i);
+                row.expression = substituter(expr);
+                row.formula = row.expression;
+                if (row.expression) manual.push(row);
+            });
+
+            if (autoExpr) {
+                field.fieldExpression = autoExpr;
+            }
+            if (manual.length === 1 && !autoExpr) {
+                field.fieldExpression = manual[0].expression;
+                field.formulaRules = [];
+            } else if (manual.length > 0) {
+                field.formulaRules = manual.map((r, i) => normalizeConditionalRuleRow(r, i));
+                if (!autoExpr) field.fieldExpression = '';
+            } else if (!autoExpr) {
+                field.fieldExpression = '';
+                field.formulaRules = [];
+            } else {
+                field.formulaRules = [];
+            }
+            delete field.fieldExpressionRules;
+            updateFieldRowIndicators(field.id);
+        }
+
+        /**
+         * 章节公式「完成」：立刻写进编辑器内存里的各行报出值/年剂量栏位（不落盘）。
+         * 同时按表几何重建 fieldBindings / backgroundBinding，避免磁盘旧绑定把本底格当成均值。
+         * 磁盘上的 JSON 仍须点「保存坐标模板 JSON」才更新。
+         * 之后可单独改某一格（会标 fieldFormulaUserOverride）；保存时不再用章节规则覆盖已有栏位公式。
+         */
+        function applyChapterFormulasToFields() {
+            const ch = syncRadiationProtectionChapterBindings();
+            applyMeanFormulasToFields();
+            const reportRules = pruneEmptyChapterFormulaRules(
+                Array.isArray(ch.reportValueRules) ? ch.reportValueRules : []
+            ).map((r, i) => normalizeConditionalRuleRow(r, i));
+            const annualRules = pruneEmptyChapterFormulaRules(
+                Array.isArray(ch.annualDoseRules) ? ch.annualDoseRules : []
+            ).map((r, i) => normalizeConditionalRuleRow(r, i));
+            const hasAnnual = chapterHasAnnualDoseColumn(ch) && annualRules.length > 0;
+            let applied = 0;
+            (ch.fieldBindings || []).forEach(binding => {
+                if (!binding || typeof binding !== 'object') return;
+                const pt = String(binding.radiationPoint || '');
+                if (pt.includes('本底')) return;
+                [1, 2].forEach(group => {
+                    const reportKey = group === 2 ? 'report_d_2' : 'report_d';
+                    const reportPid = String(binding[reportKey] || '').trim();
+                    if (!reportPid) return;
+                    const field = findFieldByPdfFieldId(reportPid);
+                    if (!field || isRadiationProtectionBackgroundField(field)) return;
+                    applyChapterRulesToReportField(field, reportRules, binding, group);
+                    applied += 1;
+                });
+                if (hasAnnual) {
+                    const annualPid = String(binding.annual_dose_msv || '').trim();
+                    if (!annualPid) return;
+                    const annualField = findFieldByPdfFieldId(annualPid);
+                    if (!annualField || isRadiationProtectionBackgroundField(annualField)) return;
+                    applyChapterRulesToReportField(annualField, annualRules, binding, 1);
+                    applied += 1;
+                }
+            });
+            return applied;
+        }
+
         function getRadiationProtectionChapterPayload(forFrontend) {
             const ch = syncRadiationProtectionChapterBindings();
+            const reportRules = pruneEmptyChapterFormulaRules(
+                Array.isArray(ch.reportValueRules) ? ch.reportValueRules : []
+            ).map((r, i) => normalizeConditionalRuleRow(r, i));
+            const annualRules = pruneEmptyChapterFormulaRules(
+                Array.isArray(ch.annualDoseRules) ? ch.annualDoseRules : []
+            ).map((r, i) => normalizeConditionalRuleRow(r, i));
+            const payloadAnnual = chapterHasAnnualDoseColumn(ch) ? annualRules : [];
             if (forFrontend) {
                 return {
                     chapterKey: ch.chapterKey || 'site_radiation_protection',
                     meanFormula: ch.meanFormula || defaultRadiationProtectionChapter().meanFormula,
-                    reportValueRules: Array.isArray(ch.reportValueRules)
-                        ? ch.reportValueRules.map((r, i) => normalizeConditionalRuleRow(r, i))
-                        : defaultRadiationProtectionChapter().reportValueRules.slice()
+                    reportValueRules: reportRules,
+                    annualDoseRules: payloadAnnual
                 };
             }
-            return ch;
+            return {
+                ...ch,
+                reportValueRules: reportRules,
+                annualDoseRules: payloadAnnual
+            };
         }
 
         function openRadiationChapterFormulaModal() {
@@ -6482,6 +6964,7 @@
         function renderRadiationProtectionChapterFormulaPanel(host, triggerField) {
             const ch = syncRadiationProtectionChapterBindings();
             host.innerHTML = '';
+            const panelCommitHooks = [];
             if (formulaModalSubtitle) {
                 formulaModalSubtitle.textContent = '第五章 · 工作场所放射防护 · 章节公式';
             }
@@ -6489,7 +6972,13 @@
             const intro = document.createElement('div');
             intro.className = 'formula-selected-card';
             intro.innerHTML = '<div class="formula-selected-title">章节公式（全表复用）</div>'
-                + '<div class="formula-selected-meta">测量均值：各行自动 avg(三次读数)。报出值：按下方条件公式套用到每一行，可用 {mean} / {mean2} 表示第一组、第二组测量均值。</div>';
+                + '<div class="formula-selected-meta">测量均值：各行自动 avg(三次读数)。报出值：按下方条件公式配置；'
+                + '<strong>点击「完成」后立刻写进编辑器里各行报出值输入框</strong>（{mean}/{mean2} 换成该行均值编号；此时不写磁盘）。'
+                + '之后可单独打开某一格再改；只有点「保存坐标模板 JSON」才更新文件。保存时不会用章节规则覆盖已有栏位公式。'
+                + (chapterHasAnnualDoseColumn(ch)
+                    ? ' 若表含「估算 mSv / 年剂量」列，可继续配置其条件公式（同样在完成时写入编辑器）。'
+                    : '')
+                + '</div>';
             host.appendChild(intro);
 
             const meanBox = document.createElement('div');
@@ -6511,26 +7000,61 @@
             host.appendChild(meanBox);
 
             if (!Array.isArray(ch.reportValueRules)) {
-                ch.reportValueRules = defaultRadiationProtectionChapter().reportValueRules.slice();
+                ch.reportValueRules = [];
             }
-            ch.reportValueRules = ch.reportValueRules.map((r, i) => {
+            // 去掉历史占位空壳（出束时间… 等无公式条目），避免一打开就像「默认带条件」
+            ch.reportValueRules = pruneEmptyChapterFormulaRules(ch.reportValueRules).map((r, i) => {
                 const row = normalizeConditionalRuleRow(r, i);
                 row.formula = row.expression;
                 return row;
             });
+            // 编辑器始终绑定 split 副本，并让 ch.reportValueRules 与编辑器共用同一批规则对象（避免拷贝导致「改一次不生效」）
             const splitRules = splitRadiationReportValueRules(ch.reportValueRules);
-            if (isDualMean && !splitRules.group2.length) {
-                splitRules.group2 = defaultRadiationReportRulesForGroup(2);
-            }
+            if (!Array.isArray(splitRules.group1)) splitRules.group1 = [];
+            if (!Array.isArray(splitRules.group2)) splitRules.group2 = [];
 
             function syncReportRulesFromEditors() {
-                ch.reportValueRules = mergeRadiationReportValueRules(splitRules.group1, splitRules.group2);
+                // 不要 map 成新对象：编辑器正在改的就是这些引用
+                ch.reportValueRules = isDualMean
+                    ? splitRules.group1.concat(splitRules.group2)
+                    : splitRules.group1.slice();
                 ch.reportValueRules.forEach((rule, i) => {
                     const row = normalizeConditionalRuleRow(rule, i);
+                    Object.assign(rule, row);
                     rule.formula = row.expression;
                     rule.expression = row.expression;
                 });
                 syncRadiationProtectionMeanFormulaMode(ch);
+            }
+
+            // 打开时先对齐引用，供后续编辑直接写回
+            syncReportRulesFromEditors();
+
+            if (!Array.isArray(ch.annualDoseRules)) {
+                ch.annualDoseRules = [];
+            }
+            const hasAnnualDose = chapterHasAnnualDoseColumn(ch);
+            if (hasAnnualDose) {
+                ch.annualDoseRules = pruneEmptyChapterFormulaRules(ch.annualDoseRules).map((r, i) => {
+                    const row = normalizeConditionalRuleRow(r, i);
+                    row.formula = row.expression;
+                    return row;
+                });
+            } else {
+                ch.annualDoseRules = [];
+            }
+
+            function syncAnnualDoseRulesFromEditors() {
+                if (!hasAnnualDose) return;
+                // 原地规范化，保持与编辑器同一批对象引用（禁止 map 成新数组）
+                const rules = Array.isArray(ch.annualDoseRules) ? ch.annualDoseRules : [];
+                rules.forEach((rule, i) => {
+                    const row = normalizeConditionalRuleRow(rule, i);
+                    Object.assign(rule, row);
+                    rule.formula = row.expression;
+                    rule.expression = row.expression;
+                });
+                ch.annualDoseRules = rules;
             }
 
             function appendReportRuleToolRow(reportSecEl, meanToken, activeGetter) {
@@ -6565,17 +7089,19 @@
             if (isDualMean) {
                 const reportSec1 = createFormulaSection(
                     2,
-                    '第一组报出值条件公式',
-                    '套用到各行第一列报出值（report_d）。公式请使用 {mean} 表示第一组测量均值。'
+                    '第一组报出值公式',
+                    '套用到各行第一列报出值（report_d）。公式请使用 {mean} 表示第一组测量均值。判断条件按需添加。'
                 );
                 let activeFormulaInput1 = null;
                 const rulesEditor1 = createConditionalRulesEditor({
                     rules: splitRules.group1,
                     expressionLabel: '第一组报出值公式',
                     expressionPlaceholder: '例：{mean}*f250',
-                    conditionPlaceholder: '例：f12>=f13；留空则需现场人工选择',
-                    hint: '写入各行第一组报出值栏位；与第二组公式分开配置。',
+                    conditionPlaceholder: '例：f12>=f13；可不填',
+                    hint: '点击「添加公式」写入第一组报出值。判断条件按需填写；公式可用 {mean}。',
+                    addButtonLabel: '添加公式',
                     setActiveExpressionInput: (el) => { activeFormulaInput1 = el; },
+                    commitHooks: panelCommitHooks,
                     onChange: syncReportRulesFromEditors
                 });
                 reportSec1.appendChild(rulesEditor1);
@@ -6584,66 +7110,135 @@
 
                 const reportSec2 = createFormulaSection(
                     3,
-                    '第二组报出值条件公式',
-                    '套用到各行第二列报出值（report_d_2）。公式请使用 {mean2} 表示第二组测量均值。'
+                    '第二组报出值公式',
+                    '套用到各行第二列报出值（report_d_2）。公式请使用 {mean2} 表示第二组测量均值。判断条件按需添加。'
                 );
                 let activeFormulaInput2 = null;
                 const rulesEditor2 = createConditionalRulesEditor({
                     rules: splitRules.group2,
                     expressionLabel: '第二组报出值公式',
                     expressionPlaceholder: '例：{mean2}*f252',
-                    conditionPlaceholder: '例：f12>=f13；留空则需现场人工选择',
-                    hint: '须含 {mean2}，导出时写入各行第二组报出值栏位。',
+                    conditionPlaceholder: '例：f12>=f13；可不填',
+                    hint: '点击「添加公式」写入第二组报出值。判断条件按需填写；公式须含 {mean2}。',
+                    addButtonLabel: '添加公式',
                     setActiveExpressionInput: (el) => { activeFormulaInput2 = el; },
+                    commitHooks: panelCommitHooks,
                     onChange: syncReportRulesFromEditors
                 });
                 reportSec2.appendChild(rulesEditor2);
                 appendReportRuleToolRow(reportSec2, '{mean2}', () => activeFormulaInput2);
                 host.appendChild(reportSec2);
             } else {
-            const reportSec = createFormulaSection(2, '报出值条件公式', '按顺序匹配条件；不填判断条件时需现场人工选择公式。可用 {mean}、{mean2} 插入各组测量均值。');
-            let activeFormulaInput = null;
-            const rulesEditor = createConditionalRulesEditor({
-                rules: ch.reportValueRules,
-                expressionLabel: '报出值公式',
-                expressionPlaceholder: '例：{mean}*f20 或 if(...)',
-                conditionPlaceholder: '例：f12>=f13（出束时间≥响应时间）；留空则需现场人工选择',
-                hint: '每条含：条件说明、判断条件（可空）、报出值公式。不填判断条件时，现场人员需人工选择适用公式。',
-                setActiveExpressionInput: (el) => { activeFormulaInput = el; },
-                onChange: syncReportRulesFromEditors
-            });
-            reportSec.appendChild(rulesEditor);
-
-            const toolRow = document.createElement('div');
-            toolRow.className = 'formula-chip-row';
-            const meanBtn = document.createElement('button');
-            meanBtn.type = 'button';
-            meanBtn.className = 'formula-tool-btn';
-            meanBtn.textContent = '插入测量均值 {mean}';
-            meanBtn.title = '在报出值公式中插入占位符 {mean}，导出时替换为该行均值栏位编号';
-            meanBtn.addEventListener('click', () => {
-                const ta = activeFormulaInput || reportSec.querySelector('textarea[placeholder*="mean"]');
-                if (ta) insertTextAtCursor(ta, '{mean}');
-            });
-            const pickBtn = document.createElement('button');
-            pickBtn.type = 'button';
-            pickBtn.className = 'primary';
-            pickBtn.textContent = '在 PDF 上选栏位';
-            pickBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const ta = activeFormulaInput || reportSec.querySelector('textarea');
-                if (!ta) return;
-                openFormulaFieldPicker(pickBtn, ta, triggerField ? triggerField.id : null, {
-                    pid: '{param}',
-                    syncFormulaUi: () => {}
+                const reportSec = createFormulaSection(2, '报出值公式', '点击「添加公式」配置。判断条件按需填写；可用 {mean}、{mean2}。');
+                let activeFormulaInput = null;
+                const rulesEditor = createConditionalRulesEditor({
+                    rules: splitRules.group1,
+                    expressionLabel: '报出值公式',
+                    expressionPlaceholder: '例：{mean}*f20 或 if(...)',
+                    conditionPlaceholder: '例：f12>=f13；可不填',
+                    hint: '点击「添加公式」配置报出值。判断条件按需填写；可用 {mean} / {mean2}。',
+                    addButtonLabel: '添加公式',
+                    setActiveExpressionInput: (el) => { activeFormulaInput = el; },
+                    commitHooks: panelCommitHooks,
+                    onChange: syncReportRulesFromEditors
                 });
-            });
-            toolRow.appendChild(meanBtn);
-            toolRow.appendChild(pickBtn);
-            reportSec.appendChild(toolRow);
+                reportSec.appendChild(rulesEditor);
 
-            host.appendChild(reportSec);
+                const toolRow = document.createElement('div');
+                toolRow.className = 'formula-chip-row';
+                const meanBtn = document.createElement('button');
+                meanBtn.type = 'button';
+                meanBtn.className = 'formula-tool-btn';
+                meanBtn.textContent = '插入测量均值 {mean}';
+                meanBtn.title = '在报出值公式中插入占位符 {mean}，导出时替换为该行均值栏位编号';
+                meanBtn.addEventListener('click', () => {
+                    const ta = activeFormulaInput || reportSec.querySelector('textarea[placeholder*="mean"]');
+                    if (ta) insertTextAtCursor(ta, '{mean}');
+                });
+                const pickBtn = document.createElement('button');
+                pickBtn.type = 'button';
+                pickBtn.className = 'primary';
+                pickBtn.textContent = '在 PDF 上选栏位';
+                pickBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const ta = activeFormulaInput || reportSec.querySelector('textarea');
+                    if (!ta) return;
+                    openFormulaFieldPicker(pickBtn, ta, triggerField ? triggerField.id : null, {
+                        pid: '{param}',
+                        syncFormulaUi: () => {}
+                    });
+                });
+                toolRow.appendChild(meanBtn);
+                toolRow.appendChild(pickBtn);
+                reportSec.appendChild(toolRow);
+                host.appendChild(reportSec);
             }
+
+            if (hasAnnualDose) {
+                const annualSecNum = isDualMean ? 4 : 3;
+                const annualSec = createFormulaSection(
+                    annualSecNum,
+                    '估算 mSv（年剂量）公式',
+                    '套用到已识别的「估算 mSv / 年剂量」列。判断条件按需添加；可用 {mean}/{mean2}/{report}/{report2}。'
+                );
+                let activeAnnualInput = null;
+                const annualEditor = createConditionalRulesEditor({
+                    rules: ch.annualDoseRules,
+                    expressionLabel: '估算 mSv 公式',
+                    expressionPlaceholder: '例：{report}*f1013*f1014 或 f1013*f1014*50',
+                    conditionPlaceholder: '例：{report}>25；可不填',
+                    hint: '点击「添加公式」配置估算 mSv。判断条件按需填写；可用 {mean}/{mean2}/{report}/{report2}。',
+                    addButtonLabel: '添加公式',
+                    setActiveExpressionInput: (el) => { activeAnnualInput = el; },
+                    commitHooks: panelCommitHooks,
+                    onChange: syncAnnualDoseRulesFromEditors
+                });
+                annualSec.appendChild(annualEditor);
+
+                const annualTools = document.createElement('div');
+                annualTools.className = 'formula-chip-row';
+                [
+                    ['插入 {mean}', '{mean}'],
+                    ['插入 {mean2}', '{mean2}'],
+                    ['插入 {report}', '{report}'],
+                    ['插入 {report2}', '{report2}']
+                ].forEach(([label, token]) => {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'formula-tool-btn';
+                    btn.textContent = label;
+                    btn.addEventListener('click', () => {
+                        const ta = activeAnnualInput || annualSec.querySelector('textarea');
+                        if (ta) insertTextAtCursor(ta, token);
+                    });
+                    annualTools.appendChild(btn);
+                });
+                const annualPickBtn = document.createElement('button');
+                annualPickBtn.type = 'button';
+                annualPickBtn.className = 'primary';
+                annualPickBtn.textContent = '在 PDF 上选栏位';
+                annualPickBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const ta = activeAnnualInput || annualSec.querySelector('textarea');
+                    if (!ta) return;
+                    openFormulaFieldPicker(annualPickBtn, ta, triggerField ? triggerField.id : null, {
+                        pid: '{param}',
+                        syncFormulaUi: () => {}
+                    });
+                });
+                annualTools.appendChild(annualPickBtn);
+                annualSec.appendChild(annualTools);
+                host.appendChild(annualSec);
+            }
+
+            // 打开时不再二次 sync 覆盖；完成时再提交
+            formulaPanelCommitFn = () => {
+                panelCommitHooks.forEach(hook => {
+                    try { hook(); } catch (err) { console.warn('chapter formula commit hook', err); }
+                });
+                syncReportRulesFromEditors();
+                if (hasAnnualDose) syncAnnualDoseRulesFromEditors();
+            };
         }
 
         const SITE_RECORD_SECTIONS = [
@@ -7046,7 +7641,8 @@
                 selectedFieldId = null;
                 closeFormulaModal();
             }
-            applyPdfFieldIdRenumber(true);
+            // 方案 B：删除后不重排其它栏位的 pdfFieldId，避免公式/映射联动错乱
+            updateFieldBadges();
             refreshFieldList();
             applyAllNamingMarks();
         }
@@ -7251,7 +7847,7 @@
                 return normalized;
             });
             if (fields.length) {
-                reindexPdfFieldIds(fields, { remapExpressions: true });
+                ensurePdfFieldIds(fields);
             }
             marks = [];
             markerSeq = 1;
@@ -8007,7 +8603,7 @@
                 else item.el?.remove();
             });
             fields = loadedFields;
-            reindexPdfFieldIds(fields, { remapExpressions: true });
+            ensurePdfFieldIds(fields);
             mountAllFields();
             selectedFieldId = null;
             closeFormulaModal();
@@ -8036,6 +8632,9 @@
             };
             if (!isReportTemplateEditor()) {
                 templateContext.radiationProtectionChapter = syncRadiationProtectionChapterBindings();
+                // 加载后立刻按表几何刷一遍均值公式，使编辑器内存与即将保存的 JSON 一致
+                applyMeanFormulasToFields();
+                fields.forEach(f => updateFieldRowIndicators(f.id));
             }
             const b = (d && d.bindings && typeof d.bindings === 'object') ? d.bindings : {};
             setSuppressAutoImport(false);
@@ -8222,7 +8821,20 @@
         };
 
         if (formulaModalClose) formulaModalClose.onclick = closeFormulaModal;
-        if (formulaModalDone) formulaModalDone.onclick = closeFormulaModal;
+        if (formulaModalDone) {
+            formulaModalDone.onclick = () => {
+                const wasChapter = formulaModalChapterMode;
+                closeFormulaModal();
+                if (wasChapter) {
+                    const n = applyChapterFormulasToFields();
+                    if (typeof n === 'number' && n > 0) {
+                        // 轻提示：已套用到栏位，避免用户以为还要等保存
+                        console.info('[chapter-formula] applied to', n, 'fields');
+                    }
+                    refreshFieldList();
+                }
+            };
+        }
         if (formulaModalBackdrop) {
             formulaModalBackdrop.addEventListener('mousedown', e => {
                 if (e.target === formulaModalBackdrop) closeFormulaModal();
@@ -8298,7 +8910,7 @@
         }
 
         function buildFieldsPayload() {
-            applyPdfFieldIdRenumber(false);
+            ensurePdfFieldIds(fields);
             applyMeanFormulasToFields();
             syncTemplateContextStepsJudgmentFromFields();
             return fields.map(i => {
@@ -8511,7 +9123,6 @@
                         steps: templateContext.steps || [],
                         radiationProtectionChapter: getRadiationProtectionChapterPayload(false)
                     },
-                    radiationProtectionChapter: getRadiationProtectionChapterPayload(false),
                     bindings: buildBindingsForExport()
                 })
             }).then(async r => {
@@ -8556,7 +9167,7 @@
 
         document.getElementById('saveTemplate').onclick = async () => {
             await syncAutoRedNamesBeforeSave();
-            applyPdfFieldIdRenumber(false);
+            ensurePdfFieldIds(fields);
             exportJsonMerged();
         };
         function saveFrontendTemplate() {
@@ -8596,7 +9207,6 @@
                         steps: templateContext.steps || [],
                         radiationProtectionChapter: getRadiationProtectionChapterPayload(true)
                     },
-                    radiationProtectionChapter: getRadiationProtectionChapterPayload(true),
                     meta: {
                         libraryTaskId: libTask,
                         libraryTemplateFileId: libTpl,

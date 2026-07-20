@@ -10272,6 +10272,9 @@ def _sync_site_record_rp_sequence_before_export(
         flat_fields = filled_fields
     bindings = None
     chapter = source_payload.get("radiationProtectionChapter")
+    if not isinstance(chapter, dict):
+        fs = source_payload.get("formSchema") if isinstance(source_payload.get("formSchema"), dict) else {}
+        chapter = fs.get("radiationProtectionChapter") if isinstance(fs, dict) else None
     if isinstance(chapter, dict):
         raw_bindings = chapter.get("fieldBindings")
         if isinstance(raw_bindings, list) and raw_bindings:

@@ -100,8 +100,8 @@
                 </div>
                 <div class="flex items-center gap-3 shrink-0">
                     <span class="text-[11px] text-slate-500 tabular-nums whitespace-nowrap">{{ notice.updated_at|date:"m-d H:i" }}</span>
-                    <a href="{% url 'library_projects' %}{{ notice.workbench_url }}" class="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium {% if notice.kind == 'my_workflow' %}bg-indigo-600 text-white hover:bg-indigo-700{% else %}bg-white ring-1 ring-slate-200 text-slate-700 hover:bg-slate-50{% endif %}">
-                        前往工作台
+                    <a href="{% if notice.hub_url %}{{ notice.hub_url }}{% else %}{% url 'library_projects' %}{{ notice.workbench_url }}{% endif %}" class="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium {% if notice.kind == 'my_workflow' %}bg-indigo-600 text-white hover:bg-indigo-700{% else %}bg-white ring-1 ring-slate-200 text-slate-700 hover:bg-slate-50{% endif %}">
+                        {{ notice.hub_label|default:"前往工作台" }}
                     </a>
                 </div>
             </li>

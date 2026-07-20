@@ -129,6 +129,12 @@ MENU_CONTEXT_CACHE_TIMEOUT = int(os.environ.get('MENU_CONTEXT_CACHE_TIMEOUT', '3
 # 请求耗时/SQL 统计：ADMIN_REQUEST_STATS=1 时写入 logs/request_stats.log 与响应头
 ADMIN_REQUEST_STATS = os.environ.get('ADMIN_REQUEST_STATS', '').lower() in ('1', 'true', 'yes')
 
+# 医院信息 / 委托项目操作日志容量限制（超出后自动删最旧记录）
+BIZ_OPERATION_LOG_MAX_ROWS = int(os.environ.get('BIZ_OPERATION_LOG_MAX_ROWS', '5000'))
+BIZ_OPERATION_LOG_RETENTION_DAYS = int(os.environ.get('BIZ_OPERATION_LOG_RETENTION_DAYS', '180'))
+BIZ_OPERATION_LOG_DETAIL_MAX_CHARS = int(os.environ.get('BIZ_OPERATION_LOG_DETAIL_MAX_CHARS', '2000'))
+BIZ_OPERATION_LOG_PRUNE_EVERY = int(os.environ.get('BIZ_OPERATION_LOG_PRUNE_EVERY', '20'))
+
 # 静态文件配置
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [

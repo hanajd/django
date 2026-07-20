@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block page_title %}报告生成及预览{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-7xl space-y-6">
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">报告流程 · 编制 / 预览</p>
+            <h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-900">报告生成及预览</h1>
+            <p class="mt-1 text-sm text-slate-600 max-w-2xl">
+                {% if tab == 'preview' %}
+                按医院或时间预览已生成报告（默认仅最新版本）。签名请先在
+                {% else %}
+                按医院或时间找到待编制任务并生成报告。签名请先在
+                {% endif %}
+                <a href="{% url 'signature_manage' %}" class="text-indigo-600 underline font-medium">签名管理</a>上传。
+            </p>
+        </div>
+        <div class="flex flex-wrap gap-2 shrink-0">
+            <a href="{% url 'workflow_hub_site_records' %}?view={{ view_mode|default:'hospital' }}" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                <i class="ri-file-list-3-line"></i> 原始记录
+            </a>
+            <a href="{% url 'workflow_hub_review_sign' %}?view={{ view_mode|default:'hospital' }}" class="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">
+                <i class="ri-shield-check-line"></i> 审核签发
+            </a>
+        </div>
+    </div>
+
+    <div class="flex flex-wrap gap-2">
+        <a href="?view={{ view_mode|default:'hospital' }}{% if project_search %}&q={{ project_search|urlencode }}{% endif %}&tab=generate"
+           class="rounded-full px-3 py-1.5 text-xs font-medium {% if tab == 'generate' %}bg-emerald-600 text-white{% else %}bg-emerald-50 text-emerald-900 hover:bg-emerald-100{% endif %}">报告生成</a>
+        <a href="?view={{ view_mode|default:'hospital' }}{% if project_search %}&q={{ project_search|urlencode }}{% endif %}&tab=preview"
+           class="rounded-full px-3 py-1.5 text-xs font-medium {% if tab == 'preview' %}bg-slate-900 text-white{% else %}bg-slate-100 text-slate-700 hover:bg-slate-200{% endif %}">报告预览</a>
+    </div>
+
+    {% include "core/partials/workflow_hub_tree.html" %}
+</div>
+{% endblock %}

@@ -1,0 +1,51 @@
+{# 树叶子：进度行或文件行 #}
+<div class="px-3 py-2.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+    {% if leaf.kind == 'file' %}
+    <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2">
+            <p class="text-sm text-slate-800 break-all">{{ leaf.file.original_name }}</p>
+            {% if leaf.is_latest %}
+            <span class="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800">最新</span>
+            {% elif leaf.is_latest == False %}
+            <span class="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">历史</span>
+            {% endif %}
+        </div>
+        <p class="text-[11px] text-slate-400 mt-0.5">{{ leaf.file.created_at|date:"Y-m-d H:i" }} · {{ leaf.file.size|filesizeformat }}</p>
+    </div>
+    <div class="flex flex-wrap gap-1.5 shrink-0">
+        <a href="{{ leaf.preview_url }}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-slate-800">
+            <i class="ri-eye-line"></i> 预览
+        </a>
+        <a href="{{ leaf.download_url }}" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+            <i class="ri-download-line"></i> 下载
+        </a>
+    </div>
+    {% else %}
+    <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2">
+            <span class="text-sm font-medium text-slate-900">{{ leaf.task_label|default:leaf.task_no|default:"任务" }}</span>
+            {% if leaf.hub_section == 'audit' %}
+            <span class="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-800">审核</span>
+            {% elif leaf.hub_section == 'sign' %}
+            <span class="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">签发</span>
+            {% endif %}
+            <span class="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">{{ leaf.stage_label|default:"—" }}</span>
+        </div>
+        <p class="text-[11px] text-slate-500 mt-0.5 font-mono">任务 {{ leaf.task_no|default:"—" }}</p>
+    </div>
+    <div class="flex flex-col items-stretch sm:items-end gap-1.5 shrink-0">
+        {% if hub_name == 'report_generate' %}
+        <a href="{{ leaf.generate_library_url }}" class="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">
+            <i class="ri-file-pdf-line"></i> 去生成报告
+        </a>
+        {% elif hub_name == 'review_sign' %}
+        <a href="{{ leaf.report_library_url }}" class="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+            <i class="ri-folder-2-line"></i> 查看报告
+        </a>
+        {% endif %}
+        {% if leaf.primary_action %}
+        {% include "core/partials/workflow_hub_advance_form.html" with row=leaf project_id=project_id task_no=task_no tab=tab %}
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
