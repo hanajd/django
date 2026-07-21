@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
@@ -1543,12 +1544,32 @@ def field_is_protection_chapter_numeric_cell(field: Mapping[str, Any]) -> bool:
     return True
 
 
+def resolve_field_number_precision(
+    field: Optional[Mapping[str, Any]] = None,
+    *,
+    default: int = PROTECTION_NUMBER_PRECISION,
+) -> int:
+    """栏位 `precision` 优先；未配置时用 default（公式默认不超过 3 位）。"""
+    if isinstance(field, Mapping) and field.get("precision") not in (None, ""):
+        try:
+            return max(0, int(field.get("precision")))
+        except (TypeError, ValueError):
+            pass
+    return max(0, int(default))
+
+
 def format_protection_numeric_display(
     value: Any,
     *,
     precision: int = PROTECTION_NUMBER_PRECISION,
+    fixed: bool = True,
 ) -> str:
-    """第五章数值 PDF/提交展示：固定小数位，避免 float 尾数如 81.38000000000001。"""
+    """
+    数值展示：先按 precision 四舍五入，避免 float 尾数如 81.38000000000001。
+
+    - fixed=True（第五章读数格默认）：固定写出小数位，如 0.120
+    - fixed=False（一般公式）：小数位不超过 precision，去掉末尾 0，如 3.5 / -3.333
+    """
     if value is None:
         return ""
     if isinstance(value, bool):
@@ -1562,10 +1583,17 @@ def format_protection_numeric_display(
         num = float(text)
     except (TypeError, ValueError):
         return text
+    if math.isnan(num) or math.isinf(num):
+        return text
     prec = max(0, int(precision))
     if prec == 0:
         return str(int(round(num)))
-    return f"{round(num, prec):.{prec}f}"
+    rounded = round(num, prec)
+    if fixed:
+        return f"{rounded:.{prec}f}"
+    if abs(rounded - int(rounded)) < 1e-12:
+        return str(int(rounded))
+    return f"{rounded:.{prec}f}".rstrip("0").rstrip(".")
 
 
 def _binding_has_dual_group(binding: Mapping[str, Any]) -> bool:

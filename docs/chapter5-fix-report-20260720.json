@@ -1,0 +1,642 @@
+{
+  "stats": {
+    "scanned": 34,
+    "skipped_no_rp": 4,
+    "needs_fix": 30,
+    "fixed": 19,
+    "unchanged": 11,
+    "errors": 0
+  },
+  "rows": [
+    {
+      "path": "templates/001-验收检测/01-CT/site/jxfs-js009-v30-xct202641-1/current/891c79d567e142e7a4b33b4335ab5ae4.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f603",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f603",
+        "has_rules": true
+      },
+      "cleared_avg": 0,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/001-验收检测/01-CT/site/jxfs-js009-v30-xct202641-1/history/891c79d567e142e7a4b33b4335ab5ae4.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/001-验收检测/02-DR/site/jxfs-js010-v30-xdr202641/current/6f592c1d6b3c4b9189e07234f08802aa.json",
+      "before": {
+        "bg_pids": 9,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f841",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 9,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f841",
+        "has_rules": true
+      },
+      "cleared_avg": 0,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/001-验收检测/02-DR/site/jxfs-js010-v30-xdr202641/history/6f592c1d6b3c4b9189e07234f08802aa.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/001-验收检测/03-DSA/site/jxfs-js001-v30-x-202641-1/current/8aa1021a32bd4e039a5c790447682e40.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f620",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f620",
+        "has_rules": true
+      },
+      "cleared_avg": 0,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/001-验收检测/03-DSA/site/jxfs-js001-v30-x-202641-1/history/8aa1021a32bd4e039a5c790447682e40.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/001-验收检测/03-DSA/site/jxfs-js117-v20-cbctc202641/current/5e33a6d5b33f441bbafa2f376ef44afb.json",
+      "before": {
+        "bg_pids": 0,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "",
+        "has_rules": false
+      },
+      "after": {
+        "bg_pids": 0,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "",
+        "has_rules": false
+      },
+      "cleared_avg": 0,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/001-验收检测/03-DSA/site/jxfs-js117-v20-cbctc202641/history/5e33a6d5b33f441bbafa2f376ef44afb.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/001-验收检测/04-C形臂/site/jxfs-js001-v30-x-202641/current/70cd495b12b64786b60228c1dc606efb.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 4,
+        "bindings_mixed": 2,
+        "reading_n": 0,
+        "report_d": "f494",
+        "has_rules": false
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f494",
+        "has_rules": false
+      },
+      "cleared_avg": 4,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/001-验收检测/04-C形臂/site/jxfs-js001-v30-x-202641/history/70cd495b12b64786b60228c1dc606efb.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/001-验收检测/05-胃肠机/site/jxfs-js115-v20-x-202641/current/0ab0bf5b8b7b48b8b6f1f07070617296.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 2,
+        "bindings_mixed": 2,
+        "reading_n": 0,
+        "report_d": "f1010",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f1010",
+        "has_rules": true
+      },
+      "cleared_avg": 2,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/001-验收检测/05-胃肠机/site/jxfs-js115-v20-x-202641/history/0ab0bf5b8b7b48b8b6f1f07070617296.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/001-验收检测/06-动态DR/site/jxfs-js115-v20-x-202641-1/current/2fdb9b34455241b998f0d743b09c03fb.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 2,
+        "bindings_mixed": 2,
+        "reading_n": 0,
+        "report_d": "f1010",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f1010",
+        "has_rules": true
+      },
+      "cleared_avg": 2,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/001-验收检测/06-动态DR/site/jxfs-js115-v20-x-202641-1/history/2fdb9b34455241b998f0d743b09c03fb.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/001-验收检测/06-动态DR/site/jxfs-js115-v20-x-202641-1/current/dfbbf059a6344f46838c862e5d2a7a84.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 2,
+        "bindings_mixed": 2,
+        "reading_n": 0,
+        "report_d": "f1010",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f1010",
+        "has_rules": true
+      },
+      "cleared_avg": 2,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/001-验收检测/06-动态DR/site/jxfs-js115-v20-x-202641-1/history/dfbbf059a6344f46838c862e5d2a7a84.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/001-验收检测/07-乳腺DR/site/xdr-1/current/f421b3a50106469b8cdc8cfcd4294062.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 4,
+        "bindings_mixed": 2,
+        "reading_n": 0,
+        "report_d": "f574",
+        "has_rules": false
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f574",
+        "has_rules": false
+      },
+      "cleared_avg": 4,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/001-验收检测/07-乳腺DR/site/xdr-1/history/f421b3a50106469b8cdc8cfcd4294062.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/001-验收检测/08-口腔CBCT/site/jxfs-js116-v20-xcbct-202641/current/165e9bbb5fad4e6abbdcbe994fe8efbd.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 2,
+        "bindings_mixed": 2,
+        "reading_n": 0,
+        "report_d": "f846",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f846",
+        "has_rules": true
+      },
+      "cleared_avg": 2,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/001-验收检测/08-口腔CBCT/site/jxfs-js116-v20-xcbct-202641/history/165e9bbb5fad4e6abbdcbe994fe8efbd.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/001-验收检测/08-口腔CBCT/site/xcbct-1/current/515ca0e9435046f095bd0e9be42a32ac.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 2,
+        "bindings_mixed": 2,
+        "reading_n": 0,
+        "report_d": "f833",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f833",
+        "has_rules": true
+      },
+      "cleared_avg": 2,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/001-验收检测/08-口腔CBCT/site/xcbct-1/history/515ca0e9435046f095bd0e9be42a32ac.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/001-验收检测/09-口腔全景/site/panorama-accept-site/current/a0db9042347748a1aec9891e620d14a0.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 2,
+        "bindings_mixed": 2,
+        "reading_n": 0,
+        "report_d": "f874",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f874",
+        "has_rules": true
+      },
+      "cleared_avg": 2,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/001-验收检测/09-口腔全景/site/panorama-accept-site/history/a0db9042347748a1aec9891e620d14a0.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/001-验收检测/10口内牙片机/site/jxfs-js008-v30-x202641/current/ba17b22073b14f41927d39a5958c6652.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 2,
+        "bindings_mixed": 2,
+        "reading_n": 0,
+        "report_d": "f887",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f887",
+        "has_rules": true
+      },
+      "cleared_avg": 2,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/001-验收检测/10口内牙片机/site/jxfs-js008-v30-x202641/history/ba17b22073b14f41927d39a5958c6652.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/001-验收检测/11-加速器中的CBCT/site/259072-01cbctct/current/a3706fa92e534df89999a87a45651114.json",
+      "before": {
+        "bg_pids": 0,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 0,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "",
+        "has_rules": true
+      },
+      "cleared_avg": 0,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/001-验收检测/11-加速器中的CBCT/site/259072-01cbctct/history/a3706fa92e534df89999a87a45651114.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/002-状态检测/01-CT/site/jxfs-js009-v30-xct202641-2/current/1506156d24d24a218e67c4aa62fd7998.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 1,
+        "reading_n": 0,
+        "report_d": "f584",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f584",
+        "has_rules": true
+      },
+      "cleared_avg": 0,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/002-状态检测/01-CT/site/jxfs-js009-v30-xct202641-2/history/1506156d24d24a218e67c4aa62fd7998.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/002-状态检测/02DR/site/jxfs-js010-v30-xdr202641-2/current/86fc79b206394658a2721607ee529bd7.json",
+      "before": {
+        "bg_pids": 9,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f834",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 9,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f834",
+        "has_rules": true
+      },
+      "cleared_avg": 0,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/002-状态检测/02DR/site/jxfs-js010-v30-xdr202641-2/history/86fc79b206394658a2721607ee529bd7.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/002-状态检测/02DR/site/jxfs-js010-v30-xdr202641-2/current/eafd2614d49c4f94b605b9cb1d8bedd5.json",
+      "before": {
+        "bg_pids": 9,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f834",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 9,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f834",
+        "has_rules": true
+      },
+      "cleared_avg": 0,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/002-状态检测/02DR/site/jxfs-js010-v30-xdr202641-2/history/eafd2614d49c4f94b605b9cb1d8bedd5.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/002-状态检测/03DSA/site/jxfs-js001-v30-x-202641-2/current/43d965c2f0f9496595ffcac1c408aeae.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 2,
+        "bindings_mixed": 3,
+        "reading_n": 0,
+        "report_d": "f474",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f474",
+        "has_rules": true
+      },
+      "cleared_avg": 2,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/002-状态检测/03DSA/site/jxfs-js001-v30-x-202641-2/history/43d965c2f0f9496595ffcac1c408aeae.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/002-状态检测/04C形臂/site/jxfs-js001-v30-x-202641-3/current/06304a2018d44efeb1203bed8c129746.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 2,
+        "bindings_mixed": 2,
+        "reading_n": 0,
+        "report_d": "f494",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f494",
+        "has_rules": true
+      },
+      "cleared_avg": 2,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/002-状态检测/04C形臂/site/jxfs-js001-v30-x-202641-3/history/06304a2018d44efeb1203bed8c129746.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/002-状态检测/04C形臂/site/jxfs-js001-v30-x-202641-3/current/15051fe8d1944c7780469837234796f0.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 4,
+        "bindings_mixed": 2,
+        "reading_n": 0,
+        "report_d": "f494",
+        "has_rules": false
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f494",
+        "has_rules": false
+      },
+      "cleared_avg": 4,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/002-状态检测/04C形臂/site/jxfs-js001-v30-x-202641-3/history/15051fe8d1944c7780469837234796f0.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/002-状态检测/05胃肠机/site/jxfs-js115-v20-x-202641-2/current/66f3fa17ed084162bdce06d3ca863324.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 2,
+        "bindings_mixed": 2,
+        "reading_n": 0,
+        "report_d": "f1010",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f1010",
+        "has_rules": true
+      },
+      "cleared_avg": 2,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/002-状态检测/05胃肠机/site/jxfs-js115-v20-x-202641-2/history/66f3fa17ed084162bdce06d3ca863324.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/002-状态检测/05胃肠机/site/jxfs-js115-v20-x-202641-2/current/7ae33f01799244939638dae5d9ea3de8.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 2,
+        "bindings_mixed": 2,
+        "reading_n": 0,
+        "report_d": "f1010",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f1010",
+        "has_rules": true
+      },
+      "cleared_avg": 2,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/002-状态检测/05胃肠机/site/jxfs-js115-v20-x-202641-2/history/7ae33f01799244939638dae5d9ea3de8.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/002-状态检测/06动态DR/site/jxfs-js115-v20-x-202641-3/current/85a6888b0eb84b1499c06bc47d4983bc.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 2,
+        "bindings_mixed": 2,
+        "reading_n": 0,
+        "report_d": "f1010",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f1010",
+        "has_rules": true
+      },
+      "cleared_avg": 2,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/002-状态检测/06动态DR/site/jxfs-js115-v20-x-202641-3/history/85a6888b0eb84b1499c06bc47d4983bc.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/002-状态检测/06动态DR/site/jxfs-js115-v20-x-202641-3/current/acb971eecb074e0d95d4db351801d4c3.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 2,
+        "bindings_mixed": 2,
+        "reading_n": 0,
+        "report_d": "f1010",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f1010",
+        "has_rules": true
+      },
+      "cleared_avg": 2,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/002-状态检测/06动态DR/site/jxfs-js115-v20-x-202641-3/history/acb971eecb074e0d95d4db351801d4c3.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/002-状态检测/07-乳腺DR/site/xdr/current/08d9e0b8f8734f18a7d790f4b96169a6.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f573",
+        "has_rules": false
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f573",
+        "has_rules": false
+      },
+      "cleared_avg": 0,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/002-状态检测/07-乳腺DR/site/xdr/history/08d9e0b8f8734f18a7d790f4b96169a6.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/002-状态检测/07-乳腺DR/site/xdr/current/aad3eaebd55d46f9ae2486fd52cbf6b0.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f573",
+        "has_rules": false
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f573",
+        "has_rules": false
+      },
+      "cleared_avg": 0,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/002-状态检测/07-乳腺DR/site/xdr/history/aad3eaebd55d46f9ae2486fd52cbf6b0.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/002-状态检测/08-口腔CBCT/site/jxfs-js008-v30-x202641-1/current/7589831219704d2e85a344f3dc576baf.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f876",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f876",
+        "has_rules": true
+      },
+      "cleared_avg": 0,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/002-状态检测/08-口腔CBCT/site/jxfs-js008-v30-x202641-1/history/7589831219704d2e85a344f3dc576baf.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/002-状态检测/08-口腔CBCT/site/oral-cbct-status-site/current/54dedaecd24b4db2ab307ed4660cff25.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 2,
+        "bindings_mixed": 2,
+        "reading_n": 0,
+        "report_d": "f854",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f854",
+        "has_rules": true
+      },
+      "cleared_avg": 2,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/002-状态检测/08-口腔CBCT/site/oral-cbct-status-site/history/54dedaecd24b4db2ab307ed4660cff25.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/002-状态检测/09-口腔全景/site/panorama-status-site/current/4588dc1387ff4b5580642a24b37bf77c.json",
+      "before": {
+        "bg_pids": 11,
+        "avg_on_bg": 2,
+        "bindings_mixed": 2,
+        "reading_n": 0,
+        "report_d": "f876",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 11,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "f876",
+        "has_rules": true
+      },
+      "cleared_avg": 2,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/002-状态检测/09-口腔全景/site/panorama-status-site/history/4588dc1387ff4b5580642a24b37bf77c.pre-ch5fix-20260720.json"
+    },
+    {
+      "path": "templates/002-状态检测/11加速器中的CBCT/site/jxfs-js118-v20-cbct/current/9f48422d841e4968ac96cce76dda44fb.json",
+      "before": {
+        "bg_pids": 0,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "",
+        "has_rules": true
+      },
+      "after": {
+        "bg_pids": 0,
+        "avg_on_bg": 0,
+        "bindings_mixed": 0,
+        "reading_n": 0,
+        "report_d": "",
+        "has_rules": true
+      },
+      "cleared_avg": 0,
+      "backup": "/home/raydose/Projects/django/media/file_library/templates/002-状态检测/11加速器中的CBCT/site/jxfs-js118-v20-cbct/history/9f48422d841e4968ac96cce76dda44fb.pre-ch5fix-20260720.json"
+    }
+  ]
+}

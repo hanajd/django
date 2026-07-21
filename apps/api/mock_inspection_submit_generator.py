@@ -622,22 +622,26 @@ def _field_should_skip_mock_fill(field: dict) -> bool:
 
 
 def _field_precision(field: dict | None = None) -> int:
-    """非第五章默认两位；第五章数值格统一三位（与模板 precision=3 一致）。"""
-    if isinstance(field, dict):
+    """栏位 `precision` 优先；第五章/公式计算栏默认 3；其余模拟默认 2。"""
+    if isinstance(field, dict) and field.get("precision") not in (None, ""):
         try:
-            from radiation_detection_report.chapter5_field_sync import (
-                PROTECTION_NUMBER_PRECISION,
-                field_is_protection_chapter_numeric_cell,
-            )
-
-            if field_is_protection_chapter_numeric_cell(field):
-                try:
-                    prec = int(field.get("precision"))
-                except (TypeError, ValueError):
-                    prec = PROTECTION_NUMBER_PRECISION
-                return max(0, prec)
-        except ImportError:
+            return max(0, int(field.get("precision")))
+        except (TypeError, ValueError):
             pass
+    try:
+        from radiation_detection_report.chapter5_field_sync import (
+            PROTECTION_NUMBER_PRECISION,
+            field_is_protection_chapter_numeric_cell,
+        )
+
+        if isinstance(field, dict) and field_is_protection_chapter_numeric_cell(field):
+            return PROTECTION_NUMBER_PRECISION
+        if isinstance(field, dict):
+            ftype = str(field.get("type") or "").strip().lower()
+            if ftype == "computed" or _field_has_formula(field):
+                return PROTECTION_NUMBER_PRECISION
+    except ImportError:
+        pass
     return _MOCK_DEFAULT_PRECISION
 
 

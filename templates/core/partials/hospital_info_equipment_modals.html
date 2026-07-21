@@ -18,10 +18,10 @@
         {% if equipment_dept_picker.mode == 'campus_then_department' %}
         <div id="eq-form-campus-wrap" class="mb-3">
             <label class="block">
-                <span class="text-xs font-medium text-slate-600">所属院区 *</span>
-                <select id="eq-form-campus"
+                <span class="text-xs font-medium text-slate-600">所属院区（可选）</span>
+                <select id="eq-form-campus" name="campus_id"
                         class="mt-1 w-full px-3 py-2 text-sm rounded-xl bg-slate-50 ring-1 ring-slate-200 border-0">
-                    <option value="">— 请先选择院区 —</option>
+                    <option value="">{{ equipment_dept_picker.empty_campus_label|default:"— 不选院区（挂在本医院）—" }}</option>
                     {% for c in equipment_dept_picker.campuses %}
                     <option value="{{ c.id }}">{{ c.label }}</option>
                     {% endfor %}
@@ -29,18 +29,19 @@
             </label>
         </div>
         <label class="block mb-3">
-            <span class="text-xs font-medium text-slate-600">所属科室 *</span>
-            <select name="department_id" id="eq-form-department" required disabled
+            <span class="text-xs font-medium text-slate-600">所属科室（可选）</span>
+            <select name="department_id" id="eq-form-department"
                     class="mt-1 w-full px-3 py-2 text-sm rounded-xl bg-slate-50 ring-1 ring-slate-200 border-0 disabled:opacity-50">
-                <option value="">— 请先选择院区 —</option>
+                <option value="">{{ equipment_dept_picker.empty_department_label|default:"— 不选科室 —" }}</option>
             </select>
+            <p class="mt-1 text-[10px] text-slate-400">不选院区/科室时，设备直接挂在当前医院下。</p>
         </label>
         {% elif equipment_dept_picker.mode == 'department_only' %}
         <label class="block mb-3">
-            <span class="text-xs font-medium text-slate-600">所属科室 *</span>
-            <select name="department_id" id="eq-form-department" required
+            <span class="text-xs font-medium text-slate-600">所属科室（可选）</span>
+            <select name="department_id" id="eq-form-department"
                     class="mt-1 w-full px-3 py-2 text-sm rounded-xl bg-slate-50 ring-1 ring-slate-200 border-0">
-                <option value="">— 请选择科室 —</option>
+                <option value="">{{ equipment_dept_picker.empty_label|default:"— 不选科室 —" }}</option>
                 {% for opt in equipment_dept_picker.departments %}
                 <option value="{{ opt.id }}">{{ opt.label }}</option>
                 {% endfor %}
@@ -231,13 +232,15 @@
         deptSelect.innerHTML = '';
         var placeholder = document.createElement('option');
         placeholder.value = '';
-        placeholder.textContent = campusKey ? '— 请选择科室 —' : '— 请先选择院区 —';
-        deptSelect.appendChild(placeholder);
         if (!campusKey) {
-            deptSelect.disabled = true;
-            deptSelect.required = true;
+            placeholder.textContent = deptPicker.empty_department_label || '— 不选科室 —';
+            deptSelect.appendChild(placeholder);
+            deptSelect.disabled = false;
+            deptSelect.required = false;
             return;
         }
+        placeholder.textContent = deptPicker.empty_department_label || '— 不选科室（挂在所选院区）—';
+        deptSelect.appendChild(placeholder);
         var list = (deptPicker.departments_by_campus || {})[campusKey] || [];
         list.forEach(function (d) {
             var opt = document.createElement('option');
@@ -246,8 +249,8 @@
             if (selectedDeptId && String(selectedDeptId) === String(d.id)) opt.selected = true;
             deptSelect.appendChild(opt);
         });
-        deptSelect.disabled = list.length === 0;
-        deptSelect.required = true;
+        deptSelect.disabled = false;
+        deptSelect.required = false;
     }
 
     function resetDepartmentPicker() {
@@ -264,7 +267,8 @@
         if (deptPicker.mode === 'campus_then_department' && campusSelect) {
             var ck = eq.campus_picker_key || '';
             campusSelect.value = ck;
-            populateDepartmentsForCampus(ck, eq.department_id);
+            var deptId = eq.department_id || null;
+            populateDepartmentsForCampus(ck, deptId);
         } else if (deptPicker.mode === 'department_only') {
             deptSelect.value = eq.department_id ? String(eq.department_id) : '';
         }
@@ -304,6 +308,7 @@
         }
         var url = apiBase + '?fl_path={{ fl_path|urlencode }}&device_type=' + encodeURIComponent(dt);
         if (deptId) url += '&department_id=' + deptId;
+        if (campusSelect && campusSelect.value) url += '&campus_id=' + encodeURIComponent(campusSelect.value);
         fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.json(); })
             .then(function (data) {

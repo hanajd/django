@@ -2192,6 +2192,9 @@ def _compact_single_form_field(
         "options",
         "instrumentScope",
         "registrySlot",
+        "fitBinding",
+        "fitConfigRef",
+        "displayFormat",
     ):
         val = field.get(key)
         if val is None or val == "" or val == []:
@@ -2203,6 +2206,17 @@ def _compact_single_form_field(
         if key == "unit" and section_key == "site_radiation_protection":
             continue
         out[key] = copy.deepcopy(val) if isinstance(val, (dict, list)) else val
+
+    # 拟合主格 / R² 从格：对齐前端 type 约定
+    fb = out.get("fitBinding") or field.get("fitBinding") or src.get("fitBinding")
+    fit_ref = str(out.get("fitConfigRef") or field.get("fitConfigRef") or src.get("fitConfigRef") or "").strip()
+    if isinstance(fb, dict) and (fb.get("x") or fb.get("y") or fb.get("r2FieldId")):
+        out["type"] = "computed"
+        if not str(out.get("displayFormat") or "").strip():
+            out["displayFormat"] = "latex"
+    elif fit_ref:
+        out["type"] = "number"
+        out["fitConfigRef"] = fit_ref.lower() if isinstance(fit_ref, str) else fit_ref
 
     try:
         from utils.conditional_field_rules import enrich_frontend_field_with_conditional_rules

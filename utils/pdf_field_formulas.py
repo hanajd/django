@@ -68,6 +68,25 @@ def remap_pdf_field_row_formula_metadata(field: Dict[str, Any], id_map: Mapping[
                 raw = str(rule.get(expr_key) or "").strip()
                 if raw:
                     rule[expr_key] = remap_pdf_field_refs_in_text(raw, id_map)
+    fb = field.get("fitBinding")
+    if isinstance(fb, dict):
+        for list_key in ("x", "y"):
+            vals = fb.get(list_key)
+            if not isinstance(vals, list):
+                continue
+            remapped = []
+            for v in vals:
+                pid = normalize_pdf_field_id(str(v or ""))
+                if not pid:
+                    continue
+                remapped.append(id_map.get(pid, pid))
+            fb[list_key] = remapped
+        r2 = normalize_pdf_field_id(str(fb.get("r2FieldId") or ""))
+        if r2:
+            fb["r2FieldId"] = id_map.get(r2, r2)
+    fit_ref = normalize_pdf_field_id(str(field.get("fitConfigRef") or ""))
+    if fit_ref:
+        field["fitConfigRef"] = id_map.get(fit_ref, fit_ref)
     jct = field.get("judgmentCriteriaByTestType")
     if isinstance(jct, dict):
         for sub in ("acceptance", "status"):

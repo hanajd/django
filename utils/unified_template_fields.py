@@ -353,6 +353,21 @@ def _field_dict_to_compact_row(mf: Dict[str, Any]) -> Dict[str, Any]:
         out["formulaRules"] = rules
     if mf.get("fieldFormulaUserOverride") is True:
         out["fieldFormulaUserOverride"] = True
+    fb = mf.get("fitBinding")
+    if isinstance(fb, dict):
+        x = fb.get("x") if isinstance(fb.get("x"), list) else []
+        y = fb.get("y") if isinstance(fb.get("y"), list) else []
+        r2 = str(fb.get("r2FieldId") or "").strip()
+        x_n = [str(v).strip().lower() for v in x if str(v or "").strip()]
+        y_n = [str(v).strip().lower() for v in y if str(v or "").strip()]
+        if x_n or y_n or r2:
+            out["fitBinding"] = {"x": x_n, "y": y_n, "r2FieldId": r2.lower() if r2 else ""}
+    fit_ref = str(mf.get("fitConfigRef") or "").strip()
+    if fit_ref:
+        out["fitConfigRef"] = fit_ref.lower()
+    disp = str(mf.get("displayFormat") or "").strip()
+    if disp:
+        out["displayFormat"] = disp
     jct = mf.get("judgmentCriteriaByTestType")
     if isinstance(jct, dict) and jct:
         out["judgmentCriteriaByTestType"] = jct

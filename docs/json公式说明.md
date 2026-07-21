@@ -19,6 +19,7 @@
 - 条件公式：`utils/conditional_field_rules.py`
 - 表达式求值（与后端回填对齐）：`utils/dynamic_form_expression.py`
 - 判定引擎：`utils/verdict_from_criterion.py`
+- 曲线拟合（线性/对数/指数 + R²，前端求值）：[`拟合公式前后端对接说明.md`](./拟合公式前后端对接说明.md)
 
 ---
 
@@ -519,5 +520,6 @@ if(f12>=f13, f4*f5, if(f12<f13, avg(f1,f2,f3), ""))
 | 日期 | 说明 |
 |------|------|
 | 2026-05 | 增加条件公式 `formulaRules`；判定保持 `judgmentCriteriaByTestType` 单行逻辑串；公式支持 `min()~max()` 范围输出；移除 `requiresManualSelection` 等冗余标记；增加 `radiationProtectionChapter` 章节公式 |
+| 2026-07 | 曲线拟合见独立文档 [`拟合公式前后端对接说明.md`](./拟合公式前后端对接说明.md)（后台只配、前端算系数） |
 
 文档版本：与 `utils/pdf_field_formulas.py`、`utils/conditional_field_rules.py`、`utils/dynamic_form_expression.py` 当前实现一致。

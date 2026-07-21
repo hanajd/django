@@ -51,9 +51,15 @@ def departments_under_org(org: CommissionOrganization) -> QuerySet[CommissionOrg
 _DIRECT_CAMPUS_KEY = "__direct__"
 
 
-def department_campus_picker_key(dept: CommissionOrganization) -> str | None:
-    """科室所属院区在下拉中的分组键（医院直属科室为 __direct__）。"""
-    parent = dept.parent
+def department_campus_picker_key(org: CommissionOrganization) -> str | None:
+    """挂载节点在「院区 → 科室」下拉里的院区键；医院直挂为空，院区直挂为自身 id。"""
+    if org is None:
+        return None
+    if org.level == CommissionOrganization.LEVEL_HOSPITAL:
+        return ""
+    if org.level == CommissionOrganization.LEVEL_CAMPUS:
+        return str(org.pk)
+    parent = org.parent
     if parent is None:
         return None
     if parent.level == CommissionOrganization.LEVEL_CAMPUS:
@@ -65,13 +71,13 @@ def department_campus_picker_key(dept: CommissionOrganization) -> str | None:
 
 def build_equipment_department_picker(org: CommissionOrganization) -> dict:
     """
-    添加设备时的科室选择器配置（随当前浏览层级变化）：
-    - 科室：无需选择
-    - 院区：仅选科室
-    - 医院：先选院区再选科室（含「医院直属科室」分组）
+    添加设备时的挂载位置选择（科室可选）：
+    - 科室：无需选择（挂在本级）
+    - 院区：可选下级科室；不选则挂在本院区
+    - 医院：可选院区、科室；都不选则挂在本院
     """
     if org.level == CommissionOrganization.LEVEL_DEPARTMENT:
-        return {"mode": "none"}
+        return {"mode": "none", "allow_empty": False}
 
     if org.level == CommissionOrganization.LEVEL_CAMPUS:
         depts = list(
@@ -83,6 +89,8 @@ def build_equipment_department_picker(org: CommissionOrganization) -> dict:
         )
         return {
             "mode": "department_only",
+            "allow_empty": True,
+            "empty_label": "— 不选科室（挂在本院区）—",
             "departments": [{"id": d.pk, "label": d.name} for d in depts],
         }
 
@@ -105,6 +113,8 @@ def build_equipment_department_picker(org: CommissionOrganization) -> dict:
             all_depts = list(departments_under_org(org))
             return {
                 "mode": "department_only",
+                "allow_empty": True,
+                "empty_label": "— 不选科室（挂在本医院）—",
                 "departments": [{"id": d.pk, "label": d.full_display_name} for d in all_depts],
             }
 
@@ -128,21 +138,23 @@ def build_equipment_department_picker(org: CommissionOrganization) -> dict:
             ]
         return {
             "mode": "campus_then_department",
+            "allow_empty": True,
+            "empty_campus_label": "— 不选院区（挂在本医院）—",
+            "empty_department_label": "— 不选科室 —",
             "campuses": campus_options,
             "departments_by_campus": departments_by_campus,
         }
 
-    return {"mode": "none"}
+    return {"mode": "none", "allow_empty": False}
 
 
 def equipments_for_org_view(org: CommissionOrganization) -> QuerySet[CommissionOrgEquipment]:
-    """当前机构及其下级科室下的全部设备（医院/院区汇总，科室仅本级）。"""
+    """当前机构及其下级节点下的全部设备（含直接挂在医院/院区的设备）。"""
     org_ids = commission_org_subtree_ids(org.pk)
     return (
         CommissionOrgEquipment.objects.filter(
             is_active=True,
             department_id__in=org_ids,
-            department__level=CommissionOrganization.LEVEL_DEPARTMENT,
             department__is_active=True,
         )
         .select_related("department", "report_file", "report_task")
@@ -873,26 +885,58 @@ def bind_equipment_tasks_to_project(
 def resolve_department_for_equipment_save(
     explorer_org: CommissionOrganization,
     department_id_raw: str,
+    campus_id_raw: str = "",
 ) -> tuple[CommissionOrganization | None, str | None]:
-    """科室节点用自身；医院/院区须指定下级科室。"""
+    """解析设备挂载节点。
+
+    - 当前在科室：挂本级
+    - 指定了科室/院区/医院 id：须在当前浏览节点子树内
+    - 仅选了院区、未选科室：挂该院区
+    - 都未选：挂当前浏览的医院/院区
+    """
     if explorer_org.level == CommissionOrganization.LEVEL_DEPARTMENT:
         return explorer_org, None
+
+    subtree_ids = set(commission_org_subtree_ids(explorer_org.pk))
+    allowed_levels = {
+        CommissionOrganization.LEVEL_HOSPITAL,
+        CommissionOrganization.LEVEL_CAMPUS,
+        CommissionOrganization.LEVEL_DEPARTMENT,
+    }
+
     raw = (department_id_raw or "").strip()
-    if not raw:
-        return None, "请选择设备所属科室"
-    try:
-        did = int(raw)
-    except ValueError:
-        return None, "科室无效"
-    allowed = set(departments_under_org(explorer_org).values_list("pk", flat=True))
-    if did not in allowed:
-        return None, "所选科室不在当前单位下级范围内"
-    dept = CommissionOrganization.objects.filter(
-        pk=did, level=CommissionOrganization.LEVEL_DEPARTMENT, is_active=True
-    ).first()
-    if dept is None:
-        return None, "科室不存在"
-    return dept, None
+    if raw:
+        try:
+            did = int(raw)
+        except ValueError:
+            return None, "挂载机构无效"
+        if did not in subtree_ids:
+            return None, "所选机构不在当前单位下级范围内"
+        target = CommissionOrganization.objects.filter(
+            pk=did, is_active=True, level__in=allowed_levels
+        ).first()
+        if target is None:
+            return None, "挂载机构不存在"
+        return target, None
+
+    campus_raw = (campus_id_raw or "").strip()
+    if campus_raw and campus_raw != _DIRECT_CAMPUS_KEY:
+        try:
+            cid = int(campus_raw)
+        except ValueError:
+            return None, "院区无效"
+        if cid not in subtree_ids:
+            return None, "所选院区不在当前单位下级范围内"
+        campus = CommissionOrganization.objects.filter(
+            pk=cid,
+            is_active=True,
+            level=CommissionOrganization.LEVEL_CAMPUS,
+        ).first()
+        if campus is None:
+            return None, "院区不存在"
+        return campus, None
+
+    return explorer_org, None
 
 
 def report_files_for_org_binding(org: CommissionOrganization) -> QuerySet[LibraryFile]:
@@ -1221,8 +1265,14 @@ def upsert_department_equipment(
     autofill_from_report: bool = True,
     bind_org_for_report: CommissionOrganization | None = None,
 ) -> tuple[CommissionOrgEquipment | None, str | None]:
-    if dept.level != CommissionOrganization.LEVEL_DEPARTMENT:
-        return None, "设备只能挂在科室下"
+    if dept.level not in (
+        CommissionOrganization.LEVEL_HOSPITAL,
+        CommissionOrganization.LEVEL_CAMPUS,
+        CommissionOrganization.LEVEL_DEPARTMENT,
+    ):
+        return None, "设备只能挂在医院、院区或科室下"
+    if not dept.is_active:
+        return None, "挂载机构已停用"
     name = (name or "").strip()
     org_for_report = bind_org_for_report or dept
     if report_file_id and user is not None:
@@ -1288,6 +1338,7 @@ def upsert_department_equipment(
         row = CommissionOrgEquipment(department=dept)
     prev_type = (row.device_type or "").strip()
     prev_dept_id = row.department_id
+    row.department = dept
     if is_new and device_type_norm:
         row.instance_no = next_equipment_instance_no(dept.pk, device_type_norm)
     elif device_type_norm and (

@@ -11,7 +11,8 @@
 | 下拉用规则 `label` 展示 | `computed_field_widget.dart` |
 | **公式选择下拉仅渲染于 `type: computed`** | `dynamic_field_widget.dart` |
 
-更完整的表达式语法见 [`json公式说明.md`](./json公式说明.md)。
+更完整的表达式语法见 [`json公式说明.md`](./json公式说明.md)。  
+曲线拟合（`fitBinding` / `fitKind`，R² 为 `number`）见 [`拟合公式前后端对接说明.md`](./拟合公式前后端对接说明.md)。
 
 ---
 

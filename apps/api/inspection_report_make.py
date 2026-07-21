@@ -2917,7 +2917,11 @@ def _backfill_use_strict_pdf_field_id_only(task_obj=None, field: dict | None = N
 
 
 def _format_protection_numeric_pdf_text(field: dict, picked, *, task_obj=None) -> str:
-    """现场记录第五章数值格：PDF 展示统一三位小数。"""
+    """
+    现场记录 PDF 数值展示：
+    - 第五章防护表数值格：固定小数位（默认 3）
+    - 其余 number/computed 公式栏：小数位不超过 precision（默认 3）
+    """
     if picked is None or isinstance(picked, bool):
         return "" if picked is None else str(picked)
     text = picked if isinstance(picked, str) else str(picked)
@@ -2928,18 +2932,22 @@ def _format_protection_numeric_pdf_text(field: dict, picked, *, task_obj=None) -
         return text
     try:
         from radiation_detection_report.chapter5_field_sync import (
-            PROTECTION_NUMBER_PRECISION,
             field_is_protection_chapter_numeric_cell,
             format_protection_numeric_display,
+            resolve_field_number_precision,
         )
 
-        if not field_is_protection_chapter_numeric_cell(field):
+        ftype = str(field.get("type") or "").strip().lower()
+        is_protection = field_is_protection_chapter_numeric_cell(field)
+        is_formula_numeric = ftype in ("number", "computed") or bool(
+            str(field.get("formula") or field.get("fieldExpression") or "").strip()
+        )
+        if not is_protection and not is_formula_numeric:
             return text
-        try:
-            prec = int(field.get("precision") or PROTECTION_NUMBER_PRECISION)
-        except (TypeError, ValueError):
-            prec = PROTECTION_NUMBER_PRECISION
-        return format_protection_numeric_display(text, precision=prec)
+        prec = resolve_field_number_precision(field)
+        return format_protection_numeric_display(
+            text, precision=prec, fixed=is_protection
+        )
     except ImportError:
         return text
 
@@ -2983,7 +2991,17 @@ def _attach_step_schema_to_pdf_fields(fields: list | None, steps: list | None) -
         fv = sch.get("fieldVerdict")
         if isinstance(fv, dict) and fv and not isinstance(box.get("fieldVerdict"), dict):
             box["fieldVerdict"] = dict(fv)
-        for ek in ("rule", "passLabel", "failLabel", "dependsOn", "formula", "type", "label"):
+        for ek in (
+            "rule",
+            "passLabel",
+            "failLabel",
+            "dependsOn",
+            "formula",
+            "fieldExpression",
+            "type",
+            "label",
+            "precision",
+        ):
             ev = sch.get(ek)
             if ev in (None, ""):
                 continue
@@ -3347,26 +3365,28 @@ def _apply_computed_fields_from_steps_to_mapping(
                 res = None
             if res is None:
                 continue
-            if isinstance(res, str):
+            if isinstance(res, bool):
+                out_val = str(res)
+            elif isinstance(res, str):
                 out_val = res
-            else:
+            elif isinstance(res, (int, float)):
                 try:
                     from radiation_detection_report.chapter5_field_sync import (
-                        PROTECTION_NUMBER_PRECISION,
                         field_is_protection_chapter_numeric_cell,
                         format_protection_numeric_display,
+                        resolve_field_number_precision,
                     )
 
-                    if field_is_protection_chapter_numeric_cell(f):
-                        try:
-                            prec = int(f.get("precision") or PROTECTION_NUMBER_PRECISION)
-                        except (TypeError, ValueError):
-                            prec = PROTECTION_NUMBER_PRECISION
-                        out_val = format_protection_numeric_display(res, precision=prec)
-                    else:
-                        out_val = str(res)
+                    prec = resolve_field_number_precision(f)
+                    out_val = format_protection_numeric_display(
+                        res,
+                        precision=prec,
+                        fixed=field_is_protection_chapter_numeric_cell(f),
+                    )
                 except ImportError:
                     out_val = str(res)
+            else:
+                out_val = str(res)
             value_mapping[fid] = out_val
             changed += 1
         if not changed:

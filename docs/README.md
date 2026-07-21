@@ -33,6 +33,7 @@
 | [任务模板number类型栏位排查报告.md](任务模板number类型栏位排查报告.md) | **只读排查**：`type:number` 未参与公式/判定的栏位清单（待确认后批量改 text） |
 | [FRONTEND_FORM_SCHEMA.md](FRONTEND_FORM_SCHEMA.md) | 前端表单 JSON 架构（`frontend_form_schema/v1`） |
 | [json公式说明.md](json公式说明.md) | 公式与判定表达式对接 |
+| [拟合公式前后端对接说明.md](拟合公式前后端对接说明.md) | 曲线拟合（线性/对数/指数）+ R²：编辑器配置与 Flutter 求值 |
 | [动态表单后端对齐与前端配合说明.md](动态表单后端对齐与前端配合说明.md) | 动态表达式求值对齐 |
 | [报告单项判定规则与逻辑.md](报告单项判定规则与逻辑.md) | 报告单项判定回填与数值推断 |
 | [质控拍照照片提交说明.md](质控拍照照片提交说明.md) | `sectionPhotos` 提交约定 |

@@ -744,13 +744,14 @@ class CommissionOrgContact(models.Model):
 
 
 class CommissionOrgEquipment(models.Model):
-    """科室下属检测设备；每台设备可关联一份已完成的检测报告文件。"""
+    """委托单位下属检测设备（可挂医院 / 院区 / 科室）；每台可关联已完成检测报告。"""
 
     department = models.ForeignKey(
         CommissionOrganization,
         on_delete=models.CASCADE,
         related_name="equipments",
-        verbose_name=_("所属科室"),
+        verbose_name=_("所属机构"),
+        help_text=_("可挂在医院、院区或科室节点下；未选科室时挂在当前浏览的医院/院区。"),
     )
     name = models.CharField(max_length=255, verbose_name=_("设备名称"))
     model = models.CharField(max_length=255, blank=True, default="", verbose_name=_("设备型号"))
@@ -768,7 +769,7 @@ class CommissionOrgEquipment(models.Model):
     instance_no = models.PositiveIntegerField(
         default=1,
         verbose_name=_("同类型台次"),
-        help_text=_("同一科室、同一设备类型下的序号，展示为设备1、设备2…"),
+        help_text=_("同一挂载节点、同一设备类型下的序号，展示为设备1、设备2…"),
     )
     report_task_bindings = models.JSONField(
         default=list,

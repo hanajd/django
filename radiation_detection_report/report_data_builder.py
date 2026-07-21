@@ -668,18 +668,17 @@ def _format_computed_report_value(raw: Any, field: Optional[Mapping[str, Any]]) 
         return "" if s == "/" else s
     try:
         from radiation_detection_report.chapter5_field_sync import (
-            PROTECTION_NUMBER_PRECISION,
+            field_is_protection_chapter_numeric_cell,
             format_protection_numeric_display,
+            resolve_field_number_precision,
         )
 
-        prec = PROTECTION_NUMBER_PRECISION
-        if isinstance(field, dict):
-            try:
-                prec = int(field.get("precision") or PROTECTION_NUMBER_PRECISION)
-            except (TypeError, ValueError):
-                pass
-        if isinstance(raw, (int, float)):
-            return format_protection_numeric_display(str(raw), precision=prec)
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            prec = resolve_field_number_precision(field if isinstance(field, dict) else None)
+            fixed = bool(
+                isinstance(field, dict) and field_is_protection_chapter_numeric_cell(field)
+            )
+            return format_protection_numeric_display(raw, precision=prec, fixed=fixed)
     except ImportError:
         pass
     s = _norm(raw)

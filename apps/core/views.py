@@ -10239,7 +10239,9 @@ def hospital_info_manage(request):
                 messages.error(request, "请先选择机构")
                 return _redir(edit=True)
             dept, dept_err = resolve_department_for_equipment_save(
-                org_ctx, request.POST.get("department_id", "")
+                org_ctx,
+                request.POST.get("department_id", ""),
+                request.POST.get("campus_id", ""),
             )
             if dept_err:
                 messages.error(request, dept_err)
@@ -10476,7 +10478,13 @@ def hospital_info_manage(request):
             except ValueError:
                 oid, eid = 0, 0
             dept = CommissionOrganization.objects.filter(
-                pk=oid, is_active=True, level=CommissionOrganization.LEVEL_DEPARTMENT
+                pk=oid,
+                is_active=True,
+                level__in=(
+                    CommissionOrganization.LEVEL_HOSPITAL,
+                    CommissionOrganization.LEVEL_CAMPUS,
+                    CommissionOrganization.LEVEL_DEPARTMENT,
+                ),
             ).first()
             row = (
                 CommissionOrgEquipment.objects.filter(pk=eid, department_id=oid)
@@ -10487,7 +10495,7 @@ def hospital_info_manage(request):
             )
             fl_path = (request.POST.get("fl_path") or "").strip()
             if dept is None:
-                messages.error(request, "科室不存在")
+                messages.error(request, "挂载机构不存在")
                 return _redir(edit=True)
             raw_report_f = (request.POST.get("report_file_id") or "").strip()
             if not raw_report_f and row and row.report_file_id:
@@ -10775,13 +10783,22 @@ def hospital_info_equipment_api(request):
             return err
         st = equipment_display_status(eq)
         campus_key = department_campus_picker_key(eq.department)
+        mount_level = eq.department.level if eq.department_id else ""
+        # 医院/院区直挂：表单科室下拉留空，仅回填院区键
+        form_department_id = (
+            eq.department_id
+            if mount_level == CommissionOrganization.LEVEL_DEPARTMENT
+            else None
+        )
         return JsonResponse(
             {
                 "ok": True,
                 "equipment": {
                     "id": eq.pk,
-                    "department_id": eq.department_id,
-                    "campus_picker_key": campus_key,
+                    "department_id": form_department_id,
+                    "mount_org_id": eq.department_id,
+                    "mount_level": mount_level,
+                    "campus_picker_key": campus_key if campus_key is not None else "",
                     "name": eq.name,
                     "device_type": eq.device_type or "",
                     "instance_no": eq.instance_no or 1,
@@ -10817,6 +10834,7 @@ def hospital_info_equipment_api(request):
     }
     dtype = (request.GET.get("device_type") or "").strip()
     dept_raw = (request.GET.get("department_id") or "").strip()
+    campus_raw = (request.GET.get("campus_id") or "").strip()
     dept_id_hint: int | None = None
     if org_ctx.level == CommissionOrganization.LEVEL_DEPARTMENT:
         dept_id_hint = org_ctx.pk
@@ -10825,6 +10843,14 @@ def hospital_info_equipment_api(request):
             dept_id_hint = int(dept_raw)
         except ValueError:
             dept_id_hint = None
+    elif campus_raw and campus_raw != "__direct__":
+        try:
+            dept_id_hint = int(campus_raw)
+        except ValueError:
+            dept_id_hint = None
+    else:
+        # 未选科室/院区：台次按当前医院或院区节点计
+        dept_id_hint = org_ctx.pk
     if dtype and dept_id_hint:
         n = next_equipment_instance_no(dept_id_hint, dtype)
         payload["next_instance_no"] = n
