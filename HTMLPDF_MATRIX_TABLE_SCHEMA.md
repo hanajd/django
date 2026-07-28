@@ -99,7 +99,7 @@
       "label": "检测值",
       "required": false,
       "defaultValue": null,
-      "precision": 1,
+      "precision": 2,
       "unit": "μSv/h",
       "source": {
         "pdfFieldId": "f85",
@@ -117,7 +117,7 @@
       "label": "报出值",
       "required": false,
       "defaultValue": null,
-      "precision": 1,
+      "precision": 2,
       "unit": "μSv/h",
       "source": {
         "pdfFieldId": "f90",

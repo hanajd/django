@@ -70,17 +70,17 @@ from apps.core.site_record_hospital_prefill import (
 )
 from apps.api.api_views import LibraryOCRUploadAPIView
 from apps.api.inspection_pdf_service import (
-    _build_filled_template_fields_for_task,
     _pick_submit_generation_tasks,
-    _persist_filled_pdf_from_submit,
     _resolve_library_task_for_task_no,
-    _resolve_report_task_for_case,
     display_inspected_no_for_fill,
     load_report_payload_for_manual_export,
     resolve_submit_payload_for_report,
     site_record_name_for_submit_storage,
 )
 from apps.api.inspection_report_make import (
+    _build_filled_template_fields_for_task,
+    _persist_filled_pdf_from_submit,
+    _resolve_report_task_for_case,
     build_instruments_root_for_frontend_export,
     apply_submit_instruments_bundle,
     coerce_submit_instruments,
@@ -1805,7 +1805,7 @@ def execute_inspection_submit_for_task(
             template_pdf_id=template_pdf_id,
             template_json_name=template_json_name,
             task_obj=task_obj,
-            source_payload=storage_payload if task_obj.output_target == LibraryTask.OUTPUT_REPORT else None,
+            source_payload=storage_payload,
             site_record_batch=submit_batch if task_obj.output_target == LibraryTask.OUTPUT_SITE_RECORD else None,
         )
         generation_results.append(

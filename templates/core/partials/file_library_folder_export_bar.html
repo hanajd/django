@@ -26,7 +26,7 @@
                 data-project-key="{{ folder_export_context.project_folder_key }}"
                 data-report-key="{{ folder_export_context.report_folder_key }}"
                 {% if folder_export_context.site_folder_key %}data-site-key="{{ folder_export_context.site_folder_key }}"{% endif %}
-                data-confirm="{% if folder_export_context.mode == 'site' %}确定导出本现场记录文件夹最新现场记录？{% else %}确定按各现场记录文件夹最新记录合并导出报告？{% endif %}">
+                data-confirm="{% if folder_export_context.mode == 'site' %}确定导出本现场记录文件夹最新现场记录？生成 PDF 可能需要数十秒，请勿关闭页面。{% else %}确定按各现场记录文件夹最新记录合并导出报告？生成可能需要数十秒，请勿关闭页面。{% endif %}">
             <i class="ri-draft-line"></i>
             {% if folder_export_context.mode == 'site' %}导出报告（本环节最新）{% else %}导出合并报告{% endif %}
         </button>

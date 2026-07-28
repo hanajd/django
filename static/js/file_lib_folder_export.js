@@ -12,14 +12,24 @@
         var msg = btn.getAttribute("data-confirm") || "确定导出报告？";
         if (!window.confirm(msg)) return false;
         btn.dataset.folderExportBusy = "1";
+        btn.disabled = true;
         var actionEl = document.getElementById("file-lib-folder-export-action");
         var projectEl = document.getElementById("file-lib-folder-export-project");
         var reportEl = document.getElementById("file-lib-folder-export-report");
         var siteEl = document.getElementById("file-lib-folder-export-site");
-        if (actionEl) actionEl.value = btn.getAttribute("data-action") || "";
+        var action = btn.getAttribute("data-action") || "";
+        if (actionEl) actionEl.value = action;
         if (projectEl) projectEl.value = btn.getAttribute("data-project-key") || "";
         if (reportEl) reportEl.value = btn.getAttribute("data-report-key") || "";
         if (siteEl) siteEl.value = btn.getAttribute("data-site-key") || "";
+        // form.submit() 不会触发 submit 事件，需手动弹出忙碌层
+        if (window.ReportExportBusy && typeof window.ReportExportBusy.show === "function") {
+            var kind =
+                typeof window.ReportExportBusy.kindFromAction === "function"
+                    ? window.ReportExportBusy.kindFromAction(action)
+                    : "export";
+            window.ReportExportBusy.show(kind || "export");
+        }
         form.submit();
         return false;
     }

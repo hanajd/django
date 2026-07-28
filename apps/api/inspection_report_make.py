@@ -1988,13 +1988,15 @@ def _site_semantic_key_blocked_for_report(
 
 
 def _report_semantic_key_is_preserve_original(ks: str) -> bool:
-    """报告 PDF 须保持模板原样的栏位（含签发日期1/2/3 等变体 id）。"""
+    """报告 PDF 须保持模板原样的栏位（含签发日期1/2/3、日期1/2/3、下划线签字框等）。"""
     s = (ks or "").strip()
     if not s:
         return False
     if s in _REPORT_PRESERVE_ORIGINAL_LABELS:
         return True
     if s.startswith("签发日期"):
+        return True
+    if s in {"日期1", "日期2", "日期3", "下划线", "下划线2", "下划线3"}:
         return True
     if "授权" in s and "签字" in s:
         return True
@@ -2218,12 +2220,10 @@ def _fill_report_inspector_name_text_field(
 
 
 def _htmlpdf_fill_font_pt(task_obj=None) -> float:
-    """现场记录五号 10.5pt；报告小四 12pt。"""
-    return (
-        htmlpdf_service.REPORT_FILL_FONT_PT
-        if _is_report_output_task(task_obj)
-        else htmlpdf_service.DEFAULT_FONT_PT
-    )
+    """现场记录 / 报告基准字号：优先读调试运行时配置（默认五号 10.5 / 小四 12）。"""
+    from apps.core.pdf_fill_runtime_config import resolve_pdf_fill_font_pt
+
+    return resolve_pdf_fill_font_pt(is_report=_is_report_output_task(task_obj))
 
 
 def _is_report_cover_overlay_pdf_field(field: dict, *, task_obj=None) -> bool:
@@ -2919,8 +2919,8 @@ def _backfill_use_strict_pdf_field_id_only(task_obj=None, field: dict | None = N
 def _format_protection_numeric_pdf_text(field: dict, picked, *, task_obj=None) -> str:
     """
     现场记录 PDF 数值展示：
-    - 第五章防护表数值格：固定小数位（默认 3）
-    - 其余 number/computed 公式栏：小数位不超过 precision（默认 3）
+    - 第五章防护表数值格：固定小数位（默认 2）
+    - 其余 number/computed 公式栏：小数位不超过 precision（默认 2）
     """
     if picked is None or isinstance(picked, bool):
         return "" if picked is None else str(picked)
@@ -2945,11 +2945,62 @@ def _format_protection_numeric_pdf_text(field: dict, picked, *, task_obj=None) -
         if not is_protection and not is_formula_numeric:
             return text
         prec = resolve_field_number_precision(field)
+        # 公式/数值格按 precision 固定位输出（如 R²=0.9967→1.00），避免 fixed=False
+        # 把 1.00 收成「1」或剥掉末尾 0 后丢失约定小数位。
         return format_protection_numeric_display(
-            text, precision=prec, fixed=is_protection
+            text, precision=prec, fixed=True if is_formula_numeric else is_protection
         )
     except ImportError:
         return text
+
+
+def _sanitize_submit_text_for_pdf_stamp(text, field: dict | None = None) -> str:
+    """
+    规范化提交文本空白/减号。
+    对 MathJax / displayFormat=latex / ``$$...$$``：保留定界符与正文，供 PDF 叠印时渲染公式图；
+    仅做空白与 Unicode 减号规范化，不再剥成纯文本（避免公式碎行乱版）。
+    """
+    if text is None or isinstance(text, bool):
+        return "" if text is None else str(text)
+    s = text if isinstance(text, str) else str(text)
+    s = s.strip()
+    if not s:
+        return s
+
+    disp = ""
+    if isinstance(field, dict):
+        disp = str(field.get("displayFormat") or "").strip().lower()
+        src = field.get("source")
+        if not disp and isinstance(src, dict):
+            disp = str(src.get("displayFormat") or "").strip().lower()
+
+    is_math = disp == "latex" or (
+        len(s) >= 4 and s.startswith("$$") and s.endswith("$$")
+    ) or ("\\ln" in s or "\\rm" in s or "\\mathrm" in s)
+
+    s = (
+        s.replace("\u00a0", " ")
+        .replace("\u202f", " ")
+        .replace("\u2007", " ")
+        .replace("\u00ad", "-")
+        .replace("\u2212", "-")
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+    )
+    if is_math:
+        # 保留 $$…$$；内部压成单行便于 MathJax
+        if len(s) >= 4 and s.startswith("$$") and s.endswith("$$"):
+            inner = re.sub(r"[ \t\n\r]+", " ", s[2:-2].strip())
+            return f"$${inner}$$"
+        return re.sub(r"[ \t\n\r]+", " ", s).strip()
+
+    # 非公式：历史兼容，剥掉误带的 $$ 以免纯文本叠印碎行
+    if len(s) >= 4 and s.startswith("$$") and s.endswith("$$"):
+        s = s[2:-2].strip()
+    elif len(s) >= 2 and s.startswith("$") and s.endswith("$") and s.count("$") == 2:
+        s = s[1:-1].strip()
+    s = re.sub(r"[ \t]+", " ", s).strip()
+    return s
 
 
 def _attach_step_schema_to_pdf_fields(fields: list | None, steps: list | None) -> None:
@@ -3001,13 +3052,20 @@ def _attach_step_schema_to_pdf_fields(fields: list | None, steps: list | None) -
             "type",
             "label",
             "precision",
+            "displayFormat",
+            "fitBinding",
+            "formulaRules",
         ):
             ev = sch.get(ek)
             if ev in (None, ""):
                 continue
             if isinstance(ev, list) and not ev:
                 continue
+            if isinstance(ev, dict) and not ev:
+                continue
             if box.get(ek) in (None, ""):
+                box[ek] = ev
+            elif ek in ("fitBinding", "formulaRules") and not box.get(ek):
                 box[ek] = ev
         for mk in ("templateSectionKey", "templateSectionTitle", "templateStepKey", "sectionType"):
             mv = sch.get(mk)
@@ -3372,7 +3430,6 @@ def _apply_computed_fields_from_steps_to_mapping(
             elif isinstance(res, (int, float)):
                 try:
                     from radiation_detection_report.chapter5_field_sync import (
-                        field_is_protection_chapter_numeric_cell,
                         format_protection_numeric_display,
                         resolve_field_number_precision,
                     )
@@ -3381,7 +3438,7 @@ def _apply_computed_fields_from_steps_to_mapping(
                     out_val = format_protection_numeric_display(
                         res,
                         precision=prec,
-                        fixed=field_is_protection_chapter_numeric_cell(f),
+                        fixed=True,
                     )
                 except ImportError:
                     out_val = str(res)
@@ -3698,15 +3755,22 @@ def _estimate_chars_per_line_for_field(
 def _pack_instrument_display_lines(
     lines: list[str],
     *,
-    max_chars_per_line: int = 96,
+    max_chars_per_line: int | None = None,
     separator: str = "；",
 ) -> str:
-    """多台仪器尽量挤在同一行，仅当单行放不下时再换行。"""
+    """
+    多台仪器用分隔符拼接。
+    - max_chars_per_line 为 None：整段单行拼接，换行交给 PDF 叠印按实际字宽处理（避免字符估算过早断行留下大片空白）。
+    - 传入正整数时：仍可按字符数预分行（兼容预览等旧调用）。
+    """
     cleaned = [str(x or "").strip() for x in lines if str(x or "").strip()]
     if not cleaned:
         return ""
     if len(cleaned) == 1:
         return cleaned[0]
+    if max_chars_per_line is None or int(max_chars_per_line) <= 0:
+        return separator.join(cleaned)
+    limit = int(max_chars_per_line)
     rows: list[str] = []
     current = ""
     for line in cleaned:
@@ -3714,7 +3778,7 @@ def _pack_instrument_display_lines(
             current = line
             continue
         candidate = f"{current}{separator}{line}"
-        if len(candidate) <= max_chars_per_line:
+        if len(candidate) <= limit:
             current = candidate
         else:
             rows.append(current)
@@ -3763,16 +3827,18 @@ def _instrument_packed_text_for_scope(
     raw_list: list | None = None,
     fill_font_pt: float | None = None,
 ) -> str:
-    """现场记录仪器栏：按 scope 全套拼接，尽量单行多机，必要时换行。"""
+    """
+    现场记录仪器栏：同 scope 全套用「；」拼成一段。
+    不在此按字符数预换行；叠印时 wrap_instrument_text_to_width 按真实字宽、
+    仅在「；」处断行，单台仪器信息不拆开，避免行内被两端对齐拉出大空。
+    """
+    del field, fill_font_pt  # 保留签名兼容旧调用
     lines = _collect_instrument_display_lines_for_scope(
         source_data, scope, raw_list=raw_list
     )
     if not lines:
         return ""
-    return _pack_instrument_display_lines(
-        lines,
-        max_chars_per_line=_estimate_chars_per_line_for_field(field, fill_font_pt=fill_font_pt),
-    )
+    return _pack_instrument_display_lines(lines, max_chars_per_line=None)
 
 
 def _collect_instrument_scope_merged_lines_from_submit_list(
@@ -5156,6 +5222,9 @@ def _inject_radio_enum_slug_checkbox_aliases(value_mapping: dict, source_data: d
     """
     互斥 radio 的枚举 value 常只在 dynamicData（如 f86、f84）或根 hospitalInfo 中；
     为报告占位 keyword 补缺「验收检测/状态检测」「同受检单位」等布尔键（不覆盖已有非空）。
+
+    同时写入「检测类型_状态检测 / 检测类型_验收检测」完整键，避免勾选框只能靠父键
+    「检测类型」子串模糊命中（会把枚举 slug 误配到多个同名勾选框）。
     """
     if not isinstance(source_data, dict) or not isinstance(value_mapping, dict):
         return
@@ -5163,11 +5232,21 @@ def _inject_radio_enum_slug_checkbox_aliases(value_mapping: dict, source_data: d
     dd = source_data.get("dynamicData") if isinstance(source_data.get("dynamicData"), dict) else {}
     tt = str(hi.get("testType") or dd.get("f86") or "").strip().lower()
     if tt == "acceptance":
-        value_mapping.setdefault("验收检测", True)
-        value_mapping.setdefault("状态检测", False)
+        for k, v in (
+            ("验收检测", True),
+            ("状态检测", False),
+            ("检测类型_验收检测", True),
+            ("检测类型_状态检测", False),
+        ):
+            value_mapping.setdefault(k, v)
     elif tt == "status":
-        value_mapping.setdefault("验收检测", False)
-        value_mapping.setdefault("状态检测", True)
+        for k, v in (
+            ("验收检测", False),
+            ("状态检测", True),
+            ("检测类型_验收检测", False),
+            ("检测类型_状态检测", True),
+        ):
+            value_mapping.setdefault(k, v)
     com_lc = str(hi.get("commissionOrgMode") or dd.get("f84") or "").strip().lower().replace(" ", "")
     if com_lc == "customcommission":
         value_mapping.setdefault("同受检单位", False)
@@ -6290,6 +6369,30 @@ def _dsa_report_field_rejects_value_key(field: dict, key: str) -> bool:
     return "DSA" not in key
 
 
+def _generic_slot_label_keys_conflict(ph: str, key: str) -> bool:
+    """「栏位N」仅允许精确同号匹配；禁止 SequenceMatcher 把栏位1142 串到栏位1174。"""
+    if not ph or not key or ph == key:
+        return False
+    return bool(
+        _REPORT_GENERIC_SLOT_LABEL_RE.fullmatch(ph)
+        and _REPORT_GENERIC_SLOT_LABEL_RE.fullmatch(key)
+    )
+
+
+def _option_parent_key_rejects_child_placeholder(ph: str, key: str) -> bool:
+    """
+    禁止父键模糊命中子选项占位，例如「检测类型」⊂「检测类型_状态检测」。
+    否则 hospitalInfo.testType / 语义键「检测类型」的枚举 slug 会灌进多个勾选框。
+    """
+    if not ph or not key or ph == key:
+        return False
+    if ph.startswith(f"{key}_") or ph.startswith(f"{key}/"):
+        return True
+    if key.startswith(f"{ph}_") or key.startswith(f"{ph}/"):
+        return True
+    return False
+
+
 def _pick_value_by_placeholder_keyword_in_mapping(
     field: dict, value_mapping: dict, *, allow_bool: bool = False
 ):
@@ -6335,6 +6438,10 @@ def _pick_value_by_placeholder_keyword_in_mapping(
                 continue
             if _dsa_report_field_rejects_value_key(field, key):
                 continue
+            if _generic_slot_label_keys_conflict(ph, key):
+                continue
+            if _option_parent_key_rejects_child_placeholder(ph, key):
+                continue
             if ftoks_mm:
                 ktoks = _mm_thickness_tokens_in_semantic_key(key)
                 if ktoks and ftoks_mm != ktoks:
@@ -6359,6 +6466,14 @@ def _pick_value_by_placeholder_keyword_in_mapping(
                 if len(kn) < 3:
                     continue
                 sc = 1.0 if ph == key else (0.93 if len(ph) >= 6 and ph in key else 0.0)
+                # 勾选框：短语义「状态检测」应能命中「检测类型_状态检测」
+                if sc == 0.0 and key in ph and key in (
+                    "状态检测",
+                    "验收检测",
+                    "定期检测",
+                    "同受检单位",
+                ):
+                    sc = 0.95
                 if sc == 0.0:
                     r = SequenceMatcher(None, phn, kn).ratio()
                     if r >= 0.78:
@@ -8596,6 +8711,10 @@ def _fill_template_fields_with_submit_enhanced(
         _sig_template_obj, payload=source_data if isinstance(source_data, dict) else None
     )
     _signature_pdf_ids = set(_sig_pdf_to_role.keys())
+    na_skip_pdf_ids = _collect_na_region_skip_pdf_field_ids(
+        source_data if isinstance(source_data, dict) else None,
+        ordered_submit_payloads,
+    )
     value_mapping = _prepare_backfill_value_mapping(
         source_data,
         map_id=map_id,
@@ -8887,12 +9006,14 @@ def _fill_template_fields_with_submit_enhanced(
                     if _reject_commission_org_enum_as_textfield_value(field, ft, got):
                         continue
                     return got
-        kw = _pick_value_by_placeholder_keyword_in_mapping(
-            field, value_mapping, allow_bool=(ft == "check")
-        )
-        if kw is not None and kw != "":
-            if not _reject_commission_org_enum_as_textfield_value(field, ft, kw):
-                return kw
+        # 与 _backfill_fuzzy_match_enabled 约定一致：关闭后禁止占位符关键词/相似度串位。
+        if _backfill_fuzzy_match_enabled():
+            kw = _pick_value_by_placeholder_keyword_in_mapping(
+                field, value_mapping, allow_bool=(ft == "check")
+            )
+            if kw is not None and kw != "":
+                if not _reject_commission_org_enum_as_textfield_value(field, ft, kw):
+                    return kw
         for k in candidates:
             mapped_fid = reverse_field_map.get(k)
             if mapped_fid and mapped_fid in value_mapping:
@@ -9267,6 +9388,10 @@ def _fill_template_fields_with_submit_enhanced(
     for field in flat_report_fields:
         if not isinstance(field, dict):
             continue
+        pid_na = _field_pdf_id(field)
+        if pid_na and pid_na.lower() in na_skip_pdf_ids:
+            _clear_template_field_fill(field)
+            continue
         if _is_report_preserve_original_pdf_field(field, task_obj=task_obj):
             ft_preserve = (field.get("fieldType") or "text").lower()
             if ft_preserve == "text":
@@ -9297,6 +9422,7 @@ def _fill_template_fields_with_submit_enhanced(
                 elif picked is not None and not isinstance(picked, str):
                     picked = str(picked).strip()
                 picked = _format_protection_numeric_pdf_text(field, picked, task_obj=task_obj)
+                picked = _sanitize_submit_text_for_pdf_stamp(picked, field)
                 if (
                     _is_report_output_task(task_obj)
                     and isinstance(picked, str)
@@ -9344,6 +9470,10 @@ def _fill_template_fields_with_submit_enhanced(
             field["imageData"] = picked_img
     for field in flat_report_fields:
         if not isinstance(field, dict):
+            continue
+        pid_na2 = _field_pdf_id(field)
+        if pid_na2 and pid_na2.lower() in na_skip_pdf_ids:
+            _clear_template_field_fill(field)
             continue
         if (field.get("fieldType") or "").lower() != "text":
             continue
@@ -10140,7 +10270,16 @@ def _normalize_fields_for_htmlpdf(fields, *, task_obj=None):
             "imageData": f.get("imageData") or "",
         }
         # build_filled_pdf 依赖 id/placeholder 等做「检测仪器」两端对齐；勿在导出前剥掉语义键。
-        for k in ("id", "placeholder", "originalPlaceholder", "title", "label", "fieldId", "pdfFieldId"):
+        for k in (
+            "id",
+            "placeholder",
+            "originalPlaceholder",
+            "title",
+            "label",
+            "fieldId",
+            "pdfFieldId",
+            "displayFormat",
+        ):
             v = f.get(k)
             if isinstance(v, str) and v.strip():
                 row[k] = v.strip()
@@ -10207,18 +10346,190 @@ def _sanitize_export_pdf_name_fragment(s: str, max_len: int = 72) -> str:
     return s or "x"
 
 
+def _sanitize_concat_name_part(s: str, max_len: int = 48) -> str:
+    """规范名拼接片段：去非法字符与空白，段间无分隔符直接相连。"""
+    s = (s or "").strip()
+    s = re.sub(r'[/\\:*?"<>|\r\n\x00-\x1f]', "", s)
+    s = re.sub(r"\s+", "", s)
+    if len(s) > max_len:
+        s = s[:max_len]
+    return s
+
+
+def _payload_report_info(payload: dict | None) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+    ri = payload.get("reportInfo")
+    return ri if isinstance(ri, dict) else {}
+
+
+def resolve_site_record_pdf_name_parts(
+    project,
+    task_obj=None,
+    task_no: str = "",
+    *,
+    source_payload: dict | None = None,
+    case=None,
+) -> dict:
+    """
+    原始记录规范命名所需字段：
+    {委托编号}{医院名称}{设备类型}{检测类型}原始记录.pdf
+    """
+    commission_no = ""
+    hospital_name = ""
+    device_type = ""
+    inspection_type = ""
+    template_name = ""
+
+    if task_obj is not None:
+        template_name = (getattr(task_obj, "name", None) or "").strip() or (
+            getattr(task_obj, "code", None) or ""
+        ).strip()
+
+    if project is not None:
+        commission_no = str(getattr(project, "code", "") or "").strip()
+        org = getattr(project, "commission_org", None)
+        if org is not None:
+            try:
+                root = org.hospital_root()
+                hospital_name = (getattr(root, "name", None) or "").strip()
+            except Exception:
+                hospital_name = ""
+        if not hospital_name:
+            hospital_name = (getattr(project, "commission_organization", None) or "").strip()
+
+        try:
+            from apps.core.project_equipment_service import (
+                library_task_equipment_context_by_task_id,
+                project_equipment_cards,
+            )
+
+            tid = int(getattr(task_obj, "pk", 0) or 0) if task_obj is not None else 0
+            ctx = library_task_equipment_context_by_task_id(project).get(tid) if tid else None
+            if ctx:
+                device_type = str(ctx.get("deviceType") or "").strip()
+                inspection_type = str(ctx.get("inspectionType") or "").strip()
+            if (not device_type or not inspection_type) and task_no:
+                for card in project_equipment_cards(project):
+                    for row in card.get("site_submit_tasks") or []:
+                        if str(row.get("taskNo") or "").strip() != str(task_no).strip():
+                            continue
+                        eq = card.get("equipment")
+                        if not device_type and eq is not None:
+                            device_type = (getattr(eq, "device_type", None) or "").strip()
+                        if not inspection_type:
+                            inspection_type = (card.get("inspection_type") or "").strip()
+                        break
+                    if device_type and inspection_type:
+                        break
+        except Exception:
+            pass
+
+    ri = _payload_report_info(source_payload)
+    for key in ("commissionNo", "entrustNo", "commission_no", "委托编号"):
+        v = ri.get(key)
+        if v not in (None, "") and str(v).strip():
+            commission_no = str(v).strip()
+            break
+
+    if isinstance(source_payload, dict):
+        for key in ("deviceType", "device_type", "设备类型"):
+            v = source_payload.get(key)
+            if isinstance(v, str) and v.strip():
+                device_type = device_type or v.strip()
+                break
+        for key in ("inspectionType", "inspection_type", "检测类型"):
+            v = source_payload.get(key)
+            if isinstance(v, str) and v.strip():
+                inspection_type = inspection_type or v.strip()
+                break
+        hi = source_payload.get("hospitalInfo")
+        if isinstance(hi, dict):
+            for key in ("hospitalName", "name", "受检单位", "受检单位名称"):
+                v = hi.get(key)
+                if isinstance(v, str) and v.strip():
+                    hospital_name = hospital_name or v.strip()
+                    break
+
+    if not commission_no and case is not None:
+        commission_no = str(getattr(case, "case_no", "") or "").strip()
+
+    return {
+        "commission_no": commission_no,
+        "hospital_name": hospital_name,
+        "device_type": device_type,
+        "inspection_type": inspection_type,
+        "template_name": template_name,
+    }
+
+
+def build_standardized_site_record_pdf_original_name(
+    project,
+    task_obj=None,
+    task_no: str = "",
+    *,
+    source_payload: dict | None = None,
+    case=None,
+) -> str:
+    """
+    原始记录 PDF 规范文件名：
+    {委托编号}{医院名称}{设备类型}{检测类型}原始记录.pdf
+    （前端提交后自动生成现场记录 PDF 时使用。）
+    """
+    parts = resolve_site_record_pdf_name_parts(
+        project,
+        task_obj,
+        task_no,
+        source_payload=source_payload,
+        case=case,
+    )
+    chunks = [
+        _sanitize_concat_name_part(parts.get("commission_no") or "", 48),
+        _sanitize_concat_name_part(parts.get("hospital_name") or "", 48),
+        _sanitize_concat_name_part(parts.get("device_type") or "", 32),
+        _sanitize_concat_name_part(parts.get("inspection_type") or "", 32),
+    ]
+    core = "".join(c for c in chunks if c)
+    if not core:
+        fallback = (parts.get("template_name") or "").strip() or str(task_no or "原始记录").strip()
+        core = _sanitize_concat_name_part(fallback, 120) or "原始记录"
+    suffix = "原始记录"
+    if suffix not in core:
+        core = f"{core}{suffix}"
+    elif not core.endswith(suffix):
+        core = f"{core}{suffix}"
+    max_stem = 180
+    if len(core) > max_stem:
+        head = core[: -len(suffix)] if core.endswith(suffix) else core
+        head_budget = max(8, max_stem - len(suffix))
+        core = f"{head[:head_budget]}{suffix}"
+    return f"{core}.pdf"
+
+
 def build_exported_inspection_pdf_original_name(
     project,
     task_obj,
     task_no: str,
     *,
     output_category: str,
+    source_payload: dict | None = None,
+    case=None,
 ) -> str:
     """
-    用户可读导出 PDF 文件名：仅任务模板名称（如 JXFS-JS009_V3.0_…原始记录.pdf）。
-    委托编号、项目名、taskNo 等仅存数据库关联，不写入文件名。
+    用户可读导出 PDF 文件名。
+    - 现场记录：规范名 {委托编号}{医院}{设备类型}{检测类型}原始记录.pdf
+    - 报告：仍以任务模板名称为主（并补「报告」后缀）
     """
     from apps.core.library_file_service import sanitize_library_original_filename_fragment
+
+    if output_category == LibraryFile.CATEGORY_SITE_RECORD:
+        return build_standardized_site_record_pdf_original_name(
+            project,
+            task_obj,
+            task_no,
+            source_payload=source_payload,
+            case=case,
+        )
 
     raw = ""
     if task_obj is not None:
@@ -10236,33 +10547,55 @@ def build_exported_inspection_pdf_original_name(
     return f"{base}.pdf"
 
 
-def build_merged_report_pdf_original_name(project, commission_no: str = "") -> str:
+def build_merged_report_pdf_original_name(
+    project,
+    commission_no: str = "",
+    *,
+    project_name_in_report: str = "",
+) -> str:
     """
-    文件库「多份报告合并」导出 PDF 的展示文件名：{委托编号}{项目名称}.pdf
-    委托编号优先取各份报告溯源到的 reportInfo.commissionNo（由调用方传入）；缺省时仅用项目名称。
+    合并报告 PDF 规范文件名：{委托编号}{报告内项目名称}.pdf
+    「报告内项目名称」优先取叠印用的 project_name_combined。
     """
-    return f"{merged_report_commission_project_basename(project, commission_no)}.pdf"
+    return (
+        f"{merged_report_commission_project_basename(project, commission_no, project_name_in_report=project_name_in_report)}.pdf"
+    )
 
 
-def merged_report_commission_project_basename(project, commission_no: str = "") -> str:
+def merged_report_commission_project_basename(
+    project,
+    commission_no: str = "",
+    *,
+    project_name_in_report: str = "",
+) -> str:
     """
-    合并报告在文件名与封面「项目名称」第二行共用的主文案：{委托编号}{项目名称}（无分隔符）。
-    空委托编号不占位；片段经路径安全过滤。与 build_report_merge_overlay 叠印一致。
+    合并报告文件名主文案：在报告内「项目名称」前加委托编号（已含则不重复）。
+    封面第二行若仍引用本函数，语义同为 {委托编号}{项目名称}。
     """
     com_raw = str(commission_no or "").strip()
-    com = _sanitize_export_pdf_name_fragment(com_raw, 48) if com_raw else ""
-    pn_raw = (getattr(project, "name", "") or "").strip() if project is not None else ""
-    pn = _sanitize_export_pdf_name_fragment(pn_raw, 120) if pn_raw else ""
-    core = f"{com}{pn}".strip("_")
-    if not core and project is not None:
-        cc = str(getattr(project, "code", "") or "").strip()
+    if not com_raw and project is not None:
+        com_raw = str(getattr(project, "code", "") or "").strip()
+    com = _sanitize_concat_name_part(com_raw, 48)
+
+    pn_raw = str(project_name_in_report or "").strip()
+    if not pn_raw and project is not None:
+        org = str(getattr(project, "commission_organization", "") or "").strip()
         nm = str(getattr(project, "name", "") or "").strip()
-        if cc and nm:
-            core = _sanitize_export_pdf_name_fragment(f"{cc}_{nm}", 140)
-        elif cc or nm:
-            core = _sanitize_export_pdf_name_fragment(cc or nm, 140)
+        pn_raw = f"{org}{nm}".strip() or nm or str(getattr(project, "code", "") or "").strip()
+    # 报告内项目名称可能已带下划线风格，统一去掉非法字符但保留中文连续
+    pn = _sanitize_concat_name_part(pn_raw, 160)
+
+    if com and pn.startswith(com):
+        core = pn
+    elif com and pn:
+        core = f"{com}{pn}"
+    else:
+        core = pn or com
     if not core:
         core = "合并报告"
+    core = re.sub(r'[/\\:*?"<>|\r\n\x00-\x1f]', "", core).strip() or "合并报告"
+    if len(core) > 200:
+        core = core[:200]
     return core
 
 
@@ -10335,6 +10668,187 @@ def _sync_site_record_rp_sequence_before_export(
     _patch(filled_fields)
 
 
+_PDF_RENDER_MARK_NA_TYPES = frozenset({"not_applicable_region", "na_region", "strike_region"})
+_PDF_RENDER_MARK_DIAGONAL_STYLES = frozenset({"diagonal", "slash", "strike_diagonal"})
+
+
+def _collect_pdf_render_marks_from_payloads(
+    source_payload: dict | None,
+    ordered_submit_payloads: Sequence[dict] | None = None,
+) -> list[dict]:
+    """汇总提交 JSON 中的 pdfRenderMarks（去重 id）。"""
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    def _absorb(payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        marks = payload.get("pdfRenderMarks")
+        if not isinstance(marks, list):
+            return
+        for mark in marks:
+            if not isinstance(mark, dict):
+                continue
+            mid = str(mark.get("id") or "").strip()
+            if mid and mid in seen:
+                continue
+            if mid:
+                seen.add(mid)
+            out.append(mark)
+
+    _absorb(source_payload)
+    if isinstance(ordered_submit_payloads, Sequence):
+        for p in ordered_submit_payloads:
+            _absorb(p)
+    return out
+
+
+def _collect_na_region_skip_pdf_field_ids(
+    source_payload: dict | None,
+    ordered_submit_payloads: Sequence[dict] | None = None,
+) -> frozenset[str]:
+    """
+    不适用划线区域内的 PDF 域：导出时一律不回填。
+    读取 mark.affectedPdfFieldIds（兼容 affectedFieldIds）。
+    """
+    ids: set[str] = set()
+    for mark in _collect_pdf_render_marks_from_payloads(
+        source_payload, ordered_submit_payloads
+    ):
+        mtype = str(mark.get("type") or "").strip().lower()
+        if mtype and mtype not in _PDF_RENDER_MARK_NA_TYPES:
+            continue
+        for key in ("affectedPdfFieldIds", "affectedFieldIds"):
+            arr = mark.get(key)
+            if not isinstance(arr, list):
+                continue
+            for item in arr:
+                pid = str(item or "").strip().lower()
+                if pid:
+                    ids.add(pid)
+    return frozenset(ids)
+
+
+def _clear_template_field_fill(field: dict) -> None:
+    """清空模板栏位上的回填结果（文本/勾选/图片）。"""
+    if not isinstance(field, dict):
+        return
+    ft = (field.get("fieldType") or "text").lower()
+    if ft == "check":
+        field["checked"] = False
+        field["value"] = False
+    elif ft == "image":
+        field["imageData"] = ""
+        field["value"] = ""
+    else:
+        field["content"] = ""
+        field["value"] = ""
+
+
+def _pdf_render_mark_diagonal_endpoints(mark: dict) -> tuple[float, float, float, float] | None:
+    """
+    不适用区域对角线：左下 → 右上（coordinateSpace=pdf_top_left_pt，与 PyMuPDF 一致）。
+    优先用 mark.line；否则由 rect=[x0,y0,x1,y1]（左上右下）推导为 (x0,y1)→(x1,y0)。
+    """
+    line = mark.get("line")
+    if isinstance(line, (list, tuple)) and len(line) >= 4:
+        try:
+            return (float(line[0]), float(line[1]), float(line[2]), float(line[3]))
+        except (TypeError, ValueError):
+            pass
+    rect = mark.get("rect")
+    if isinstance(rect, (list, tuple)) and len(rect) >= 4:
+        try:
+            x0, y0, x1, y1 = (float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3]))
+        except (TypeError, ValueError):
+            return None
+        # 归一化为左/上/右/下
+        left, right = (x0, x1) if x0 <= x1 else (x1, x0)
+        top, bottom = (y0, y1) if y0 <= y1 else (y1, y0)
+        return (left, bottom, right, top)
+    return None
+
+
+def _apply_pdf_render_marks_to_pdf_bytes(pdf_bytes: bytes, marks: list[dict] | None) -> bytes:
+    """
+    将提交中的 pdfRenderMarks 叠印到已填写 PDF。
+    not_applicable_region + diagonal：按区域画一条左下→右上斜线，表示表格不适用划掉。
+    """
+    if not pdf_bytes or not marks:
+        return pdf_bytes
+    try:
+        import fitz
+    except ImportError:
+        return pdf_bytes
+
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        drew = False
+        for mark in marks:
+            if not isinstance(mark, dict):
+                continue
+            mtype = str(mark.get("type") or "").strip().lower()
+            style = str(mark.get("style") or "diagonal").strip().lower()
+            if mtype and mtype not in _PDF_RENDER_MARK_NA_TYPES:
+                continue
+            if style and style not in _PDF_RENDER_MARK_DIAGONAL_STYLES:
+                continue
+            ends = _pdf_render_mark_diagonal_endpoints(mark)
+            if ends is None:
+                continue
+            try:
+                page_1based = int(mark.get("page") or 0)
+            except (TypeError, ValueError):
+                continue
+            if page_1based < 1 or page_1based > len(doc):
+                continue
+            page = doc[page_1based - 1]
+            x0, y0, x1, y1 = ends
+            # 若提交带了 pageSize 且与当前页尺寸差较大，按比例映射（平板预览坐标对齐）
+            page_size = mark.get("pageSize")
+            if isinstance(page_size, (list, tuple)) and len(page_size) >= 2:
+                try:
+                    src_w, src_h = float(page_size[0]), float(page_size[1])
+                    pr = page.rect
+                    dst_w, dst_h = float(pr.width), float(pr.height)
+                    if src_w > 1 and src_h > 1 and (
+                        abs(src_w - dst_w) > 0.5 or abs(src_h - dst_h) > 0.5
+                    ):
+                        sx, sy = dst_w / src_w, dst_h / src_h
+                        x0, y0, x1, y1 = x0 * sx, y0 * sy, x1 * sx, y1 * sy
+                except (TypeError, ValueError, ZeroDivisionError):
+                    pass
+            try:
+                width = float(mark.get("lineWidth") or mark.get("strokeWidth") or 1.2)
+            except (TypeError, ValueError):
+                width = 1.2
+            color = (0.0, 0.0, 0.0)
+            raw_color = mark.get("color") or mark.get("strokeColor")
+            if isinstance(raw_color, (list, tuple)) and len(raw_color) >= 3:
+                try:
+                    color = (float(raw_color[0]), float(raw_color[1]), float(raw_color[2]))
+                    if max(color) > 1.0:
+                        color = (color[0] / 255.0, color[1] / 255.0, color[2] / 255.0)
+                except (TypeError, ValueError):
+                    color = (0.0, 0.0, 0.0)
+            try:
+                page.draw_line(
+                    fitz.Point(x0, y0),
+                    fitz.Point(x1, y1),
+                    color=color,
+                    width=max(0.5, width),
+                    overlay=True,
+                )
+                drew = True
+            except Exception:
+                continue
+        if not drew:
+            return pdf_bytes
+        return doc.tobytes()
+    finally:
+        doc.close()
+
+
 def _persist_filled_pdf_from_submit(
     user,
     task_no: str,
@@ -10358,6 +10872,19 @@ def _persist_filled_pdf_from_submit(
     if task_obj is None:
         task_obj = _resolve_library_task_for_task_no(task_no, project)
     _sync_site_record_rp_sequence_before_export(filled_fields, source_payload, task_obj)
+    # 不适用划线区：导出前再次清空 affectedPdfFieldIds，避免任何路径残留回填值
+    na_skip_pdf_ids = _collect_na_region_skip_pdf_field_ids(
+        source_payload, ordered_submit_payloads
+    )
+    if na_skip_pdf_ids:
+        flat_clear: list = []
+        _walk_template_field_dicts(filled_fields, flat_clear)
+        for fld in flat_clear:
+            if not isinstance(fld, dict):
+                continue
+            pid = _field_pdf_id(fld)
+            if pid and pid.lower() in na_skip_pdf_ids:
+                _clear_template_field_fill(fld)
     normalized_fields, skipped_fields = _normalize_fields_for_htmlpdf(
         filled_fields, task_obj=task_obj
     )
@@ -10408,6 +10935,12 @@ def _persist_filled_pdf_from_submit(
             source_pdf,
             fill_font_pt=_htmlpdf_fill_font_pt(task_obj),
         )
+        # 现场记录：叠印 pdfRenderMarks（如不适用区域左下→右上划线）
+        render_marks = _collect_pdf_render_marks_from_payloads(
+            source_payload, ordered_submit_payloads
+        )
+        if render_marks:
+            pdf_bytes = _apply_pdf_render_marks_to_pdf_bytes(pdf_bytes, render_marks)
         if (
             task_obj is not None
             and task_obj.output_target == LibraryTask.OUTPUT_REPORT
@@ -10432,7 +10965,12 @@ def _persist_filled_pdf_from_submit(
         return False, f"PDF 渲染失败: {exc}", None
     output_category = LibraryFile.CATEGORY_REPORT if task_obj.output_target == LibraryTask.OUTPUT_REPORT else LibraryFile.CATEGORY_SITE_RECORD
     filename = build_exported_inspection_pdf_original_name(
-        project, task_obj, task_no, output_category=output_category
+        project,
+        task_obj,
+        task_no,
+        output_category=output_category,
+        source_payload=source_payload,
+        case=case,
     )
     wrapped = type("UploadLike", (), {"read": lambda self: pdf_bytes, "name": filename})()
     save_kwargs: dict = {

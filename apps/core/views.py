@@ -17,7 +17,7 @@ from urllib.parse import quote, urlencode
 
 from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth import authenticate, login, logout, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.core.paginator import Paginator
@@ -178,6 +178,7 @@ from apps.core.commission_management_service import (
     commission_project_rows,
     commission_visible_subject_users,
     library_user_may_access_commission_manage,
+    library_user_may_manage_commission_codes,
 )
 from apps.core.instrument_inventory_service import (
     apply_manual_instrument_assignment,
@@ -307,6 +308,14 @@ def _require_perm(request, perm: str):
         messages.error(request, "无权访问该功能")
         return redirect(reverse("dashboard"))
     return None
+
+
+def _require_super_admin_debug(request):
+    """调试设置页：仅 Django 超级用户或角色 super_admin。"""
+    if library_user_may_use_htmlpdf_matrix_beta_controls(request.user):
+        return None
+    messages.error(request, "仅超级管理员可访问调试设置")
+    return redirect(reverse("dashboard"))
 
 
 def _deny_party_a_demo_user_or_role_admin(request):
@@ -635,8 +644,10 @@ def _user_form_context(request, profile=None, edit_user=None):
     """用户创建/编辑页上下文；委托统筹仅选人员派工五级岗位，不展示权限个性化。"""
     from apps.core.models import Role
     from apps.core.project_workflow_ui import ROLE_LADDER
+    from apps.core.org_roles import user_is_dept_director
 
     is_coordinator = library_user_is_commission_coordinator(request.user)
+    is_dept_director = user_is_dept_director(request.user)
     roles = roles_assignable_by_user(request.user) or list(Role.objects.all())
     workflow_role_options = []
     if is_coordinator:
@@ -661,9 +672,10 @@ def _user_form_context(request, profile=None, edit_user=None):
         "profile": profile,
         "roles": roles,
         "is_coordinator_user_form": is_coordinator,
+        "is_dept_director_user_form": is_dept_director,
         "workflow_role_options": workflow_role_options,
         "perm_override_rows": []
-        if is_coordinator
+        if is_coordinator or is_dept_director
         else _perm_override_rows_for_profile(profile),
         "perm_override_disabled": perm_override_disabled,
     }
@@ -1180,7 +1192,36 @@ def user_list(request):
         'users': users_page,
         'search': search,
         'is_coordinator_user_list': library_user_is_commission_coordinator(request.user),
+        'is_dept_director_user_list': False,
+        'can_create_invite_link': False,
+        'active_invite_url': '',
+        'active_invite_expires': None,
     }
+    try:
+        from apps.core.org_roles import library_user_may_manage_org_staff, user_is_dept_director
+        from apps.core.models import UserInviteToken
+
+        context["is_dept_director_user_list"] = user_is_dept_director(request.user)
+        context["can_create_invite_link"] = library_user_may_manage_org_staff(request.user)
+        if context["can_create_invite_link"]:
+            from django.utils import timezone
+
+            invite = (
+                UserInviteToken.objects.filter(
+                    created_by=request.user,
+                    is_active=True,
+                    expires_at__gt=timezone.now(),
+                )
+                .order_by("-created_at")
+                .first()
+            )
+            if invite:
+                context["active_invite_url"] = request.build_absolute_uri(
+                    reverse("user_invite_register", kwargs={"token": invite.token})
+                )
+                context["active_invite_expires"] = invite.expires_at
+    except Exception:
+        pass
     return render(request, 'core/user_list.html', context)
 
 
@@ -1202,6 +1243,7 @@ def user_create(request):
         phone = request.POST.get('phone', '')
         department = request.POST.get('department', '')
         position = request.POST.get('position', '')
+        employee_no = (request.POST.get("employee_no") or "").strip()
         role_id = request.POST.get('role')
         
         # 验证
@@ -1225,6 +1267,20 @@ def user_create(request):
             messages.error(request, "请选择检测岗位")
             return redirect("user_create")
 
+        from apps.core.org_roles import (
+            ROLE_TO_ORG_UNIT,
+            staff_role_code_for_director,
+            user_is_dept_director,
+            user_org_unit,
+        )
+
+        if user_is_dept_director(request.user):
+            staff_code = staff_role_code_for_director(request.user)
+            role = Role.objects.filter(code=staff_code).first()
+            if role is None:
+                messages.error(request, "本部门员工角色未配置，请联系管理员执行 ensure_org_roles")
+                return redirect("user_create")
+
         with transaction.atomic():
             user = User.objects.create_user(
                 username=username,
@@ -1238,9 +1294,20 @@ def user_create(request):
             profile.phone = phone or None
             profile.department = department or None
             profile.position = position or None
+            profile.employee_no = employee_no
             profile.role = role
             profile.created_by = request.user
-            if library_user_is_commission_coordinator(request.user):
+            # 仅新轨角色写入 org_unit；旧轨五岗/统筹创建的账号不改组织部门字段
+            from apps.core.org_roles import ORG_ROLE_CODES
+
+            if role is not None and role.code in ORG_ROLE_CODES:
+                profile.org_unit = ROLE_TO_ORG_UNIT.get(role.code, "") or user_org_unit(
+                    request.user
+                )
+            if user_is_dept_director(request.user):
+                profile.org_unit = user_org_unit(request.user)
+                profile.perm_overrides = {}
+            elif library_user_is_commission_coordinator(request.user):
                 profile.perm_overrides = {}
             else:
                 profile.perm_overrides = _parse_perm_overrides_from_post(request)
@@ -1291,9 +1358,13 @@ def user_edit(request, user_id):
         
         # 更新资料
         profile.phone = request.POST.get('phone', profile.phone)
+        profile.employee_no = (request.POST.get("employee_no") or "").strip()
         if not library_user_is_commission_coordinator(request.user):
-            profile.department = request.POST.get('department', profile.department)
-            profile.position = request.POST.get('position', profile.position)
+            from apps.core.org_roles import user_is_dept_director
+
+            if not user_is_dept_director(request.user):
+                profile.department = request.POST.get('department', profile.department)
+                profile.position = request.POST.get('position', profile.position)
         
         role_id = request.POST.get('role')
         if role_id:
@@ -1311,7 +1382,15 @@ def user_edit(request, user_id):
             user.is_superuser
             or (getattr(profile.role, "code", None) == "super_admin")
             or library_user_is_commission_coordinator(request.user)
+            or False
         )
+        try:
+            from apps.core.org_roles import user_is_dept_director
+
+            if user_is_dept_director(request.user):
+                skip_perm_overrides = True
+        except Exception:
+            pass
         if not skip_perm_overrides:
             profile.perm_overrides = _parse_perm_overrides_from_post(request)
         
@@ -1350,6 +1429,148 @@ def user_delete(request, user_id):
         'user': user,
     }
     return render(request, 'core/user_confirm_delete.html', context)
+
+
+@login_required
+def user_invite_create(request):
+    """部门主管生成员工自助注册邀请链接。"""
+    r = _require_perm(request, "perm_manage_users")
+    if r:
+        return r
+    from apps.core.org_roles import create_invite_token, library_user_may_manage_org_staff
+
+    if not library_user_may_manage_org_staff(request.user):
+        messages.error(request, "仅部门主管可生成邀请链接")
+        return redirect("user_list")
+    if request.method != "POST":
+        return redirect("user_list")
+    try:
+        ttl = int(request.POST.get("ttl_days") or 7)
+    except (TypeError, ValueError):
+        ttl = 7
+    try:
+        invite = create_invite_token(created_by=request.user, ttl_days=ttl)
+    except PermissionError as exc:
+        messages.error(request, str(exc))
+        return redirect("user_list")
+    url = request.build_absolute_uri(
+        reverse("user_invite_register", kwargs={"token": invite.token})
+    )
+    messages.success(
+        request,
+        f"邀请链接已生成（{ttl} 天内有效）：{url}",
+    )
+    return redirect("user_list")
+
+
+@login_required
+def user_invite_revoke(request):
+    """作废当前主管发出的有效邀请链接。"""
+    r = _require_perm(request, "perm_manage_users")
+    if r:
+        return r
+    from apps.core.models import UserInviteToken
+    from apps.core.org_roles import library_user_may_manage_org_staff
+
+    if not library_user_may_manage_org_staff(request.user):
+        messages.error(request, "无权操作邀请链接")
+        return redirect("user_list")
+    if request.method == "POST":
+        UserInviteToken.objects.filter(created_by=request.user, is_active=True).update(
+            is_active=False
+        )
+        messages.success(request, "已作废您发出的邀请链接")
+    return redirect("user_list")
+
+
+def user_invite_register(request, token: str):
+    """
+    员工通过邀请链接自助注册。
+    必填：用户名、密码；选填：手机号、邮箱、姓名、工号。
+    """
+    from django.utils import timezone
+
+    from apps.core.models import Role, UserInviteToken, UserProfile
+    from apps.core.org_roles import ROLE_TO_ORG_UNIT, resolve_invite_token
+
+    invite = resolve_invite_token(token)
+    if invite is None:
+        return render(
+            request,
+            "core/user_invite_register.html",
+            {"invalid": True, "error": "邀请链接无效或已过期，请联系主管重新获取。"},
+        )
+
+    if request.user.is_authenticated:
+        messages.info(request, "您已登录。如需注册新账号请先退出。")
+        return redirect("dashboard")
+
+    error = ""
+    if request.method == "POST":
+        username = (request.POST.get("username") or "").strip()
+        password = request.POST.get("password") or ""
+        password2 = request.POST.get("password2") or ""
+        email = (request.POST.get("email") or "").strip()
+        phone = (request.POST.get("phone") or "").strip()
+        first_name = (request.POST.get("first_name") or "").strip()
+        last_name = (request.POST.get("last_name") or "").strip()
+        # 表单用 display_name 简化「姓名」；写入 first_name
+        display_name = (request.POST.get("display_name") or "").strip()
+        if display_name and not first_name and not last_name:
+            first_name = display_name
+        employee_no = (request.POST.get("employee_no") or "").strip()
+
+        if not username or not password:
+            error = "请填写用户名和密码"
+        elif password != password2:
+            error = "两次输入的密码不一致"
+        elif len(password) < 6:
+            error = "密码至少 6 位"
+        elif User.objects.filter(username=username).exists():
+            error = "用户名已存在，请换一个"
+        else:
+            role = Role.objects.filter(code=invite.staff_role_code).first()
+            if role is None:
+                error = "系统角色未配置，请联系管理员"
+            else:
+                with transaction.atomic():
+                    # 再次校验令牌（防并发过期）
+                    locked = UserInviteToken.objects.select_for_update().filter(pk=invite.pk).first()
+                    if locked is None or not locked.is_usable():
+                        error = "邀请链接已失效"
+                    else:
+                        user = User.objects.create_user(
+                            username=username,
+                            email=email,
+                            password=password,
+                            first_name=first_name,
+                            last_name=last_name,
+                        )
+                        profile, _ = UserProfile.objects.get_or_create(user=user)
+                        profile.phone = phone or None
+                        profile.employee_no = employee_no
+                        profile.role = role
+                        profile.org_unit = invite.org_unit or ROLE_TO_ORG_UNIT.get(role.code, "")
+                        profile.created_by = invite.created_by
+                        profile.perm_overrides = {}
+                        profile.save()
+                        locked.use_count = int(locked.use_count or 0) + 1
+                        locked.last_used_at = timezone.now()
+                        locked.save(update_fields=["use_count", "last_used_at"])
+                        messages.success(request, "账号创建成功，请登录")
+                        return redirect("login")
+
+    return render(
+        request,
+        "core/user_invite_register.html",
+        {
+            "invalid": False,
+            "error": error,
+            "token": token,
+            "org_unit": invite.org_unit,
+            "expires_at": invite.expires_at,
+        },
+    )
 
 
 @login_required
@@ -1448,6 +1669,404 @@ def signature_manage(request, user_id: int | None = None):
         "event_type_choices": UserSignatureEvent.EVENT_CHOICES,
     }
     return render(request, "core/signature_manage.html", context)
+
+
+@login_required
+def account_profile(request):
+    """当前登录用户：修改个人信息与密码（不可改角色/权限）。"""
+    user = request.user
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+
+    if request.method == "POST":
+        email = (request.POST.get("email") or "").strip()
+        first_name = (request.POST.get("first_name") or "").strip()
+        last_name = (request.POST.get("last_name") or "").strip()
+        phone = (request.POST.get("phone") or "").strip()
+        employee_no = (request.POST.get("employee_no") or "").strip()
+        department = (request.POST.get("department") or "").strip()
+        position = (request.POST.get("position") or "").strip()
+
+        current_password = request.POST.get("current_password") or ""
+        new_password = request.POST.get("new_password") or ""
+        new_password2 = request.POST.get("new_password_confirm") or ""
+        changing_password = bool(new_password or new_password2 or current_password)
+
+        if changing_password:
+            if not current_password:
+                messages.error(request, "修改密码请填写当前密码")
+                return redirect("account_profile")
+            if not user.check_password(current_password):
+                messages.error(request, "当前密码不正确")
+                return redirect("account_profile")
+            if not new_password:
+                messages.error(request, "请填写新密码")
+                return redirect("account_profile")
+            if new_password != new_password2:
+                messages.error(request, "两次输入的新密码不一致")
+                return redirect("account_profile")
+            if len(new_password) < 6:
+                messages.error(request, "新密码至少 6 位")
+                return redirect("account_profile")
+            if new_password == current_password:
+                messages.error(request, "新密码不能与当前密码相同")
+                return redirect("account_profile")
+
+        user.email = email
+        user.first_name = first_name
+        user.last_name = last_name
+        if changing_password:
+            user.set_password(new_password)
+        user.save()
+
+        profile.phone = phone or None
+        profile.employee_no = employee_no
+        profile.department = department or None
+        profile.position = position or None
+        # 不改 org_unit / role（由管理员或组织角色维护）
+        profile.save()
+
+        if changing_password:
+            update_session_auth_hash(request, user)
+            messages.success(request, "个人信息与密码已更新")
+        else:
+            messages.success(request, "个人信息已保存")
+        return redirect("account_profile")
+
+    org_unit_label = ""
+    try:
+        from apps.core.org_roles import ORG_UNIT_CHOICES, user_org_unit
+
+        ou = user_org_unit(user)
+        org_unit_label = dict(ORG_UNIT_CHOICES).get(ou, ou) if ou else ""
+    except Exception:
+        org_unit_label = (getattr(profile, "org_unit", None) or "").strip()
+
+    return render(
+        request,
+        "core/account_profile.html",
+        {
+            "profile": profile,
+            "role_name": (profile.role.name if profile.role_id else "") or "未分配",
+            "org_unit_label": org_unit_label,
+        },
+    )
+
+
+@login_required
+def system_debug_settings(request):
+    """
+    超级管理员调试页：PDF 回填着色 / 字号、LLM API、OCR prompt 热更新。
+    """
+    denied = _require_super_admin_debug(request)
+    if denied:
+        return denied
+    from apps.core.llm_runtime_config import (
+        DEFAULT_DEVICES_PROMPT,
+        get_llm_runtime_config,
+        llm_runtime_config_path,
+        write_llm_runtime_config,
+    )
+    from apps.core.pdf_fill_runtime_config import (
+        get_pdf_fill_runtime_config,
+        pdf_fill_runtime_config_path,
+        write_pdf_fill_runtime_config,
+    )
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "save_pdf").strip().lower()
+
+        if action == "save_llm":
+            provider = (request.POST.get("llm_provider") or "ollama").strip().lower()
+            if provider not in ("ollama", "openai_compatible"):
+                messages.error(request, "请选择有效的 LLM 提供方")
+                return redirect("system_debug_settings")
+            base_url = (request.POST.get("llm_base_url") or "").strip()
+            model = (request.POST.get("llm_model") or "").strip()
+            if not base_url or not model:
+                messages.error(request, "API 地址与模型名不能为空")
+                return redirect("system_debug_settings")
+            clear_key = (request.POST.get("clear_api_key") or "").strip() in ("1", "on", "true", "yes")
+            api_key_raw = request.POST.get("llm_api_key")
+            if clear_key:
+                api_key = ""
+            elif api_key_raw is None or str(api_key_raw).strip() == "":
+                api_key = None  # 保留已有密钥
+            else:
+                api_key = str(api_key_raw).strip()
+            options_raw = (request.POST.get("llm_options_json") or "").strip()
+            if options_raw:
+                import json as _json
+
+                try:
+                    parsed_opts = _json.loads(options_raw)
+                    if not isinstance(parsed_opts, dict):
+                        raise ValueError("须为 JSON 对象")
+                except (ValueError, TypeError) as e:
+                    messages.error(request, f"Ollama options 须为合法 JSON 对象：{e}")
+                    return redirect("system_debug_settings")
+            else:
+                parsed_opts = None
+            try:
+                temperature = float(request.POST.get("llm_temperature") or 0.2)
+                max_retries = int(request.POST.get("llm_max_retries") or 3)
+            except (TypeError, ValueError):
+                messages.error(request, "temperature / 重试次数须为数字")
+                return redirect("system_debug_settings")
+            json_mode = (request.POST.get("llm_json_mode") or "").strip() in ("1", "on", "true", "yes")
+            try:
+                cfg = write_llm_runtime_config(
+                    provider=provider,
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    options=parsed_opts,
+                    temperature=temperature,
+                    max_retries=max_retries,
+                    json_mode=json_mode,
+                )
+            except Exception as e:
+                messages.error(request, f"保存 LLM 配置失败：{e}")
+                return redirect("system_debug_settings")
+            messages.success(
+                request,
+                (
+                    f"已保存 LLM：{cfg.provider_label_zh} · 模型 {cfg.model} · "
+                    f"{cfg.base_url}。下次 OCR 铭牌抽取即生效。"
+                ),
+            )
+            return redirect("system_debug_settings")
+
+        if action == "save_prompts":
+            devices = request.POST.get("devices_prompt")
+            if devices is None:
+                messages.error(request, "Prompt 内容缺失")
+                return redirect("system_debug_settings")
+            if "{struct}" not in devices or "{md}" not in devices:
+                messages.error(request, "设备抽取 Prompt 须包含占位符 {struct} 与 {md}")
+                return redirect("system_debug_settings")
+            try:
+                # 前端模板 LLM 暂停用：只保存设备抽取 Prompt，保留文件中 frontend 模板字段
+                write_llm_runtime_config(devices_prompt=devices)
+            except Exception as e:
+                messages.error(request, f"保存 Prompt 失败：{e}")
+                return redirect("system_debug_settings")
+            messages.success(request, "已保存 OCR 设备抽取 Prompt，立即生效。")
+            return redirect("system_debug_settings")
+
+        if action == "reset_prompts":
+            try:
+                write_llm_runtime_config(devices_prompt=DEFAULT_DEVICES_PROMPT)
+            except Exception as e:
+                messages.error(request, f"恢复默认 Prompt 失败：{e}")
+                return redirect("system_debug_settings")
+            messages.success(request, "已恢复内置默认设备抽取 Prompt。")
+            return redirect("system_debug_settings")
+
+        # 默认：保存 PDF 回填
+        mode = (request.POST.get("pdf_fill_mode") or "").strip().lower()
+        font_fit = (request.POST.get("pdf_font_fit") or "").strip().lower()
+        if mode not in ("test", "formal"):
+            messages.error(request, "请选择有效的回填着色模式")
+            return redirect("system_debug_settings")
+        if font_fit not in ("auto", "fixed"):
+            messages.error(request, "请选择有效的字号适应方式")
+            return redirect("system_debug_settings")
+        try:
+            site_font_pt = float(request.POST.get("site_font_pt") or 10.5)
+            report_font_pt = float(request.POST.get("report_font_pt") or 12.0)
+            font_min_pt = float(request.POST.get("font_min_pt") or 5.0)
+        except (TypeError, ValueError):
+            messages.error(request, "字号须为数字（单位 pt）")
+            return redirect("system_debug_settings")
+        cfg = write_pdf_fill_runtime_config(
+            mode=mode,
+            site_font_pt=site_font_pt,
+            report_font_pt=report_font_pt,
+            font_fit=font_fit,
+            font_min_pt=font_min_pt,
+        )
+        messages.success(
+            request,
+            (
+                f"已保存：{cfg.mode_label_zh}；现场 {cfg.site_font_pt:g}pt / "
+                f"报告 {cfg.report_font_pt:g}pt；{cfg.font_fit_label_zh}"
+                f"（最小 {cfg.font_min_pt:g}pt）。重新导出 PDF 即可生效。"
+            ),
+        )
+        return redirect("system_debug_settings")
+
+    pdf_cfg = get_pdf_fill_runtime_config(force_reload=True)
+    llm_cfg = get_llm_runtime_config(force_reload=True)
+    api_key_set = bool((llm_cfg.api_key or "").strip())
+    return render(
+        request,
+        "core/system_debug_settings.html",
+        {
+            "pdf_fill_mode": pdf_cfg.mode,
+            "pdf_fill_mode_label": pdf_cfg.mode_label_zh,
+            "pdf_fill_config_path": str(pdf_fill_runtime_config_path()),
+            "site_font_pt": pdf_cfg.site_font_pt,
+            "report_font_pt": pdf_cfg.report_font_pt,
+            "pdf_font_fit": pdf_cfg.font_fit,
+            "pdf_font_fit_label": pdf_cfg.font_fit_label_zh,
+            "font_min_pt": pdf_cfg.font_min_pt,
+            "llm_provider": llm_cfg.provider,
+            "llm_provider_label": llm_cfg.provider_label_zh,
+            "llm_base_url": llm_cfg.base_url,
+            "llm_model": llm_cfg.model,
+            "llm_api_key_set": api_key_set,
+            "llm_options_json": llm_cfg.options_json,
+            "llm_temperature": llm_cfg.temperature,
+            "llm_max_retries": llm_cfg.max_retries,
+            "llm_json_mode": llm_cfg.json_mode,
+            "llm_config_path": str(llm_runtime_config_path()),
+            "devices_prompt": llm_cfg.devices_prompt,
+        },
+    )
+
+
+@login_required
+def app_ota_settings(request):
+    """
+    超级管理员：Android App OTA 发版。
+    推荐上传编译产物 zip（apk + json，见 docs/APK_PACKAGE_GUIDE.md）。
+    """
+    denied = _require_super_admin_debug(request)
+    if denied:
+        return denied
+    from apps.api.app_ota_service import (
+        app_ota_apk_dir,
+        app_ota_config_path,
+        get_app_ota_runtime_config,
+        ingest_uploaded_release_package,
+        validate_build_number_monotonic,
+        write_app_ota_runtime_config,
+    )
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "publish").strip()
+        if action == "disable":
+            cfg0 = get_app_ota_runtime_config(force_reload=True)
+            if not cfg0.filename:
+                messages.error(request, "尚无已发布 APK，无法仅关闭；请先上传发版")
+                return redirect("app_ota_settings")
+            try:
+                write_app_ota_runtime_config(
+                    enabled=False,
+                    version=cfg0.version or "0.0.0",
+                    build_number=cfg0.build_number or 0,
+                    filename=cfg0.filename,
+                    release_notes=cfg0.release_notes,
+                    force_update=cfg0.force_update,
+                    file_size=cfg0.file_size,
+                    sha256=cfg0.sha256,
+                )
+                messages.success(request, "已关闭 App 更新推送（包文件仍保留）")
+            except Exception as exc:
+                messages.error(request, f"关闭失败：{exc}")
+            return redirect("app_ota_settings")
+
+        force_update = (request.POST.get("force_update") or "").strip() in ("1", "true", "on", "yes")
+        enabled = (request.POST.get("enabled") or "").strip() in ("1", "true", "on", "yes")
+        version = (request.POST.get("version") or "").strip()
+        notes = (request.POST.get("release_notes") or "").strip()
+        try:
+            build_number = int((request.POST.get("build_number") or "").strip() or "0")
+        except ValueError:
+            messages.error(request, "构建号 build_number 须为整数")
+            return redirect("app_ota_settings")
+
+        upload = request.FILES.get("package_file") or request.FILES.get("apk_file")
+        cfg0 = get_app_ota_runtime_config(force_reload=True)
+        filename = cfg0.filename
+        file_size = cfg0.file_size
+        sha256 = cfg0.sha256
+        package_replaced = False
+        ingest_note = ""
+
+        if upload is not None:
+            preferred = (request.POST.get("apk_filename") or "").strip()
+            try:
+                ingested = ingest_uploaded_release_package(
+                    upload,
+                    preferred_apk_name=preferred,
+                )
+            except Exception as exc:
+                messages.error(request, f"发版包处理失败：{exc}")
+                return redirect("app_ota_settings")
+            filename = ingested.filename
+            file_size = ingested.file_size
+            sha256 = ingested.sha256
+            package_replaced = True
+            if ingested.meta_from_json:
+                # zip 内 JSON 为权威来源（与 APK_PACKAGE_GUIDE 一致）；表单仅作缺省回退
+                if ingested.version:
+                    version = ingested.version
+                if ingested.build_number > 0:
+                    build_number = ingested.build_number
+                notes = ingested.release_notes
+                if "force_update" not in request.POST:
+                    force_update = bool(ingested.force_update)
+                ingest_note = "已从 zip 内 JSON 导入版本信息"
+            else:
+                ingest_note = "已保存 APK"
+
+        if not version or build_number <= 0:
+            messages.error(
+                request,
+                "请填写版本号与正整数构建号（上传 zip 时可自动从 JSON 填入）",
+            )
+            return redirect("app_ota_settings")
+        if not filename:
+            messages.error(request, "首次发版请上传 zip（推荐）或 APK 文件")
+            return redirect("app_ota_settings")
+
+        try:
+            validate_build_number_monotonic(
+                new_build=build_number,
+                previous_build=cfg0.build_number,
+                package_replaced=package_replaced,
+            )
+        except ValueError as exc:
+            messages.error(request, str(exc))
+            return redirect("app_ota_settings")
+
+        try:
+            cfg = write_app_ota_runtime_config(
+                enabled=enabled,
+                version=version,
+                build_number=build_number,
+                filename=filename,
+                release_notes=notes,
+                force_update=force_update,
+                file_size=file_size,
+                sha256=sha256,
+            )
+            extra = f"；{ingest_note}" if ingest_note else ""
+            messages.success(
+                request,
+                (
+                    f"已保存 App 更新：{cfg.version}+{cfg.build_number}"
+                    f"{'（已启用推送）' if cfg.enabled else '（未启用推送）'}；"
+                    f"文件 {cfg.filename}{extra}"
+                ),
+            )
+        except Exception as exc:
+            messages.error(request, f"保存配置失败：{exc}")
+        return redirect("app_ota_settings")
+
+    cfg = get_app_ota_runtime_config(force_reload=True)
+    return render(
+        request,
+        "core/app_ota_settings.html",
+        {
+            "ota": cfg,
+            "ota_ready": cfg.is_ready,
+            "ota_config_path": str(app_ota_config_path()),
+            "ota_apk_dir": str(app_ota_apk_dir()),
+            "ota_download_path": f"/api/v2/app/apk/{cfg.filename}" if cfg.filename else "",
+        },
+    )
 
 
 @login_required
@@ -2849,30 +3468,66 @@ def library_projects(request):
                 messages.error(request, "无权维护项目流程成员（须为高权限账号或本项目主要负责人）")
                 return redirect(reverse("library_projects") + f"?project_id={proj.pk}")
             if action == "add_workflow_member":
-                try:
-                    uid = int(request.POST.get("user_id", "") or 0)
-                except ValueError:
-                    uid = 0
+                raw_uids = request.POST.getlist("user_ids") or []
+                if not raw_uids:
+                    single = (request.POST.get("user_id") or "").strip()
+                    if single:
+                        raw_uids = [single]
+                uids: list[int] = []
+                for raw in raw_uids:
+                    try:
+                        uid = int(raw)
+                    except (TypeError, ValueError):
+                        continue
+                    if uid > 0 and uid not in uids:
+                        uids.append(uid)
                 wf_role = (request.POST.get("workflow_role") or "").strip()
                 valid_roles = {c for c, _ in LibraryProjectWorkflowMember.WORKFLOW_ROLE_CHOICES}
-                if uid <= 0 or wf_role not in valid_roles:
+                if not uids or wf_role not in valid_roles:
                     messages.error(request, "请选择用户与有效的流程岗位")
                 else:
-                    u = User.objects.filter(pk=uid, is_active=True).select_related("profile__role").first()
-                    if u is None:
-                        messages.error(request, "用户不存在或未启用")
-                    elif not getattr(u, "profile", None) or not u.profile.role:
-                        messages.error(request, "该用户未绑定角色")
-                    elif library_user_has_party_a_demo_restrictions(request.user) and u.id != request.user.id:
-                        messages.error(request, "演示账号仅可将流程岗位分配给本人")
-                    elif u.profile.role.code not in APP_SIDE_ROLE_CODES:
-                        messages.error(request, "所选用户角色不属于可参与检测流程的账号")
-                    elif not user_eligible_for_workflow_role(u, wf_role):
-                        messages.error(
-                            request,
-                            "该用户权限不足以登记到此流程岗位（高权限账号可兼任不高于自身等级的岗位）",
+                    from apps.core.org_roles import (
+                        DEPT_STAFF_ROLE_CODES,
+                        user_is_dept_director,
+                        user_is_legacy_permission_track,
+                        user_may_be_dispatched_by_org_director,
+                    )
+
+                    actor_is_org_director = (
+                        not user_is_legacy_permission_track(request.user)
+                        and user_is_dept_director(request.user)
+                    )
+                    added = 0
+                    skipped = 0
+                    for uid in uids:
+                        u = (
+                            User.objects.filter(pk=uid, is_active=True)
+                            .select_related("profile__role")
+                            .first()
                         )
-                    else:
+                        if u is None:
+                            skipped += 1
+                            continue
+                        if not getattr(u, "profile", None) or not u.profile.role:
+                            skipped += 1
+                            continue
+                        if library_user_has_party_a_demo_restrictions(request.user) and u.id != request.user.id:
+                            skipped += 1
+                            continue
+                        role_code = u.profile.role.code
+                        if actor_is_org_director:
+                            # 新轨主管：只能派本部门员工
+                            if not user_may_be_dispatched_by_org_director(request.user, u):
+                                skipped += 1
+                                continue
+                        else:
+                            # 旧轨（统筹等）：候选人仍须为 APP_SIDE 五岗；不可派到新轨员工
+                            if role_code in DEPT_STAFF_ROLE_CODES or role_code not in APP_SIDE_ROLE_CODES:
+                                skipped += 1
+                                continue
+                        if not user_eligible_for_workflow_role(u, wf_role):
+                            skipped += 1
+                            continue
                         _, created = LibraryProjectWorkflowMember.objects.get_or_create(
                             project=proj,
                             user=u,
@@ -2882,13 +3537,10 @@ def library_projects(request):
                             synced, _ = sync_project_task_assignments_for_user(
                                 proj, u, request.user
                             )
+                            added += 1
                             role_label = dict(
                                 LibraryProjectWorkflowMember.WORKFLOW_ROLE_CHOICES
                             ).get(wf_role, wf_role)
-                            msg = f"已添加流程参与人：{u.username} → {role_label}"
-                            if synced:
-                                msg += f"，已自动同步 {synced} 条 App 任务"
-                            messages.success(request, msg)
                             record_biz_operation(
                                 actor=request.user,
                                 scope=BizOperationLog.SCOPE_PROJECT,
@@ -2900,7 +3552,22 @@ def library_projects(request):
                                 detail={"user_id": u.pk, "workflow_role": wf_role},
                             )
                         else:
-                            messages.info(request, f"{u.username} 已在该岗位登记，无需重复添加")
+                            skipped += 1
+                    role_label = dict(LibraryProjectWorkflowMember.WORKFLOW_ROLE_CHOICES).get(
+                        wf_role, wf_role
+                    )
+                    if added:
+                        messages.success(
+                            request,
+                            f"已将 {added} 人登记为「{role_label}」"
+                            + (f"（跳过 {skipped} 人）" if skipped else "")
+                            + "，已自动同步 App 任务",
+                        )
+                    else:
+                        messages.info(
+                            request,
+                            "未新增人员（可能均已登记、角色不符或无权派工到所选账号）",
+                        )
             else:
                 try:
                     mid = int(request.POST.get("member_id", "") or 0)
@@ -3094,11 +3761,29 @@ def library_projects(request):
                     User.objects.filter(pk=request.user.pk, is_active=True).select_related("profile__role")
                 )
             else:
-                assignable_workflow_users = list(
-                    User.objects.filter(is_active=True, profile__role__code__in=APP_SIDE_ROLE_CODES)
-                    .select_related("profile__role")
-                    .order_by("username")
+                from apps.core.org_roles import (
+                    org_dispatch_candidate_queryset,
+                    user_is_dept_director,
+                    user_is_legacy_permission_track,
                 )
+
+                if (
+                    not user_is_legacy_permission_track(request.user)
+                    and user_is_dept_director(request.user)
+                ):
+                    # 新轨：仅本部门员工，与旧五岗隔离
+                    assignable_workflow_users = list(
+                        org_dispatch_candidate_queryset(request.user).select_related("profile__role")
+                    )
+                else:
+                    # 旧轨：保持改前 APP_SIDE 候选人池
+                    assignable_workflow_users = list(
+                        User.objects.filter(
+                            is_active=True, profile__role__code__in=APP_SIDE_ROLE_CODES
+                        )
+                        .select_related("profile__role")
+                        .order_by("username")
+                    )
             stage_labels = dict(InspectionCaseWorkflowState.STAGE_CHOICES)
             for c in (
                 InspectionCase.objects.filter(library_project=selected_project)
@@ -3142,11 +3827,25 @@ def library_projects(request):
         selected_project and library_user_may_assign_on_project(request.user, selected_project)
     )
     if can_assign_on_selected_project:
-        app_users_for_assign = list(
-            User.objects.filter(profile__role__code__in=APP_SIDE_ROLE_CODES, is_active=True)
-            .select_related("profile__role")
-            .order_by("username")
+        from apps.core.org_roles import (
+            org_dispatch_candidate_queryset,
+            user_is_dept_director,
+            user_is_legacy_permission_track,
         )
+
+        if (
+            not user_is_legacy_permission_track(request.user)
+            and user_is_dept_director(request.user)
+        ):
+            app_users_for_assign = list(
+                org_dispatch_candidate_queryset(request.user).select_related("profile__role")
+            )
+        else:
+            app_users_for_assign = list(
+                User.objects.filter(profile__role__code__in=APP_SIDE_ROLE_CODES, is_active=True)
+                .select_related("profile__role")
+                .order_by("username")
+            )
     elif selected_project and library_user_may_mutate_project_workbench(request.user, selected_project):
         app_users_for_assign = [request.user]
 
@@ -3605,13 +4304,14 @@ def workflow_hub_site_records(request):
 
 @login_required
 def workflow_hub_report_generate(request):
-    """报告生成及预览：编制 / 预览分 Tab，签名推进。"""
+    """报告生成及预览：编制 / 预览分 Tab；本页直接导出报告、合并报告。"""
     from apps.core.workflow_hub_service import (
         VIEW_HOSPITAL,
         build_hub_query,
         build_report_generate_hub,
         workflow_hub_nav_allowed,
     )
+    from apps.core.library_access import library_user_may_export_report_library_pdfs
 
     gx = _require_perm(request, "perm_file_library")
     if gx:
@@ -3621,8 +4321,15 @@ def workflow_hub_report_generate(request):
         return redirect(reverse("dashboard"))
 
     redir_name = "workflow_hub_report_generate"
+
+    def _hub_redir(*, tab: str = "generate", project_id: int = 0, task_no: str = "", view: str = VIEW_HOSPITAL):
+        return redirect(
+            reverse(redir_name)
+            + build_hub_query(project_id=project_id, task_no=task_no, tab=tab, view=view)
+        )
+
     if request.method == "POST":
-        _workflow_hub_handle_advance_post(request, redirect_name=redir_name)
+        action = (request.POST.get("action") or "").strip()
         try:
             filter_pid = int((request.POST.get("filter_project_id") or request.GET.get("project_id") or 0) or 0)
         except ValueError:
@@ -3630,10 +4337,48 @@ def workflow_hub_report_generate(request):
         filter_task = (request.POST.get("filter_task_no") or request.GET.get("task_no") or "").strip()
         tab = (request.POST.get("filter_tab") or request.GET.get("tab") or "generate").strip()
         view = (request.POST.get("filter_view") or request.GET.get("view") or VIEW_HOSPITAL).strip()
-        return redirect(
-            reverse(redir_name)
-            + build_hub_query(project_id=filter_pid, task_no=filter_task, tab=tab, view=view)
-        )
+
+        if action == "hub_export_report":
+            if not library_user_may_export_report_library_pdfs(request.user):
+                messages.error(request, "当前角色无权执行导出报告")
+                return _hub_redir(tab="generate", project_id=filter_pid, task_no=filter_task, view=view)
+            try:
+                project_id = int(request.POST.get("project_id") or 0)
+            except ValueError:
+                project_id = 0
+            task_no = (request.POST.get("task_no") or "").strip()
+            try:
+                site_task_id = int(request.POST.get("site_library_task_id") or 0)
+            except ValueError:
+                site_task_id = 0
+            hub_back = reverse(redir_name) + build_hub_query(
+                project_id=project_id or filter_pid,
+                task_no="",
+                tab="preview",
+                view=view,
+            )
+            return _workflow_hub_export_report(
+                request,
+                project_id=project_id,
+                task_no=task_no,
+                site_task_id=site_task_id,
+                redirect_url=hub_back,
+            )
+
+        if action == "hub_merge_reports":
+            if not library_user_may_export_report_library_pdfs(request.user):
+                messages.error(request, "当前角色无权执行报告合并")
+                return _hub_redir(tab="preview", project_id=filter_pid, task_no=filter_task, view=view)
+            hub_back = reverse(redir_name) + build_hub_query(
+                project_id=filter_pid,
+                task_no=filter_task,
+                tab="preview",
+                view=view,
+            )
+            return _workflow_hub_merge_reports(request, redirect_url=hub_back)
+
+        _workflow_hub_handle_advance_post(request, redirect_name=redir_name)
+        return _hub_redir(tab=tab, project_id=filter_pid, task_no=filter_task, view=view)
 
     try:
         project_id = int((request.GET.get("project_id") or "").strip() or 0)
@@ -3664,6 +4409,258 @@ def workflow_hub_report_generate(request):
             ),
         },
     )
+
+
+def _workflow_hub_export_report(
+    request,
+    *,
+    project_id: int,
+    task_no: str,
+    site_task_id: int,
+    redirect_url: str,
+):
+    """报告生成页：按项目 + 现场任务导出报告，完成后回到枢纽预览 Tab。"""
+    from apps.api.inspection_pdf_service import (
+        _resolve_library_task_for_task_no,
+        collect_latest_submit_rows_for_site_folder,
+    )
+    from apps.api.inspection_report_make import _resolve_report_task_for_case
+    from apps.core.models import LibraryTask
+
+    if not project_id:
+        messages.error(request, "未指定项目，无法导出报告")
+        return redirect(redirect_url)
+    project = LibraryProject.objects.filter(pk=project_id).first()
+    if project is None:
+        messages.error(request, "项目不存在或无权访问")
+        return redirect(redirect_url)
+
+    site_task = None
+    if site_task_id:
+        site_task = LibraryTask.objects.filter(pk=site_task_id).first()
+    if site_task is None and task_no:
+        site_task = _resolve_library_task_for_task_no(task_no, project)
+    # 序号解析偶发落到报告任务：改取其绑定的现场记录源任务
+    if site_task is not None and site_task.output_target == LibraryTask.OUTPUT_REPORT:
+        site_task = (
+            site_task.report_source_tasks.filter(output_target=LibraryTask.OUTPUT_SITE_RECORD)
+            .order_by("code", "id")
+            .first()
+        )
+    if site_task is None or site_task.output_target != LibraryTask.OUTPUT_SITE_RECORD:
+        messages.error(request, "未找到对应的现场记录任务，无法导出报告")
+        return redirect(redirect_url)
+    if not project.library_tasks.filter(pk=site_task.pk).exists():
+        messages.error(request, "该现场记录任务未关联到当前项目")
+        return redirect(redirect_url)
+
+    report_task = None
+    # 优先：以本现场任务为数据源的报告任务
+    report_task = (
+        project.library_tasks.filter(
+            output_target=LibraryTask.OUTPUT_REPORT,
+            report_source_tasks=site_task,
+        )
+        .order_by("code", "id")
+        .first()
+    )
+    if report_task is None and task_no:
+        from apps.core.models import InspectionCase
+
+        case = InspectionCase.objects.filter(case_no=task_no, library_project=project).first()
+        if case is not None:
+            report_task = _resolve_report_task_for_case(task_no, project)
+    if report_task is None:
+        report_task = (
+            project.library_tasks.filter(output_target=LibraryTask.OUTPUT_REPORT)
+            .order_by("code", "id")
+            .first()
+        )
+    if report_task is None:
+        messages.error(request, "该项目下未找到报告任务，无法导出报告")
+        return redirect(redirect_url)
+
+    rows_ok, info_notes, errors = collect_latest_submit_rows_for_site_folder(
+        project, site_task, request.user, tab="inspection_submit"
+    )
+    if not rows_ok:
+        # 回退：现场记录 PDF 源
+        rows_ok, info_notes, errors = collect_latest_submit_rows_for_site_folder(
+            project, site_task, request.user, tab="site_record"
+        )
+    if errors and not rows_ok:
+        messages.error(request, "现场记录缺少可用数据，未能导出报告。")
+        return redirect(redirect_url)
+
+    scope_hint = f"报告生成枢纽 · {site_task.name or site_task.code} 最新提交"
+    return _run_merged_report_export_from_submit_rows(
+        request,
+        rows_ok,
+        "inspection_submit",
+        str(project_id),
+        scope_hint=scope_hint,
+        report_task_override=report_task,
+        prep_notes=info_notes,
+        redirect_url=redirect_url,
+        success_for_hub_preview=True,
+    )
+
+
+def _workflow_hub_merge_reports(request, *, redirect_url: str):
+    """报告生成页预览 Tab：勾选多份报告 PDF 合并。"""
+    from utils.pdf_merge import merge_report_pdfs_header_toc_sections
+    from apps.api.inspection_pdf_service import (
+        build_report_merge_overlay,
+        collect_report_merge_source_rows,
+        commission_no_from_merge_source_rows,
+        merge_row_toc_chapter_title,
+    )
+    from apps.api.inspection_report_make import build_merged_report_pdf_original_name
+    from apps.core.library_access import library_export_merge_allowed_under_own_files_scope
+
+    if not library_export_merge_allowed_under_own_files_scope(request.user, None):
+        messages.error(request, "当前账号范围下不支持报告合并")
+        return redirect(redirect_url)
+
+    ids_merge = []
+    for x in request.POST.getlist("ids"):
+        try:
+            ids_merge.append(int(x))
+        except (TypeError, ValueError):
+            continue
+    ids_merge = list(dict.fromkeys([i for i in ids_merge if i > 0]))
+    if len(ids_merge) < 2:
+        messages.warning(request, "请至少勾选两份报告后再合并")
+        return redirect(redirect_url)
+
+    id_order = {pk: i for i, pk in enumerate(ids_merge)}
+    report_files = list(
+        LibraryFile.objects.filter(pk__in=ids_merge, category=LibraryFile.CATEGORY_REPORT).select_related(
+            "created_by"
+        )
+    )
+    report_files.sort(key=lambda f: id_order.get(f.pk, 10**9))
+    found_pks = {f.pk for f in report_files}
+    merge_errors: list[str] = []
+    for pk in ids_merge:
+        if pk not in found_pks:
+            merge_errors.append(f"文件 id={pk} 不存在或不是「报告」分类")
+
+    paths: list[str] = []
+    project_pids_union: set[int] = set()
+    for lf in report_files:
+        if not library_file_access_allowed(request.user, lf):
+            merge_errors.append(f"{lf.original_name}: 无权访问该文件")
+            continue
+        if not (lf.original_name or "").lower().endswith(".pdf"):
+            merge_errors.append(f"{lf.original_name}: 仅支持合并 PDF 报告")
+            continue
+        abs_p = pipeline_service.library_absolute_path(lf.relative_path)
+        paths.append(str(abs_p))
+        project_pids_union.update(lf.projects.values_list("pk", flat=True))
+
+    merge_rows = collect_report_merge_source_rows(report_files)
+    titles = []
+    path_order = {p: i for i, p in enumerate(paths)}
+    for row in merge_rows:
+        p = row.get("path") or ""
+        if p in path_order:
+            titles.append((path_order[p], merge_row_toc_chapter_title(row)))
+    titles = [t for _, t in sorted(titles, key=lambda x: x[0])]
+    if len(titles) < len(paths):
+        for i, pth in enumerate(paths):
+            if i >= len(titles):
+                titles.append(merge_row_toc_chapter_title({"path": pth}))
+
+    if merge_errors:
+        _log_file_library_export_detail(request.user, "merge_report_pdfs_failed", merge_errors)
+        messages.error(request, "所选报告存在问题，未能完成合并。")
+        return redirect(redirect_url)
+    if len(paths) < 2:
+        messages.warning(request, "有效可合并的报告 PDF 不足两份")
+        return redirect(redirect_url)
+    if len(project_pids_union) > 1:
+        messages.error(request, "所选报告须属于同一项目，请仅勾选同一项目下的报告后再试")
+        return redirect(redirect_url)
+
+    report_commission_code = ""
+    if len(project_pids_union) == 1:
+        _pid = next(iter(project_pids_union))
+        _code = LibraryProject.objects.filter(pk=_pid).values_list("code", flat=True).first()
+        if _code:
+            report_commission_code = str(_code)
+
+    merge_overlay, merge_overlay_hint = build_report_merge_overlay(
+        report_files, merge_time=timezone.now(), source_rows=merge_rows
+    )
+    pdf_bytes, merge_err = merge_report_pdfs_header_toc_sections(
+        paths,
+        section_titles=titles,
+        commission_no_suffix6=report_commission_code,
+        merge_overlay=merge_overlay,
+    )
+    if merge_err or not pdf_bytes:
+        messages.error(request, merge_err or "报告合并失败")
+        return redirect(redirect_url)
+
+    com_no = commission_no_from_merge_source_rows(merge_rows)
+    project_obj = (
+        LibraryProject.objects.filter(pk=next(iter(project_pids_union))).first()
+        if len(project_pids_union) == 1
+        else None
+    )
+    if not com_no and project_obj is not None:
+        com_no = str(project_obj.code or "").strip()
+    pname_in_report = ""
+    if isinstance(merge_overlay, dict):
+        org = str(
+            merge_overlay.get("inspected_org")
+            or merge_overlay.get("cover_org_line")
+            or ""
+        ).strip()
+        title = str(merge_overlay.get("cover_report_title") or "").strip()
+        # 封面第二行常已含委托编号，拼文件名时去掉以免重复
+        if com_no and title.startswith(com_no):
+            title = title[len(com_no) :].strip()
+        pname_in_report = f"{org}{title}".strip() or str(
+            merge_overlay.get("project_name_combined") or ""
+        ).strip()
+    fname = (
+        build_merged_report_pdf_original_name(
+            project_obj,
+            com_no,
+            project_name_in_report=pname_in_report,
+        )
+        if project_obj is not None
+        else f"合并报告-{timezone.now().strftime('%Y%m%d-%H%M%S')}.pdf"
+    )
+    wrapped = type("UploadLike", (), {"read": lambda self: pdf_bytes, "name": fname})()
+    lf0 = report_files[0]
+    created, _skipped = save_library_binary_uploads(
+        request.user,
+        [wrapped],
+        LibraryFile.CATEGORY_REPORT,
+        link_entity=(lf0.link_entity or "") if lf0.link_entity else "",
+        link_object_id=lf0.link_object_id,
+        project_ids=sorted(project_pids_union),
+        enforce_storage_quota=False,
+    )
+    if not created:
+        messages.error(request, "合并 PDF 已生成但保存到文件库失败")
+        return redirect(redirect_url)
+    _log_file_library_export_detail(
+        request.user,
+        "merge_report_pdfs",
+        [
+            merge_overlay_hint,
+            f"merged_count={len(paths)}",
+            f"files={', '.join(titles)}",
+            f"saved_as={fname}",
+            "来源=报告生成枢纽",
+        ],
+    )
+    messages.success(request, f"已合并 {len(paths)} 份报告并保存：{fname}")
+    return redirect(redirect_url)
 
 
 @login_required
@@ -3857,6 +4854,74 @@ def commission_manage(request):
 
     if request.method == "POST":
         action = (request.POST.get("action") or "").strip()
+        redir = reverse("commission_manage")
+        q_parts = []
+        if subject_user:
+            q_parts.append(f"user_id={subject_user.pk}")
+        for key in ("scope", "status", "search"):
+            val = (request.POST.get(key) or request.GET.get(key) or "").strip()
+            if val:
+                from urllib.parse import quote
+
+                q_parts.append(f"{key}={quote(val)}")
+
+        # 委托编号管理：可调整含停用项目，不依赖下方「活跃项目」校验
+        if action == "adjust_project_code":
+            parts = list(q_parts)
+            yy_keep = (request.POST.get("code_year") or request.GET.get("code_year") or "").strip()
+            if yy_keep:
+                from urllib.parse import quote
+
+                parts.append(f"code_year={quote(yy_keep)}")
+            parts.append("panel=codes")
+            tab_q = "?" + "&".join(parts)
+            if not library_user_may_manage_commission_codes(request.user):
+                messages.error(request, "当前角色无权调整委托编号")
+                return redirect(redir + tab_q)
+            try:
+                project_id = int(request.POST.get("project_id", "") or 0)
+            except ValueError:
+                project_id = 0
+            project = LibraryProject.objects.filter(pk=project_id).first()
+            if project is None:
+                messages.error(request, "项目无效")
+                return redirect(redir + tab_q)
+            from apps.core.project_numbering import validate_manual_project_code
+
+            new_code, code_err = validate_manual_project_code(
+                request.POST.get("project_code") or "",
+                exclude_pk=project.pk,
+            )
+            if code_err:
+                messages.error(request, code_err)
+                return redirect(redir + tab_q)
+            if not new_code:
+                messages.error(request, "请填写新的委托编号")
+                return redirect(redir + tab_q)
+            old_code = (project.code or "").strip()
+            if new_code == old_code:
+                messages.info(request, "委托编号未变化")
+                return redirect(redir + tab_q)
+            project.code = new_code
+            project.save(update_fields=["code", "updated_at"])
+            messages.success(
+                request,
+                f"已将「{project.name}」委托编号由 {old_code or '（空）'} 调整为 {new_code}",
+            )
+            try:
+                record_biz_operation(
+                    actor=request.user,
+                    scope=BizOperationLog.SCOPE_PROJECT,
+                    action=BizOperationLog.ACTION_UPDATE,
+                    summary=f"调整委托编号：{old_code} → {new_code}（{project.name}）",
+                    project=project,
+                    entity_type="library_project",
+                    entity_id=project.pk,
+                )
+            except Exception:
+                pass
+            return redirect(redir + tab_q)
+
         try:
             project_id = int(request.POST.get("project_id", "") or 0)
         except ValueError:
@@ -3868,16 +4933,6 @@ def commission_manage(request):
             if project_id
             else None
         )
-        redir = reverse("commission_manage")
-        q_parts = []
-        if subject_user:
-            q_parts.append(f"user_id={subject_user.pk}")
-        for key in ("scope", "status", "search"):
-            val = (request.POST.get(key) or request.GET.get(key) or "").strip()
-            if val:
-                from urllib.parse import quote
-
-                q_parts.append(f"{key}={quote(val)}")
         tab_q = ("?" + "&".join(q_parts)) if q_parts else ""
 
         if project is None:
@@ -4087,6 +5142,15 @@ def commission_manage(request):
         scope_filter=scope_filter,
         search=search,
     )
+    can_manage_commission_codes = library_user_may_manage_commission_codes(request.user)
+    code_inventory = None
+    code_year = (request.GET.get("code_year") or "").strip()
+    open_code_panel = (request.GET.get("panel") or "").strip() == "codes"
+    if can_manage_commission_codes:
+        from apps.core.project_numbering import build_commission_code_inventory
+
+        code_inventory = build_commission_code_inventory(year_yy=code_year)
+
     return render(
         request,
         "core/commission_manage.html",
@@ -4100,6 +5164,9 @@ def commission_manage(request):
             "status_filter": status_filter,
             "scope_filter": scope_filter,
             "search": search,
+            "can_manage_commission_codes": can_manage_commission_codes,
+            "code_inventory": code_inventory,
+            "open_code_panel": open_code_panel,
         },
     )
 
@@ -5024,10 +6091,16 @@ def _log_file_library_export_detail(user, action: str, lines=None) -> None:
     )
 
 
-def _merged_report_export_user_success_message(project, report_task, library_file=None) -> str:
+def _merged_report_export_user_success_message(
+    project, report_task, library_file=None, *, for_hub_preview: bool = False
+) -> str:
     code = str(getattr(project, "code", "") or "").strip() or "—"
     label = (getattr(report_task, "name", None) or getattr(report_task, "code", None) or "报告").strip()
     fname = (getattr(library_file, "original_name", None) or "").strip() if library_file is not None else ""
+    if for_hub_preview:
+        if fname:
+            return f"项目 {code}「{label}」报告已生成：{fname}，已打开报告预览。"
+        return f"项目 {code}「{label}」报告已生成，请在「报告预览」中查看。"
     if fname:
         return f"项目 {code}「{label}」报告已生成：{fname}"
     return f"项目 {code}「{label}」报告已生成，请在文件库「报告」分类查看。"
@@ -5042,18 +6115,22 @@ def _run_merged_report_export_from_submit_rows(
     scope_hint: str = "",
     report_task_override=None,
     prep_notes: list | None = None,
+    redirect_url: str | None = None,
+    success_for_hub_preview: bool = False,
 ) -> HttpResponse:
     from apps.api.inspection_pdf_service import (
-        _build_filled_template_fields_for_task,
-        _persist_filled_pdf_from_submit,
-        _resolve_report_task_for_case,
         accumulate_inspection_payloads_ordered_merge,
         load_report_payload_for_manual_export,
         resolve_merged_report_device_count,
         site_record_task_count_for_project,
     )
+    from apps.api.inspection_report_make import (
+        _build_filled_template_fields_for_task,
+        _persist_filled_pdf_from_submit,
+        _resolve_report_task_for_case,
+    )
 
-    redir = _file_library_redirect_from_post(request, tab, project_selected)
+    redir = redirect_url or _file_library_redirect_from_post(request, tab, project_selected)
     if not rows_ok:
         messages.error(request, "没有可用的现场记录，或缺少可用的检测提交数据")
         return redirect(redir)
@@ -5173,7 +6250,12 @@ def _run_merged_report_export_from_submit_rows(
         _log_file_library_export_detail(request.user, "merged_report_from_site_records", log_lines)
         messages.success(
             request,
-            _merged_report_export_user_success_message(project, report_task, pdf_lf),
+            _merged_report_export_user_success_message(
+                project,
+                report_task,
+                pdf_lf,
+                for_hub_preview=success_for_hub_preview,
+            ),
         )
     return redirect(redir)
 
@@ -6171,8 +7253,27 @@ def file_library(request):
             if len(project_pids_union) == 1
             else None
         )
+        if not com_no and project_obj is not None:
+            com_no = str(project_obj.code or "").strip()
+        pname_in_report = ""
+        if isinstance(merge_overlay, dict):
+            org = str(
+                merge_overlay.get("inspected_org")
+                or merge_overlay.get("cover_org_line")
+                or ""
+            ).strip()
+            title = str(merge_overlay.get("cover_report_title") or "").strip()
+            if com_no and title.startswith(com_no):
+                title = title[len(com_no) :].strip()
+            pname_in_report = f"{org}{title}".strip() or str(
+                merge_overlay.get("project_name_combined") or ""
+            ).strip()
         fname = (
-            build_merged_report_pdf_original_name(project_obj, com_no)
+            build_merged_report_pdf_original_name(
+                project_obj,
+                com_no,
+                project_name_in_report=pname_in_report,
+            )
             if project_obj is not None
             else f"合并报告-{timezone.now().strftime('%Y%m%d-%H%M%S')}.pdf"
         )
@@ -6791,6 +7892,47 @@ def file_library_download(request, pk):
     if not library_file_access_allowed(request.user, lf):
         raise PermissionDenied("无权下载该文件")
     return library_file_download_response(lf)
+
+
+@login_required
+def site_record_retained_photos(request, pk):
+    """原始记录同批次提交落库的留存照片（仅 photos/，不含签名与布局图）。"""
+    from apps.core.library_file_service import list_retained_photos_for_site_record
+
+    lf = get_object_or_404(
+        LibraryFile,
+        pk=pk,
+        category=LibraryFile.CATEGORY_SITE_RECORD,
+        deleted_at__isnull=True,
+    )
+    if not role_has(request.user, "perm_file_library"):
+        raise PermissionDenied("无权查看留存照片")
+    if not library_file_access_allowed(request.user, lf):
+        raise PermissionDenied("无权查看留存照片")
+    photos = []
+    for photo in list_retained_photos_for_site_record(lf):
+        if not library_file_access_allowed(request.user, photo):
+            continue
+        photos.append(
+            {
+                "file": photo,
+                "preview_url": reverse("file_preview", kwargs={"pk": photo.pk}),
+                "raw_url": reverse("file_library_raw", kwargs={"pk": photo.pk}),
+                "download_url": reverse("file_library_download", kwargs={"pk": photo.pk}),
+            }
+        )
+    display_name = (lf.original_name or "").strip() or f"现场记录 #{lf.pk}"
+    return render(
+        request,
+        "core/site_record_retained_photos.html",
+        {
+            "site_record": lf,
+            "display_name": display_name,
+            "photos": photos,
+            "preview_url": reverse("file_preview", kwargs={"pk": lf.pk}),
+            "back_url": reverse("workflow_hub_site_records"),
+        },
+    )
 
 
 @login_required
@@ -7986,7 +9128,7 @@ def _build_matrix_steps_from_auto_fields(fields, source_pdf_path, table_struct_b
                                     "label": token or semantic,
                                     "required": False,
                                     "defaultValue": None,
-                                    "precision": 1,
+                                    "precision": 2,
                                     "unit": "",
                                     "source": cell_src,
                                 }
@@ -8076,7 +9218,7 @@ def _build_matrix_steps_from_auto_fields(fields, source_pdf_path, table_struct_b
                             "label": value_columns[i]["title"],
                             "required": False,
                             "defaultValue": raw_txt or None,
-                            "precision": 1,
+                            "precision": 2,
                             "unit": value_columns[i].get("unit") or "",
                             "editable": False,
                             "source": static_src,
@@ -8111,7 +9253,7 @@ def _build_matrix_steps_from_auto_fields(fields, source_pdf_path, table_struct_b
                         "label": value_columns[i]["title"],
                         "required": False,
                         "defaultValue": None,
-                        "precision": 1,
+                        "precision": 2,
                         "unit": value_columns[i].get("unit") or "",
                         "source": cell_src,
                     }
@@ -8703,10 +9845,10 @@ def htmlpdf_api_save_pdf(request):
     if output_category not in (LibraryFile.CATEGORY_SITE_RECORD, LibraryFile.CATEGORY_REPORT):
         return JsonResponse({"error": "output_category 仅支持 site_record/report"}, status=400)
     try:
-        fill_font_pt = (
-            htmlpdf_service.REPORT_FILL_FONT_PT
-            if output_category == LibraryFile.CATEGORY_REPORT
-            else htmlpdf_service.DEFAULT_FONT_PT
+        from apps.core.pdf_fill_runtime_config import resolve_pdf_fill_font_pt
+
+        fill_font_pt = resolve_pdf_fill_font_pt(
+            is_report=(output_category == LibraryFile.CATEGORY_REPORT)
         )
         pdf_bytes = htmlpdf_service.build_filled_pdf(
             fields,
@@ -9116,9 +10258,11 @@ def library_task_management(request):
                 )
 
             from apps.api.inspection_pdf_service import (
-                _build_filled_template_fields_for_task,
                 _deep_merge_payload_dicts,
                 _load_site_record_payload_for_report,
+            )
+            from apps.api.inspection_report_make import (
+                _build_filled_template_fields_for_task,
                 _persist_filled_pdf_from_submit,
             )
 
@@ -9182,6 +10326,7 @@ def library_task_management(request):
                 template_pdf_id=template_pdf_id,
                 template_json_name=template_json_name,
                 task_obj=task_obj,
+                source_payload=payload if isinstance(payload, dict) else None,
             )
             if not ok:
                 messages.error(request, pdf_reason or "导出 PDF 失败")

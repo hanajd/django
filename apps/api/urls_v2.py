@@ -5,6 +5,7 @@ Base URL: /api/v2/
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from apps.api.app_ota_views import AppApkDownloadAPIView, AppVersionAPIView
 from apps.api.api_views import (
     AuthAPIView,
     LibraryFileDownloadAPIView,
@@ -80,6 +81,8 @@ router.register(r"registry/reports", ReportViewSet, basename="registry-report")
 urlpatterns = [
     path("auth/login/", AuthAPIView.as_view(), name="api_v2_login"),
     path("auth/token/refresh/", TokenRefreshAPIView.as_view(), name="api_v2_token_refresh"),
+    path("app/version", AppVersionAPIView.as_view(), name="api_v2_app_version"),
+    path("app/apk/<str:filename>", AppApkDownloadAPIView.as_view(), name="api_v2_app_apk_download"),
     path("library/files/ocr/", LibraryOCRUploadAPIView.as_view(), name="api_v2_library_ocr_upload"),
     path("library/files/<int:pk>/download/", LibraryFileDownloadAPIView.as_view(), name="api_v2_library_file_download"),
     path("library/templates/downloadable/", LibraryTemplateDownloadListAPIView.as_view(), name="api_v2_library_template_download_list"),

@@ -160,8 +160,8 @@ steps[]                    # 办理步骤（通常 1 步「检测原始记录」
 ### 3.3 `precision`（数值小数位）
 
 - **仅对 `type: "number"` 或 `computed` 有意义**。
-- 表示前端展示与校验时保留的小数位数，例如 `"precision": 1` → 显示/提交一位小数（如 `12.3`）。
-- 质控测量、剂量率、防护表读数等一般为 `1`；若未写，后端规则引擎默认按 `1` 处理。
+- 表示前端展示与校验时保留的小数位数，例如 `"precision": 2` → 显示/提交两位小数（如 `12.34`）。
+- 未配置时，后端规则引擎与导出管线**默认按 `2` 处理**。
 
 ### 3.4 `unit`
 
@@ -250,7 +250,7 @@ steps[]                    # 办理步骤（通常 1 步「检测原始记录」
   "schemaKey": "step_site_record.site_qc_performance.t0_r8_c5.measuredValue92",
   "hierarchyKey": "CT值线性（仅验收检测）_检测结果",
   "judgmentCriterionText": "…",
-  "precision": 1,
+  "precision": 2,
   "table": {
     "cellId": "t0_r8_c5",
     "tableId": 0,
@@ -272,7 +272,7 @@ steps[]                    # 办理步骤（通常 1 步「检测原始记录」
   "label": "测量读数M",
   "pdfFieldId": "f259",
   "submitPath": "testResult.auto.u3bcf79e8f4a0.t0_r9_c3.field280",
-  "precision": 1,
+  "precision": 2,
   "unit": "μSv/h",
   "table": {
     "cellId": "t0_r9_c3",
@@ -456,6 +456,6 @@ json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 | `sectionType` / `sectionKey` | 六大章节稳定枚举，前端勿依赖中文标题 |
 | 防护章 | 运行态为 `matrixTable` + 22 行 `protectionPoints` |
 | 移动端 JSON 体积 | compact + gzip；`mode=editor` 仅调试用 |
-| `precision` | 数值/计算栏小数位，常为 `1` |
+| `precision` | 数值/计算栏小数位，**默认 `2`** |
 
 实现入口：`utils/frontend_export_pipeline.py`（任务/编辑器共用）+ `utils/frontend_schema_rule_engine.py`（规则拼装）+ `utils/frontend_runtime_export.py`（运行态压平）。

@@ -1711,6 +1711,24 @@ def _normalize_pdf_field(item: Dict[str, Any], idx: int) -> Dict[str, Any]:
         out["templateSectionKey"] = ts_key
     if ts_title:
         out["templateSectionTitle"] = ts_title
+    # 拟合主格 / R² 从格：从 pdf.fields 透传到规则引擎归一化项，供后续写入 formSchema
+    fe = str(item.get("fieldExpression") or item.get("pdfFieldExpression") or "").strip()
+    if fe:
+        out["fieldExpression"] = fe
+    fb = item.get("fitBinding")
+    if isinstance(fb, dict) and (fb.get("x") or fb.get("y") or fb.get("r2FieldId")):
+        out["fitBinding"] = copy.deepcopy(fb)
+    fit_ref = str(item.get("fitConfigRef") or "").strip()
+    if fit_ref:
+        out["fitConfigRef"] = fit_ref
+    display_format = str(item.get("displayFormat") or "").strip()
+    if display_format:
+        out["displayFormat"] = display_format
+    rules = item.get("formulaRules")
+    if not isinstance(rules, list) or not rules:
+        rules = item.get("fieldExpressionRules")
+    if isinstance(rules, list) and rules:
+        out["formulaRules"] = copy.deepcopy(rules)
     return out
 
 
@@ -2209,14 +2227,67 @@ def _compact_single_form_field(
 
     # 拟合主格 / R² 从格：对齐前端 type 约定
     fb = out.get("fitBinding") or field.get("fitBinding") or src.get("fitBinding")
-    fit_ref = str(out.get("fitConfigRef") or field.get("fitConfigRef") or src.get("fitConfigRef") or "").strip()
-    if isinstance(fb, dict) and (fb.get("x") or fb.get("y") or fb.get("r2FieldId")):
+    from utils.pdf_field_formulas import (
+        build_fit_r2_expression,
+        is_fit_model_expression,
+        resolve_fit_r2_master_pid,
+    )
+
+    r2_master = resolve_fit_r2_master_pid(out) or resolve_fit_r2_master_pid(field) or resolve_fit_r2_master_pid(src)
+    rules_probe = out.get("formulaRules") or field.get("formulaRules") or src.get("formulaRules") or []
+    model_flags: list[bool] = []
+    if isinstance(rules_probe, list):
+        for r in rules_probe:
+            if not isinstance(r, dict):
+                continue
+            expr = str(r.get("expression") or r.get("formula") or "").strip()
+            kind = str(r.get("fitKind") or "").strip().lower()
+            is_model = is_fit_model_expression(expr) or (
+                kind in ("linear", "log", "exp") and (not expr or expr.lower() == "fit_eq()")
+            )
+            model_flags.append(is_model)
+    disp = str(out.get("displayFormat") or field.get("displayFormat") or "").strip().lower()
+    # 规则全是 fit(y=...) → 方程主格；否则有点列且非 latex → R² Pearson
+    is_fit_master_rules = bool(model_flags) and all(model_flags)
+    is_direct_r2 = (
+        not is_fit_master_rules
+        and disp != "latex"
+        and isinstance(fb, dict)
+        and bool(fb.get("x") or fb.get("y"))
+        and bool(model_flags)  # 有条件规则
+    )
+    if r2_master and not is_direct_r2:
+        # 旧哨兵 fit_r2
+        r2_expr = build_fit_r2_expression(r2_master)
+        out["type"] = "computed"
+        out["fieldExpression"] = r2_expr
+        out["formula"] = r2_expr
+        out.pop("fitConfigRef", None)
+        # R² 不当 LaTeX 方程格展示
+        if str(out.get("displayFormat") or "").strip().lower() == "latex":
+            out.pop("displayFormat", None)
+        if isinstance(fb, dict) and (fb.get("x") or fb.get("y")):
+            out["fitBinding"] = {
+                "x": list(fb.get("x") or []),
+                "y": list(fb.get("y") or []),
+                "r2FieldId": "",
+            }
+    elif is_direct_r2:
+        out["type"] = "computed"
+        out.pop("fitConfigRef", None)
+        if str(out.get("displayFormat") or "").strip().lower() == "latex":
+            out.pop("displayFormat", None)
+        if isinstance(fb, dict) and (fb.get("x") or fb.get("y")):
+            out["fitBinding"] = {
+                "x": list(fb.get("x") or []),
+                "y": list(fb.get("y") or []),
+                "r2FieldId": "",
+            }
+    elif isinstance(fb, dict) and (fb.get("x") or fb.get("y") or fb.get("r2FieldId")):
         out["type"] = "computed"
         if not str(out.get("displayFormat") or "").strip():
             out["displayFormat"] = "latex"
-    elif fit_ref:
-        out["type"] = "number"
-        out["fitConfigRef"] = fit_ref.lower() if isinstance(fit_ref, str) else fit_ref
+        out.pop("fitConfigRef", None)
 
     try:
         from utils.conditional_field_rules import enrich_frontend_field_with_conditional_rules
@@ -2234,6 +2305,13 @@ def _compact_single_form_field(
             merged["formulaRules"] = src["fieldExpressionRules"]
         out = enrich_frontend_field_with_conditional_rules(merged)
         out.pop("fieldExpressionRules", None)
+        # 条件公式 / 公式栏：最终 type 必须为 computed
+        if (
+            (isinstance(out.get("formulaRules"), list) and out.get("formulaRules"))
+            or str(out.get("fieldExpression") or out.get("formula") or "").strip()
+            or isinstance(out.get("fitBinding"), dict)
+        ):
+            out["type"] = "computed"
     except Exception:
         pass
     return out
@@ -2934,7 +3012,7 @@ def _upgrade_sv_h_sections_to_matrix_table(payload: Dict[str, Any]) -> Dict[str,
                     "label": "检测值" if cell_key == "measuredValue" else "报出值",
                     "required": False,
                     "defaultValue": None,
-                    "precision": 1,
+                    "precision": 2,
                     "source": {},
                 }
                 # cells 必须保持完整 field schema，便于前端复用动态字段渲染器
@@ -2942,7 +3020,7 @@ def _upgrade_sv_h_sections_to_matrix_table(payload: Dict[str, Any]) -> Dict[str,
                 item["label"] = str(item.get("label") or ("检测值" if cell_key == "measuredValue" else "报出值"))
                 item["required"] = bool(item.get("required", False))
                 item["defaultValue"] = item.get("defaultValue", None)
-                item["precision"] = int(item.get("precision") or 1)
+                item["precision"] = int(item.get("precision") or 2)
                 item["unit"] = str(item.get("unit") or "μSv/h")
                 item["id"] = f"sv_h_row_{row_seq}_{'measured_value' if cell_key == 'measuredValue' else 'report_value'}"
                 src_obj = item.get("source") if isinstance(item.get("source"), dict) else {}
@@ -5165,9 +5243,9 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
         if submit_binding["bucket"] == "testResult":
             field_obj["type"] = "number"
             field_obj["defaultValue"] = None
-            field_obj["precision"] = 1
+            field_obj["precision"] = 2
         if field_obj.get("type") == "number":
-            field_obj["precision"] = 1
+            field_obj["precision"] = 2
             # 防护表单位在 matrix valueColumns 表头展示，单元格不写 unit。
             if pdf_section_key != "site_radiation_protection":
                 unit = _pick_unit(field_label)
@@ -5196,11 +5274,120 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
             field_obj["minLines"] = 3
             field_obj["maxLines"] = 8
             field_obj["width"] = "full"
-        if field_obj.get("type") == "computed":
+        # 占位：先清空 computed 模板字段；有条件公式时稍后由 enrich 写回
+        if field_obj.get("type") == "computed" and not (
+            (isinstance(item.get("formulaRules"), list) and item.get("formulaRules"))
+            or (isinstance(item.get("fieldExpressionRules"), list) and item.get("fieldExpressionRules"))
+            or str(item.get("fieldExpression") or item.get("formula") or "").strip()
+            or isinstance(item.get("fitBinding"), dict)
+        ):
             field_obj["dependsOn"] = []
             field_obj["formula"] = ""
         if field_obj.get("type") == "verdict":
             field_obj["rule"] = ""
+        # 拟合主格 / R²：从 pdf 归一化项写入（覆盖 testResult→number 等通用类型推断）
+        from utils.pdf_field_formulas import (
+            build_fit_r2_expression,
+            is_fit_model_expression,
+            normalize_pdf_field_id,
+            parse_fit_r2_master_pid,
+            resolve_fit_r2_master_pid,
+        )
+
+        r2_master = resolve_fit_r2_master_pid(item)
+        if not r2_master:
+            r2_master = parse_fit_r2_master_pid(
+                str(item.get("fieldExpression") or item.get("formula") or "")
+            ) or normalize_pdf_field_id(str(item.get("fitConfigRef") or ""))
+        fb = item.get("fitBinding")
+        rules = item.get("formulaRules")
+        if not isinstance(rules, list) or not rules:
+            rules = item.get("fieldExpressionRules")
+        model_flags: list[bool] = []
+        if isinstance(rules, list):
+            for r in rules:
+                if not isinstance(r, dict):
+                    continue
+                expr = str(r.get("expression") or r.get("formula") or "").strip()
+                kind = str(r.get("fitKind") or "").strip().lower()
+                is_model = is_fit_model_expression(expr) or (
+                    kind in ("linear", "log", "exp") and (not expr or expr.lower() == "fit_eq()")
+                )
+                model_flags.append(is_model)
+        disp = str(item.get("displayFormat") or field_obj.get("displayFormat") or "").strip().lower()
+        is_fit_master_rules = bool(model_flags) and all(model_flags)
+        is_direct_r2 = (
+            not is_fit_master_rules
+            and disp != "latex"
+            and isinstance(fb, dict)
+            and bool(fb.get("x") or fb.get("y"))
+            and bool(model_flags)
+        )
+        if r2_master:
+            r2_expr = build_fit_r2_expression(r2_master)
+            field_obj["fieldExpression"] = r2_expr
+            field_obj["formula"] = r2_expr
+            field_obj["type"] = "computed"
+            field_obj["defaultValue"] = None
+            field_obj["precision"] = field_obj.get("precision") if field_obj.get("precision") is not None else 2
+            field_obj.pop("fitConfigRef", None)
+            if str(field_obj.get("displayFormat") or "").strip().lower() == "latex":
+                field_obj.pop("displayFormat", None)
+            if isinstance(fb, dict) and (fb.get("x") or fb.get("y")):
+                field_obj["fitBinding"] = {
+                    "x": list(fb.get("x") or []),
+                    "y": list(fb.get("y") or []),
+                    "r2FieldId": "",
+                }
+            if isinstance(rules, list) and rules:
+                field_obj["formulaRules"] = copy.deepcopy(rules)
+        elif is_direct_r2 and isinstance(fb, dict) and (fb.get("x") or fb.get("y")):
+            field_obj["type"] = "computed"
+            field_obj["defaultValue"] = None
+            field_obj.pop("fitConfigRef", None)
+            if str(field_obj.get("displayFormat") or "").strip().lower() == "latex":
+                field_obj.pop("displayFormat", None)
+            field_obj["fitBinding"] = {
+                "x": list(fb.get("x") or []),
+                "y": list(fb.get("y") or []),
+                "r2FieldId": "",
+            }
+            if isinstance(rules, list) and rules:
+                field_obj["formulaRules"] = copy.deepcopy(rules)
+            fe = str(item.get("fieldExpression") or item.get("formula") or field_obj.get("formula") or "").strip()
+            if fe:
+                field_obj["fieldExpression"] = fe
+                field_obj["formula"] = fe
+        elif isinstance(fb, dict) and (fb.get("x") or fb.get("y") or fb.get("r2FieldId")):
+            field_obj["fitBinding"] = copy.deepcopy(fb)
+            field_obj["type"] = "computed"
+            dfmt = str(item.get("displayFormat") or field_obj.get("displayFormat") or "latex").strip()
+            field_obj["displayFormat"] = dfmt or "latex"
+            if isinstance(rules, list) and rules:
+                field_obj["formulaRules"] = copy.deepcopy(rules)
+            # 拟合由 fitBinding + formulaRules 中的 fit(y=...) 驱动
+            if not str(field_obj.get("formula") or "").strip():
+                field_obj["formula"] = "fit(y=a*x+b)"
+            field_obj["dependsOn"] = list(field_obj.get("dependsOn") or [])
+        # 条件公式 / 单条公式：覆盖 testResult→number，强制 type=computed
+        elif (isinstance(rules, list) and rules) or str(
+            item.get("fieldExpression") or item.get("formula") or field_obj.get("formula") or ""
+        ).strip():
+            if isinstance(rules, list) and rules:
+                field_obj["formulaRules"] = copy.deepcopy(rules)
+            fe = str(item.get("fieldExpression") or item.get("formula") or field_obj.get("formula") or "").strip()
+            if fe:
+                field_obj["fieldExpression"] = fe
+                field_obj["formula"] = fe
+            try:
+                from utils.conditional_field_rules import enrich_frontend_field_with_conditional_rules
+
+                enrich_frontend_field_with_conditional_rules(field_obj)
+            except Exception:
+                pass
+            field_obj["type"] = "computed"
+            if field_obj.get("precision") is None:
+                field_obj["precision"] = 2
         sec["fields"].append(field_obj)
 
     # 归位：第一页“状态检测/验收检测”合并成 testType（报告信息）

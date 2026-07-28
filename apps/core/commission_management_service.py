@@ -82,8 +82,20 @@ def library_user_may_access_commission_manage(user) -> bool:
         return False
     if library_user_can_assign_tasks_to_participants(user):
         return True
-    if getattr(user, "is_superuser", False) or _role_code(user) in ("super_admin", "admin"):
+    if getattr(user, "is_superuser", False) or _role_code(user) in (
+        "super_admin",
+        "admin",
+        "admin_office",
+        "commission_coordinator",
+    ):
         return True
+    try:
+        from apps.core.org_roles import user_is_admin_office
+
+        if user_is_admin_office(user):
+            return True
+    except Exception:
+        pass
     if LibraryProject.objects.filter(primary_responsible=user, is_active=True).exists():
         return True
     if LibraryTaskAssignment.objects.filter(assignee=user, project_id__isnull=False).exists():
@@ -91,6 +103,25 @@ def library_user_may_access_commission_manage(user) -> bool:
     if LibraryProjectWorkflowMember.objects.filter(user=user, project__is_active=True).exists():
         return True
     return bool(library_user_scoped_project_ids(user))
+
+
+def library_user_may_manage_commission_codes(user) -> bool:
+    """行政 / 系统管理岗：可查看并调整全部委托编号。"""
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+    code = _role_code(user)
+    if code in ("super_admin", "admin", "admin_office", "commission_coordinator"):
+        return True
+    try:
+        from apps.core.org_roles import user_is_admin_office
+
+        if user_is_admin_office(user):
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def _viewer_rank(user) -> int:
@@ -298,12 +329,22 @@ def _submission_workflow_stage(sub: InspectionSubmission | None) -> str:
 
 
 def _submission_workflow_updated_at(sub: InspectionSubmission | None):
-    if sub is None or sub.case_id is None:
+    """
+    委托管理「最近更新」：服务端感知的最近业务活动时间。
+    取环节推进、提交落库、正式提交、草稿保存等服务端时间的最大值；
+    不使用 updated_at_remote（客户端时钟）。
+    """
+    if sub is None:
         return None
-    st = getattr(sub.case, "workflow_state", None)
-    if st is not None and st.updated_at is not None:
-        return st.updated_at
-    return sub.updated_at
+    candidates = []
+    for ts in (sub.updated_at, sub.submitted_at, getattr(sub, "draft_saved_at", None)):
+        if ts is not None:
+            candidates.append(ts)
+    if sub.case_id is not None:
+        st = getattr(sub.case, "workflow_state", None)
+        if st is not None and st.updated_at is not None:
+            candidates.append(st.updated_at)
+    return max(candidates) if candidates else None
 
 
 def build_commission_project_item_progress(
@@ -352,6 +393,7 @@ def build_commission_project_item_progress(
                         "task_no": task_no,
                         "task_label": row.get("label") or task_no,
                         "report_task_label": card.get("report_task_label") or "—",
+                        "library_task_id": int(row.get("libraryTaskId") or 0) or 0,
                         "case_id": case_id,
                         "stage_code": bar["stage_code"],
                         "stage_label": bar["stage_label"],

@@ -316,6 +316,12 @@ def enrich_frontend_steps_rect_from_pdf_fields(
 
 
 def _field_dict_to_compact_row(mf: Dict[str, Any]) -> Dict[str, Any]:
+    from utils.pdf_field_formulas import (
+        build_fit_r2_expression,
+        normalize_pdf_field_id,
+        parse_fit_r2_master_pid,
+    )
+
     page = int(mf.get("page") or 1)
     x = round(float(mf.get("x") or 0), 2)
     y = round(float(mf.get("y") or 0), 2)
@@ -363,8 +369,10 @@ def _field_dict_to_compact_row(mf: Dict[str, Any]) -> Dict[str, Any]:
         if x_n or y_n or r2:
             out["fitBinding"] = {"x": x_n, "y": y_n, "r2FieldId": r2.lower() if r2 else ""}
     fit_ref = str(mf.get("fitConfigRef") or "").strip()
-    if fit_ref:
-        out["fitConfigRef"] = fit_ref.lower()
+    # 兼容旧 fitConfigRef：落盘时改写为 fit_r2(主格)
+    r2_master = parse_fit_r2_master_pid(fe) or normalize_pdf_field_id(fit_ref)
+    if r2_master and "fitBinding" not in out:
+        out["fieldExpression"] = build_fit_r2_expression(r2_master)
     disp = str(mf.get("displayFormat") or "").strip()
     if disp:
         out["displayFormat"] = disp

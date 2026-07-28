@@ -66,7 +66,7 @@ _COLUMN_SEQ = "序号"
 _SEQ_LABEL_RE = re.compile(r"^序号_r\d+", re.I)
 _F_ID_RE = re.compile(r"^f\d+$", re.I)
 _RP_LOCATION_COLUMN_ROLES = frozenset({"检测点位置", "位置细分"})
-PROTECTION_NUMBER_PRECISION = 3
+PROTECTION_NUMBER_PRECISION = 2
 _HEADER_READING_RE = re.compile(r"测量读数|读数\s*M", re.I)
 _HEADER_MEAN_RE = re.compile(r"测量均值|均值\s*M", re.I)
 _HEADER_REPORT_RE = re.compile(r"报出值", re.I)
@@ -370,6 +370,16 @@ def _background_reading_fields_sorted(
     return list(geo.get("readings") or [])
 
 
+def _background_binding_is_complete(binding: Optional[Mapping[str, Any]]) -> bool:
+    """已保存本底绑定是否含报出格 + 至少 2 个读数（可写 min~max）。"""
+    if not isinstance(binding, dict):
+        return False
+    if not _norm(binding.get("report_d") or ""):
+        return False
+    n = sum(1 for i in range(1, 11) if _norm(binding.get(f"bg_reading_{i}") or ""))
+    return n >= 2
+
+
 def resolve_background_row_binding(
     fields: Sequence[Any],
     *,
@@ -380,7 +390,13 @@ def resolve_background_row_binding(
     """
     第五章本底行表结构绑定：①–⑩ 读数格 + 报出值 D 汇总格 + 校准因子。
     按 PDF 表列带密排几何定位，不扫描 placeholder 标签。
+
+    模板已保存且完整的 ``backgroundBinding`` 优先：导出 steps 几何易把末行测量
+    报出格误判为本底（如 f465），不可覆盖编辑器已确认的 f494 等本底报出格。
     """
+    if isinstance(chapter, dict) and _background_binding_is_complete(chapter.get("backgroundBinding")):
+        return dict(chapter["backgroundBinding"])
+
     field_list = list(fields or [])
     if not field_list and isinstance(template_payload, dict):
         field_list = list(iter_frontend_export_fields(template_payload))
@@ -398,11 +414,6 @@ def resolve_background_row_binding(
     geo = infer_background_geometry_from_fields(field_list, column_layout=column_layout)
     readings = list(geo.get("readings") or [])
     if not readings:
-        # 仅当几何推不出时，才沿用已保存且仍完整的 backgroundBinding
-        if isinstance(chapter, dict):
-            saved = chapter.get("backgroundBinding")
-            if isinstance(saved, dict) and any(_norm(saved.get(f"bg_reading_{i}") or "") for i in range(1, 11)):
-                return dict(saved)
         return {}
 
     page = int(geo.get("page") or readings[0].get("page") or 0)
@@ -514,25 +525,45 @@ def apply_background_formulas_to_pdf_fields(
     fields: List[Any],
     *,
     chapter: Optional[Mapping[str, Any]] = None,
+    geometry_fields: Optional[Sequence[Any]] = None,
 ) -> None:
     """
     本底水平及范围：写入 min(f…)~max(f…)×校准因子（仿 CT 验收 f603），
     不被章节报出值规则 {mean}*f927 覆盖。
+
+    ``geometry_fields``：用于识别本底①–⑩与报出格的几何来源。导出前端 JSON 时
+    steps 栏位的 pdfAnchor 易把末几行测量点误判为本底，应传入原始 ``pdf.fields``。
     """
     chapter = chapter if isinstance(chapter, dict) else {}
     field_list = [f for f in (fields or []) if isinstance(f, dict)]
-    reading_rows = _background_reading_fields_sorted(field_list)
-    if len(reading_rows) < 2:
+    geo_source = [f for f in (geometry_fields or []) if isinstance(f, dict)]
+    if len(geo_source) < 2:
+        geo_source = field_list
+    # 优先章节已保存的本底绑定，避免导出态重推几何串格
+    saved_bb = chapter.get("backgroundBinding") if isinstance(chapter.get("backgroundBinding"), dict) else {}
+    saved_report = _norm(saved_bb.get("report_d") or "")
+    saved_readings = [
+        _norm(saved_bb.get(f"bg_reading_{i}") or "")
+        for i in range(1, 11)
+        if _norm(saved_bb.get(f"bg_reading_{i}") or "")
+    ]
+    geo = infer_background_geometry_from_fields(geo_source)
+    reading_rows = list(geo.get("readings") or [])
+    if saved_readings and len(saved_readings) >= 2:
+        reading_pids = saved_readings
+    else:
+        reading_pids = [str(r["pid"]) for r in reading_rows]
+    if len(reading_pids) < 2:
         return
-    factor_pid = resolve_background_calibration_factor_pid(chapter, field_list)
+    factor_pid = resolve_background_calibration_factor_pid(chapter, geo_source or field_list)
     if not factor_pid:
         return
-    reading_pids = [str(r["pid"]) for r in reading_rows]
     expr = background_range_expression(reading_pids, factor_pid)
     if not expr:
         return
-    geo = infer_background_geometry_from_fields(field_list)
-    report_pid = _norm(geo.get("report_d") or "")
+    report_pid = saved_report or _norm(geo.get("report_d") or "")
+    if not report_pid:
+        return
     for field in field_list:
         pid = export_field_pdf_id(field)
         if not pid or pid != report_pid:
@@ -985,41 +1016,21 @@ def _dual_binding_assignment_complete(out: Mapping[str, Any]) -> bool:
     return all(_norm(out.get(k) or "") for k in keys)
 
 
-# 窄列双组表（口腔 CBCT 等）：10 列固定 x 带，不依赖栏位 id 后缀（M3/M4/栏位编号）。
+# 窄列双组表（胃肠机 / 口腔 CBCT 等）：10～11 列固定 x 带（分界取列心间隙中点，不依赖 id/label）。
+# 实测列心约：225 / 269 / 317 / 360 / 420 / 471 / 516 / 568 / 632 / 690 / 747
 _NARROW_DUAL_X_BANDS: tuple[tuple[str, float, float], ...] = (
-    ("reading_1", 210.0, 255.0),
-    ("reading_2", 255.0, 300.0),
-    ("reading_3", 300.0, 360.0),
-    ("mean_m", 360.0, 420.0),
-    ("reading_1_2", 420.0, 470.0),
-    ("reading_2_2", 470.0, 525.0),
-    ("reading_3_2", 525.0, 575.0),
-    ("mean_m_2", 575.0, 635.0),
-    ("report_d", 635.0, 705.0),
-    ("report_d_2", 705.0, 820.0),
+    ("reading_1", 210.0, 247.0),
+    ("reading_2", 247.0, 293.0),
+    ("reading_3", 293.0, 338.0),
+    ("mean_m", 338.0, 390.0),
+    ("reading_1_2", 390.0, 445.0),
+    ("reading_2_2", 445.0, 493.0),
+    ("reading_3_2", 493.0, 542.0),
+    ("mean_m_2", 542.0, 600.0),
+    ("report_d", 600.0, 661.0),
+    ("report_d_2", 661.0, 718.0),
+    ("annual_dose_msv", 718.0, 820.0),
 )
-
-
-def _narrow_dual_slot_from_label(label: str) -> str:
-    """标签后缀提示列角色；M4 与 M3 同属第一组读数 3。"""
-    t = _norm(label)
-    if not t:
-        return ""
-    if t.endswith("_测量读数M1"):
-        return "reading_1"
-    if t.endswith("_测量读数M2"):
-        return "reading_2"
-    if re.search(r"_测量读数M[34]$", t):
-        return "reading_3"
-    if re.search(r"_测量读数M$", t) and not re.search(r"_测量读数M\d", t):
-        return "reading_1_2"
-    if t.endswith("_测量值"):
-        return ""
-    if t.endswith("_测量均值Mbar"):
-        return ""
-    if t.endswith("_报出值D"):
-        return ""
-    return ""
 
 
 def _narrow_dual_slot_for_x(x: float) -> str:
@@ -1029,139 +1040,221 @@ def _narrow_dual_slot_for_x(x: float) -> str:
     return ""
 
 
+def _field_rect_x0(field: Mapping[str, Any]) -> float:
+    rect = field.get("rect") if isinstance(field.get("rect"), list) else None
+    return float(rect[1]) if rect and len(rect) > 1 else _field_sort_x(field)
+
+
+def _field_rect_y0(field: Mapping[str, Any]) -> float:
+    rect = field.get("rect") if isinstance(field.get("rect"), list) else None
+    return float(rect[2]) if rect and len(rect) > 2 else 0.0
+
+
+def _field_rect_w(field: Mapping[str, Any]) -> float:
+    rect = field.get("rect") if isinstance(field.get("rect"), list) else None
+    return float(rect[3]) if rect and len(rect) > 3 else 0.0
+
+
+def _field_rect_h(field: Mapping[str, Any]) -> float:
+    rect = field.get("rect") if isinstance(field.get("rect"), list) else None
+    return float(rect[4]) if rect and len(rect) > 4 else 0.0
+
+
+def _field_y_mid(field: Mapping[str, Any]) -> float:
+    return round(_field_rect_y0(field) + _field_rect_h(field) / 2.0, 1)
+
+
+def snap_narrow_dual_complementary_row_fragments(
+    fields: List[Any],
+    *,
+    max_dy: float = 5.0,
+    min_dy: float = 2.0,
+    min_union_slots: int = 8,
+) -> int:
+    """
+    窄列双组防护表：同行测量格因坐标漂移拆成两簇时，按**列槽互补**合并回一行。
+
+    判定只依赖：
+    - 窄列 x 列带（读数/均值/报出）
+    - 行心 y 聚类
+    - 异常碎片特征（误标「本底」或列宽明显偏窄）
+
+    不硬编码 pdfFieldId，也不按设备类型分支。胃肠机/动态 DR 等同版 JS115 可共用。
+    """
+    by_page: Dict[int, List[Dict[str, Any]]] = {}
+    for field in fields or []:
+        if not isinstance(field, dict) or not is_protection_pdf_field(field):
+            continue
+        page, _x0, _y0, _y1 = _field_pdf_anchor_bounds(field)
+        if page < 5:
+            continue
+        if not _narrow_dual_slot_for_x(_field_rect_x0(field)):
+            continue
+        by_page.setdefault(int(page), []).append(field)
+
+    snapped = 0
+    for _page, meas in by_page.items():
+        buckets: Dict[float, List[Dict[str, Any]]] = {}
+        for field in meas:
+            key = round(_field_y_mid(field) * 2) / 2.0
+            buckets.setdefault(key, []).append(field)
+        keys = sorted(buckets)
+        clusters: List[Dict[str, Any]] = []
+        used: set[float] = set()
+        for i, key in enumerate(keys):
+            if key in used:
+                continue
+            group = list(buckets[key])
+            used.add(key)
+            ym = sum(_field_y_mid(f) for f in group) / len(group)
+            for key2 in keys[i + 1 :]:
+                if key2 - ym <= 1.2:
+                    group.extend(buckets[key2])
+                    used.add(key2)
+                    ym = sum(_field_y_mid(f) for f in group) / len(group)
+                else:
+                    break
+            slots = {
+                sl
+                for f in group
+                for sl in (_narrow_dual_slot_for_x(_field_rect_x0(f)),)
+                if sl
+            }
+            clusters.append({"ym": round(ym, 1), "fields": group, "slots": slots})
+
+        ref_clusters = [c for c in clusters if len(c["fields"]) >= 8] or clusters
+        slot_x: Dict[str, List[float]] = {}
+        slot_w: Dict[str, List[float]] = {}
+        for cluster in ref_clusters:
+            for field in cluster["fields"]:
+                slot = _narrow_dual_slot_for_x(_field_rect_x0(field))
+                if not slot:
+                    continue
+                slot_x.setdefault(slot, []).append(_field_rect_x0(field))
+                slot_w.setdefault(slot, []).append(_field_rect_w(field))
+        med_x = {s: sorted(vs)[len(vs) // 2] for s, vs in slot_x.items() if vs}
+        med_w = {s: sorted(vs)[len(vs) // 2] for s, vs in slot_w.items() if vs}
+
+        def _is_outlier(cluster: Mapping[str, Any]) -> bool:
+            for field in cluster.get("fields") or []:
+                if "本底" in _field_label_blob(field):
+                    return True
+                slot = _narrow_dual_slot_for_x(_field_rect_x0(field))
+                if slot in med_w and med_w[slot] - _field_rect_w(field) >= 3.0:
+                    return True
+            return False
+
+        def _quality(cluster: Mapping[str, Any]) -> int:
+            score = 0
+            for field in cluster.get("fields") or []:
+                slot = _narrow_dual_slot_for_x(_field_rect_x0(field))
+                if slot and slot in med_w and abs(_field_rect_w(field) - med_w[slot]) <= 1.0:
+                    score += 2
+                if "本底" in _field_label_blob(field):
+                    score -= 3
+                if slot in ("report_d", "report_d_2", "annual_dose_msv"):
+                    score += 1
+            return score
+
+        merged: set[int] = set()
+        for i in range(len(clusters)):
+            if i in merged:
+                continue
+            for j in range(i + 1, len(clusters)):
+                if j in merged:
+                    continue
+                left, right = clusters[i], clusters[j]
+                dy = abs(float(left["ym"]) - float(right["ym"]))
+                if dy < min_dy or dy > max_dy:
+                    continue
+                if left["slots"] & right["slots"]:
+                    continue
+                union = left["slots"] | right["slots"]
+                if len(union) < min_union_slots:
+                    continue
+                if not (union & {"reading_1", "reading_2", "reading_3", "reading_1_2"}):
+                    continue
+                if not (union & {"mean_m", "mean_m_2", "report_d", "report_d_2"}):
+                    continue
+                if not (_is_outlier(left) or _is_outlier(right)):
+                    continue
+                if _quality(left) >= _quality(right):
+                    target, source = left, right
+                else:
+                    target, source = right, left
+                if not _is_outlier(source):
+                    target, source = source, target
+                target_fields = list(target.get("fields") or [])
+                if not target_fields:
+                    continue
+                target_y0 = sorted(_field_rect_y0(f) for f in target_fields)[
+                    len(target_fields) // 2
+                ]
+                for field in source.get("fields") or []:
+                    slot = _narrow_dual_slot_for_x(_field_rect_x0(field))
+                    rect = field.get("rect")
+                    if not slot or not isinstance(rect, list) or len(rect) < 5:
+                        continue
+                    new_rect = list(rect)
+                    new_rect[2] = round(float(target_y0), 2)
+                    if slot in med_x:
+                        new_rect[1] = round(float(med_x[slot]), 2)
+                    if slot in med_w:
+                        new_rect[3] = round(float(med_w[slot]), 2)
+                    field["rect"] = new_rect
+                    for key in ("id", "placeholder", "originalPlaceholder", "title", "label"):
+                        val = _norm(field.get(key) or "")
+                        if "本底" not in val:
+                            continue
+                        pid = export_field_pdf_id(field)
+                        field[key] = f"栏位{pid[1:]}" if pid.startswith("f") and pid[1:].isdigit() else "栏位"
+                    snapped += 1
+                merged.add(i)
+                merged.add(j)
+    return snapped
+
+
 def _assign_dual_group_slots_by_narrow_x(items: List[Dict[str, Any]]) -> Dict[str, str]:
     """
-    窄列双组表：按 PDF x 坐标列带分配槽位（M1/M2/M3/均值/M/测量值/报出值）。
-    均值/报出值以标签顺序为准，禁止被 x 列带误判到对方槽位（如报出值落在 mean_m_2 带）。
+    窄列双组表：只按同行格子的列几何分配槽位，不读 id / placeholder / label。
+
+    - 满列（≥10）：从左到右按表列序 zip（读数×3+均值）×2 + 报出×2 [+年剂量]
+    - 不满列：落入预置 x 列带；仍不看文字
     """
     ordered = sorted(items, key=lambda it: float(it.get("x0") or 0.0))
-    out: Dict[str, str] = {}
-    value_slots = ("reading_2_2", "reading_3_2")
-    value_idx = 0
-    mean_idx = 0
-    report_idx = 0
+    if not ordered:
+        return {}
 
-    def _label_blob(it: Dict[str, Any]) -> tuple[str, str, str]:
-        field = it.get("field")
-        fid = str(field.get("id") or "") if isinstance(field, dict) else ""
-        label = ""
-        if isinstance(field, dict):
-            label = f"{_field_display_label(field)} {fid}"
-        role = _norm(it.get("role") or "")
-        return fid, label, role
+    # 满行：列序即槽位（与 PDF 表头两组测量列一致）
+    if len(ordered) >= 10:
+        use = ordered[: len(_DUAL_GROUP_SLOT_KEYS)]
+        out: Dict[str, str] = {}
+        for slot, it in zip(_DUAL_GROUP_SLOT_KEYS, use):
+            pid = _norm(it.get("pid") or "")
+            if pid:
+                out[slot] = pid
+        return out
 
+    # 缺格行：仅用 x 列带
+    out = {}
     for it in ordered:
         pid = _norm(it.get("pid") or "")
         if not pid:
             continue
-        field = it.get("field")
-        fid, label, role = _label_blob(it)
         x = float(it.get("x0") or 0.0)
-        is_mean = (
-            role == _COLUMN_MEAN
-            or fid.endswith("_测量均值Mbar")
-            or label.rstrip().endswith("_测量均值Mbar")
-            or ("均值" in fid and "报出" not in fid)
-        )
-        is_report = (
-            role == _COLUMN_REPORT
-            or fid.endswith("_报出值D")
-            or "报出值" in fid
-            or "报出值" in label
-        )
-        is_annual = role == _COLUMN_ANNUAL_DOSE or _is_annual_dose_field_label(label) or _is_annual_dose_field_label(fid)
-        is_measure_value = fid.endswith("_测量值") or label.rstrip().endswith("_测量值")
-
-        slot = ""
-        if is_annual:
-            slot = "annual_dose_msv"
-        elif is_mean:
-            # 按出现顺序写入均值槽，不用 x 带（避免与报出值列带重叠）
-            slot = "mean_m" if mean_idx == 0 else ("mean_m_2" if mean_idx == 1 else "")
-            if slot:
-                mean_idx += 1
-        elif is_report:
-            # 按出现顺序写入报出值槽，禁止落入 mean_m_* x 带
-            slot = "report_d" if report_idx == 0 else ("report_d_2" if report_idx == 1 else "")
-            if slot:
-                report_idx += 1
-        elif role == _COLUMN_READING or _is_rp_measurement_data_cell(field if isinstance(field, dict) else {}):
-            slot = _narrow_dual_slot_from_label(label or fid)
-            if not slot and is_measure_value:
-                if value_idx < len(value_slots):
-                    slot = value_slots[value_idx]
-                    value_idx += 1
-                elif report_idx >= 2:
-                    # 两组报出值右侧多余的「测量值」列为估算 mSv（表头常为估算，OCR 成测量值）
-                    slot = "annual_dose_msv"
-            if not slot:
-                xs = _narrow_dual_slot_for_x(x)
-                if xs.startswith("reading_"):
-                    slot = xs
-        else:
-            slot = _narrow_dual_slot_from_label(label or fid)
-            if not slot and is_measure_value:
-                if value_idx < len(value_slots):
-                    slot = value_slots[value_idx]
-                    value_idx += 1
-                elif report_idx >= 2:
-                    slot = "annual_dose_msv"
-            if not slot:
-                slot = _narrow_dual_slot_for_x(x)
-
+        slot = _narrow_dual_slot_for_x(x)
         if not slot or slot not in _BINDING_SLOT_KEYS:
             continue
         if slot in out and out[slot] != pid:
-            # 均值/报出值槽已被占用时不要用 x 带抢写
-            if slot in ("mean_m", "mean_m_2", "report_d", "report_d_2", "annual_dose_msv"):
-                continue
-            xs = _narrow_dual_slot_for_x(x)
-            if xs and xs not in out and xs.startswith("reading_"):
-                slot = xs
-            else:
-                continue
+            continue
         out[slot] = pid
-
-    # 两组报出值已齐、仍有更右侧未占用栏位 → 估算 mSv
-    if not _norm(out.get("annual_dose_msv") or "") and report_idx >= 2:
-        used = {_norm(v) for v in out.values() if _norm(v)}
-        report_pids = {_norm(out.get("report_d") or ""), _norm(out.get("report_d_2") or "")}
-        report_pids.discard("")
-        report_max_x = max(
-            (
-                float(it.get("x0") or 0.0)
-                for it in ordered
-                if _norm(it.get("pid") or "") in report_pids
-            ),
-            default=None,
-        )
-        for it in reversed(ordered):
-            pid = _norm(it.get("pid") or "")
-            if not pid or pid in used:
-                continue
-            if report_max_x is not None and float(it.get("x0") or 0.0) <= report_max_x + 2.0:
-                continue
-            fid, label, role = _label_blob(it)
-            if (
-                role == _COLUMN_ANNUAL_DOSE
-                or _is_annual_dose_field_label(label)
-                or _is_annual_dose_field_label(fid)
-                or fid.endswith("_测量值")
-                or label.rstrip().endswith("_测量值")
-            ):
-                for key in list(out.keys()):
-                    if _norm(out.get(key) or "") == pid:
-                        out[key] = ""
-                out["annual_dose_msv"] = pid
-                break
-
     return out
 
 
 def _assign_dual_group_slots_by_x(items: List[Dict[str, Any]]) -> Dict[str, str]:
     """
     双组表按 x 从左到右：组1(读数×3+均值) + 组2(读数×3+均值) + 报出值。
-    与 JS115 口腔全景等「成组交错」版式一致，而非先 6 个读数再 2 个均值。
+    与窄列满行列序一致，不依赖 id/label。
     """
     ordered = sorted(items, key=lambda it: float(it.get("x0") or 0.0))
     out: Dict[str, str] = {}
@@ -1173,17 +1266,12 @@ def _assign_dual_group_slots_by_x(items: List[Dict[str, Any]]) -> Dict[str, str]
 
 
 def _binding_item_column_role(item: Mapping[str, Any]) -> str:
-    """行内格子的列角色：优先标签语义，避免 x 列带把均值误判为读数。"""
+    """行内格子的列角色：优先已写入的几何 slot/role，不再回落解析 label。"""
     role = _norm(item.get("role") or "")
     if role in (_COLUMN_READING, _COLUMN_MEAN, _COLUMN_REPORT, _COLUMN_ANNUAL_DOSE):
         return role
-    field = item.get("field")
-    sem = item.get("sem") if isinstance(item.get("sem"), dict) else {}
-    if isinstance(field, dict):
-        label_role = _column_role(sem, field)
-        if label_role:
-            return label_role
-    return role
+    slot = _norm(item.get("slot") or "")
+    return _SLOT_TO_COLUMN_ROLE.get(slot, role)
 
 
 def _assign_dual_group_slots_by_role(items: List[Dict[str, Any]]) -> Dict[str, str]:
@@ -1492,7 +1580,7 @@ def apply_protection_field_export_typing(
     *,
     column_layout: Optional[Mapping[str, Any]] = None,
 ) -> None:
-    """第五章导出：检测点位置列 text；其余数值 precision=3。"""
+    """第五章导出：检测点位置列 text；其余数值 precision=2。"""
     if str(item.get("templateSectionKey") or "") != CHAPTER_KEY:
         return
     src = field_obj.get("source") if isinstance(field_obj.get("source"), dict) else {}
@@ -1549,7 +1637,7 @@ def resolve_field_number_precision(
     *,
     default: int = PROTECTION_NUMBER_PRECISION,
 ) -> int:
-    """栏位 `precision` 优先；未配置时用 default（公式默认不超过 3 位）。"""
+    """栏位 `precision` 优先；未配置时用 default（默认 2 位）。"""
     if isinstance(field, Mapping) and field.get("precision") not in (None, ""):
         try:
             return max(0, int(field.get("precision")))
@@ -1926,6 +2014,7 @@ def _collect_point_data_fields(
     fields: List[Mapping[str, Any]],
     *,
     column_layout: Optional[Mapping[str, Any]] = None,
+    dual_group: bool = False,
 ) -> Dict[str, List[Dict[str, Any]]]:
     """按 PDF 行坐标 + 列带 x 聚合读数/均值/报出格（不用 placeholder 标签拆行）。"""
     layout = column_layout if isinstance(column_layout, dict) and column_layout.get("columns") else None
@@ -1949,27 +2038,25 @@ def _collect_point_data_fields(
             continue
         slot = protection_data_column_slot(field, layout)
         role = _SLOT_TO_COLUMN_ROLE.get(slot, "")
-        label_role = _column_role(sem, field)
-        if label_role in (_COLUMN_READING, _COLUMN_MEAN, _COLUMN_REPORT, _COLUMN_ANNUAL_DOSE):
-            role = label_role
-        item_id = _norm(field.get("id") or "")
-        # 「栏位N」等无语义标签格：先按窄列双组 x 带定角色，避免被 page<5 / data_cell 过滤掉。
-        if item_id.startswith("栏位"):
+        # 双组：列角色只来自窄列 x 几何，禁止 id/label 覆盖（脏拼接 id 含「均值」会把读数当成均值）
+        if dual_group:
             band_slot = _narrow_dual_slot_for_x(_field_sort_x(field))
-            if band_slot.startswith("reading_"):
-                role = _COLUMN_READING
+            if band_slot:
                 slot = band_slot
-            elif band_slot in ("mean_m", "mean_m_2"):
-                role = _COLUMN_MEAN
-                slot = band_slot
-            elif band_slot in ("report_d", "report_d_2"):
-                role = _COLUMN_REPORT
-                slot = band_slot
+                role = _SLOT_TO_COLUMN_ROLE.get(band_slot, role)
+        else:
+            label_role = _column_role(sem, field)
+            if label_role in (_COLUMN_READING, _COLUMN_MEAN, _COLUMN_REPORT, _COLUMN_ANNUAL_DOSE):
+                role = label_role
         if role not in (_COLUMN_READING, _COLUMN_MEAN, _COLUMN_REPORT, _COLUMN_ANNUAL_DOSE):
             if not _is_rp_measurement_data_cell(field, layout):
                 continue
             role = _COLUMN_READING
-            slot = ""
+            if dual_group:
+                band_slot = _narrow_dual_slot_for_x(_field_sort_x(field))
+                slot = band_slot if band_slot in _BINDING_SLOT_KEYS else ""
+            else:
+                slot = slot if slot in _SINGLE_GROUP_SLOT_KEYS else ""
         if not pt:
             continue
         rows.setdefault(pt, []).append(
@@ -1989,35 +2076,31 @@ def _assign_slots_to_point_row(
     *,
     dual_group: bool = False,
 ) -> Dict[str, str]:
-    """双组表按 x 成组交错分配；单组表优先列带槽位，不完整时按 x 排序。"""
+    """双组表按列几何分配；单组表优先列带槽位，不完整时按 x 排序。"""
     if not items:
         return {}
 
     if dual_group:
-        narrow_out = _assign_dual_group_slots_by_narrow_x(items)
-        if narrow_out.get("reading_1") and (
-            narrow_out.get("mean_m")
-            or narrow_out.get("reading_1_2")
-            or narrow_out.get("report_d")
+        # 仅几何：满行列序 / x 列带；不再走 id/label 角色分支
+        geo_out = _assign_dual_group_slots_by_narrow_x(items)
+        if geo_out.get("reading_1") and (
+            geo_out.get("mean_m")
+            or geo_out.get("reading_1_2")
+            or geo_out.get("report_d")
         ):
-            return narrow_out
-        role_out = _assign_dual_group_slots_by_role(items)
-        if role_out.get("reading_1") and (
-            role_out.get("mean_m")
-            or role_out.get("reading_1_2")
-            or role_out.get("report_d")
-        ):
-            return role_out
+            return geo_out
         return _assign_dual_group_slots_by_x(items)
 
     out: Dict[str, str] = {}
     for it in items or []:
         slot = _norm(it.get("slot") or "")
         pid = _norm(it.get("pid") or "")
-        if slot and pid and slot in _BINDING_SLOT_KEYS and not out.get(slot):
+        # 单组表只接受单组槽位，忽略双组 *_2 污染
+        if slot and pid and slot in _SINGLE_GROUP_SLOT_KEYS and not out.get(slot):
             out[slot] = pid
 
-    if out.get("reading_1") and (out.get("mean_m") or out.get("report_d") or out.get("reading_2")):
+    reading_n = sum(1 for k in ("reading_1", "reading_2", "reading_3") if out.get(k))
+    if out.get("reading_1") and reading_n >= 2 and (out.get("mean_m") or out.get("report_d")):
         return out
 
     return _assign_single_group_slots_by_x(items)
@@ -2701,7 +2784,9 @@ def build_field_bindings_from_fields(
             template_payload=template_payload,
         )
     col_layout = resolve_protection_table_layout(fields, layout_json=layout)
-    point_items = _collect_point_data_fields(fields, column_layout=col_layout)
+    point_items = _collect_point_data_fields(
+        fields, column_layout=col_layout, dual_group=bool(dual_group)
+    )
     rows: Dict[str, Dict[str, Any]] = {}
     for pt, items in point_items.items():
         sem0 = items[0].get("sem") if items else {}
@@ -2792,37 +2877,16 @@ def field_has_per_cell_formula_override(
     chapter_rules: Optional[List[Mapping[str, Any]]] = None,
 ) -> bool:
     """
-    栏位已单独配置公式时，章节均值/报出值公式不得覆盖。
+    栏位是否被用户手动改过公式（``fieldFormulaUserOverride``）。
 
-    章节套用改由编辑器「完成」强制写入；保存 JSON 时只要栏位已有
-    fieldExpression / formulaRules / 用户覆盖标记，一律保留，避免与手动改格冲突。
-    ``chapter_rules`` 保留兼容参数，不再用 id 集合判定「章节同源可覆盖」。
+    仅该标记阻止章节均值/报出值/本底回写。旧逻辑把「已有 fieldExpression」
+    也当成覆盖，导致章节公式改完后保存仍写不进编辑器栏位。
+    ``chapter_rules`` 保留兼容参数。
     """
+    del chapter_rules
     if not isinstance(field, dict):
         return False
-    if field.get("fieldFormulaUserOverride") is True:
-        return True
-    _ = chapter_rules  # 兼容旧调用，刻意不参与判定
-    fe = _norm(
-        field.get("fieldExpression")
-        or field.get("formula")
-        or field.get("pdfFieldExpression")
-        or ""
-    )
-    if fe:
-        return True
-    src = field.get("source") if isinstance(field.get("source"), dict) else {}
-    for key in ("formulaRules", "fieldExpressionRules"):
-        for container in (field, src):
-            val = container.get(key) if isinstance(container, dict) else None
-            if not isinstance(val, list) or not val:
-                continue
-            for rule in val:
-                if not isinstance(rule, dict):
-                    continue
-                if _norm(rule.get("expression") or rule.get("formula")):
-                    return True
-    return False
+    return field.get("fieldFormulaUserOverride") is True
 
 
 def default_chapter_config() -> Dict[str, Any]:
@@ -3104,8 +3168,11 @@ def apply_chapter_report_rules_to_field(
         return
     if is_background_range_pdf_field(report_field):
         return
-    if not force and _field_has_user_cell_formula(report_field, chapter_rules=rules):
+    # 用户单格覆盖始终保留；force 仅用于「完成」时清掉 override 后再写
+    if field_has_per_cell_formula_override(report_field, chapter_rules=rules) and not force:
         return
+    if force:
+        report_field.pop("fieldFormulaUserOverride", None)
     binding = _binding_with_mean_fallback(binding, report_field, report_group=report_group)
     mean_pid = _norm(binding.get(_binding_mean_key(group=report_group)) or "")
     if mean_pid:
@@ -3165,6 +3232,7 @@ def apply_report_formulas_to_pdf_fields(
                 rules,
                 binding,
                 report_group=group,
+                background_pids=bg_pids,
             )
 
 
@@ -3634,7 +3702,12 @@ def apply_chapter_formulas_to_export_payload(
         for item in pdf_fields:
             if isinstance(item, dict) and export_field_pdf_id(item) and export_field_pdf_id(item) not in seen:
                 export_fields.append(item)
-    apply_background_formulas_to_pdf_fields(export_fields, chapter=chapter)
+    # 本底范围公式必须按坐标模板 pdf.fields 几何定位；勿用 steps 导出栏位重推（会把测量报出格如 f465 误写成 min~max）
+    apply_background_formulas_to_pdf_fields(
+        export_fields,
+        chapter=chapter,
+        geometry_fields=pdf_fields if isinstance(pdf_fields, list) else None,
+    )
     # 根级章节配置：优先保留模板已保存的 reportValueRules（含 {mean} 占位），勿用默认空规则覆盖
     src_rules = None
     if isinstance(chapter_in, dict) and isinstance(chapter_in.get("reportValueRules"), list):

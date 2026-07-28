@@ -39,7 +39,7 @@ ADVANCE_TARGET_SIGN_SLOT: dict[str, str] = {
 SIGN_SLOT_LABELS: dict[str, str] = {
     CaseReportSignatureRecord.SLOT_REPORT_AUTHOR: "编制人",
     CaseReportSignatureRecord.SLOT_REPORT_AUDITOR: "审核人",
-    CaseReportSignatureRecord.SLOT_AUTHORIZED_SIGNATORY: "授权人",
+    CaseReportSignatureRecord.SLOT_AUTHORIZED_SIGNATORY: "授权签字人",
     CaseReportSignatureRecord.SLOT_ISSUE_DATE: "签发日期",
 }
 
@@ -67,13 +67,16 @@ def _sha256_bytes(data: bytes) -> str:
 
 def _format_issue_date(d: date | None = None) -> str:
     d = d or timezone.localdate()
-    return f"{d.year}年{d.month}月{d.day}日"
+    return f"{d.year:04d}年{d.month:02d}月{d.day:02d}日"
 
 
 def resolve_report_signature_slots(template_parsed: dict | None) -> dict[str, dict[str, Any]]:
     """
     解析报告模板签字位坐标。
     返回 slot -> {page, rect: [x0,y0,x1,y1], pdfFieldId, label}
+
+    优先级：模板显式 reportSignatureSlots → 中文标签（编制人/审核人/…）
+    → 第三页「下划线/年月日」布局推断 → 仅当默认 f 号标签确实对应签字位时才用。
     """
     out: dict[str, dict[str, Any]] = {}
     if not isinstance(template_parsed, dict):
@@ -105,17 +108,20 @@ def resolve_report_signature_slots(template_parsed: dict | None) -> dict[str, di
             if field:
                 out[slot_key] = field
 
-    if out:
-        return out
-
     pdf_fields = _index_pdf_fields(template_parsed)
-    by_fid = {v.get("pdfFieldId"): k for k, v in pdf_fields.items() if v.get("pdfFieldId")}
-    for slot, default_fid in _DEFAULT_SLOT_PDF_FIELD_IDS.items():
+    slot_order = (
+        CaseReportSignatureRecord.SLOT_REPORT_AUTHOR,
+        CaseReportSignatureRecord.SLOT_REPORT_AUDITOR,
+        CaseReportSignatureRecord.SLOT_AUTHORIZED_SIGNATORY,
+        CaseReportSignatureRecord.SLOT_ISSUE_DATE,
+    )
+
+    # 1) 已按标签索引的 slot（编制人/审核人/授权签字人/签发日期/年月日）
+    for slot in slot_order:
         if slot in out:
             continue
-        label_key = by_fid.get(default_fid)
-        if label_key and label_key in pdf_fields:
-            out[slot] = pdf_fields[label_key]
+        if slot in pdf_fields:
+            out[slot] = pdf_fields[slot]
             continue
         for label, mapped_slot in _FIELD_LABEL_TO_SLOT.items():
             if mapped_slot != slot:
@@ -123,7 +129,107 @@ def resolve_report_signature_slots(template_parsed: dict | None) -> dict[str, di
             if label in pdf_fields:
                 out[slot] = pdf_fields[label]
                 break
+
+    # 2) 第三页常见「下划线 / 下划线2 / 下划线3 / 年月日」四框布局
+    inferred = _infer_slots_from_underline_layout(pdf_fields)
+    for slot, spec in inferred.items():
+        out.setdefault(slot, spec)
+
+    # 3) 拆分签发日期（年/月/日三格）→ 供叠印时分别写入
+    date_parts = _resolve_split_issue_date_parts(pdf_fields)
+    if date_parts:
+        out["_issueDateParts"] = date_parts  # type: ignore[assignment]
+        if CaseReportSignatureRecord.SLOT_ISSUE_DATE not in out:
+            # 用三格并集作为逻辑签发位，便于「已配置」判断
+            xs0 = min(p["rect"][0] for p in date_parts)
+            ys0 = min(p["rect"][1] for p in date_parts)
+            xs1 = max(p["rect"][2] for p in date_parts)
+            ys1 = max(p["rect"][3] for p in date_parts)
+            out[CaseReportSignatureRecord.SLOT_ISSUE_DATE] = {
+                "page": int(date_parts[0]["page"]),
+                "rect": [xs0, ys0, xs1, ys1],
+                "pdfFieldId": "",
+                "label": "签发日期",
+            }
+
+    # 4) 默认 f 号：仅当该 f 的标签确实属于目标签字位时才采纳（避免 f10=设备型号 等误伤）
+    for slot, default_fid in _DEFAULT_SLOT_PDF_FIELD_IDS.items():
+        if slot in out:
+            continue
+        entry = pdf_fields.get(default_fid)
+        if not entry:
+            continue
+        label = str(entry.get("label") or "").strip()
+        if _FIELD_LABEL_TO_SLOT.get(label) == slot:
+            out[slot] = entry
+
+    # 不把内部辅助键当成正式 slot 返回给调用方以外的逻辑；保留在 dict 内供叠印使用
     return out
+
+
+def _infer_slots_from_underline_layout(
+    pdf_fields: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """
+    部分报告第三页底部四框仍标为「下划线/下划线2/下划线3/年月日」：
+    左上编制人、右上审核人、左下授权签字人、右下签发日期。
+    """
+    keys = ("下划线", "下划线2", "下划线3", "年月日")
+    boxes = []
+    for key in keys:
+        entry = pdf_fields.get(key)
+        if not entry:
+            return {}
+        boxes.append(entry)
+    pages = {int(b.get("page") or 0) for b in boxes}
+    if len(pages) != 1:
+        return {}
+    # 按 y 分行，再按 x 分左右
+    sorted_by_y = sorted(boxes, key=lambda b: (b["rect"][1], b["rect"][0]))
+    top = sorted_by_y[:2]
+    bottom = sorted_by_y[2:]
+    if len(top) != 2 or len(bottom) != 2:
+        return {}
+    top_l, top_r = sorted(top, key=lambda b: b["rect"][0])
+    bot_l, bot_r = sorted(bottom, key=lambda b: b["rect"][0])
+    return {
+        CaseReportSignatureRecord.SLOT_REPORT_AUTHOR: {
+            **top_l,
+            "label": "编制人",
+        },
+        CaseReportSignatureRecord.SLOT_REPORT_AUDITOR: {
+            **top_r,
+            "label": "审核人",
+        },
+        CaseReportSignatureRecord.SLOT_AUTHORIZED_SIGNATORY: {
+            **bot_l,
+            "label": "授权签字人",
+        },
+        CaseReportSignatureRecord.SLOT_ISSUE_DATE: {
+            **bot_r,
+            "label": "签发日期",
+        },
+    }
+
+
+def _resolve_split_issue_date_parts(
+    pdf_fields: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """签发日期1/2/3 或 日期1/2/3（年/月/日）拆分格。"""
+    for labels in (
+        ("签发日期1", "签发日期2", "签发日期3"),
+        ("日期1", "日期2", "日期3"),
+    ):
+        parts: list[dict[str, Any]] = []
+        for label in labels:
+            entry = pdf_fields.get(label)
+            if not entry:
+                parts = []
+                break
+            parts.append(entry)
+        if len(parts) == 3:
+            return parts
+    return []
 
 
 def _index_pdf_fields(template_parsed: dict) -> dict[str, dict[str, Any]]:
@@ -152,7 +258,9 @@ def _index_pdf_fields(template_parsed: dict) -> dict[str, dict[str, Any]]:
         }
         out[label] = entry
         if slot:
-            out[slot] = entry
+            # 勿让「年月日」等弱标签覆盖已解析到的「签发日期」
+            if slot not in out or label in {"编制人", "审核人", "授权签字人", "授权人签字", "签发日期"}:
+                out[slot] = entry
         if fid:
             out[fid] = entry
     return out
@@ -282,10 +390,14 @@ def _overlay_signature_on_pdf(
         if image_bytes:
             page.insert_image(r, stream=image_bytes, keep_proportion=True, overlay=True)
         if date_text:
+            # 略缩字号以适应窄框；仍尽量完整显示 YYYY年MM月DD日
+            fs = 10.5
+            if r.width < 90:
+                fs = 8.0
             page.insert_textbox(
                 r,
                 date_text,
-                fontsize=10.5,
+                fontsize=fs,
                 color=(0, 0, 0),
                 align=fitz.TEXT_ALIGN_CENTER,
                 overlay=True,
@@ -293,6 +405,69 @@ def _overlay_signature_on_pdf(
         return doc.tobytes()
     finally:
         doc.close()
+
+
+def _overlay_issue_date_on_pdf(
+    pdf_bytes: bytes,
+    *,
+    slots: dict[str, dict[str, Any]],
+    issue_day: date,
+) -> tuple[bytes, int, list[float]]:
+    """
+    叠印签发日期：优先写「签发日期1/2/3」年/月/日三格；
+    否则写入单一「签发日期/年月日」框，文案为 YYYY年MM月DD日。
+    返回 (pdf_bytes, page_1based, rect_xyxy用于留痕)。
+    """
+    parts = slots.get("_issueDateParts")
+    if isinstance(parts, list) and len(parts) >= 3:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        try:
+            texts = (
+                f"{issue_day.year:04d}",
+                f"{issue_day.month:02d}",
+                f"{issue_day.day:02d}",
+            )
+            for part, text in zip(parts[:3], texts):
+                page_1based = int(part.get("page") or 3)
+                page_idx = max(0, page_1based - 1)
+                if page_idx >= doc.page_count:
+                    continue
+                rect = list(part.get("rect") or [])
+                if len(rect) < 4:
+                    continue
+                page = doc[page_idx]
+                page.insert_textbox(
+                    fitz.Rect(*rect),
+                    text,
+                    fontsize=10.5,
+                    color=(0, 0, 0),
+                    align=fitz.TEXT_ALIGN_CENTER,
+                    overlay=True,
+                )
+            issue_spec = slots.get(CaseReportSignatureRecord.SLOT_ISSUE_DATE) or parts[0]
+            return (
+                doc.tobytes(),
+                int(issue_spec.get("page") or parts[0].get("page") or 3),
+                list(issue_spec.get("rect") or parts[0].get("rect") or []),
+            )
+        finally:
+            doc.close()
+
+    issue_spec = slots.get(CaseReportSignatureRecord.SLOT_ISSUE_DATE)
+    if not issue_spec:
+        raise ValueError("报告模板未配置签发日期栏位")
+    rect = list(issue_spec.get("rect") or [])
+    page = int(issue_spec.get("page") or 3)
+    if len(rect) < 4:
+        raise ValueError("签发日期坐标无效")
+    pdf_out = _overlay_signature_on_pdf(
+        pdf_bytes,
+        page_1based=page,
+        rect_xyxy=rect,
+        image_bytes=b"",
+        date_text=_format_issue_date(issue_day),
+    )
+    return pdf_out, page, rect
 
 
 def _save_signed_report_file(
@@ -596,6 +771,11 @@ def apply_report_signature_and_advance(
     slot_spec = slots.get(sign_slot)
     if not slot_spec:
         return False, "报告模板未配置该签字位坐标，请联系管理员"
+    if target_stage == InspectionCaseWorkflowState.STAGE_ISSUED:
+        if CaseReportSignatureRecord.SLOT_ISSUE_DATE not in slots and not slots.get(
+            "_issueDateParts"
+        ):
+            return False, "报告模板未配置签发日期栏位，请联系管理员"
 
     sig_bytes = _read_user_signature_bytes(user_sig)
     if not sig_bytes:
@@ -664,47 +844,42 @@ def apply_report_signature_and_advance(
     )
 
     if target_stage == InspectionCaseWorkflowState.STAGE_ISSUED:
-        issue_spec = slots.get(CaseReportSignatureRecord.SLOT_ISSUE_DATE)
         idate = issue_date or timezone.localdate()
-        if issue_spec:
-            issue_rect = list(issue_spec.get("rect") or [])
-            issue_page = int(issue_spec.get("page") or 3)
-            if len(issue_rect) >= 4:
-                pdf_with_date = _overlay_signature_on_pdf(
-                    pdf_after,
-                    page_1based=issue_page,
-                    rect_xyxy=issue_rect,
-                    image_bytes=b"",
-                    date_text=_format_issue_date(idate),
-                )
-                sha_after_date = _sha256_bytes(pdf_with_date)
-                new_lf = _save_signed_report_file(
-                    user=user,
-                    project=project,
-                    report_task=report_task,
-                    case=case,
-                    task_no=submission.task_no,
-                    pdf_bytes=pdf_with_date,
-                    sign_version=sign_version + 1,
-                )
-                CaseReportSignatureRecord.objects.create(
-                    case=case,
-                    project=project,
-                    submission=submission,
-                    task_no=(submission.task_no or "").strip(),
-                    workflow_stage=effective,
-                    slot=CaseReportSignatureRecord.SLOT_ISSUE_DATE,
-                    signer=user,
-                    user_signature=None,
-                    signature_sha256="",
-                    report_file=new_lf,
-                    report_sha256_before=sha_after,
-                    report_sha256_after=sha_after_date,
-                    overlay_page=issue_page,
-                    overlay_rect=issue_rect,
-                    sign_version=sign_version + 1,
-                )
-                sha_after = sha_after_date
+        try:
+            pdf_with_date, issue_page, issue_rect = _overlay_issue_date_on_pdf(
+                pdf_after, slots=slots, issue_day=idate
+            )
+        except ValueError as exc:
+            return False, str(exc)
+        if len(issue_rect) >= 4:
+            sha_after_date = _sha256_bytes(pdf_with_date)
+            new_lf = _save_signed_report_file(
+                user=user,
+                project=project,
+                report_task=report_task,
+                case=case,
+                task_no=submission.task_no,
+                pdf_bytes=pdf_with_date,
+                sign_version=sign_version + 1,
+            )
+            CaseReportSignatureRecord.objects.create(
+                case=case,
+                project=project,
+                submission=submission,
+                task_no=(submission.task_no or "").strip(),
+                workflow_stage=effective,
+                slot=CaseReportSignatureRecord.SLOT_ISSUE_DATE,
+                signer=user,
+                user_signature=None,
+                signature_sha256="",
+                report_file=new_lf,
+                report_sha256_before=sha_after,
+                report_sha256_after=sha_after_date,
+                overlay_page=issue_page,
+                overlay_rect=issue_rect,
+                sign_version=sign_version + 1,
+            )
+            sha_after = sha_after_date
 
     ok, msg = apply_manual_workflow_advance(
         user=user,

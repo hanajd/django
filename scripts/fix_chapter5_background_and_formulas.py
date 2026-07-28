@@ -92,14 +92,13 @@ def get_chapter(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def set_chapter(data: Dict[str, Any], chapter: Dict[str, Any]) -> None:
-    """规范为 formSchema.radiationProtectionChapter；根级若曾存在则同步一份便于旧工具读。"""
+    """规范为仅 formSchema.radiationProtectionChapter（不再根级双写）。"""
     fs = data.get("formSchema")
     if not isinstance(fs, dict):
         fs = {}
         data["formSchema"] = fs
     fs["radiationProtectionChapter"] = chapter
-    # 根级保留同步副本（与编辑器曾双写兼容）；内容一致，避免读旧路径丢配置
-    data["radiationProtectionChapter"] = copy.deepcopy(chapter)
+    data.pop("radiationProtectionChapter", None)
 
 
 def clear_avg_on_background_fields(fields: List[Dict[str, Any]], bg_pids: set[str]) -> int:

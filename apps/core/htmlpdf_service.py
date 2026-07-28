@@ -591,11 +591,17 @@ def fit_instrument_text_for_box(
     *,
     max_font_pt: float = DEFAULT_FONT_PT,
 ) -> Tuple[str, float]:
-    """检测仪器栏：按仪器条目边界换行并自适应缩小字号以放入框高。"""
-    max_fs = min(max_font_pt, rect.height * 0.85)
-    min_fs = 5.0
-    fs = max(max_fs, min_fs)
+    """检测仪器栏：按仪器条目边界换行；默认自适应缩小字号，调试可改为固定字号。"""
+    from apps.core.pdf_fill_runtime_config import get_pdf_fill_runtime_config
+
+    cfg = get_pdf_fill_runtime_config()
+    max_fs = min(max_font_pt, rect.height * 0.85) if cfg.font_auto_shrink else float(max_font_pt)
+    min_fs = float(cfg.font_min_pt) if cfg.font_auto_shrink else float(max_font_pt)
+    min_fs = max(4.0, min(min_fs, max_fs if cfg.font_auto_shrink else max_font_pt))
+    fs = max(max_fs, min_fs) if cfg.font_auto_shrink else float(max_font_pt)
     max_w = max(1.0, rect.width - 2)
+    if not cfg.font_auto_shrink:
+        return wrap_instrument_text_to_width(text, max_w, font, fs), fs
     while fs >= min_fs:
         wrapped = wrap_instrument_text_to_width(text, max_w, font, fs)
         line_count = max(1, wrapped.count("\n") + 1)
@@ -613,8 +619,16 @@ def fit_text_for_box(
     *,
     max_font_pt: float = DEFAULT_FONT_PT,
 ) -> Tuple[str, float]:
+    """普通文本栏：默认按框高自适应缩小；调试设置为 fixed 时强制用基准字号。"""
+    from apps.core.pdf_fill_runtime_config import get_pdf_fill_runtime_config
+
+    cfg = get_pdf_fill_runtime_config()
+    if not cfg.font_auto_shrink:
+        fs = float(max_font_pt)
+        wrapped = wrap_text_to_width(text, max(1.0, rect.width - 2), font, fs)
+        return wrapped, fs
     max_fs = min(max_font_pt, rect.height * 0.85)
-    min_fs = 5.0
+    min_fs = max(4.0, min(float(cfg.font_min_pt), max_fs))
     fs = max(max_fs, min_fs)
     while fs >= min_fs:
         wrapped = wrap_text_to_width(text, max(1.0, rect.width - 2), font, fs)
@@ -635,15 +649,15 @@ def _insert_multiline_text_left(
     fs: float,
     color: tuple[float, float, float],
 ) -> None:
-    """多行左对齐直写（insert_textbox 失败时的仪器栏回退）。"""
+    """多行左对齐顶对齐直写（insert_textbox 失败时的仪器栏回退）。"""
     lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
     if not lines:
         return
     line_h = fs * 1.2
-    total_h = len(lines) * line_h
-    start_y = rect.y0 + max(0.0, (rect.height - total_h) / 2.0)
     for i, line in enumerate(lines):
-        baseline_y = start_y + i * line_h + fs * 0.85
+        baseline_y = rect.y0 + i * line_h + fs * 0.85
+        if baseline_y > rect.y1:
+            break
         page.insert_text(
             fitz.Point(rect.x0, baseline_y),
             line,
@@ -945,7 +959,18 @@ def _pdf_field_is_qc_verdict_slot(field: Dict[str, Any]) -> bool:
 
 
 def _pdf_text_color_for_field(field: Dict[str, Any], text: str) -> tuple[float, float, float]:
-    """回填 PDF 文字颜色：默认红；单项判定合格为绿、不合格为蓝。"""
+    """
+    回填 PDF 文字颜色。
+    - 正式模式：纯黑
+    - 测试模式：默认红；单项判定合格为绿、不合格为蓝
+    """
+    try:
+        from apps.core.pdf_fill_runtime_config import pdf_fill_is_test_mode
+
+        if not pdf_fill_is_test_mode():
+            return (0, 0, 0)
+    except Exception:
+        pass
     parts: list[str] = []
     for k in ("id", "placeholder", "originalPlaceholder", "title", "label", "fieldId", "pdfFieldId"):
         v = field.get(k)
@@ -965,6 +990,18 @@ def _pdf_text_color_for_field(field: Dict[str, Any], text: str) -> tuple[float, 
         return (0, 0, 1)
     if t in ("合格", "符合", "通过") or "合格" in t:
         return (0, 0.55, 0)
+    return (1, 0, 0)
+
+
+def _pdf_check_mark_color() -> tuple[float, float, float]:
+    """勾选 ✓ 颜色：测试模式红，正式模式黑。"""
+    try:
+        from apps.core.pdf_fill_runtime_config import pdf_fill_is_test_mode
+
+        if not pdf_fill_is_test_mode():
+            return (0, 0, 0)
+    except Exception:
+        pass
     return (1, 0, 0)
 
 
@@ -1024,12 +1061,13 @@ def build_filled_pdf(
                 )
                 if checked:
                     page.insert_font(fontname="F_CHECK", fontfile=str(check_font_path))
+                    check_color = _pdf_check_mark_color()
                     remain = page.insert_textbox(
                         r,
                         "✓",
                         fontname="F_CHECK",
                         fontsize=10.5,
-                        color=(1, 0, 0),
+                        color=check_color,
                         align=fitz.TEXT_ALIGN_CENTER,
                         overlay=True,
                     )
@@ -1043,7 +1081,7 @@ def build_filled_pdf(
                             "✓",
                             fontname="F_CHECK",
                             fontsize=10.5,
-                            color=(1, 0, 0),
+                            color=check_color,
                             overlay=True,
                         )
                 continue
@@ -1061,6 +1099,21 @@ def build_filled_pdf(
             text = str(f.get("value", "")).strip()
             if not text:
                 continue
+
+            # 拟合主格等：MathJax / $$...$$ → 渲染为公式图再叠印
+            try:
+                from utils.mathjax_pdf_render import (
+                    looks_like_mathjax_equation,
+                    stamp_equation_on_page,
+                )
+
+                if looks_like_mathjax_equation(text, f):
+                    text_color = _pdf_text_color_for_field(f, text)
+                    if stamp_equation_on_page(page, r, text, field=f, color=text_color):
+                        continue
+            except Exception:
+                pass
+
             if f.get("_syntheticQcVerdict"):
                 try:
                     erase = fitz.Rect(
@@ -1091,14 +1144,16 @@ def build_filled_pdf(
                     text, r, font_obj, max_font_pt=fill_font_pt
                 )
             if is_instrument:
-                align = getattr(fitz, "TEXT_ALIGN_JUSTIFY", fitz.TEXT_ALIGN_LEFT)
+                # 左对齐：两端对齐会在行未撑满时把字距拉得过大
+                align = fitz.TEXT_ALIGN_LEFT
             elif "\n" in wrapped_text:
                 align = fitz.TEXT_ALIGN_LEFT
             else:
                 align = fitz.TEXT_ALIGN_CENTER
             line_count = max(1, wrapped_text.count("\n") + 1)
             text_h = line_count * fs * 1.2
-            if is_instrument and "\n" in wrapped_text:
+            if is_instrument:
+                # 仪器栏顶对齐，避免少行时垂直居中留下大块空白
                 text_rect = r
             elif text_h < r.height:
                 offset_y = (r.height - text_h) / 2.0
@@ -1116,7 +1171,7 @@ def build_filled_pdf(
                 overlay=True,
             )
             if remain < 0:
-                if is_instrument and "\n" in wrapped_text:
+                if is_instrument:
                     _insert_multiline_text_left(
                         page, text_rect, wrapped_text, font_name, font_obj, fs, text_color
                     )

@@ -483,8 +483,8 @@
                 {% if can_manual_export_report_from_site_record %}
                 <button type="submit" name="action" value="manual_export_report_from_site_record"
                         formaction="{% url 'file_library' %}"
-                        class="inline-flex items-center gap-1.5 rounded-xl bg-violet-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-violet-500"
-                        onclick="return confirm('{% if tab == 'site_record' %}勾选的多份现场记录将按与「检测提交」相同的合并规则汇总为一份报告（同一业务块以先勾选为准）。请优先使用系统导出的现场记录（文件名中含项目、任务说明及任务编号），或保证每案仅有一份检测提交。确定生成 PDF？{% else %}多份现场记录将汇总为一份报告数据：同一业务块（如医院信息）以先勾选的为准。确定生成 PDF？{% endif %}');">
+                        class="inline-flex items-center gap-1.5 rounded-xl bg-violet-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-violet-500 disabled:cursor-wait disabled:opacity-70"
+                        onclick="return confirm('{% if tab == 'site_record' %}勾选的多份现场记录将按与「检测提交」相同的合并规则汇总为一份报告（同一业务块以先勾选为准）。请优先使用系统导出的现场记录（文件名中含项目、任务说明及任务编号），或保证每案仅有一份检测提交。生成可能需要数十秒，请勿关闭页面。确定生成 PDF？{% else %}多份现场记录将汇总为一份报告数据：同一业务块（如医院信息）以先勾选的为准。生成可能需要数十秒，请勿关闭页面。确定生成 PDF？{% endif %}');">
                     <i class="ri-draft-line"></i>
                     手动导出报告
                 </button>
@@ -492,8 +492,8 @@
                 {% if can_merge_reports %}
                 <button type="submit" name="action" value="merge_reports"
                         formaction="{% url 'file_library' %}"
-                        class="inline-flex items-center gap-1.5 rounded-xl bg-teal-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-teal-500"
-                        onclick="return confirm('将合并勾选的报告 PDF（至少两份）。确定继续？');">
+                        class="inline-flex items-center gap-1.5 rounded-xl bg-teal-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-teal-500 disabled:cursor-wait disabled:opacity-70"
+                        onclick="return confirm('将合并勾选的报告 PDF（至少两份）。合并可能需要数十秒，请勿关闭页面。确定继续？');">
                     <i class="ri-stack-line"></i>
                     报告合并
                 </button>
@@ -642,7 +642,7 @@
                                     data-action="export_report_folder_merged"
                                     data-project-key="{{ pg.project_key }}"
                                     data-report-key="{{ rg.report_key }}"
-                                    data-confirm="确定合并导出本报告下各现场记录环节的最新提交？">
+                                    data-confirm="确定合并导出本报告下各现场记录环节的最新提交？生成可能需要数十秒，请勿关闭页面。">
                                 <i class="ri-draft-line"></i>导出合并报告
                             </button>
                             {% endif %}
@@ -669,7 +669,7 @@
                                             data-project-key="{{ pg.project_key }}"
                                             data-report-key="{{ rg.report_key }}"
                                             data-site-key="{{ sg.site_key }}"
-                                            data-confirm="确定导出本现场记录环节最新提交对应的报告？">
+                                            data-confirm="确定导出本现场记录环节最新提交对应的报告？生成可能需要数十秒，请勿关闭页面。">
                                         <i class="ri-draft-line"></i>导出报告
                                     </button>
                                     {% endif %}

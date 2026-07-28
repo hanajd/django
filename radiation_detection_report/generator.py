@@ -579,6 +579,13 @@ def _draw_line(
 
 
 def _evaluation_text_color(text: str) -> Tuple[float, float, float]:
+    try:
+        from apps.core.pdf_fill_runtime_config import pdf_fill_is_test_mode
+
+        if not pdf_fill_is_test_mode():
+            return (0.0, 0.0, 0.0)
+    except Exception:
+        pass
     if str(text or "").strip() == "不合格":
         return (1.0, 0.0, 0.0)
     return (0.0, 0.0, 0.0)

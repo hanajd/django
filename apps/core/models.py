@@ -21,6 +21,11 @@ class Role(models.Model):
         ('template_editor', _('模板编辑')),
         ('template_tester', _('模板编辑器（测试）')),
         ('commission_coordinator', _('委托统筹')),
+        ('admin_office', _('行政')),
+        ('dept_director_inspection', _('检测部主管')),
+        ('dept_staff_inspection', _('检测部员工')),
+        ('dept_director_evaluation', _('评价部主管')),
+        ('dept_staff_evaluation', _('评价部员工')),
     )
     
     name = models.CharField(
@@ -121,11 +126,26 @@ class UserProfile(models.Model):
         null=True,
         verbose_name=_('部门')
     )
+    org_unit = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        db_index=True,
+        verbose_name=_("组织部门"),
+        help_text=_("结构化：admin_office / inspection / evaluation；新业务线角色使用"),
+    )
     position = models.CharField(
         max_length=100,
         blank=True,
         null=True,
         verbose_name=_('职位')
+    )
+    employee_no = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+        verbose_name=_("工号"),
     )
     role = models.ForeignKey(
         Role,
@@ -177,6 +197,47 @@ class UserProfile(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.phone or '无手机号'}"
+
+
+class UserInviteToken(models.Model):
+    """部门主管发出的员工自助注册邀请链接。"""
+
+    token = models.CharField(max_length=64, unique=True, db_index=True, verbose_name=_("令牌"))
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="user_invite_tokens_created",
+        verbose_name=_("邀请人"),
+    )
+    org_unit = models.CharField(max_length=32, db_index=True, verbose_name=_("组织部门"))
+    staff_role_code = models.CharField(
+        max_length=50,
+        db_index=True,
+        verbose_name=_("注册后角色代码"),
+        help_text=_("一般为 dept_staff_inspection / dept_staff_evaluation"),
+    )
+    expires_at = models.DateTimeField(db_index=True, verbose_name=_("过期时间"))
+    is_active = models.BooleanField(default=True, db_index=True, verbose_name=_("有效"))
+    use_count = models.PositiveIntegerField(default=0, verbose_name=_("已使用次数"))
+    last_used_at = models.DateTimeField(null=True, blank=True, verbose_name=_("最近使用时间"))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("创建时间"))
+
+    class Meta:
+        verbose_name = _("用户邀请令牌")
+        verbose_name_plural = verbose_name
+        ordering = ["-created_at"]
+
+    def is_usable(self) -> bool:
+        from django.utils import timezone
+
+        if not self.is_active:
+            return False
+        if self.expires_at and self.expires_at <= timezone.now():
+            return False
+        return True
+
+    def __str__(self):
+        return f"{self.token[:8]}… / {self.org_unit} / {self.staff_role_code}"
 
 
 class Menu(models.Model):
@@ -945,8 +1006,33 @@ class LibraryProjectEquipment(models.Model):
 class LibraryProject(models.Model):
     """文件库项目：用于隔离与筛选跨分类文件。"""
 
+    BUSINESS_LINE_INSPECTION = "inspection"
+    BUSINESS_LINE_PRE_EVAL = "pre_eval"
+    BUSINESS_LINE_CONTROL_EFFECT = "control_effect"
+    BUSINESS_LINE_CHOICES = (
+        (BUSINESS_LINE_INSPECTION, _("检测报告")),
+        (BUSINESS_LINE_PRE_EVAL, _("预评价报告")),
+        (BUSINESS_LINE_CONTROL_EFFECT, _("控制效果评价")),
+    )
+
     code = models.CharField(max_length=64, unique=True, db_index=True, verbose_name=_("项目编码"))
     name = models.CharField(max_length=128, db_index=True, verbose_name=_("项目名称"))
+    business_line = models.CharField(
+        max_length=32,
+        choices=BUSINESS_LINE_CHOICES,
+        default=BUSINESS_LINE_INSPECTION,
+        db_index=True,
+        verbose_name=_("业务线"),
+        help_text=_("inspection=检测；pre_eval/control_effect 本期预留"),
+    )
+    owning_org_unit = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        db_index=True,
+        verbose_name=_("接收部门"),
+        help_text=_("admin_office / inspection / evaluation；行政提交到部门后写入"),
+    )
     commission_org = models.ForeignKey(
         CommissionOrganization,
         null=True,

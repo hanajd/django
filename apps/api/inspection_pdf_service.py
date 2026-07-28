@@ -1721,12 +1721,3 @@ def build_report_merge_overlay(
         rows, merge_date_str=merge_date_str, cover_title_override=cover_title_override
     )
     return overlay, "；".join(hint_parts)
-
-
-from apps.api.inspection_report_make import (  # noqa: E402
-    _build_filled_template_fields_for_task,
-    _build_filled_template_fields_from_submit,
-    _persist_filled_pdf_from_submit,
-    _report_site_record_source_tasks,
-    _resolve_report_task_for_case,
-)

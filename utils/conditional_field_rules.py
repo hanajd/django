@@ -112,6 +112,9 @@ def new_rule_id() -> str:
     return "rule_" + uuid.uuid4().hex[:12]
 
 
+_FIT_KINDS = frozenset({"linear", "log", "exp"})
+
+
 def normalize_rule(
     rule: Any,
     *,
@@ -125,6 +128,12 @@ def normalize_rule(
     label = _norm(rule.get("label") or default_label)
     rid = _norm(rule.get("id")) or new_rule_id()
     _ = rule_count  # 保留参数供调用方区分单条默认公式与多条备选
+    from utils.pdf_field_formulas import is_fit_model_expression, migrate_fit_rule_expression
+
+    fit_kind = _norm(rule.get("fitKind")).lower()
+    # 旧 fitKind + fit_eq() → 通用 fit(y=...)；不再保留 fitKind
+    if fit_kind in _FIT_KINDS or is_fit_model_expression(expr) or expr.lower() == "fit_eq()":
+        expr = migrate_fit_rule_expression(expr, fit_kind=fit_kind)
     return {
         "id": rid,
         "label": label,
@@ -134,7 +143,7 @@ def normalize_rule(
 
 
 def export_rule_for_frontend(rule: Mapping[str, Any]) -> Dict[str, Any]:
-    """前端运行态：仅四字段（id/label/condition/expression），与 Flutter 约定一致。"""
+    """前端运行态：id/label/condition/expression（拟合为 fit(y=...)，不导出 fitKind）。"""
     row = normalize_rule(rule)
     return {
         "id": row["id"],
@@ -503,16 +512,83 @@ def apply_formula_rules_to_field_dict(
         exported = export_formula_rules_list(rules)
         field["formulaRules"] = exported
         strip_legacy_field_expression_rules_list_key(field)
-        default_expr = _norm(field.get("fieldExpression") or field.get("formula"))
-        auto_compiled = compile_conditional_expression(
-            normalized,
-            substituter=substituter,
-            default_expression=default_expr,
+        from utils.pdf_field_formulas import (
+            build_fit_r2_expression,
+            is_fit_model_expression,
+            parse_fit_r2_master_pid,
+            resolve_fit_r2_master_pid,
         )
-        if auto_compiled and auto_compiled != '""' and has_auto_conditional_rules(normalized):
-            field["formula"] = auto_compiled
-            field["fieldExpression"] = auto_compiled
-            field["type"] = field.get("type") or "computed"
+
+        exprs = [_norm(r.get("expression")) for r in exported if isinstance(r, dict)]
+        has_fit = any(is_fit_model_expression(e) for e in exprs)
+        r2_master = resolve_fit_r2_master_pid(field)
+        if not r2_master:
+            for r in exported:
+                if not isinstance(r, dict):
+                    continue
+                r2_master = parse_fit_r2_master_pid(str(r.get("expression") or ""))
+                if r2_master:
+                    break
+        fit_model_only = bool(exprs) and all(is_fit_model_expression(e) for e in exprs)
+        if r2_master and all(parse_fit_r2_master_pid(e) or e in ("",) for e in exprs):
+            # 旧哨兵 fit_r2(主格)
+            r2_expr = build_fit_r2_expression(r2_master)
+            field["formula"] = r2_expr
+            field["fieldExpression"] = r2_expr
+            field["type"] = "computed"
+            if str(field.get("displayFormat") or "").strip().lower() == "latex":
+                field.pop("displayFormat", None)
+            field["formulaRules"] = exported
+        elif fit_model_only:
+            # 拟合主格：条件公式 + fit(y=...) 待定系数模型；编译 if(...) 供前端直接求值
+            default_expr = _norm(field.get("fieldExpression") or field.get("formula"))
+            if is_fit_model_expression(default_expr) or default_expr in ("", "fit_eq()"):
+                default_expr = ""
+            auto_compiled = compile_conditional_expression(
+                normalized,
+                substituter=substituter,
+                default_expression=default_expr,
+            )
+            if auto_compiled and auto_compiled != '""' and has_auto_conditional_rules(normalized):
+                field["formula"] = auto_compiled
+                field["fieldExpression"] = auto_compiled
+            else:
+                # 无自动条件时保留首条模型式（人工下选）
+                primary = exprs[0] if exprs else "fit(y=a*x+b)"
+                field["formula"] = primary
+                field["fieldExpression"] = primary
+            field["type"] = "computed"
+            field["formulaRules"] = exported
+        elif has_fit or any(
+            is_fit_model_expression(e) is False and len(e) > 20 for e in exprs
+        ):
+            # R² 直接 Pearson 公式：编译条件 if
+            default_expr = _norm(field.get("fieldExpression") or field.get("formula"))
+            auto_compiled = compile_conditional_expression(
+                normalized,
+                substituter=substituter,
+                default_expression=default_expr,
+            )
+            if auto_compiled and auto_compiled != '""' and has_auto_conditional_rules(normalized):
+                field["formula"] = auto_compiled
+                field["fieldExpression"] = auto_compiled
+            field["type"] = "computed"
+            if str(field.get("displayFormat") or "").strip().lower() == "latex":
+                field.pop("displayFormat", None)
+            field["formulaRules"] = exported
+        else:
+            default_expr = _norm(field.get("fieldExpression") or field.get("formula"))
+            auto_compiled = compile_conditional_expression(
+                normalized,
+                substituter=substituter,
+                default_expression=default_expr,
+            )
+            if auto_compiled and auto_compiled != '""' and has_auto_conditional_rules(normalized):
+                field["formula"] = auto_compiled
+                field["fieldExpression"] = auto_compiled
+            # 凡带 formulaRules 的条件公式栏位，导出 type 必须为 computed
+            # （覆盖 testResult→number 等上游推断）
+            field["type"] = "computed"
     for legacy in (
         "formulaSelectionMode",
         "requiresManualFormulaSelection",

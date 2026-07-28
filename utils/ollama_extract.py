@@ -2,6 +2,8 @@ import json
 import logging
 import os
 import re
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -17,18 +19,32 @@ from utils.unified_template_fields import materialize_unified_pdf_fields
 logger = logging.getLogger(__name__)
 
 
+def _get_llm_cfg():
+    try:
+        from apps.core.llm_runtime_config import get_llm_runtime_config
+
+        return get_llm_runtime_config()
+    except Exception as e:
+        logger.debug("读取 llm_runtime 失败，回退环境变量: %s", e)
+        return None
+
+
 def _ollama_default_runner_options() -> dict:
-    raw = os.environ.get("OLLAMA_OPTIONS", "").strip()
     opts: Dict[str, Any] = {"num_gpu": 999}
-    if raw:
-        try:
-            parsed = json.loads(raw)
-            if isinstance(parsed, dict):
-                opts = parsed
-            else:
-                logger.warning("OLLAMA_OPTIONS 须为 JSON 对象，已使用默认 num_gpu")
-        except json.JSONDecodeError:
-            logger.warning("OLLAMA_OPTIONS 不是合法 JSON，已忽略: %s", raw)
+    cfg = _get_llm_cfg()
+    if cfg is not None and isinstance(cfg.options, dict) and cfg.options:
+        opts = dict(cfg.options)
+    else:
+        raw = os.environ.get("OLLAMA_OPTIONS", "").strip()
+        if raw:
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    opts = parsed
+                else:
+                    logger.warning("OLLAMA_OPTIONS 须为 JSON 对象，已使用默认 num_gpu")
+            except json.JSONDecodeError:
+                logger.warning("OLLAMA_OPTIONS 不是合法 JSON，已忽略: %s", raw)
     try:
         from utils.gpu_scheduler import merge_ollama_options_for_gpu_headroom
 
@@ -36,6 +52,78 @@ def _ollama_default_runner_options() -> dict:
     except Exception as e:
         logger.debug("Ollama GPU 动态选项合并跳过: %s", e)
     return opts
+
+
+def _resolve_llm_host_model_retries() -> tuple[str, str, int]:
+    cfg = _get_llm_cfg()
+    if cfg is not None:
+        host = (cfg.base_url or "").strip() or "http://127.0.0.1:11434"
+        model = (cfg.model or "").strip() or pipeline_config.MODEL_NAME
+        retries = int(cfg.max_retries or pipeline_config.MAX_RETRIES)
+        return host, model, max(1, retries)
+    host = (os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434") or "http://127.0.0.1:11434").strip()
+    return host, pipeline_config.MODEL_NAME, pipeline_config.MAX_RETRIES
+
+
+def _resolve_chat_completions_url(base_url: str) -> str:
+    u = (base_url or "").strip().rstrip("/")
+    if not u:
+        raise ValueError("LLM base_url 为空")
+    if u.endswith("/chat/completions"):
+        return u
+    if u.endswith("/v1"):
+        return f"{u}/chat/completions"
+    return f"{u}/v1/chat/completions"
+
+
+def _openai_compatible_chat(prompt: str) -> str:
+    """调用 OpenAI 兼容 /v1/chat/completions，返回 message.content 文本。"""
+    cfg = _get_llm_cfg()
+    if cfg is None:
+        raise RuntimeError("无法读取 LLM 运行时配置")
+    endpoint = _resolve_chat_completions_url(cfg.base_url)
+    body: Dict[str, Any] = {
+        "model": cfg.model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": float(cfg.temperature),
+    }
+    if cfg.json_mode:
+        body["response_format"] = {"type": "json_object"}
+    data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    if cfg.api_key:
+        headers["Authorization"] = f"Bearer {cfg.api_key}"
+    req = urllib.request.Request(endpoint, data=data, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")[:800]
+        raise RuntimeError(f"OpenAI 兼容 API HTTP {e.code}: {detail}") from e
+    choices = payload.get("choices") if isinstance(payload, dict) else None
+    if not isinstance(choices, list) or not choices:
+        raise RuntimeError(f"OpenAI 兼容 API 无 choices: {str(payload)[:400]}")
+    msg = choices[0].get("message") if isinstance(choices[0], dict) else None
+    content = msg.get("content") if isinstance(msg, dict) else None
+    if content is None:
+        raise RuntimeError("OpenAI 兼容 API 返回空 content")
+    if isinstance(content, list):
+        # 部分网关返回多段 content
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text") or ""))
+            elif isinstance(block, str):
+                parts.append(block)
+        content = "".join(parts)
+    return str(content)
+
+
+def _llm_provider() -> str:
+    cfg = _get_llm_cfg()
+    if cfg is not None:
+        return str(cfg.provider or "ollama")
+    return "ollama"
 
 
 class OllamaClientGpuPreference(Client):
@@ -63,44 +151,18 @@ class OllamaClientGpuPreference(Client):
 
 def build_devices_prompt(md: str, source_file_hint: int) -> str:
     struct = json.dumps(pipeline_config.SINGLE_DEVICE_STRUCT, ensure_ascii=False, indent=2)
-    return f"""你是设备铭牌提取专家，从文本中提取所有独立设备铭牌，输出**严格JSON数组**，无其他内容。文本中可能有部分拼写错误或者识别错误，请根据上下文进行简单修正，避免改动过大。
-===== 提取规则（必须逐条遵守） =====
-【1. 设备名称】
-- 定义：文本里直接说明设备是什么的短语/英文，比如“X-RAY TUBE HOUSING ASSEMBLY”“X射线管组件”
-- 匹配关键词：找文本里大写的设备功能/部件名词，比如TUBE、ASSEMBLY、SYSTEM、SCANNER等
-- 示例：如果文本里有“X-RAY TUBE HOUSING ASSEMBLY”，设备名称尽量翻译成中文名称
-- 注意：不要把厂家名、型号代码当成设备名称
+    try:
+        from apps.core.llm_runtime_config import render_devices_prompt
 
-【2. 设备型号】
-- 定义：厂家给设备/部件的型号代码，通常是字母+数字的组合
-- 匹配关键词：前面通常跟着“Model:”“型号:”“REF:”，格式类似“XXX 1234”“ABC-123/45”
-- 示例：文本里“Model MRC 200 0407 ROT-GS 1004”“REF 9890 000 86502”都是型号相关内容
-- 注意：要把所有标注为Model/REF的内容都列出来，区分“组件型号”和“核心部件型号”
+        return render_devices_prompt(md, source_file_hint, struct)
+    except Exception as e:
+        logger.warning("渲染设备抽取 prompt 失败，使用内置默认: %s", e)
+        from apps.core.llm_runtime_config import DEFAULT_DEVICES_PROMPT, _safe_replace_placeholders
 
-【3. 设备编号/序列号（SN号）】
-- 定义：设备唯一的出厂编号，通常是一串数字+字母
-- 匹配关键词：前面跟着“SN:”“Serial No.:”“序列号:”，格式类似“72320M168874”“168874”
-- 示例：文本里“SN 72320M168874”就是序列号
-- 注意：序列号是唯一的串号，不是型号代码
-
-【4. 生产厂家】
-- 定义：设备的制造商全称，不要包含地址、城市、国家，只用写出公司全称即可
-- 匹配关键词：找文本开头/上方的公司名，通常包含“Medical Systems”“GmbH”“Co., Ltd”，后面跟着地址、城市、国家
-- 示例：文本里“Philips Medical Systems DMC GmbH, Röntgenstraße 24, 22335 Hamburg / GERMANY”就是厂家信息
-- 注意：不要只写“Philips”，要写完整识别到的内容
-
-【5. 额定参数】
-- 定义：设备的核心工作参数，通常是kV/mA/mAs/mAs范围，当前表单中的额定参数主要是球管参数，如果没有球管参数，则不用填入内容
-- 匹配关键词：前面跟着“Rated kV:”“额定kV:”“Rated mA:”“额定mA:”“Rated mAs:”“额定mAs:”，格式类似“100 kV”“200 mA”
-- 示例：文本里“Rated kV 100”“Rated mA 200”都是额定参数
-- 注意：要把所有标注为Rated的内容都列出来，区分kV/mA/mAs
-
-格式：
-{struct}
-
-文本：
-{md}
-"""
+        return _safe_replace_placeholders(
+            DEFAULT_DEVICES_PROMPT,
+            {"struct": struct, "md": md, "source_file_hint": source_file_hint},
+        )
 
 
 def _to_frontend_field_type(field_type: str) -> str:
@@ -120,56 +182,29 @@ def build_frontend_template_prompt(
     """Build prompt for converting htmlpdf/unified template to frontend-renderable JSON."""
     compact = json.dumps(template_obj, ensure_ascii=False, separators=(",", ":"))
     sample_compact = json.dumps(sample_template_obj or {}, ensure_ascii=False, separators=(",", ":"))
-    return f"""# 角色
-你是放射医疗设备质量控制检测表单JSON架构专家、Flutter动态表单Schema工程师，严格遵循统一动态表单规范 + 参考样板格式，标准化转换所有新旧放射检测记录JSON模板。
+    try:
+        from apps.core.llm_runtime_config import render_frontend_template_prompt
 
-固定统一顶层JSON结构（一字不改，顺序固定）：
-{{
-  "templateId": "",
-  "templateName": "",
-  "version": "1.0.0",
-  "reportType": "",
-  "standard": "",
-  "pdfUrl": "",
-  "locale": "zh-CN",
-  "constants": {{}},
-  "enums": {{}},
-  "steps": []
-}}
+        return render_frontend_template_prompt(
+            template_compact=compact,
+            sample_compact=sample_compact,
+            source_file_hint=source_file_hint,
+        )
+    except Exception as e:
+        logger.warning("渲染前端模板 prompt 失败，使用内置默认: %s", e)
+        from apps.core.llm_runtime_config import (
+            DEFAULT_FRONTEND_TEMPLATE_PROMPT,
+            _safe_replace_placeholders,
+        )
 
-强制规则：
-1) 只输出纯JSON，不允许解释文本。
-2) 必须删除冗余废弃字段：schema、meta、pdf、formSchema、bindings、独立fields数组、source_pdf。
-3) 层级必须是 steps -> sections -> fields；layout 仅允许 form/table/grid。
-4) 步骤ID格式：step_英文语义；区块ID格式：sec_英文语义。
-5) 表单字段ID必须英文小驼峰，禁止中文ID；根据label语义命名。
-6) 字段类型只允许：text/date/number/radio/boolean/select/group/computed/verdict/textarea/signature/table。
-7) number必须包含precision；radio/select必须用enumRef关联enums。
-8) 前端导出JSON不包含坐标信息（不输出rect/xywh/xyxy/page/x/y/w/h/pdfAnchor），仅在source中保留 key/pdfFieldId/page/anchorType 作为关联引用。
-9) visibleWhen 使用简单表达式：== > < && || !
-10) computed 必须包含 formula 与 dependsOn；verdict 必须包含 rule。
-11) constants/enums 如无数据必须返回空对象；steps不能为空。
-12) 输出必须可被Flutter动态表单直接读取渲染。
-
-人员签名类字段 ID 命名字典（强制执行）：
-- 执行层：“检测员 / 测试员” -> id: "inspector"
-- 检验主责：“主检 / 主检人” -> id: "mainInspector"
-- 复核层：“校核员 / 校核人 / 复核人” -> id: "checker"（不可与审核混淆）
-- 审批层：“审核员 / 审核人” -> id: "reviewer"
-- 终审层：“批准人 / 授权签字人” -> id: "approver" 或 "authorizedSignatory"
-- 外部人员：“受检单位陪同人” -> id: "accompanyingPerson"
-
-警告：
-- 遇到“校核员及校核日期”这类组合文本，必须判定为 signature，id 使用 "checker"；
-- 严禁将此类签字字段命名为 dateDay/date 或混合多个角色语义；
-- source.pdfFieldId 必须使用 PDF 原生唯一物理占位符（如 f78/f79），不得用语义字段名替代。
-
-参考标准样板JSON：
-{sample_compact}
-
-待转换原始JSON（文件数提示: {source_file_hint}）：
-{compact}
-"""
+        return _safe_replace_placeholders(
+            DEFAULT_FRONTEND_TEMPLATE_PROMPT,
+            {
+                "sample_compact": sample_compact,
+                "source_file_hint": source_file_hint,
+                "compact": compact,
+            },
+        )
 
 
 def _slugify_ascii_id(text: str, fallback: str, max_len: int = 64) -> str:
@@ -520,13 +555,30 @@ def generate_frontend_template_with_ollama(
     sample_template_obj: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """
-    Generate frontend-renderable template JSON from htmlpdf/unified template via local Ollama model.
+    Generate frontend-renderable template JSON from htmlpdf/unified template via LLM.
     Returns empty dict when generation fails.
     """
+    sample_obj = sample_template_obj if isinstance(sample_template_obj, dict) else _load_standard_sample_template()
+    prompt = build_frontend_template_prompt(template_obj, source_file_hint, sample_obj)
+    host, model_name, max_retries = _resolve_llm_host_model_retries()
+    provider = _llm_provider()
+
+    if provider == "openai_compatible":
+        for _ in range(max_retries):
+            try:
+                raw = _openai_compatible_chat(prompt)
+                parsed = validate_json(raw, None) if isinstance(raw, str) else raw
+                normalized = _normalize_generated_frontend_payload(parsed, template_obj)
+                if normalized.get("steps"):
+                    return normalized
+            except Exception as e:
+                logger.warning("前端模板 AI 生成重试失败(openai_compatible): %s", str(e))
+                continue
+        return {}
+
     try:
-        host = (os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434") or "http://127.0.0.1:11434").strip()
         client = OllamaClientGpuPreference(host=host)
-        model = Ollama(client, model_name=pipeline_config.MODEL_NAME)
+        model = Ollama(client, model_name=model_name)
         schema = {
             "type": "object",
             "properties": {
@@ -593,11 +645,10 @@ def generate_frontend_template_with_ollama(
             "required": ["templateId", "templateName", "version", "reportType", "standard", "pdfUrl", "locale", "constants", "enums", "steps"],
         }
 
-        sample_obj = sample_template_obj if isinstance(sample_template_obj, dict) else _load_standard_sample_template()
-        for _ in range(pipeline_config.MAX_RETRIES):
+        for _ in range(max_retries):
             try:
                 gen = Generator(model, output_type=json_schema(schema))
-                raw = gen(build_frontend_template_prompt(template_obj, source_file_hint, sample_obj))
+                raw = gen(prompt)
                 parsed = raw
                 if isinstance(raw, str):
                     parsed = validate_json(raw, None)
@@ -624,10 +675,51 @@ def _normalize_device_item(obj: Any) -> Dict[str, Any]:
 
 
 def extract_devices_with_ollama(md_content: str, file_count: int) -> List[Dict[str, Any]]:
+    prompt = build_devices_prompt(md_content, file_count)
+    host, model_name, max_retries = _resolve_llm_host_model_retries()
+    provider = _llm_provider()
+    fallback = [_normalize_device_item({})]
+
+    def _parse_devices(raw: Any) -> List[Dict[str, Any]] | None:
+        parsed = None
+        if isinstance(raw, list):
+            parsed = raw
+        elif isinstance(raw, dict):
+            # openai json_object 有时包一层
+            for key in ("devices", "items", "data", "结果"):
+                if isinstance(raw.get(key), list):
+                    parsed = raw[key]
+                    break
+            if parsed is None:
+                parsed = [raw]
+        elif isinstance(raw, str):
+            parsed = validate_json(raw, None)
+            if isinstance(parsed, dict):
+                for key in ("devices", "items", "data", "结果"):
+                    if isinstance(parsed.get(key), list):
+                        parsed = parsed[key]
+                        break
+                else:
+                    parsed = [parsed]
+        if isinstance(parsed, list) and len(parsed) >= 1:
+            return [_normalize_device_item(x) for x in parsed]
+        return None
+
+    if provider == "openai_compatible":
+        for _ in range(max_retries):
+            try:
+                raw = _openai_compatible_chat(prompt)
+                got = _parse_devices(raw)
+                if got:
+                    return got
+            except Exception as e:
+                logger.warning("AI调用重试失败(openai_compatible): %s", str(e))
+                continue
+        return fallback
+
     try:
-        host = (os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434") or "http://127.0.0.1:11434").strip()
         client = OllamaClientGpuPreference(host=host)
-        model = Ollama(client, model_name=pipeline_config.MODEL_NAME)
+        model = Ollama(client, model_name=model_name)
         schema = {
             "type": "array",
             "minItems": 1,
@@ -638,32 +730,22 @@ def extract_devices_with_ollama(md_content: str, file_count: int) -> List[Dict[s
                     "设备型号": {"type": "string"},
                     "设备编号": {"type": "string"},
                     "生产厂家": {"type": "string"},
-                    "额定参数": {"type": "object"},
                 },
-                "required": ["设备名称", "设备型号", "设备编号", "生产厂家", "额定参数"],
+                "required": ["设备名称", "设备型号", "设备编号", "生产厂家"],
             },
         }
-        fallback = [_normalize_device_item({})]
 
-        for _ in range(pipeline_config.MAX_RETRIES):
+        for _ in range(max_retries):
             try:
                 gen = Generator(model, output_type=json_schema(schema))
-                raw = gen(build_devices_prompt(md_content, file_count))
-
-                parsed = None
-                if isinstance(raw, list):
-                    parsed = raw
-                elif isinstance(raw, dict):
-                    parsed = [raw]
-                elif isinstance(raw, str):
-                    parsed = validate_json(raw, None)
-
-                if isinstance(parsed, list) and len(parsed) >= 1:
-                    return [_normalize_device_item(x) for x in parsed]
+                raw = gen(prompt)
+                got = _parse_devices(raw)
+                if got:
+                    return got
             except Exception as e:
                 logger.warning("AI调用重试失败: %s", str(e))
                 continue
         return fallback
     except Exception as e:
         logger.error("Ollama连接失败: %s", e)
-        return [_normalize_device_item({})]
+        return fallback

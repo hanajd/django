@@ -67,7 +67,7 @@
         <div class="flex flex-wrap items-start justify-between gap-2 mb-4">
             <div>
                 <h4 class="text-base font-semibold text-slate-900">流程岗位参与人</h4>
-                <p class="text-xs text-slate-600 mt-1 max-w-2xl">按岗位展开「添加人员」：先勾选一名用户，再点确认；已登记人员显示在各自岗位下。</p>
+                <p class="text-xs text-slate-600 mt-1 max-w-2xl">按岗位展开「添加人员」：可<strong>多选</strong>员工后一次确认挂岗；已登记人员显示在各自岗位下。</p>
             </div>
             <span class="text-xs px-2.5 py-1 rounded-full {% if workflow_member_user_count %}bg-emerald-100 text-emerald-800{% else %}bg-slate-100 text-slate-600{% endif %} font-medium">
                 共 {{ workflow_member_user_count }} 人
@@ -121,10 +121,15 @@
                                 <input type="hidden" name="action" value="add_workflow_member">
                                 <input type="hidden" name="project_id" value="{{ selected_project_id }}">
                                 <input type="hidden" name="workflow_role" value="{{ panel.code }}">
-                                <div class="max-h-48 overflow-y-auto rounded-lg border border-white bg-white divide-y divide-slate-50">
+                                <div class="mb-2 flex flex-wrap items-center gap-2 text-xs">
+                                    <button type="button" class="dispatch-select-all rounded-md bg-white px-2 py-1 text-teal-800 ring-1 ring-teal-200 hover:bg-teal-50">全选</button>
+                                    <button type="button" class="dispatch-select-none rounded-md bg-white px-2 py-1 text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50">清空</button>
+                                    <span class="text-slate-500">可多选后批量挂岗</span>
+                                </div>
+                                <div class="max-h-56 overflow-y-auto rounded-lg border border-white bg-white divide-y divide-slate-50">
                                     {% for row in panel.picker_users %}
                                     <label class="flex items-start gap-3 px-3 py-2.5 cursor-pointer hover:bg-teal-50/40">
-                                        <input type="radio" name="user_id" value="{{ row.user_id }}" class="mt-0.5 text-teal-600"
+                                        <input type="checkbox" name="user_ids" value="{{ row.user_id }}" class="mt-0.5 rounded text-teal-600"
                                                data-username="{{ row.username }}">
                                         <span class="min-w-0 flex-1">
                                             <span class="font-medium text-slate-900 text-sm block">{{ row.username }}</span>
@@ -140,7 +145,7 @@
                                     {% endfor %}
                                 </div>
                                 <button type="submit" class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-teal-700 text-white text-xs font-semibold hover:bg-teal-800">
-                                    <i class="ri-check-line"></i> 确认添加到「{{ panel.label }}」
+                                    <i class="ri-check-line"></i> 确认添加所选人员到「{{ panel.label }}」
                                 </button>
                             </form>
                             {% else %}
@@ -280,16 +285,32 @@
             });
         }
         document.querySelectorAll('form.dispatch-add-member-form').forEach(function (form) {
+            var allBtn = form.querySelector('.dispatch-select-all');
+            var noneBtn = form.querySelector('.dispatch-select-none');
+            if (allBtn) {
+                allBtn.addEventListener('click', function () {
+                    form.querySelectorAll('input[name="user_ids"]').forEach(function (el) { el.checked = true; });
+                });
+            }
+            if (noneBtn) {
+                noneBtn.addEventListener('click', function () {
+                    form.querySelectorAll('input[name="user_ids"]').forEach(function (el) { el.checked = false; });
+                });
+            }
             form.addEventListener('submit', function (e) {
-                var checked = form.querySelector('input[name="user_id"]:checked');
-                if (!checked) {
+                var checked = form.querySelectorAll('input[name="user_ids"]:checked');
+                if (!checked.length) {
                     e.preventDefault();
-                    alert('请先勾选一名要添加的用户');
+                    alert('请至少勾选一名要添加的用户');
                     return false;
                 }
                 var role = form.getAttribute('data-role-label') || '该岗位';
-                var name = checked.getAttribute('data-username') || '';
-                return confirm('确认将「' + name + '」登记为「' + role + '」？\n登记后将自动同步 App 任务。');
+                var names = [];
+                checked.forEach(function (el) {
+                    names.push(el.getAttribute('data-username') || '');
+                });
+                var preview = names.slice(0, 5).join('、') + (names.length > 5 ? ' 等' + names.length + '人' : '');
+                return confirm('确认将「' + preview + '」登记为「' + role + '」？\n登记后将自动同步 App 任务。');
             });
         });
         {% if dispatch_role %}

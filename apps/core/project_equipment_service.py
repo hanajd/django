@@ -248,30 +248,41 @@ def equipment_title_from_card(card: dict) -> str:
 
 
 def task_no_display_index(project: LibraryProject) -> dict[str, dict]:
-    """taskNo → 受检设备、检测项目等人员可读标签（供进度跟踪等界面）。"""
+    """taskNo → 受检设备、检测项目等人员可读标签（供进度跟踪等界面）。
+
+    ``detection_label`` / ``site_task_name`` 优先取现场记录任务模板名称（与导出现场
+    记录 / 报告 PDF 文件名同源），不展示 ``ct_qc`` 等后台 code。
+    """
     index: dict[str, dict] = {}
     for card in project_equipment_cards(project):
         equip_title = equipment_title_from_card(card)
         report_label = (card.get("report_task_label") or "").strip() or "—"
         if " · " in report_label:
             _, report_human = report_label.split(" · ", 1)
+            report_human = (report_human or "").strip() or report_label
         else:
             report_human = report_label
         department_label = (card.get("department_label") or "").strip()
         site_rows = card.get("site_submit_tasks") or []
-        multi_site = len(site_rows) > 1
         for row in site_rows:
             task_no = str(row.get("taskNo") or "").strip()
             if not task_no:
                 continue
-            code = (row.get("code") or "").strip()
-            if multi_site and code:
-                detection_label = f"{report_human}（{code}）"
-            else:
+            site_name = (row.get("name") or "").strip()
+            site_code = (row.get("code") or "").strip()
+            # 与 build_exported_inspection_pdf_original_name 一致：名称优先于 code
+            site_task_name = site_name or site_code
+            if site_name:
+                detection_label = site_name
+            elif report_human and report_human not in ("—", site_code):
                 detection_label = report_human
+            else:
+                detection_label = site_task_name or task_no
             index[task_no] = {
                 "equipment_title": equip_title,
                 "detection_label": detection_label,
+                "site_task_name": site_task_name,
+                "site_task_code": site_code,
                 "report_task_label": report_label,
                 "department_label": department_label,
             }

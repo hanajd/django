@@ -344,9 +344,11 @@ def save_pdf():
         font_file = SIMSUN_FONT if use_simsun else times_font_path
         page.insert_font(fontname=font_name, fontfile=font_file)
         font_obj = fitz.Font(fontfile=font_file)
+        is_instrument = _pdf_text_field_wants_justify_for_instrument_line(f)
         wrapped_text, fs = fit_text_for_box(text, r, font_obj)
-        if _pdf_text_field_wants_justify_for_instrument_line(f):
-            align = getattr(fitz, "TEXT_ALIGN_JUSTIFY", fitz.TEXT_ALIGN_LEFT)
+        if is_instrument:
+            # 左对齐：两端对齐会在短行上把字距拉得过大
+            align = fitz.TEXT_ALIGN_LEFT
         elif "\n" in wrapped_text:
             align = fitz.TEXT_ALIGN_LEFT
         else:
@@ -354,7 +356,9 @@ def save_pdf():
 
         line_count = max(1, wrapped_text.count("\n") + 1)
         text_h = line_count * fs * 1.2
-        if text_h < r.height:
+        if is_instrument:
+            text_rect = r
+        elif text_h < r.height:
             offset_y = (r.height - text_h) / 2.0
             text_rect = fitz.Rect(r.x0, r.y0 + offset_y, r.x1, r.y1)
         else:

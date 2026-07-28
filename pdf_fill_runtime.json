@@ -1,0 +1,8 @@
+{
+  "mode": "formal",
+  "site_font_pt": 10.5,
+  "report_font_pt": 12.0,
+  "font_fit": "fixed",
+  "font_min_pt": 5.0,
+  "_comment": "mode: test=彩色 / formal=纯黑；site_font_pt/report_font_pt: 现场记录/报告基准字号(pt)，五号=10.5、小四=12；font_fit: auto=框内自适应缩小 / fixed=固定字号；font_min_pt: auto 模式下最小字号。修改后无需重启，下次导出 PDF 即生效。"
+}

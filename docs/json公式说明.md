@@ -134,6 +134,8 @@ round(min(f1,f2),1)~round(max(f1,f2),1)
 | `median` / `count` | 中位数 / 有效数值个数 |
 | `round(x, n)` | 四舍五入 |
 | `abs` / `parseNum` | 绝对值 / 从带单位文本取数 |
+| `ln` / `log` | 自然对数（拟合 R² 对数/指数变换用） |
+| `sqrt` | 平方根 |
 | `if(c,a,b)` | 条件取值 |
 | `coalesce` / `isEmpty` | 空值处理 |
 | `lookup` / `unitFactor` / `ctdiw` | 查表 / 单位换算 / CTDIw |

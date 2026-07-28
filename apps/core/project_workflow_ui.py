@@ -247,7 +247,19 @@ def workflow_role_rank(workflow_role: str) -> int:
 
 
 def user_eligible_for_workflow_role(user, workflow_role: str) -> bool:
-    """高权限账号可登记到不高于自身等级的流程岗位（如授权签字人可兼任检测员）。"""
+    """
+    高权限账号可登记到不高于自身等级的流程岗位（如授权签字人可兼任检测员）。
+    新轨部门员工无全局五岗等级：由主管派工决定，任意流程岗均可挂。
+    旧轨五岗账号：仍按原 GLOBAL_ROLE_WORKFLOW_RANK 判断，行为不变。
+    """
+    code = global_role_code_for_user(user)
+    try:
+        from apps.core.org_roles import DEPT_STAFF_ROLE_CODES
+
+        if code in DEPT_STAFF_ROLE_CODES:
+            return True
+    except Exception:
+        pass
     rank = global_workflow_rank(user)
     return rank > 0 and rank >= workflow_role_rank(workflow_role)
 

@@ -101,7 +101,7 @@
             </div>
             
             <!-- 菜单 -->
-            <nav class="flex-1 overflow-y-auto py-4">
+            <nav class="flex flex-1 flex-col overflow-y-auto py-4">
                 {% if role_perm.perm_file_library %}
                 <div class="px-2 pb-3 mb-2 border-b border-slate-700/60 space-y-0.5">
                     <a id="sidebar-link-file-library" href="{% url 'file_library' %}?tab=ocr" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
@@ -153,12 +153,6 @@
                         <i class="ri-download-2-line text-lg"></i>
                         <span>报告导出及下载</span>
                     </a>
-                    {% if ui_sidebar_show_user_management %}
-                    <a id="sidebar-link-user-management" href="{% url 'user_list' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
-                        <i class="ri-team-line text-lg"></i>
-                        <span>用户管理</span>
-                    </a>
-                    {% endif %}
                     {% if show_library_task_nav %}
                     <a id="sidebar-link-task-templates" href="{% url 'library_task_management' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
                         <i class="ri-stack-line text-lg"></i>
@@ -181,6 +175,10 @@
                 {% endif %}
                 <div class="px-2 pb-3 mb-2 border-b border-slate-700/60 space-y-0.5">
                     <p class="px-4 py-1.5 text-xs font-medium text-slate-500">个人</p>
+                    <a id="sidebar-link-account-profile" href="{% url 'account_profile' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
+                        <i class="ri-user-settings-line text-lg"></i>
+                        <span>个人信息</span>
+                    </a>
                     <a id="sidebar-link-signature-manage" href="{% url 'signature_manage' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
                         <i class="ri-quill-pen-line text-lg"></i>
                         <span>签名管理</span>
@@ -245,6 +243,28 @@
                     {% endif %}
                 </div>
                 {% endfor %}
+                {% if ui_sidebar_show_user_management or ui_show_system_debug_settings or ui_show_app_ota_settings %}
+                <div class="mt-auto px-2 pt-3 pb-2 border-t border-slate-700/60 space-y-0.5">
+                    {% if ui_sidebar_show_user_management %}
+                    <a id="sidebar-link-user-management" href="{% url 'user_list' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
+                        <i class="ri-team-line text-lg"></i>
+                        <span>用户管理</span>
+                    </a>
+                    {% endif %}
+                    {% if ui_show_app_ota_settings %}
+                    <a id="sidebar-link-app-ota" href="{% url 'app_ota_settings' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
+                        <i class="ri-smartphone-line text-lg"></i>
+                        <span>App 更新</span>
+                    </a>
+                    {% endif %}
+                    {% if ui_show_system_debug_settings %}
+                    <a id="sidebar-link-system-debug" href="{% url 'system_debug_settings' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
+                        <i class="ri-bug-line text-lg"></i>
+                        <span>调试设置</span>
+                    </a>
+                    {% endif %}
+                </div>
+                {% endif %}
             </nav>
             
             <!-- 用户信息 -->
@@ -308,7 +328,8 @@
     </div>
     <script src="{% static 'js/admin-pjax.js' %}" defer></script>
     {% if user.is_authenticated %}
-    <script src="{% static 'js/file_lib_folder_export.js' %}?v=1" defer></script>
+    <script src="{% static 'js/report_export_busy.js' %}?v=2" defer></script>
+    <script src="{% static 'js/file_lib_folder_export.js' %}?v=2" defer></script>
     {% endif %}
     
     {% else %}

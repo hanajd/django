@@ -170,6 +170,14 @@ def role_enterprise_catalog(code: str) -> Dict[str, Any]:
         kind, style = "App 侧（兼容）", "amber"
     elif code == COMMISSION_COORDINATOR_ROLE_CODE:
         kind, style = "委托统筹", "amber"
+    elif code in (
+        "admin_office",
+        "dept_director_inspection",
+        "dept_staff_inspection",
+        "dept_director_evaluation",
+        "dept_staff_evaluation",
+    ):
+        kind, style = "业务线组织", "violet"
     else:
         kind, style = "其他", "slate"
     return {
@@ -305,6 +313,15 @@ ROLE_DEFAULT_PERMS_BY_CODE[COMMISSION_COORDINATOR_ROLE_CODE] = {
     "perm_biz_registry": True,
 }
 
+# 新业务线组织角色默认权限（与 org_roles.ORG_ROLE_SEED 对齐；迁移/ensure 时写入 Role 表）
+try:
+    from apps.core.org_roles import ORG_ROLE_SEED as _ORG_ROLE_SEED
+
+    for _code, _meta in _ORG_ROLE_SEED.items():
+        ROLE_DEFAULT_PERMS_BY_CODE[_code] = dict(_meta["perms"])
+except Exception:
+    pass
+
 
 def library_user_is_commission_coordinator(user) -> bool:
     return _role_code(user) == COMMISSION_COORDINATOR_ROLE_CODE
@@ -383,6 +400,7 @@ def roles_assignable_by_user(actor) -> list:
         return []
     if getattr(actor, "is_superuser", False) or _role_code(actor) in ("super_admin", "admin"):
         return list(Role.objects.order_by("name", "id"))
+    # 旧轨委托统筹：行为不变
     if library_user_is_commission_coordinator(actor):
         from apps.core.project_workflow_ui import ROLE_CODE_ORDER
 
@@ -391,19 +409,60 @@ def roles_assignable_by_user(actor) -> list:
             for r in Role.objects.filter(code__in=COMMISSION_COORDINATOR_WORKFLOW_ROLE_CODES)
         }
         return [roles_by_code[c] for c in ROLE_CODE_ORDER if c in roles_by_code]
+    # 仅新轨部门主管收窄可分配角色
+    try:
+        from apps.core.org_roles import (
+            staff_role_code_for_director,
+            user_is_dept_director,
+            user_is_legacy_permission_track,
+        )
+
+        if not user_is_legacy_permission_track(actor) and user_is_dept_director(actor):
+            staff_code = staff_role_code_for_director(actor)
+            if staff_code:
+                return list(Role.objects.filter(code=staff_code).order_by("name", "id"))
+            return []
+    except Exception:
+        pass
     if role_has(actor, "perm_manage_users"):
         return list(Role.objects.order_by("name", "id"))
     return []
 
 
 def library_user_may_manage_target_user(actor, target) -> bool:
-    """委托统筹仅可维护本人创建的检测流程岗位账号。"""
+    """委托统筹仅可维护本人创建的检测流程岗位账号；新轨主管可管本部门员工。"""
     if actor is None or target is None:
         return False
     if getattr(actor, "is_superuser", False) or _role_code(actor) in ("super_admin", "admin"):
         return True
     if not role_has(actor, "perm_manage_users"):
         return False
+    # 新轨主管专用规则；旧轨不进入此分支
+    try:
+        from apps.core.org_roles import (
+            DEPT_STAFF_ROLE_CODES,
+            staff_role_code_for_director,
+            user_is_dept_director,
+            user_is_legacy_permission_track,
+            user_org_unit,
+        )
+
+        if not user_is_legacy_permission_track(actor) and user_is_dept_director(actor):
+            if getattr(target, "is_superuser", False):
+                return False
+            try:
+                profile = target.profile
+                code = profile.role.code if profile.role_id else ""
+            except Exception:
+                return False
+            if code not in DEPT_STAFF_ROLE_CODES:
+                return False
+            if code != staff_role_code_for_director(actor):
+                return False
+            return user_org_unit(actor) == user_org_unit(target)
+    except Exception:
+        pass
+    # —— 以下与改前委托统筹 / 普通管理员逻辑一致 ——
     if not library_user_is_commission_coordinator(actor):
         return True
     if getattr(target, "is_superuser", False):
@@ -423,10 +482,21 @@ def library_user_may_manage_target_user(actor, target) -> bool:
 
 
 def library_coordinator_managed_users_queryset(actor):
-    """委托统筹用户列表：仅本人创建的流程岗位账号。"""
+    """用户列表：委托统筹仅本人创建的流程岗；新轨主管为本部门员工；其余旧轨不变。"""
     from django.contrib.auth.models import User
 
     qs = User.objects.select_related("profile", "profile__role").order_by("username", "id")
+    try:
+        from apps.core.org_roles import (
+            org_staff_queryset_for_director,
+            user_is_dept_director,
+            user_is_legacy_permission_track,
+        )
+
+        if not user_is_legacy_permission_track(actor) and user_is_dept_director(actor):
+            return org_staff_queryset_for_director(actor)
+    except Exception:
+        pass
     if not library_user_is_commission_coordinator(actor):
         return qs
     return qs.filter(
@@ -720,10 +790,18 @@ def library_user_may_access_task_template_library_nav(user) -> bool:
     含：分配文件库任务、覆盖项 ``perm_library_task_templates_write``（如甲方演示自建模板）、
     或已被分配检测任务且具备模板填 PDF 链路的参与人。
     不包含 ``perm_file_library``；展示入口的模板仍需自备文件库可见性判断。
-    委托统筹（``commission_coordinator``）可使用全部任务模板立项，但不展示任务模板库入口。
+    委托统筹与新轨组织角色（行政 / 检测·评价主管与员工）可在工作台选用标准任务，
+    但不展示「任务模板库」入口（与 coordinator 一致）。
     """
     if library_user_is_commission_coordinator(user):
         return False
+    try:
+        from apps.core.org_roles import user_is_org_role
+
+        if user_is_org_role(user):
+            return False
+    except Exception:
+        pass
     if not getattr(user, "is_authenticated", False):
         return False
     if role_has(user, "perm_assign_tasks") or role_has(user, "perm_library_task_templates_write"):
@@ -749,6 +827,22 @@ def library_user_may_edit_hospital_info(user) -> bool:
     """医院信息管理：维护医院/院区/科室与设备（本模块无只读访客档）。"""
     if not getattr(user, "is_authenticated", False):
         return False
+    # 仅新轨组织角色走新规则；旧轨（统筹/五岗/管理员等）完全沿用原逻辑
+    try:
+        from apps.core.org_roles import (
+            user_is_admin_office,
+            user_is_dept_director,
+            user_is_dept_staff,
+            user_is_legacy_permission_track,
+        )
+
+        if not user_is_legacy_permission_track(user):
+            if user_is_admin_office(user):
+                return True
+            if user_is_dept_director(user) or user_is_dept_staff(user):
+                return False
+    except Exception:
+        pass
     if library_user_is_commission_coordinator(user) and role_has(user, "perm_file_library"):
         return True
     if role_has(user, "perm_manage_users"):
@@ -1271,6 +1365,8 @@ def role_ui_context(user) -> Dict[str, Any]:
         "ui_dashboard_site_record_focus": False,
         "ui_dashboard_hide_file_stats_row": False,
         "ui_dashboard_show_django_admin_tile": False,
+        "ui_show_system_debug_settings": False,
+        "ui_show_app_ota_settings": False,
     }
     if not getattr(user, "is_authenticated", False):
         return empty
@@ -1278,6 +1374,13 @@ def role_ui_context(user) -> Dict[str, Any]:
     is_super = bool(getattr(user, "is_superuser", False)) or code == "super_admin"
     is_admin = code == "admin"
     is_coordinator = code == COMMISSION_COORDINATOR_ROLE_CODE
+    is_dept_director = False
+    try:
+        from apps.core.org_roles import user_is_dept_director as _is_dept_director
+
+        is_dept_director = bool(_is_dept_director(user))
+    except Exception:
+        is_dept_director = False
     has_assign = library_user_can_assign_tasks_to_participants(user)
 
     # 侧栏「项目管理」：委托统筹创建的流程岗位可查看已分配项目；其他现场两岗不进入配置页
@@ -1295,25 +1398,32 @@ def role_ui_context(user) -> Dict[str, Any]:
     hide_json = site_focus or is_coordinator
     hide_file_row = not role_has(user, "perm_file_library")
 
-    # Django Admin 入口：仅保留给系统管理类角色，避免检测岗误点
+    # Django Admin 入口：仅系统管理类角色；委托统筹 / 部门主管走业务「用户管理」页
     show_admin_tile = is_super or is_admin or (
-        role_has(user, "perm_manage_users") and not is_coordinator
+        role_has(user, "perm_manage_users")
+        and not is_coordinator
+        and not is_dept_director
     )
 
     from apps.core.commission_management_service import library_user_may_access_commission_manage
+
+    # 侧栏用户管理：委托统筹 + 检测/评价部主管（本部门员工）
+    show_user_mgmt = role_has(user, "perm_manage_users") and (
+        is_coordinator or is_dept_director
+    )
 
     return {
         "ui_sidebar_show_project_management": bool(show_pm),
         "ui_sidebar_show_commission_manage": bool(
             show_pm and library_user_may_access_commission_manage(user)
         ),
-        "ui_sidebar_show_user_management": bool(
-            is_coordinator and role_has(user, "perm_manage_users")
-        ),
+        "ui_sidebar_show_user_management": bool(show_user_mgmt),
         "ui_dashboard_hide_json_tile": bool(hide_json),
         "ui_dashboard_site_record_focus": bool(site_focus),
         "ui_dashboard_hide_file_stats_row": bool(hide_file_row),
         "ui_dashboard_show_django_admin_tile": bool(show_admin_tile),
+        "ui_show_system_debug_settings": bool(is_super),
+        "ui_show_app_ota_settings": bool(is_super),
     }
 
 

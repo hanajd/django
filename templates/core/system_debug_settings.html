@@ -1,0 +1,289 @@
+{% extends 'base.html' %}
+
+{% block page_title %}调试设置{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-5xl space-y-8">
+    <div>
+        <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">系统管理 · 超级管理员</p>
+        <h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-900">调试设置</h1>
+        <p class="mt-1 text-sm leading-relaxed text-slate-600">
+            PDF 回填、LLM API（切换模型 / 兼容接口）与 OCR 设备抽取 Prompt。保存后写入配置文件，无需重启服务。
+        </p>
+    </div>
+
+    {# —— PDF —— #}
+    <form method="post" class="space-y-6">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="save_pdf">
+
+        <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-8">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                    <h2 class="text-lg font-semibold text-slate-900">PDF 回填着色</h2>
+                    <p class="mt-1 text-sm text-slate-600">当前：<strong class="text-slate-900">{{ pdf_fill_mode_label }}</strong></p>
+                </div>
+                <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
+                    {% if pdf_fill_mode == 'test' %}bg-rose-50 text-rose-700 ring-1 ring-rose-200
+                    {% else %}bg-slate-100 text-slate-700 ring-1 ring-slate-200{% endif %}">
+                    {% if pdf_fill_mode == 'test' %}测试{% else %}正式{% endif %}
+                </span>
+            </div>
+
+            <div class="mt-6 space-y-4">
+                <label class="flex cursor-pointer gap-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 transition hover:border-rose-200 hover:bg-rose-50/40 has-[:checked]:border-rose-300 has-[:checked]:bg-rose-50/60">
+                    <input type="radio" name="pdf_fill_mode" value="test" class="mt-1 h-4 w-4 text-rose-600"
+                           {% if pdf_fill_mode == 'test' %}checked{% endif %}>
+                    <span class="min-w-0">
+                        <span class="block font-medium text-slate-900">测试模式（彩色）</span>
+                        <span class="mt-1 block text-sm leading-relaxed text-slate-600">
+                            文字默认红色；单项判定合格绿色、不合格蓝色；勾选为红色。便于核对回填位置。
+                        </span>
+                    </span>
+                </label>
+                <label class="flex cursor-pointer gap-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 transition hover:border-slate-300 hover:bg-white has-[:checked]:border-slate-400 has-[:checked]:bg-white">
+                    <input type="radio" name="pdf_fill_mode" value="formal" class="mt-1 h-4 w-4 text-slate-700"
+                           {% if pdf_fill_mode == 'formal' %}checked{% endif %}>
+                    <span class="min-w-0">
+                        <span class="block font-medium text-slate-900">正式模式（纯黑）</span>
+                        <span class="mt-1 block text-sm leading-relaxed text-slate-600">
+                            文字与勾选一律黑色，用于对外交付的正式 PDF。
+                        </span>
+                    </span>
+                </label>
+            </div>
+        </section>
+
+        <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-8">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                    <h2 class="text-lg font-semibold text-slate-900">PDF 回填字号</h2>
+                    <p class="mt-1 text-sm text-slate-600">
+                        当前：现场 <strong>{{ site_font_pt }}</strong> pt · 报告 <strong>{{ report_font_pt }}</strong> pt ·
+                        <strong>{{ pdf_font_fit_label }}</strong>
+                    </p>
+                </div>
+                <span class="inline-flex items-center rounded-full bg-sky-50 px-3 py-1 text-xs font-medium text-sky-800 ring-1 ring-sky-200">
+                    五号=10.5 · 小四=12
+                </span>
+            </div>
+
+            <div class="mt-6 grid gap-4 sm:grid-cols-3">
+                <label class="block">
+                    <span class="text-sm font-medium text-slate-800">现场记录基准字号 (pt)</span>
+                    <input type="number" name="site_font_pt" step="0.5" min="5" max="28"
+                           value="{{ site_font_pt }}"
+                           class="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100">
+                    <span class="mt-1 block text-xs text-slate-500">默认五号 10.5</span>
+                </label>
+                <label class="block">
+                    <span class="text-sm font-medium text-slate-800">报告基准字号 (pt)</span>
+                    <input type="number" name="report_font_pt" step="0.5" min="5" max="28"
+                           value="{{ report_font_pt }}"
+                           class="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100">
+                    <span class="mt-1 block text-xs text-slate-500">默认小四 12</span>
+                </label>
+                <label class="block">
+                    <span class="text-sm font-medium text-slate-800">自适应最小字号 (pt)</span>
+                    <input type="number" name="font_min_pt" step="0.5" min="4" max="28"
+                           value="{{ font_min_pt }}"
+                           class="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100">
+                    <span class="mt-1 block text-xs text-slate-500">仅「自适应缩小」时生效</span>
+                </label>
+            </div>
+
+            <div class="mt-6 space-y-4">
+                <label class="flex cursor-pointer gap-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 transition hover:border-sky-200 hover:bg-sky-50/40 has-[:checked]:border-sky-300 has-[:checked]:bg-sky-50/50">
+                    <input type="radio" name="pdf_font_fit" value="auto" class="mt-1 h-4 w-4 text-sky-600"
+                           {% if pdf_font_fit == 'auto' %}checked{% endif %}>
+                    <span class="min-w-0">
+                        <span class="block font-medium text-slate-900">自适应缩小（当前默认）</span>
+                        <span class="mt-1 block text-sm leading-relaxed text-slate-600">
+                            以基准字号为上限；格子偏矮或文字过长时自动缩小（不低于上面的最小字号），避免溢出。
+                        </span>
+                    </span>
+                </label>
+                <label class="flex cursor-pointer gap-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 transition hover:border-amber-200 hover:bg-amber-50/40 has-[:checked]:border-amber-300 has-[:checked]:bg-amber-50/50">
+                    <input type="radio" name="pdf_font_fit" value="fixed" class="mt-1 h-4 w-4 text-amber-600"
+                           {% if pdf_font_fit == 'fixed' %}checked{% endif %}>
+                    <span class="min-w-0">
+                        <span class="block font-medium text-slate-900">固定字号（不缩小）</span>
+                        <span class="mt-1 block text-sm leading-relaxed text-slate-600">
+                            一律用基准字号（现场/报告各自设置）。框不够高时可能裁切或叠出，便于核对「规定字号」效果。
+                        </span>
+                    </span>
+                </label>
+            </div>
+        </section>
+
+        <div class="flex flex-wrap items-center gap-3">
+            <button type="submit"
+                    class="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800">
+                <i class="ri-save-line text-lg"></i>
+                保存 PDF 设置
+            </button>
+            <p class="text-xs text-slate-500">
+                <code class="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-700">{{ pdf_fill_config_path }}</code>
+            </p>
+        </div>
+    </form>
+
+    {# —— LLM API —— #}
+    <form method="post" class="space-y-6">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="save_llm">
+
+        <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-8">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                    <h2 class="text-lg font-semibold text-slate-900">LLM API</h2>
+                    <p class="mt-1 text-sm text-slate-600">
+                        当前：<strong>{{ llm_provider_label }}</strong> ·
+                        <strong>{{ llm_model }}</strong>
+                    </p>
+                </div>
+                <span class="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-800 ring-1 ring-emerald-200">
+                    OCR 铭牌抽取
+                </span>
+            </div>
+
+            <div class="mt-6 space-y-4">
+                <label class="flex cursor-pointer gap-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 transition hover:border-emerald-200 hover:bg-emerald-50/40 has-[:checked]:border-emerald-300 has-[:checked]:bg-emerald-50/50">
+                    <input type="radio" name="llm_provider" value="ollama" class="mt-1 h-4 w-4 text-emerald-600"
+                           {% if llm_provider == 'ollama' %}checked{% endif %}>
+                    <span class="min-w-0">
+                        <span class="block font-medium text-slate-900">Ollama（本地）</span>
+                        <span class="mt-1 block text-sm leading-relaxed text-slate-600">
+                            使用本机 Ollama + outlines 结构化输出。地址示例：<code class="text-xs">http://127.0.0.1:11434</code>
+                        </span>
+                    </span>
+                </label>
+                <label class="flex cursor-pointer gap-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 transition hover:border-violet-200 hover:bg-violet-50/40 has-[:checked]:border-violet-300 has-[:checked]:bg-violet-50/40">
+                    <input type="radio" name="llm_provider" value="openai_compatible" class="mt-1 h-4 w-4 text-violet-600"
+                           {% if llm_provider == 'openai_compatible' %}checked{% endif %}>
+                    <span class="min-w-0">
+                        <span class="block font-medium text-slate-900">OpenAI 兼容 API</span>
+                        <span class="mt-1 block text-sm leading-relaxed text-slate-600">
+                            DeepSeek / vLLM / LM Studio / 云厂商等。填到 <code class="text-xs">.../v1</code> 即可（会自动拼 <code class="text-xs">/chat/completions</code>）。
+                        </span>
+                    </span>
+                </label>
+            </div>
+
+            <div class="mt-6 grid gap-4 sm:grid-cols-2">
+                <label class="block sm:col-span-2">
+                    <span class="text-sm font-medium text-slate-800">API 地址 (base_url)</span>
+                    <input type="text" name="llm_base_url" required value="{{ llm_base_url }}"
+                           placeholder="http://127.0.0.1:11434 或 https://api.deepseek.com/v1"
+                           class="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 font-mono text-sm text-slate-900 shadow-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100">
+                </label>
+                <label class="block">
+                    <span class="text-sm font-medium text-slate-800">模型名</span>
+                    <input type="text" name="llm_model" required value="{{ llm_model }}"
+                           placeholder="qwen3:14b-q4_K_M / deepseek-chat"
+                           class="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 font-mono text-sm text-slate-900 shadow-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100">
+                </label>
+                <label class="block">
+                    <span class="text-sm font-medium text-slate-800">
+                        API Key
+                        {% if llm_api_key_set %}
+                        <span class="ml-1 text-xs font-normal text-emerald-700">（已保存，留空则不改）</span>
+                        {% else %}
+                        <span class="ml-1 text-xs font-normal text-slate-500">（Ollama 通常不需要）</span>
+                        {% endif %}
+                    </span>
+                    <input type="password" name="llm_api_key" value="" autocomplete="new-password"
+                           placeholder="{% if llm_api_key_set %}••••••••（留空保留）{% else %}sk-...{% endif %}"
+                           class="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 font-mono text-sm text-slate-900 shadow-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100">
+                </label>
+                <label class="block">
+                    <span class="text-sm font-medium text-slate-800">Temperature</span>
+                    <input type="number" name="llm_temperature" step="0.1" min="0" max="2"
+                           value="{{ llm_temperature }}"
+                           class="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100">
+                </label>
+                <label class="block">
+                    <span class="text-sm font-medium text-slate-800">最大重试次数</span>
+                    <input type="number" name="llm_max_retries" step="1" min="1" max="8"
+                           value="{{ llm_max_retries }}"
+                           class="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100">
+                </label>
+            </div>
+
+            <label class="mt-4 flex items-start gap-3">
+                <input type="checkbox" name="llm_json_mode" value="1" class="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600"
+                       {% if llm_json_mode %}checked{% endif %}>
+                <span class="text-sm text-slate-700">
+                    OpenAI 兼容模式请求 <code class="text-xs">response_format=json_object</code>
+                    <span class="block text-xs text-slate-500">部分网关不支持时可关闭</span>
+                </span>
+            </label>
+
+            {% if llm_api_key_set %}
+            <label class="mt-3 flex items-start gap-3">
+                <input type="checkbox" name="clear_api_key" value="1" class="mt-1 h-4 w-4 rounded border-slate-300 text-rose-600">
+                <span class="text-sm text-rose-700">清除已保存的 API Key</span>
+            </label>
+            {% endif %}
+
+            <label class="mt-6 block">
+                <span class="text-sm font-medium text-slate-800">Ollama options（JSON）</span>
+                <textarea name="llm_options_json" rows="4"
+                          class="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 font-mono text-xs leading-relaxed text-slate-900 shadow-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100">{{ llm_options_json }}</textarea>
+                <span class="mt-1 block text-xs text-slate-500">仅 Ollama 生效，例如 {"num_gpu":999,"num_ctx":8192}</span>
+            </label>
+        </section>
+
+        <div class="flex flex-wrap items-center gap-3">
+            <button type="submit"
+                    class="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-800">
+                <i class="ri-cpu-line text-lg"></i>
+                保存 LLM API
+            </button>
+            <p class="text-xs text-slate-500">
+                <code class="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-700">{{ llm_config_path }}</code>
+            </p>
+        </div>
+    </form>
+
+    {# —— Prompts —— #}
+    <form method="post" class="space-y-6">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="save_prompts">
+
+        <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-8">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                    <h2 class="text-lg font-semibold text-slate-900">OCR Prompt 模板</h2>
+                    <p class="mt-1 text-sm text-slate-600">
+                        设备铭牌抽取。占位符用花括号原样书写，勿改名。
+                    </p>
+                </div>
+            </div>
+
+            <label class="mt-6 block">
+                <span class="text-sm font-medium text-slate-800">设备铭牌抽取</span>
+                <span class="mt-0.5 block text-xs text-slate-500">
+                    必填占位符：<code>{struct}</code>（输出字段结构）、<code>{md}</code>（OCR 文本）；可选 <code>{source_file_hint}</code>
+                </span>
+                <textarea name="devices_prompt" rows="16" required
+                          class="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 font-mono text-xs leading-relaxed text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-100">{{ devices_prompt }}</textarea>
+            </label>
+        </section>
+
+        <div class="flex flex-wrap items-center gap-3">
+            <button type="submit"
+                    class="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800">
+                <i class="ri-file-text-line text-lg"></i>
+                保存 Prompt
+            </button>
+            <button type="submit" name="action" value="reset_prompts"
+                    class="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
+                    onclick="return confirm('确定恢复内置默认 Prompt？当前自定义内容将被覆盖。');">
+                恢复默认 Prompt
+            </button>
+            <a href="{% url 'dashboard' %}" class="text-sm text-slate-500 hover:text-slate-800">返回首页</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

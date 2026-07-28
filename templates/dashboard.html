@@ -213,6 +213,19 @@
                     <span class="block truncate text-xs text-slate-500">检测仪器台账</span>
                 </span>
             </a>
+            {% endif %}
+            {% if ui_sidebar_show_user_management %}
+            <a href="{% url 'user_list' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-blue-200 hover:bg-blue-50/50">
+                <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
+                    <i class="ri-user-line text-lg"></i>
+                </span>
+                <span class="min-w-0">
+                    <span class="block font-medium text-slate-900">用户管理</span>
+                    <span class="block truncate text-xs text-slate-500">本部门账号与邀请</span>
+                </span>
+            </a>
+            {% endif %}
+            {% if can_access_instrument_database and not ui_sidebar_show_user_management and role_perm.perm_manage_users %}
             <a href="{% url 'user_list' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-blue-200 hover:bg-blue-50/50">
                 <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
                     <i class="ri-user-line text-lg"></i>
@@ -242,6 +255,17 @@
                 <span class="min-w-0">
                     <span class="block font-medium text-slate-900">菜单管理</span>
                     <span class="block truncate text-xs text-slate-500">侧边栏导航</span>
+                </span>
+            </a>
+            {% endif %}
+            {% if ui_show_system_debug_settings %}
+            <a href="{% url 'system_debug_settings' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-amber-200 hover:bg-amber-50/50">
+                <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-600 text-white shadow-sm">
+                    <i class="ri-bug-line text-lg"></i>
+                </span>
+                <span class="min-w-0">
+                    <span class="block font-medium text-slate-900">调试设置</span>
+                    <span class="block truncate text-xs text-slate-500">PDF 回填着色等热更新开关</span>
                 </span>
             </a>
             {% endif %}

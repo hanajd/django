@@ -271,6 +271,40 @@ def classify_inspection_submit_library_file(lf: LibraryFile) -> str:
     return "legacy"
 
 
+def parse_site_record_submit_batch(relative_path: str) -> Optional[Tuple[str, str]]:
+    """
+    从现场记录路径解析同批次委托编号与时间戳。
+    约定：site_records/{委托编号}/{时间戳}/xxx.pdf
+    """
+    parts = [p for p in (relative_path or "").replace("\\", "/").strip("/").split("/") if p]
+    if len(parts) >= 3 and parts[0] == "site_records":
+        code, batch = parts[1].strip(), parts[2].strip()
+        if code and batch:
+            return code, batch
+    return None
+
+
+def list_retained_photos_for_site_record(lf: LibraryFile) -> List[LibraryFile]:
+    """
+    列出与现场记录同提交批次、落库在 photos/ 下的留存照片。
+    不含 signatures/、assets/（签名与布局图等）。
+    """
+    parsed = parse_site_record_submit_batch(getattr(lf, "relative_path", "") or "")
+    if not parsed:
+        return []
+    code, batch = parsed
+    needle = f"inspection_submits/{code}/{batch}/photos/"
+    qs = (
+        LibraryFile.objects.filter(
+            category=LibraryFile.CATEGORY_INSPECTION_SUBMIT,
+            deleted_at__isnull=True,
+            relative_path__startswith=needle,
+        )
+        .order_by("original_name", "id")
+    )
+    return list(qs)
+
+
 def library_disk_dir_and_rel_prefix(category: str) -> Tuple[Path, str]:
     if category == LibraryFile.CATEGORY_UPLOAD:
         return Path(settings.FILE_LIBRARY_UPLOAD_DIR), "uploads"

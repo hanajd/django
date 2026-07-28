@@ -12,7 +12,7 @@
 | **公式选择下拉仅渲染于 `type: computed`** | `dynamic_field_widget.dart` |
 
 更完整的表达式语法见 [`json公式说明.md`](./json公式说明.md)。  
-曲线拟合（`fitBinding` / `fitKind`，R² 为 `number`）见 [`拟合公式前后端对接说明.md`](./拟合公式前后端对接说明.md)。
+曲线拟合（`fitBinding` + `fit(y=...)` 条件公式，主格与 R² 均为 `computed`）见 [`拟合公式前后端对接说明.md`](./拟合公式前后端对接说明.md)。
 
 ---
 
@@ -79,35 +79,16 @@
 
 ---
 
-## 3. 为什么报出值常被导出成 `type: number`？
+## 3. 导出强制：`formulaRules` → `type: computed`
 
-**不是**编辑器「章节公式 → 完成」故意把可选公式改成 `number`。该路径只写 `fieldExpression` / `formulaRules`，并不负责最终前端 `type`。
+历史上 `submitBucket == "testResult"` 会把检测结果格先打成 `number`，导致带 `formulaRules` 的报出值无法出现公式下拉。
 
-真正把防护表检测结果格打成 `number` 的是导出管线：
+**当前规则（已落地）：**
 
-1. **`utils/frontend_schema_rule_engine.py`**  
-   归入 `submitBucket == "testResult"` 的栏位被统一设为：
+1. `apply_formula_rules_to_field_dict`：只要存在 `formulaRules`，**一律** `type = "computed"`（不再用 `type or computed`）。
+2. `frontend_schema_rule_engine` 拼装栏位末尾：若有 `formulaRules` / `fieldExpression` / `fitBinding`，**覆盖** `testResult→number`，再 enrich 条件公式。
 
-   ```text
-   field_obj["type"] = "number"
-   ```
-
-   （注释意图：检测结果按数值渲染与提交。）
-
-2. **`utils/conditional_field_rules.py` → `apply_formula_rules_to_field_dict`**  
-   仅在 `type` 为空时补 `"computed"`：
-
-   ```text
-   field["type"] = field.get("type") or "computed"
-   ```
-
-   若前面已是 `"number"`，**不会**升为 `computed`。
-
-3. 第五章 `apply_protection_field_export_typing` 只调 `precision`，**不会**把报出值改回 `computed`。
-
-因此 CT 等模板里：报出值带 **多条空 `condition` 的 `formulaRules`**，导出却是 **`type: "number"`** → Flutter 计算侧可能锁公式，但 **不画选择下拉** →「前端不让选公式」。
-
-后端在 `chapter5_field_sync._write_manual_report_rules_to_field` 里对 **pdf.fields** 有过 `type → computed` 的写入，但坐标模板主要用编辑器的 `fieldType`（text/check/image），**导出前端 schema 的 `type` 由规则引擎重算**，会被上述 `testResult → number` 覆盖。
+因此凡条件公式栏位（含报出值人工选公式），导出给 Flutter 时 **`type` 必为 `"computed"`**。
 
 ---
 

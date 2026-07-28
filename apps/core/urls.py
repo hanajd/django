@@ -25,8 +25,12 @@ urlpatterns = [
     path('database/devices/checkout-options/', views.database_device_checkout_options, name='database_device_checkout_options'),
     path('users/', views.user_list, name='user_list'),
     path('users/create/', views.user_create, name='user_create'),
+    path('users/invite/create/', views.user_invite_create, name='user_invite_create'),
+    path('users/invite/revoke/', views.user_invite_revoke, name='user_invite_revoke'),
+    path('users/invite/<str:token>/', views.user_invite_register, name='user_invite_register'),
     path('users/<int:user_id>/edit/', views.user_edit, name='user_edit'),
     path('users/<int:user_id>/delete/', views.user_delete, name='user_delete'),
+    path('account/profile/', views.account_profile, name='account_profile'),
     path('account/signatures/', views.signature_manage, name='signature_manage'),
     path('users/<int:user_id>/signatures/', views.signature_manage, name='user_signature_manage'),
     
@@ -41,6 +45,10 @@ urlpatterns = [
     path('menus/create/', views.menu_create, name='menu_create'),
     path('menus/<int:menu_id>/edit/', views.menu_edit, name='menu_edit'),
     path('menus/<int:menu_id>/delete/', views.menu_delete, name='menu_delete'),
+
+    # 超级管理员调试设置（PDF 回填着色等）
+    path('settings/debug/', views.system_debug_settings, name='system_debug_settings'),
+    path('settings/app-ota/', views.app_ota_settings, name='app_ota_settings'),
 
     # 文件库与处理流程
     path('files/', views.file_library, name='file_library'),
@@ -82,6 +90,11 @@ urlpatterns = [
     path('files/<int:pk>/delete/', views.file_library_delete, name='file_library_delete'),
     path('files/batch-delete/', views.file_library_batch_delete, name='file_library_batch_delete'),
     path('files/<int:pk>/preview/', views.file_preview, name='file_preview'),
+    path(
+        'files/<int:pk>/retained-photos/',
+        views.site_record_retained_photos,
+        name='site_record_retained_photos',
+    ),
     path('files/<int:pk>/raw/', views.file_library_raw, name='file_library_raw'),
     path('files/<int:pk>/download/', views.file_library_download, name='file_library_download'),
     path('files/process/', views.process_pipeline, name='process_pipeline'),

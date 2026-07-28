@@ -324,8 +324,23 @@ def deactivate_commission_org_node(org: CommissionOrganization) -> str | None:
         if eq_count:
             return f"该科室下仍有 {eq_count} 台设备，请先删除设备后再删科室"
     if org.level == CommissionOrganization.LEVEL_HOSPITAL:
-        if LibraryProject.objects.filter(commission_org_id=org.pk, is_active=True).exists():
-            return "该医院下仍有关联项目，请先调整或停用相关项目"
+        # 含已停用下级：委托可能仍挂在已删院区/科室上，hospital_root 仍指向本医院
+        tree_ids: list[int] = []
+        pending = [org.pk]
+        seen: set[int] = set()
+        while pending:
+            cur = pending.pop()
+            if cur in seen:
+                continue
+            seen.add(cur)
+            tree_ids.append(cur)
+            pending.extend(
+                CommissionOrganization.objects.filter(parent_id=cur).values_list("pk", flat=True)
+            )
+        if LibraryProject.objects.filter(
+            commission_org_id__in=tree_ids, is_active=True
+        ).exists():
+            return "该医院下仍有关联项目（含挂在已删院区/科室上的委托），请先调整或停用相关项目"
     org.is_active = False
     org.save(update_fields=["is_active", "updated_at"])
     org.contacts.filter(is_active=True).update(is_active=False)

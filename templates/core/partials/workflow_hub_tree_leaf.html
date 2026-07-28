@@ -1,18 +1,37 @@
 {# 树叶子：进度行或文件行 #}
 <div class="px-3 py-2.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
     {% if leaf.kind == 'file' %}
-    <div class="min-w-0">
-        <div class="flex flex-wrap items-center gap-2">
-            <p class="text-sm text-slate-800 break-all">{{ leaf.file.original_name }}</p>
-            {% if leaf.is_latest %}
-            <span class="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800">最新</span>
-            {% elif leaf.is_latest == False %}
-            <span class="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">历史</span>
+    <div class="min-w-0 flex items-start gap-2 flex-1">
+        {% if hub_name == 'report_generate' and tab == 'preview' and can_merge_reports %}
+        <label class="mt-0.5 shrink-0 inline-flex items-center" onclick="event.stopPropagation()">
+            <input type="checkbox" name="ids" value="{{ leaf.file.pk }}" form="hub-merge-reports-form"
+                   class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500">
+        </label>
+        {% endif %}
+        <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-2">
+                <a href="{{ leaf.preview_url }}" target="_blank" rel="noopener"
+                   class="text-sm {% if hub_name == 'report_generate' and tab == 'preview' %}font-medium text-indigo-700 hover:text-indigo-900{% else %}text-slate-800 hover:text-indigo-700{% endif %} hover:underline break-all"
+                   title="单击预览">{{ leaf.display_name|default:leaf.file.original_name }}</a>
+                {% if leaf.is_latest %}
+                <span class="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800">最新</span>
+                {% elif leaf.is_latest == False %}
+                <span class="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">历史</span>
+                {% endif %}
+            </div>
+            {% if leaf.template_name %}
+            <p class="text-[11px] text-slate-500 mt-0.5 break-all" title="任务模板名称">{{ leaf.template_name }}</p>
             {% endif %}
+            <p class="text-[11px] text-slate-400 mt-0.5">{{ leaf.file.created_at|date:"Y-m-d H:i" }} · {{ leaf.file.size|filesizeformat }}</p>
         </div>
-        <p class="text-[11px] text-slate-400 mt-0.5">{{ leaf.file.created_at|date:"Y-m-d H:i" }} · {{ leaf.file.size|filesizeformat }}</p>
     </div>
+    {% if not hub_name or hub_name != 'report_generate' or tab != 'preview' %}
     <div class="flex flex-wrap gap-1.5 shrink-0">
+        {% if hub_name == 'site_records' and leaf.photos_url %}
+        <a href="{{ leaf.photos_url }}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+            <i class="ri-image-line"></i> 留存照片
+        </a>
+        {% endif %}
         <a href="{{ leaf.preview_url }}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-slate-800">
             <i class="ri-eye-line"></i> 预览
         </a>
@@ -20,10 +39,11 @@
             <i class="ri-download-line"></i> 下载
         </a>
     </div>
+    {% endif %}
     {% else %}
     <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-2">
-            <span class="text-sm font-medium text-slate-900">{{ leaf.task_label|default:leaf.task_no|default:"任务" }}</span>
+            <span class="text-sm font-medium text-slate-900 break-all">{{ leaf.display_title|default:leaf.task_label|default:leaf.task_no|default:"任务" }}</span>
             {% if leaf.hub_section == 'audit' %}
             <span class="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-800">审核</span>
             {% elif leaf.hub_section == 'sign' %}
@@ -31,13 +51,24 @@
             {% endif %}
             <span class="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">{{ leaf.stage_label|default:"—" }}</span>
         </div>
-        <p class="text-[11px] text-slate-500 mt-0.5 font-mono">任务 {{ leaf.task_no|default:"—" }}</p>
     </div>
     <div class="flex flex-col items-stretch sm:items-end gap-1.5 shrink-0">
-        {% if hub_name == 'report_generate' %}
-        <a href="{{ leaf.generate_library_url }}" class="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">
-            <i class="ri-file-pdf-line"></i> 去生成报告
-        </a>
+        {% if hub_name == 'report_generate' and tab == 'generate' and can_export_report and leaf.can_export_report %}
+        <form method="post" class="inline" data-report-busy="export"
+              onsubmit="return confirm('确认导出该任务报告？生成 PDF 可能需要数十秒，请勿关闭或刷新页面。');">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="hub_export_report">
+            <input type="hidden" name="project_id" value="{{ leaf.project_id|default:project_id }}">
+            <input type="hidden" name="task_no" value="{{ leaf.task_no }}">
+            <input type="hidden" name="site_library_task_id" value="{{ leaf.site_library_task_id|default:0 }}">
+            <input type="hidden" name="filter_project_id" value="{{ leaf.project_id|default:project_id }}">
+            <input type="hidden" name="filter_task_no" value="">
+            <input type="hidden" name="filter_tab" value="preview">
+            <input type="hidden" name="filter_view" value="{{ view_mode|default:'hospital' }}">
+            <button type="submit" class="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-70">
+                <i class="ri-file-pdf-line"></i> 导出报告
+            </button>
+        </form>
         {% elif hub_name == 'review_sign' %}
         <a href="{{ leaf.report_library_url }}" class="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
             <i class="ri-folder-2-line"></i> 查看报告

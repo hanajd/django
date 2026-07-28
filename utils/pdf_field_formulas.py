@@ -26,6 +26,174 @@ def normalize_pdf_field_id(token: str) -> str:
     return f"f{int(s[1:], 10)}"
 
 
+_FIT_R2_RE = re.compile(r"^fit_r2\(\s*(f\d+)\s*\)$", re.IGNORECASE)
+# 待定系数模型：前端见 fit(...) 即用 fitBinding.x/y 做最小二乘，再代入 a、b 生成方程
+_FIT_MODEL_RE = re.compile(
+    r"^fit\(\s*y\s*=\s*(.+?)\s*\)$",
+    re.IGNORECASE,
+)
+_FIT_MODEL_EXPR_BY_KIND = {
+    "linear": "fit(y=a*x+b)",
+    "log": "fit(y=a*ln(x)+b)",
+    "exp": "fit(y=a*exp(b*x))",
+}
+_FIT_KIND_BY_CANON_MODEL = {
+    "a*x+b": "linear",
+    "a*ln(x)+b": "log",
+    "a*exp(b*x)": "exp",
+}
+
+
+def parse_fit_r2_master_pid(expression: str) -> str:
+    """解析 ``fit_r2(f123)`` 哨兵式，返回规范化主格 pdfFieldId。"""
+    m = _FIT_R2_RE.match(str(expression or "").strip())
+    if not m:
+        return ""
+    return normalize_pdf_field_id(m.group(1))
+
+
+def build_fit_r2_expression(master_pdf_field_id: str) -> str:
+    """兼容旧哨兵；新模板请用 ``build_pearson_r2_expression``。"""
+    pid = normalize_pdf_field_id(str(master_pdf_field_id or ""))
+    return f"fit_r2({pid})" if pid else ""
+
+
+def _canon_fit_model_body(body: str) -> str:
+    s = re.sub(r"\s+", "", str(body or "").strip().lower())
+    s = s.replace("{a}", "a").replace("{b}", "b")
+    s = s.replace("·", "*").replace("×", "*")
+    # 兼容 a*x + b / a*ln(x)+b / a*e^(b*x) 等写法
+    s = s.replace("{\\rm e}", "exp").replace("\\rm e", "exp").replace("e^", "exp")
+    s = re.sub(r"exp\(([^)]+)\)", r"exp(\1)", s)
+    s = s.replace("a*e^(b*x)", "a*exp(b*x)").replace("a*exp(bx)", "a*exp(b*x)")
+    s = s.replace("a*lnx+b", "a*ln(x)+b")
+    return s
+
+
+def build_fit_model_expression(fit_kind: str = "linear") -> str:
+    """按内部 kind 生成前端可直接识别的 ``fit(y=...)`` 模型式。"""
+    kind = str(fit_kind or "linear").strip().lower()
+    return _FIT_MODEL_EXPR_BY_KIND.get(kind, _FIT_MODEL_EXPR_BY_KIND["linear"])
+
+
+def is_fit_model_expression(expression: str) -> bool:
+    """是否为待定系数拟合模型式（含旧哨兵 ``fit_eq()``）。"""
+    raw = str(expression or "").strip()
+    if not raw:
+        return False
+    if raw.lower() == "fit_eq()":
+        return True
+    return bool(_FIT_MODEL_RE.match(raw))
+
+
+def parse_fit_model_kind(expression: str) -> str:
+    """
+    从 ``fit(y=...)`` / 旧 ``fit_eq()`` / 旧 fitKind 兼容串解析内部 kind。
+    仅供后台迁移与 R² Pearson 展开；前端应直接按模型式做最小二乘，不必依赖 kind 枚举。
+    """
+    raw = str(expression or "").strip()
+    if not raw:
+        return ""
+    low = raw.lower()
+    if low == "fit_eq()":
+        return "linear"
+    if low in _FIT_MODEL_EXPR_BY_KIND:
+        return low
+    m = _FIT_MODEL_RE.match(raw)
+    if not m:
+        return ""
+    canon = _canon_fit_model_body(m.group(1))
+    return _FIT_KIND_BY_CANON_MODEL.get(canon, "")
+
+
+def migrate_fit_rule_expression(
+    expression: str = "",
+    *,
+    fit_kind: str = "",
+) -> str:
+    """
+    将旧 ``fitKind`` + ``fit_eq()`` 迁成 ``fit(y=...)``；
+    已是模型式则规范化空白后返回。
+    """
+    kind = str(fit_kind or "").strip().lower()
+    expr = str(expression or "").strip()
+    # 优先用显式 fitKind（旧数据 expression 常为 fit_eq()）
+    if kind in _FIT_MODEL_EXPR_BY_KIND and (not expr or expr.lower() == "fit_eq()"):
+        return build_fit_model_expression(kind)
+    parsed = parse_fit_model_kind(expr)
+    if parsed:
+        return build_fit_model_expression(parsed)
+    if expr.lower() == "fit_eq()":
+        return build_fit_model_expression("linear")
+    return expr
+
+
+def build_pearson_r2_expression(
+    x_ids: List[str],
+    y_ids: List[str],
+    *,
+    fit_kind: str = "linear",
+    fit_model: str = "",
+) -> str:
+    """
+    可直接求值的 Pearson R²（与线性/对数/指数拟合的变换空间一致）：
+
+    - linear / fit(y=a*x+b): (x, y)
+    - log / fit(y=a*ln(x)+b): (ln(x), y)
+    - exp / fit(y=a*exp(b*x)): (x, ln(y))
+
+    R² = (n·Σxy − Σx·Σy)² / ((n·Σx² − (Σx)²)·(n·Σy² − (Σy)²))
+    """
+    kind = parse_fit_model_kind(fit_model) or str(fit_kind or "linear").strip().lower()
+    if kind not in ("linear", "log", "exp"):
+        kind = "linear"
+    xs: List[str] = []
+    ys: List[str] = []
+    n_in = min(len(x_ids or []), len(y_ids or []))
+    for i in range(n_in):
+        xid = normalize_pdf_field_id(str(x_ids[i] or ""))
+        yid = normalize_pdf_field_id(str(y_ids[i] or ""))
+        if not xid or not yid:
+            continue
+        if kind == "log":
+            xs.append(f"ln({xid})")
+            ys.append(yid)
+        elif kind == "exp":
+            xs.append(xid)
+            ys.append(f"ln({yid})")
+        else:
+            xs.append(xid)
+            ys.append(yid)
+    n = len(xs)
+    if n < 2:
+        return ""
+    sx = "+".join(xs)
+    sy = "+".join(ys)
+    sxy = "+".join(f"({xs[i]})*({ys[i]})" for i in range(n))
+    sx2 = "+".join(f"({xs[i]})*({xs[i]})" for i in range(n))
+    sy2 = "+".join(f"({ys[i]})*({ys[i]})" for i in range(n))
+    num = f"(({n})*({sxy})-({sx})*({sy}))"
+    den = f"((({n})*({sx2})-({sx})*({sx}))*(({n})*({sy2})-({sy})*({sy})))"
+    return f"(({num})*({num})/{den})"
+
+
+def resolve_fit_r2_master_pid(field: Mapping[str, Any]) -> str:
+    """优先从 ``fieldExpression`` / ``formula`` 的 fit_r2(...) 解析；旧数据回退 fitConfigRef。"""
+    if not isinstance(field, Mapping):
+        return ""
+    for key in ("fieldExpression", "formula", "pdfFieldExpression"):
+        pid = parse_fit_r2_master_pid(str(field.get(key) or ""))
+        if pid:
+            return pid
+    src = field.get("source") if isinstance(field.get("source"), Mapping) else {}
+    if isinstance(src, Mapping):
+        for key in ("pdfFieldExpression", "fieldExpression", "formula"):
+            pid = parse_fit_r2_master_pid(str(src.get(key) or ""))
+            if pid:
+                return pid
+    return normalize_pdf_field_id(str(field.get("fitConfigRef") or src.get("fitConfigRef") or ""))
+
+
 def extract_pdf_field_refs(expression: str) -> List[str]:
     """从公式串中提取所有 f+数字 占位符（规范化）。"""
     out: Set[str] = set()
@@ -86,7 +254,10 @@ def remap_pdf_field_row_formula_metadata(field: Dict[str, Any], id_map: Mapping[
             fb["r2FieldId"] = id_map.get(r2, r2)
     fit_ref = normalize_pdf_field_id(str(field.get("fitConfigRef") or ""))
     if fit_ref:
-        field["fitConfigRef"] = id_map.get(fit_ref, fit_ref)
+        # 旧键迁移：改写为 fit_r2，不再保留 fitConfigRef
+        field["fieldExpression"] = build_fit_r2_expression(id_map.get(fit_ref, fit_ref))
+        field.pop("fitConfigRef", None)
+    # 已有 fit_r2(...) 由上面的 fieldExpression remap 处理
     jct = field.get("judgmentCriteriaByTestType")
     if isinstance(jct, dict):
         for sub in ("acceptance", "status"):
@@ -243,6 +414,11 @@ def collect_merged_field_formulas_dict(template_obj: Mapping[str, Any]) -> Dict[
             expr = str(row.get("fieldExpression") or row.get("pdfFieldExpression") or "").strip()
             if pid and expr:
                 out[pid] = expr
+            elif pid:
+                # 旧数据仅有 fitConfigRef：补成 fit_r2(主格)
+                r2_master = resolve_fit_r2_master_pid(row)
+                if r2_master:
+                    out[pid] = build_fit_r2_expression(r2_master)
     for k, v in _collect_form_schema_field_formulas(template_obj).items():
         if k not in out:
             out[k] = v
@@ -286,6 +462,15 @@ def _collect_pdf_field_metadata_by_id(template_obj: Mapping[str, Any]) -> Dict[s
         mean_ref = str(row.get("chapterMeanPdfFieldId") or "").strip()
         if mean_ref:
             chunk["chapterMeanPdfFieldId"] = normalize_pdf_field_id(mean_ref) or mean_ref
+        fb = row.get("fitBinding")
+        if isinstance(fb, dict) and (fb.get("x") or fb.get("y") or fb.get("r2FieldId")):
+            chunk["fitBinding"] = copy.deepcopy(fb)
+        r2_master = resolve_fit_r2_master_pid(row)
+        if r2_master:
+            chunk["fieldExpression"] = build_fit_r2_expression(r2_master)
+        display_format = str(row.get("displayFormat") or "").strip()
+        if display_format:
+            chunk["displayFormat"] = display_format
         if chunk:
             meta[pid] = {**meta.get(pid, {}), **chunk}
     return meta
@@ -444,6 +629,27 @@ def embed_pdf_field_formulas_into_frontend_fields(
         if mean_ref:
             fld["chapterMeanPdfFieldId"] = mean_ref
             src["chapterMeanPdfFieldId"] = mean_ref
+        fb = extra.get("fitBinding")
+        if isinstance(fb, dict) and (fb.get("x") or fb.get("y") or fb.get("r2FieldId")):
+            fld["fitBinding"] = copy.deepcopy(fb)
+            src["fitBinding"] = copy.deepcopy(fb)
+            fld["type"] = "computed"
+            if not str(fld.get("displayFormat") or "").strip():
+                fld["displayFormat"] = str(extra.get("displayFormat") or "latex").strip() or "latex"
+        r2_expr = str(extra.get("fieldExpression") or "").strip()
+        r2_master = parse_fit_r2_master_pid(r2_expr) or resolve_fit_r2_master_pid(extra)
+        if r2_master and not isinstance(fld.get("fitBinding"), dict):
+            expr = build_fit_r2_expression(r2_master)
+            fld["fieldExpression"] = expr
+            fld["formula"] = expr
+            src["pdfFieldExpression"] = expr
+            fld["type"] = "computed"
+            fld.pop("fitConfigRef", None)
+            src.pop("fitConfigRef", None)
+        display_format = str(extra.get("displayFormat") or "").strip()
+        if display_format:
+            fld["displayFormat"] = display_format
+            src["displayFormat"] = display_format
         try:
             from utils.conditional_field_rules import apply_field_logic_connectors_for_frontend_export
 

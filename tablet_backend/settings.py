@@ -43,7 +43,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',  # CORS 中间件
-    'django.middleware.gzip.GZipMiddleware',
+    'apps.api.middleware.SmartGZipMiddleware',  # APK 等二进制跳过 gzip，保留 Content-Length
     'django.middleware.common.CommonMiddleware',
     'django.middleware.http.ConditionalGetMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -183,6 +183,10 @@ MINERU_BACKEND = os.environ.get('MINERU_BACKEND', 'pipeline')
 # MINERU_CUDA_VISIBLE_DEVICES、OLLAMA_PREFERRED_GPU_INDEX、PIPELINE_OLLAMA_NUM_CTX_* 等）。
 OLLAMA_HOST = os.environ.get('OLLAMA_HOST', 'http://127.0.0.1:11434')
 
+# Android APK OTA（版本检查 / 下载，与业务隔离）
+APP_OTA_APK_DIR = Path(os.environ.get("APP_OTA_APK_DIR", str(MEDIA_ROOT / "apk")))
+APP_OTA_RUNTIME_CONFIG_FILE = BASE_DIR / "app_ota_runtime.json"
+
 # 默认主键类型
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -230,6 +234,12 @@ SIMPLE_JWT = {
 
 # 热更新 JWT 有效期：编辑此 JSON 后无需重启（见 apps/api/jwt_runtime_config.py）
 JWT_RUNTIME_CONFIG_FILE = BASE_DIR / "jwt_runtime.json"
+
+# PDF 回填着色：test=彩色（调试），formal=纯黑（正式）；见 apps/core/pdf_fill_runtime_config.py
+PDF_FILL_RUNTIME_CONFIG_FILE = BASE_DIR / "pdf_fill_runtime.json"
+
+# OCR/管线 LLM：provider、model、API、prompt 模板；见 apps/core/llm_runtime_config.py
+LLM_RUNTIME_CONFIG_FILE = BASE_DIR / "llm_runtime.json"
 
 # CORS 配置（允许跨域访问）
 CORS_ALLOWED_ORIGINS = [

@@ -24,29 +24,45 @@ def _local_dt(dt=None):
     return timezone.localtime(dt)
 
 
-def max_project_serial_for_year_suffix(yy: str) -> int:
-    """当年已占用最大流水号（仅统计符合 YY#### 的 code）。"""
+def used_project_serials_for_year_suffix(yy: str) -> set[int]:
+    """当年已占用的标准委托编号流水集合（含停用项目，避免复用冲突）。"""
     yy = str(yy or "").strip()
     if len(yy) != 2 or not yy.isdigit():
-        return 0
-    max_seq = 0
+        return set()
+    used: set[int] = set()
     for code in LibraryProject.objects.filter(code__startswith=yy).values_list("code", flat=True):
         s = str(code or "").strip()
         if PROJECT_CODE_RE.fullmatch(s) and s[:2] == yy:
-            max_seq = max(max_seq, int(s[2:]))
-    return max_seq
+            used.add(int(s[2:]))
+    return used
+
+
+def max_project_serial_for_year_suffix(yy: str) -> int:
+    """当年已占用最大流水号（仅统计符合 YY#### 的 code）。"""
+    used = used_project_serials_for_year_suffix(yy)
+    return max(used) if used else 0
+
+
+def first_free_project_serial_for_year_suffix(yy: str) -> int:
+    """
+    当年第一个未占用流水（优先填补空洞，避免手动跳号后自动编号继续飙高）。
+    """
+    used = used_project_serials_for_year_suffix(yy)
+    for seq in range(1, _MAX_PROJECT_SERIAL + 1):
+        if seq not in used:
+            return seq
+    raise ValueError(f"年度委托编号流水号已用尽（{yy} 已超过 {_MAX_PROJECT_SERIAL}）")
 
 
 def generate_library_project_code(*, now=None) -> str:
     """
-    委托编号：年份后两位 + 四位流水（0001–9999），按自然年递增。
-    例：2026 年第 1 个 → ``260001``。
+    委托编号：年份后两位 + 四位流水（0001–9999）。
+    按自然年取**最小未占用**流水，充分利用编号空隙。
+    例：已有 260001、260003 → 下一号 ``260002``。
     """
     dt = _local_dt(now)
     yy = dt.strftime("%y")
-    next_seq = max_project_serial_for_year_suffix(yy) + 1
-    if next_seq > _MAX_PROJECT_SERIAL:
-        raise ValueError(f"年度委托编号流水号已用尽（{yy} 已超过 {_MAX_PROJECT_SERIAL}）")
+    next_seq = first_free_project_serial_for_year_suffix(yy)
     return f"{yy}{next_seq:04d}"
 
 
@@ -116,6 +132,133 @@ def suggest_next_project_code(*, now=None) -> str:
         return generate_library_project_code(now=now)
     except ValueError:
         return ""
+
+
+def build_commission_code_inventory(*, year_yy: str = "", now=None) -> dict:
+    """
+    委托编号利用情况（供行政「委托编号管理」窗口）。
+
+    - 标准号：YY####（含停用）
+    - 空隙：1..max 中未使用的流水
+    - 非标准号：手动/历史格式，单独列出
+    """
+    dt = _local_dt(now)
+    yy = str(year_yy or "").strip()
+    if not (len(yy) == 2 and yy.isdigit()):
+        yy = dt.strftime("%y")
+    year_full = 2000 + int(yy)
+
+    used = used_project_serials_for_year_suffix(yy)
+    max_serial = max(used) if used else 0
+    gaps: list[int] = []
+    if max_serial:
+        for seq in range(1, max_serial + 1):
+            if seq not in used:
+                gaps.append(seq)
+
+    try:
+        next_seq = first_free_project_serial_for_year_suffix(yy)
+        next_code = f"{yy}{next_seq:04d}"
+    except ValueError:
+        next_code = ""
+
+    standard_rows: list[dict] = []
+    for p in (
+        LibraryProject.objects.filter(code__startswith=yy)
+        .select_related("commission_org", "primary_responsible", "created_by")
+        .order_by("code", "id")
+    ):
+        code = str(p.code or "").strip()
+        if not (PROJECT_CODE_RE.fullmatch(code) and code[:2] == yy):
+            continue
+        serial = int(code[2:])
+        standard_rows.append(
+            {
+                "pk": p.pk,
+                "code": code,
+                "serial": serial,
+                "name": (p.name or "").strip() or "—",
+                "is_active": bool(p.is_active),
+                "org_label": (
+                    p.commission_org.full_display_name
+                    if p.commission_org_id
+                    else (p.commission_organization or "—")
+                ),
+                "created_at": p.created_at,
+                "created_by": (
+                    p.created_by.username if getattr(p, "created_by_id", None) else ""
+                ),
+                "kind": "standard",
+            }
+        )
+
+    other_rows: list[dict] = []
+    for p in (
+        LibraryProject.objects.exclude(code="")
+        .select_related("commission_org", "created_by")
+        .order_by("-updated_at", "-id")[:400]
+    ):
+        code = str(p.code or "").strip()
+        if PROJECT_CODE_RE.fullmatch(code) and code[:2] == yy:
+            continue
+        kind = "legacy8" if LEGACY_PROJECT_CODE_RE.fullmatch(code) else "manual"
+        other_rows.append(
+            {
+                "pk": p.pk,
+                "code": code,
+                "serial": None,
+                "name": (p.name or "").strip() or "—",
+                "is_active": bool(p.is_active),
+                "org_label": (
+                    p.commission_org.full_display_name
+                    if p.commission_org_id
+                    else (p.commission_organization or "—")
+                ),
+                "created_at": p.created_at,
+                "created_by": (
+                    p.created_by.username if getattr(p, "created_by_id", None) else ""
+                ),
+                "kind": kind,
+            }
+        )
+
+    gap_preview = [f"{yy}{g:04d}" for g in gaps[:40]]
+    warnings: list[str] = []
+    if max_serial and gaps:
+        warnings.append(
+            f"{year_full} 年标准编号最大流水为 {max_serial:04d}，已用 {len(used)} 个，"
+            f"中间空缺 {len(gaps)} 个（自动编号将优先填补最小空号）。"
+        )
+    if max_serial >= 300 and len(used) < max_serial * 0.5:
+        warnings.append(
+            "最大流水明显高于实际占用数，常见原因是手动填写了较大编号；"
+            "可用本窗口将高号改回空缺号，或继续依赖自动填补空号。"
+        )
+
+    # 可选年份：有标准编号的年份 + 当前年
+    year_options: list[str] = []
+    seen_yy: set[str] = set()
+    for code in LibraryProject.objects.values_list("code", flat=True):
+        s = str(code or "").strip()
+        if PROJECT_CODE_RE.fullmatch(s):
+            seen_yy.add(s[:2])
+    seen_yy.add(dt.strftime("%y"))
+    year_options = sorted(seen_yy, reverse=True)
+
+    return {
+        "yy": yy,
+        "year": year_full,
+        "year_options": year_options,
+        "used_count": len(used),
+        "max_serial": max_serial,
+        "gap_count": len(gaps),
+        "gap_codes": gap_preview,
+        "gap_truncated": len(gaps) > len(gap_preview),
+        "next_code": next_code,
+        "standard_rows": standard_rows,
+        "other_rows": other_rows,
+        "warnings": warnings,
+    }
 
 
 def project_public_id(project: LibraryProject | None) -> str:

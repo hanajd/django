@@ -34,13 +34,18 @@
                     <div class="min-w-0 flex-1">
                         <div class="flex flex-wrap items-center gap-2">
                             <span class="text-sm font-semibold text-slate-900">{{ group.title }}</span>
+                            {% if group.is_ghost %}
+                            <span class="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900">已停用</span>
+                            {% endif %}
                             {% if group.attention %}
                             <span class="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-800">{{ group.badge_label }}</span>
                             {% else %}
                             <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">{{ group.badge_label }}</span>
                             {% endif %}
                         </div>
-                        <p class="text-xs text-slate-500 mt-0.5">{{ group.commissions|length }} 个委托</p>
+                        <p class="text-xs text-slate-500 mt-0.5">
+                            {% if group.is_ghost %}医院信息管理中已停用或删除的单位；下列委托仅供查阅历史资料 · {% endif %}{{ group.commissions|length }} 个委托
+                        </p>
                     </div>
                 </summary>
                 <ul class="hub-tree-children hub-tree-l2-wrap">
@@ -54,6 +59,9 @@
                                         <span class="font-semibold">{{ c.code }}</span>
                                         <span class="text-slate-500 font-normal"> · {{ c.name }}</span>
                                     </p>
+                                    {% if c.legacy_hospital_name %}
+                                    <p class="text-[11px] text-amber-800/80 mt-0.5">原单位：{{ c.legacy_hospital_name }}</p>
+                                    {% endif %}
                                     <p class="text-xs {% if c.attention %}text-indigo-700 font-medium{% else %}text-slate-500{% endif %} mt-0.5">{{ c.badge_label }}</p>
                                 </div>
                             </summary>

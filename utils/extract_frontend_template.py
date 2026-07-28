@@ -147,7 +147,8 @@ def extract_frontend_template(template_obj: dict[str, Any]) -> dict[str, Any]:
 
     bindings = template_obj.get("bindings") if isinstance(template_obj.get("bindings"), dict) else {}
 
-    use_llm = str(os.environ.get("ENABLE_LLM_FRONTEND_TEMPLATE_DRAFT", "1")).strip().lower() in {"1", "true", "yes", "on"}
+    # 前端模板 LLM 草稿默认关闭（有待完善）；需要时 export ENABLE_LLM_FRONTEND_TEMPLATE_DRAFT=1
+    use_llm = str(os.environ.get("ENABLE_LLM_FRONTEND_TEMPLATE_DRAFT", "0")).strip().lower() in {"1", "true", "yes", "on"}
     if use_llm and not steps and pdf_fields:
         llm_payload = generate_frontend_template_with_ollama(template_obj, source_file_hint=1)
         llm_steps = llm_payload.get("steps") if isinstance(llm_payload.get("steps"), list) else []

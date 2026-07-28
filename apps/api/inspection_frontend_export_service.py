@@ -8,11 +8,13 @@ from typing import Any, Dict, Optional, Tuple
 from django.utils import timezone
 
 from apps.api.inspection_pdf_service import (
-    _build_filled_template_fields_for_task,
     _resolve_library_task_for_task_no,
     display_inspected_no_for_fill,
 )
-from apps.api.inspection_report_make import merge_task_template_bound_instruments_into_payload
+from apps.api.inspection_report_make import (
+    _build_filled_template_fields_for_task,
+    merge_task_template_bound_instruments_into_payload,
+)
 from apps.api.inspection_submit_payload_service import consolidate_submit_signatures, normalize_floor_plan_dynamic_data
 DEFAULT_REPORT_TYPE = "xray_fluoroscopy"
 from apps.core import pipeline_service

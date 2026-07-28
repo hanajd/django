@@ -1,0 +1,136 @@
+{% extends 'base.html' %}
+
+{% block page_title %}App 更新（OTA）{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-3xl space-y-6">
+    <div>
+        <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">系统管理 · 超级管理员</p>
+        <h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-900">Android App 在线更新</h1>
+        <p class="mt-1 text-sm leading-relaxed text-slate-600">
+            上传一键编译产物 <strong>zip</strong>（内含 APK + JSON），系统自动落盘并写入版本接口。
+            App 通过 <code class="rounded bg-slate-100 px-1 text-xs">GET /api/v2/app/version</code> 检查更新；
+            下载路径为 <code class="rounded bg-slate-100 px-1 text-xs">GET /api/v2/app/apk/…</code>（含 Content-Length）。
+        </p>
+    </div>
+
+    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-8">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+                <h2 class="text-lg font-semibold text-slate-900">当前发布状态</h2>
+                <p class="mt-1 text-sm text-slate-600">
+                    {% if ota_ready %}
+                    已启用推送：<strong>{{ ota.version }}</strong> · build <strong>{{ ota.build_number }}</strong>
+                    {% elif ota.filename %}
+                    已有包但<strong>未启用</strong>推送：{{ ota.version }} · build {{ ota.build_number }}
+                    {% else %}
+                    尚未发版
+                    {% endif %}
+                </p>
+            </div>
+            <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium
+                {% if ota_ready %}bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200
+                {% else %}bg-slate-100 text-slate-700 ring-1 ring-slate-200{% endif %}">
+                {% if ota_ready %}推送中{% else %}未推送{% endif %}
+            </span>
+        </div>
+        {% if ota.filename %}
+        <dl class="mt-4 grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
+            <div><dt class="text-xs text-slate-500">文件</dt><dd class="font-mono text-xs break-all">{{ ota.filename }}</dd></div>
+            <div><dt class="text-xs text-slate-500">大小</dt><dd>{{ ota.file_size }} 字节</dd></div>
+            <div class="sm:col-span-2"><dt class="text-xs text-slate-500">SHA256</dt><dd class="font-mono text-xs break-all">{{ ota.sha256|default:"—" }}</dd></div>
+            <div class="sm:col-span-2"><dt class="text-xs text-slate-500">下载路径</dt><dd class="font-mono text-xs break-all">{{ ota_download_path }}</dd></div>
+            {% if ota.release_notes %}
+            <div class="sm:col-span-2"><dt class="text-xs text-slate-500">更新说明</dt><dd class="whitespace-pre-wrap">{{ ota.release_notes }}</dd></div>
+            {% endif %}
+        </dl>
+        {% endif %}
+        <p class="mt-4 text-[11px] text-slate-400">配置：{{ ota_config_path }} · 目录：{{ ota_apk_dir }}</p>
+    </section>
+
+    <form method="post" enctype="multipart/form-data" class="space-y-6">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="publish">
+
+        <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-8">
+            <h2 class="text-lg font-semibold text-slate-900">发版</h2>
+            <p class="mt-1 text-sm text-slate-600">
+                推荐上传
+                <code class="rounded bg-slate-100 px-1 text-xs">放射安全检测报告-v版本-build构建号.zip</code>
+                ；解压后 APK 原名保留，JSON 中的 version / build_number / file_size / release_notes 自动录入。
+                <span class="block mt-1 text-xs text-slate-500">换包时 build_number 必须大于当前值。仅改说明可不传文件。上传 zip 时以包内 JSON 为准（会覆盖下方版本字段）。</span>
+            </p>
+
+            <label class="mt-6 block">
+                <span class="text-sm font-medium text-slate-800">发版包（zip 推荐，或单独 .apk）</span>
+                <input type="file" name="package_file"
+                       accept=".zip,.apk,application/zip,application/vnd.android.package-archive"
+                       class="mt-1.5 block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-medium file:text-slate-800 hover:file:bg-slate-200">
+                <span class="mt-1 block text-xs text-slate-500">
+                    zip 内需含同名单的 .apk 与 .json；JSON 里的 download_url 仅取文件名，实际下载地址按 App 访问的 Host 生成。
+                </span>
+            </label>
+
+            <div class="mt-6 grid gap-4 sm:grid-cols-2">
+                <label class="block">
+                    <span class="text-sm font-medium text-slate-800">版本号 version</span>
+                    <input type="text" name="version" placeholder="上传 zip 可留空自动填入"
+                           value="{{ ota.version }}"
+                           class="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-100">
+                </label>
+                <label class="block">
+                    <span class="text-sm font-medium text-slate-800">构建号 build_number</span>
+                    <input type="number" name="build_number" min="1" step="1"
+                           placeholder="上传 zip 可留空"
+                           value="{% if ota.build_number %}{{ ota.build_number }}{% endif %}"
+                           class="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-100">
+                </label>
+            </div>
+
+            <label class="mt-4 block">
+                <span class="text-sm font-medium text-slate-800">更新说明 release_notes</span>
+                <textarea name="release_notes" rows="3" placeholder="上传 zip 时可自动从 JSON 填入"
+                          class="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-100">{{ ota.release_notes }}</textarea>
+            </label>
+
+            <label class="mt-4 block">
+                <span class="text-sm font-medium text-slate-800">自定义 APK 文件名（仅单独上传 .apk 时可选）</span>
+                <input type="text" name="apk_filename" placeholder="默认使用上传文件原名（支持中文）"
+                       class="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-sm shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-100">
+            </label>
+
+            <div class="mt-4 flex flex-wrap gap-6 text-sm">
+                <label class="inline-flex items-center gap-2">
+                    <input type="checkbox" name="enabled" value="1" class="rounded border-slate-300 text-slate-800"
+                           {% if ota.enabled or not ota.filename %}checked{% endif %}>
+                    <span>启用推送（App 可检测到更新）</span>
+                </label>
+                <label class="inline-flex items-center gap-2">
+                    <input type="checkbox" name="force_update" value="1" class="rounded border-slate-300 text-slate-800"
+                           {% if ota.force_update %}checked{% endif %}>
+                    <span>强制更新（预留；zip 未勾选时以 JSON 为准）</span>
+                </label>
+            </div>
+
+            <div class="mt-6 flex flex-wrap gap-3">
+                <button type="submit"
+                        class="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800">
+                    保存发版
+                </button>
+                <a href="{% url 'dashboard' %}" class="inline-flex items-center text-sm text-slate-500 hover:text-slate-800">返回首页</a>
+            </div>
+        </section>
+    </form>
+
+    {% if ota.filename %}
+    <form method="post" onsubmit="return confirm('确定关闭更新推送？');">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="disable">
+        <button type="submit"
+                class="inline-flex items-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+            关闭推送（保留 APK）
+        </button>
+    </form>
+    {% endif %}
+</div>
+{% endblock %}

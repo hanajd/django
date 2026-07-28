@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "version": "0.1.17",
+  "build_number": 17,
+  "filename": "放射安全检测报告-v0.1.17-build17.apk",
+  "file_size": 86715663,
+  "sha256": "8fbc09e2450975d73dbd77cb20af417c2b0f93db8d37080283c5ed73cce9f87c",
+  "release_notes": "feat: 实现Android APK在线更新功能",
+  "force_update": false
+}

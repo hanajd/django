@@ -1,5 +1,6 @@
 {
   "dependencies": {
-    "driver.js": "^1.4.0"
+    "driver.js": "^1.4.0",
+    "mathjax-full": "^3.2.2"
   }
 }

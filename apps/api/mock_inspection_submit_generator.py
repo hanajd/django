@@ -622,7 +622,7 @@ def _field_should_skip_mock_fill(field: dict) -> bool:
 
 
 def _field_precision(field: dict | None = None) -> int:
-    """栏位 `precision` 优先；第五章/公式计算栏默认 3；其余模拟默认 2。"""
+    """栏位 `precision` 优先；未配置时默认 2。"""
     if isinstance(field, dict) and field.get("precision") not in (None, ""):
         try:
             return max(0, int(field.get("precision")))

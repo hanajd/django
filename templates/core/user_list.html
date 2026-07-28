@@ -8,7 +8,7 @@
         <div>
             <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">系统管理</p>
             <h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-900">用户列表</h1>
-            <p class="mt-1 text-sm text-slate-600">{% if is_coordinator_user_list %}创建与管理检测流程岗位账号{% else %}搜索、编辑账号与角色分配{% endif %}</p>
+            <p class="mt-1 text-sm text-slate-600">{% if is_coordinator_user_list %}创建与管理检测流程岗位账号{% elif is_dept_director_user_list %}管理本部门员工；可发邀请链接让员工自助注册{% else %}搜索、编辑账号与角色分配{% endif %}</p>
         </div>
         <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
             <form method="get" class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
@@ -22,12 +22,41 @@
                     搜索
                 </button>
             </form>
+            {% if can_create_invite_link %}
+            <form method="post" action="{% url 'user_invite_create' %}" class="inline">
+                {% csrf_token %}
+                <input type="hidden" name="ttl_days" value="7">
+                <button type="submit" class="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-medium text-emerald-900 shadow-sm transition hover:bg-emerald-100">
+                    <i class="ri-link"></i>
+                    生成邀请链接
+                </button>
+            </form>
+            {% endif %}
             <a id="guide-user-create" href="{% url 'user_create' %}" class="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700">
                 <i class="ri-user-add-line"></i>
                 创建用户
             </a>
         </div>
     </div>
+
+    {% if can_create_invite_link and active_invite_url %}
+    <div class="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 text-sm text-emerald-950">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="min-w-0 flex-1">
+                <p class="font-medium">当前有效邀请链接</p>
+                <p class="mt-1 break-all font-mono text-xs text-emerald-900/90">{{ active_invite_url }}</p>
+                {% if active_invite_expires %}
+                <p class="mt-1 text-xs text-emerald-800/80">有效期至 {{ active_invite_expires|date:"Y-m-d H:i" }}</p>
+                {% endif %}
+            </div>
+            <form method="post" action="{% url 'user_invite_revoke' %}">
+                {% csrf_token %}
+                <button type="submit" class="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-red-700 ring-1 ring-red-200 hover:bg-red-50"
+                        onclick="return confirm('作废当前邀请链接？');">作废</button>
+            </form>
+        </div>
+    </div>
+    {% endif %}
 
     <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ring-1 ring-slate-900/[0.04]">
         <div class="overflow-x-auto">
@@ -38,6 +67,7 @@
                         <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">邮箱</th>
                         <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">姓名</th>
                         <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">手机</th>
+                        <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">工号</th>
                         <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">{% if is_coordinator_user_list %}岗位{% else %}角色{% endif %}</th>
                         <th class="px-5 py-3.5 text-xs font-semibold uppercase tracking-wide text-slate-500">状态</th>
                         <th class="px-5 py-3.5 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">操作</th>
@@ -57,6 +87,7 @@
                         <td class="whitespace-nowrap px-5 py-4 text-slate-600">{{ user.email|default:"—" }}</td>
                         <td class="whitespace-nowrap px-5 py-4 text-slate-800">{{ user.first_name }} {{ user.last_name }}</td>
                         <td class="whitespace-nowrap px-5 py-4 text-slate-600">{{ user.profile.phone|default:"—" }}</td>
+                        <td class="whitespace-nowrap px-5 py-4 text-slate-600">{{ user.profile.employee_no|default:"—" }}</td>
                         <td class="whitespace-nowrap px-5 py-4">
                             {% if user.profile.role %}
                             <span class="inline-flex rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-medium text-violet-800">{{ user.profile.role.name }}</span>
@@ -87,7 +118,7 @@
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="7" class="px-5 py-16 text-center">
+                        <td colspan="8" class="px-5 py-16 text-center">
                             <div class="mx-auto flex max-w-sm flex-col items-center text-slate-500">
                                 <span class="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
                                     <i class="ri-user-unfollow-line text-2xl"></i>
