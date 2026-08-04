@@ -128,13 +128,15 @@ round(min(f1,f2),1)~round(max(f1,f2),1)
 | 函数 | 说明 |
 |------|------|
 | `max(f1,f2)` / `min` | 最大 / 最小 |
+| `max_abs(f1,f2,f3)` | 绝对值最大的原数（保留正负；等同 `max(xs, key=abs)`） |
 | `sum` / `avg` | 求和 / 平均 |
 | `std` / `stdev` / `stddev` | 样本标准差（n-1） |
 | `var` / `variance` | 样本方差 |
 | `median` / `count` | 中位数 / 有效数值个数 |
 | `round(x, n)` | 四舍五入 |
 | `abs` / `parseNum` | 绝对值 / 从带单位文本取数 |
-| `ln` / `log` | 自然对数（拟合 R² 对数/指数变换用） |
+| `ln` / `log` | 自然对数（拟合 R² / 反算展开用） |
+| `exp` | 自然指数（对数拟合反算、指数模型系数展开用） |
 | `sqrt` | 平方根 |
 | `if(c,a,b)` | 条件取值 |
 | `coalesce` / `isEmpty` | 空值处理 |

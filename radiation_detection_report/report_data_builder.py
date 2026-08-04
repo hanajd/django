@@ -663,24 +663,23 @@ def _report_value_mapping(
 def _format_computed_report_value(raw: Any, field: Optional[Mapping[str, Any]]) -> str:
     if raw is None:
         return ""
+    try:
+        from radiation_detection_report.chapter5_field_sync import (
+            format_protection_cell_display,
+            protection_numeric_cell_kind,
+        )
+
+        kind = protection_numeric_cell_kind(field) if isinstance(field, Mapping) else ""
+        if kind in ("mean", "report", "reading", "other"):
+            s = format_protection_cell_display(raw, field if isinstance(field, dict) else None, fixed=True)
+            return "" if s == "/" else s
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            return format_protection_cell_display(raw, field if isinstance(field, dict) else None, fixed=True)
+    except ImportError:
+        pass
     if isinstance(raw, str):
         s = _norm(raw)
         return "" if s == "/" else s
-    try:
-        from radiation_detection_report.chapter5_field_sync import (
-            field_is_protection_chapter_numeric_cell,
-            format_protection_numeric_display,
-            resolve_field_number_precision,
-        )
-
-        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-            prec = resolve_field_number_precision(field if isinstance(field, dict) else None)
-            fixed = bool(
-                isinstance(field, dict) and field_is_protection_chapter_numeric_cell(field)
-            )
-            return format_protection_numeric_display(raw, precision=prec, fixed=fixed)
-    except ImportError:
-        pass
     s = _norm(raw)
     return "" if s == "/" else s
 

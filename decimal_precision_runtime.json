@@ -1,0 +1,13 @@
+{
+  "global_precision": 2,
+  "chapter5_enabled": true,
+  "chapter5_mean_precision": 3,
+  "chapter5_reading_precision": 2,
+  "chapter5_report_tiered": true,
+  "chapter5_report_lt10_precision": 2,
+  "chapter5_report_lt100_precision": 1,
+  "chapter5_report_gte100_precision": 0,
+  "chapter5_report_fixed_precision": 2,
+  "apply_on_backfill": false,
+  "_comment": "global_precision: 全局默认小数位；chapter5_*: 第五章工作场所放射防护表规则；apply_on_backfill=false 时 PDF 回填不改写前端提交数值。修改后无需重启。"
+}

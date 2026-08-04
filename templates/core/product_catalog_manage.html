@@ -1,0 +1,385 @@
+{% extends "base.html" %}
+{% block title %}产品管理{% endblock %}
+{% block page_title %}产品管理{% endblock %}
+
+{% block extra_head %}
+<style>
+  /* 仅产品管理页：禁止主栏整页滚动，滚动条落在产品列表内 */
+  main.flex { overflow: hidden !important; }
+  #admin-page-body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    flex: 1 1 0;
+  }
+  #admin-page-body > .mb-6 { flex-shrink: 0; }
+  .product-catalog-page {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    overflow: hidden;
+  }
+  .product-catalog-list-panel {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .product-catalog-list-scroll {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: auto;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="product-catalog-page max-w-[1400px] w-full mx-auto">
+    <header class="shrink-0 flex flex-wrap items-center justify-between gap-3">
+        <div class="min-w-0">
+            <p class="text-[10px] font-semibold uppercase tracking-widest text-emerald-700/80">销售目录</p>
+            <h1 class="text-xl font-bold text-slate-900 tracking-tight">产品管理</h1>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            {% if can_edit and tab == 'products' %}
+            <a href="?tab=products&amp;new=1{% if q %}&amp;q={{ q|urlencode }}{% endif %}{% if status_filter %}&amp;status={{ status_filter|urlencode }}{% endif %}"
+               class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 text-sm font-medium text-white hover:bg-emerald-700 shadow-sm">
+                <i class="ri-add-line text-base"></i> 上架新产品
+            </a>
+            {% endif %}
+            <a href="{{ hospital_info_url }}" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white text-sm font-medium text-slate-700 ring-1 ring-slate-200 hover:text-emerald-800">
+                <i class="ri-arrow-left-line"></i> 医院信息
+            </a>
+        </div>
+    </header>
+
+    <nav class="shrink-0 inline-flex rounded-xl bg-slate-100 p-1 text-sm self-start">
+        <a href="?tab=products{% if q %}&q={{ q|urlencode }}{% endif %}" class="rounded-lg px-3 py-1.5 font-medium {% if tab == 'products' %}bg-white text-slate-900 shadow-sm{% else %}text-slate-600{% endif %}">产品</a>
+        <a href="?tab=categories" class="rounded-lg px-3 py-1.5 font-medium {% if tab == 'categories' %}bg-white text-slate-900 shadow-sm{% else %}text-slate-600{% endif %}">分类</a>
+        <a href="?tab=lines" class="rounded-lg px-3 py-1.5 font-medium {% if tab == 'lines' %}bg-white text-slate-900 shadow-sm{% else %}text-slate-600{% endif %}">产品线</a>
+        <a href="?tab=logs" class="rounded-lg px-3 py-1.5 font-medium {% if tab == 'logs' %}bg-white text-slate-900 shadow-sm{% else %}text-slate-600{% endif %}">修改日志</a>
+    </nav>
+
+    {% if tab == 'products' %}
+    <article class="product-catalog-list-panel rounded-2xl bg-white ring-1 ring-slate-200/70 shadow-sm">
+        <div class="shrink-0 px-3 py-2.5 border-b border-slate-100 flex flex-wrap gap-2 items-center bg-white">
+            <form method="get" class="flex gap-2 flex-1 min-w-[12rem]">
+                <input type="hidden" name="tab" value="products">
+                <input type="search" name="q" value="{{ q }}" placeholder="搜索产品名称"
+                       class="flex-1 px-3 py-1.5 text-sm rounded-xl ring-1 ring-slate-200 border-0">
+                <select name="status" class="px-2 py-1.5 text-sm rounded-xl ring-1 ring-slate-200 border-0">
+                    <option value="">全部状态</option>
+                    <option value="listed" {% if status_filter == 'listed' %}selected{% endif %}>已上架</option>
+                    <option value="unlisted" {% if status_filter == 'unlisted' %}selected{% endif %}>已下架</option>
+                </select>
+                <button class="px-3 py-1.5 rounded-xl bg-slate-900 text-white text-sm">搜索</button>
+            </form>
+            <span class="text-[11px] text-slate-400 tabular-nums">共 {{ products|length }} 条</span>
+        </div>
+        <div class="product-catalog-list-scroll">
+            <table class="min-w-full text-sm">
+                <thead class="bg-slate-50 text-left text-xs text-slate-500 sticky top-0 z-10 shadow-sm">
+                    <tr>
+                        <th class="px-3 py-2 font-medium">产品名称</th>
+                        <th class="px-3 py-2 font-medium">价格</th>
+                        <th class="px-3 py-2 font-medium">单位</th>
+                        <th class="px-3 py-2 font-medium">状态</th>
+                        <th class="px-3 py-2 font-medium">上架时间</th>
+                        <th class="px-3 py-2 font-medium">分类 / 产品线</th>
+                        <th class="px-3 py-2 font-medium">负责人</th>
+                        <th class="px-3 py-2 font-medium">设备/检测</th>
+                        {% if can_edit %}<th class="px-3 py-2 font-medium">操作</th>{% endif %}
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for p in products %}
+                    <tr class="hover:bg-slate-50/80">
+                        <td class="px-3 py-2 font-medium text-slate-900">{{ p.name }}</td>
+                        <td class="px-3 py-2 tabular-nums">¥{{ p.standard_price }}</td>
+                        <td class="px-3 py-2 text-slate-600">{{ p.unit|default:"—" }}</td>
+                        <td class="px-3 py-2">
+                            {% if p.status == 'listed' %}
+                            <span class="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800">已上架</span>
+                            {% else %}
+                            <span class="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">已下架</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-3 py-2 text-[11px] text-slate-500 tabular-nums whitespace-nowrap">
+                            {% if p.listed_at %}{{ p.listed_at|date:"Y-m-d H:i" }}{% else %}—{% endif %}
+                        </td>
+                        <td class="px-3 py-2 text-xs text-slate-600">
+                            {{ p.category.name|default:"—" }} / {{ p.product_line.name|default:"—" }}
+                        </td>
+                        <td class="px-3 py-2 text-slate-600">{{ p.owner_name|default:"—" }}</td>
+                        <td class="px-3 py-2 text-[11px] text-slate-500 max-w-[9rem]">
+                            {% if p.device_bindings_label %}{{ p.device_bindings_label }}{% else %}—{% endif %}
+                            <br>
+                            {% if p.default_inspection_types %}{{ p.default_inspection_types|join:"、" }}{% else %}—{% endif %}
+                        </td>
+                        {% if can_edit %}
+                        <td class="px-3 py-2 whitespace-nowrap">
+                            <a href="?tab=products&amp;edit_id={{ p.pk }}{% if q %}&amp;q={{ q|urlencode }}{% endif %}{% if status_filter %}&amp;status={{ status_filter|urlencode }}{% endif %}"
+                               class="text-emerald-700 hover:underline text-xs">编辑</a>
+                            <form method="post" class="inline ml-2">
+                                {% csrf_token %}
+                                <input type="hidden" name="tab" value="products">
+                                <input type="hidden" name="action" value="set_product_status">
+                                <input type="hidden" name="product_id" value="{{ p.pk }}">
+                                <input type="hidden" name="status" value="{% if p.status == 'listed' %}unlisted{% else %}listed{% endif %}">
+                                <button class="text-xs text-slate-600 hover:underline">{% if p.status == 'listed' %}下架{% else %}上架{% endif %}</button>
+                            </form>
+                            <form method="post" class="inline ml-2" onsubmit="return confirm('确定删除该产品？');">
+                                {% csrf_token %}
+                                <input type="hidden" name="tab" value="products">
+                                <input type="hidden" name="action" value="delete_product">
+                                <input type="hidden" name="product_id" value="{{ p.pk }}">
+                                <button class="text-xs text-red-600 hover:underline">删除</button>
+                            </form>
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="9" class="px-3 py-10 text-center text-slate-400">暂无产品{% if can_edit %}，点击右上角「上架新产品」添加{% endif %}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </article>
+    {% elif tab == 'categories' %}
+    <div class="product-catalog-list-panel overflow-auto grid grid-cols-1 lg:grid-cols-2 gap-4 content-start">
+        {% if can_edit %}
+        <article class="rounded-2xl bg-white p-5 ring-1 ring-slate-200/70 shadow-sm h-fit">
+            <h2 class="text-sm font-semibold mb-3">添加分类</h2>
+            <form method="post" class="flex gap-2">
+                {% csrf_token %}
+                <input type="hidden" name="tab" value="categories">
+                <input type="hidden" name="action" value="save_category">
+                <input name="category_name" required placeholder="分类名称" class="flex-1 px-3 py-2 text-sm rounded-xl ring-1 ring-slate-200 border-0">
+                <button class="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm">添加</button>
+            </form>
+        </article>
+        {% endif %}
+        <article class="rounded-2xl bg-white ring-1 ring-slate-200/70 shadow-sm overflow-hidden">
+            <ul class="divide-y divide-slate-100 max-h-full overflow-y-auto">
+                {% for c in categories %}
+                <li class="px-4 py-3 flex items-center justify-between gap-2">
+                    <span class="text-sm font-medium text-slate-900">{{ c.name }}</span>
+                    {% if can_edit %}
+                    <form method="post" onsubmit="return confirm('确定删除分类？');">
+                        {% csrf_token %}
+                        <input type="hidden" name="tab" value="categories">
+                        <input type="hidden" name="action" value="delete_category">
+                        <input type="hidden" name="category_id" value="{{ c.pk }}">
+                        <button class="text-xs text-red-600">删除</button>
+                    </form>
+                    {% endif %}
+                </li>
+                {% empty %}
+                <li class="px-4 py-8 text-center text-slate-400 text-sm">暂无分类</li>
+                {% endfor %}
+            </ul>
+        </article>
+    </div>
+    {% elif tab == 'lines' %}
+    <div class="product-catalog-list-panel overflow-auto grid grid-cols-1 lg:grid-cols-2 gap-4 content-start">
+        {% if can_edit %}
+        <article class="rounded-2xl bg-white p-5 ring-1 ring-slate-200/70 shadow-sm h-fit">
+            <h2 class="text-sm font-semibold mb-3">添加产品线</h2>
+            <form method="post" class="flex gap-2">
+                {% csrf_token %}
+                <input type="hidden" name="tab" value="lines">
+                <input type="hidden" name="action" value="save_product_line">
+                <input name="line_name" required placeholder="产品线名称" class="flex-1 px-3 py-2 text-sm rounded-xl ring-1 ring-slate-200 border-0">
+                <button class="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm">添加</button>
+            </form>
+        </article>
+        {% endif %}
+        <article class="rounded-2xl bg-white ring-1 ring-slate-200/70 shadow-sm overflow-hidden">
+            <ul class="divide-y divide-slate-100 max-h-full overflow-y-auto">
+                {% for ln in product_lines %}
+                <li class="px-4 py-3 flex items-center justify-between gap-2">
+                    <span class="text-sm font-medium text-slate-900">{{ ln.name }}</span>
+                    {% if can_edit %}
+                    <form method="post" onsubmit="return confirm('确定删除产品线？');">
+                        {% csrf_token %}
+                        <input type="hidden" name="tab" value="lines">
+                        <input type="hidden" name="action" value="delete_product_line">
+                        <input type="hidden" name="line_id" value="{{ ln.pk }}">
+                        <button class="text-xs text-red-600">删除</button>
+                    </form>
+                    {% endif %}
+                </li>
+                {% empty %}
+                <li class="px-4 py-8 text-center text-slate-400 text-sm">暂无产品线</li>
+                {% endfor %}
+            </ul>
+        </article>
+    </div>
+    {% elif tab == 'logs' %}
+    <article class="product-catalog-list-panel rounded-2xl bg-white ring-1 ring-slate-200/70 shadow-sm overflow-hidden">
+        <div class="shrink-0 px-4 py-3 border-b border-slate-100 text-sm font-semibold text-slate-900">产品信息修改日志</div>
+        <ul class="product-catalog-list-scroll divide-y divide-slate-100">
+            {% for log in product_logs %}
+            <li class="px-4 py-3 text-sm">
+                <div class="flex flex-wrap gap-2 items-baseline">
+                    <span class="text-[11px] text-slate-400 tabular-nums">{{ log.created_at|date:"Y-m-d H:i" }}</span>
+                    <span class="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">{{ log.action_label }}</span>
+                    <span class="font-medium text-slate-800">{{ log.summary }}</span>
+                    <span class="ml-auto text-xs text-slate-500">{{ log.actor_label }}</span>
+                </div>
+            </li>
+            {% empty %}
+            <li class="px-4 py-10 text-center text-slate-400 text-sm">暂无日志</li>
+            {% endfor %}
+        </ul>
+    </article>
+    {% endif %}
+</div>
+
+{% if can_edit and tab == 'products' %}
+<dialog id="product-form-dialog"
+        class="w-[min(100vw-1.5rem,36rem)] max-h-[min(90vh,44rem)] rounded-3xl border-0 p-0 shadow-2xl backdrop:bg-slate-900/45"
+        data-auto-open="{% if open_product_modal %}1{% else %}0{% endif %}">
+    <div class="flex flex-col min-h-0 max-h-[min(90vh,44rem)] bg-white rounded-3xl overflow-hidden">
+        <div class="shrink-0 flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
+            <h2 class="text-base font-semibold text-slate-900">
+                {% if edit_product %}编辑产品{% else %}上架新产品{% endif %}
+            </h2>
+            <a href="?tab=products{% if q %}&amp;q={{ q|urlencode }}{% endif %}{% if status_filter %}&amp;status={{ status_filter|urlencode }}{% endif %}"
+               class="p-2 rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="关闭"
+               data-close-product-dialog>
+                <i class="ri-close-line text-xl"></i>
+            </a>
+        </div>
+        <form method="post" class="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-3">
+            {% csrf_token %}
+            <input type="hidden" name="tab" value="products">
+            <input type="hidden" name="action" value="save_product">
+            {% if edit_product %}<input type="hidden" name="product_id" value="{{ edit_product.pk }}">{% endif %}
+            <div>
+                <label class="text-xs text-slate-500">产品名称 *</label>
+                <input name="product_name" required value="{{ edit_product.name|default:'' }}"
+                       class="mt-1 w-full px-3 py-2 text-sm rounded-xl ring-1 ring-slate-200 border-0">
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <label class="text-xs text-slate-500">标准价格</label>
+                    <input type="number" step="0.01" min="0" name="standard_price" value="{{ edit_product.standard_price|default:'0' }}"
+                           class="mt-1 w-full px-3 py-2 text-sm rounded-xl ring-1 ring-slate-200 border-0">
+                </div>
+                <div>
+                    <label class="text-xs text-slate-500">单位</label>
+                    <input name="unit" value="{{ edit_product.unit|default:'' }}" placeholder="台 / 份 / 处"
+                           class="mt-1 w-full px-3 py-2 text-sm rounded-xl ring-1 ring-slate-200 border-0">
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <label class="text-xs text-slate-500">分类</label>
+                    <select name="category_id" class="mt-1 w-full px-3 py-2 text-sm rounded-xl ring-1 ring-slate-200 border-0">
+                        <option value="">—</option>
+                        {% for c in categories %}
+                        <option value="{{ c.pk }}" {% if edit_product.category_id == c.pk %}selected{% endif %}>{{ c.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="text-xs text-slate-500">产品线</label>
+                    <select name="product_line_id" class="mt-1 w-full px-3 py-2 text-sm rounded-xl ring-1 ring-slate-200 border-0">
+                        <option value="">—</option>
+                        {% for ln in product_lines %}
+                        <option value="{{ ln.pk }}" {% if edit_product.product_line_id == ln.pk %}selected{% endif %}>{{ ln.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <label class="text-xs text-slate-500">上下架 *</label>
+                    <select name="status" class="mt-1 w-full px-3 py-2 text-sm rounded-xl ring-1 ring-slate-200 border-0">
+                        <option value="listed" {% if not edit_product or edit_product.status == 'listed' %}selected{% endif %}>已上架</option>
+                        <option value="unlisted" {% if edit_product.status == 'unlisted' %}selected{% endif %}>已下架</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-xs text-slate-500">负责人</label>
+                    <input name="owner_name" value="{{ edit_product.owner_name|default:'' }}"
+                           class="mt-1 w-full px-3 py-2 text-sm rounded-xl ring-1 ring-slate-200 border-0">
+                </div>
+            </div>
+            {% if edit_product.listed_at %}
+            <p class="text-[11px] text-slate-500">上架时间：{{ edit_product.listed_at|date:"Y-m-d H:i" }}</p>
+            {% endif %}
+            <div>
+                <label class="text-xs text-slate-500">对应设备（可多选，每类可设台数）</label>
+                <div class="mt-1 space-y-1 max-h-40 overflow-y-auto p-2 rounded-xl bg-slate-50 ring-1 ring-slate-100">
+                    {% for row in edit_device_rows %}
+                    <div class="flex items-center gap-2 text-[11px] px-2 py-1 rounded-lg bg-white ring-1 ring-slate-200">
+                        <input type="hidden" name="device_type_option" value="{{ row.type }}">
+                        <label class="inline-flex items-center gap-1.5 flex-1 min-w-0 cursor-pointer">
+                            <input type="checkbox" name="device_type_selected_{{ row.index }}" value="1"
+                                   {% if row.selected %}checked{% endif %}>
+                            <span class="truncate">{{ row.type }}</span>
+                        </label>
+                        <span class="text-slate-400 shrink-0">台数</span>
+                        <input type="number" name="device_type_count_{{ row.index }}" min="1" step="1"
+                               value="{{ row.count }}"
+                               class="w-14 px-1.5 py-0.5 rounded-md ring-1 ring-slate-200 border-0 text-center">
+                    </div>
+                    {% endfor %}
+                </div>
+                <p class="mt-1 text-[10px] text-slate-400">委托挂载时仍可再挂多台具体设备实例。</p>
+            </div>
+            <div>
+                <label class="text-xs text-slate-500">默认检测类型（可多选）</label>
+                <div class="mt-1 flex flex-wrap gap-1.5">
+                    {% for it in inspection_type_choices %}
+                    <label class="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg bg-white ring-1 ring-slate-200 cursor-pointer">
+                        <input type="checkbox" name="default_inspection_types" value="{{ it }}"
+                               {% if edit_product and it in edit_product.default_inspection_types %}checked{% endif %}>
+                        {{ it }}
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+            <div>
+                <label class="text-xs text-slate-500">备注</label>
+                <input name="notes" value="{{ edit_product.notes|default:'' }}" class="mt-1 w-full px-3 py-2 text-sm rounded-xl ring-1 ring-slate-200 border-0">
+            </div>
+            <div>
+                <label class="text-xs text-slate-500">规格属性</label>
+                <textarea name="specs" rows="2" class="mt-1 w-full px-3 py-2 text-sm rounded-xl ring-1 ring-slate-200 border-0">{{ edit_product.specs|default:'' }}</textarea>
+            </div>
+            <div class="sticky bottom-0 -mx-5 px-5 pt-3 pb-4 bg-white border-t border-slate-100 flex gap-2">
+                <button type="submit" class="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700">保存</button>
+                <a href="?tab=products{% if q %}&amp;q={{ q|urlencode }}{% endif %}{% if status_filter %}&amp;status={{ status_filter|urlencode }}{% endif %}"
+                   class="px-4 py-2.5 rounded-xl ring-1 ring-slate-200 text-sm text-slate-600 hover:bg-slate-50"
+                   data-close-product-dialog>取消</a>
+            </div>
+        </form>
+    </div>
+</dialog>
+<script>
+(function () {
+    var dlg = document.getElementById('product-form-dialog');
+    if (!dlg) return;
+    var listUrl = '?tab=products{% if q %}&q={{ q|escapejs }}{% endif %}{% if status_filter %}&status={{ status_filter|escapejs }}{% endif %}';
+    function goList() { window.location.href = listUrl; }
+    if (dlg.getAttribute('data-auto-open') === '1' && typeof dlg.showModal === 'function') {
+        try { dlg.showModal(); } catch (e) { dlg.setAttribute('open', ''); }
+    }
+    dlg.addEventListener('cancel', function (e) {
+        e.preventDefault();
+        goList();
+    });
+    dlg.addEventListener('click', function (e) {
+        if (e.target === dlg) goList();
+    });
+})();
+</script>
+{% endif %}
+{% endblock %}

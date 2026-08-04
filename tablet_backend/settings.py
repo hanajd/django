@@ -238,6 +238,9 @@ JWT_RUNTIME_CONFIG_FILE = BASE_DIR / "jwt_runtime.json"
 # PDF 回填着色：test=彩色（调试），formal=纯黑（正式）；见 apps/core/pdf_fill_runtime_config.py
 PDF_FILL_RUNTIME_CONFIG_FILE = BASE_DIR / "pdf_fill_runtime.json"
 
+# 小数精度（全局 / 第五章 / 回填是否套用）；见 apps/core/decimal_precision_runtime_config.py
+DECIMAL_PRECISION_RUNTIME_CONFIG_FILE = BASE_DIR / "decimal_precision_runtime.json"
+
 # OCR/管线 LLM：provider、model、API、prompt 模板；见 apps/core/llm_runtime_config.py
 LLM_RUNTIME_CONFIG_FILE = BASE_DIR / "llm_runtime.json"
 

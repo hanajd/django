@@ -303,6 +303,153 @@
     {% endif %}
 </article>
 
+{# 委托信息：销售产品挂载（与下方单位设备直挂并存） #}
+<article class="rounded-3xl bg-white p-6 shadow-[0_4px_24px_-8px_rgba(15,23,42,0.08)] ring-1 ring-slate-200/60">
+    <header class="flex flex-wrap items-start justify-between gap-3 mb-5">
+        <div class="flex items-center gap-3">
+            <span class="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
+                <i class="ri-file-list-3-line text-xl"></i>
+            </span>
+            <div>
+                <h3 class="text-base font-semibold text-slate-900">委托信息</h3>
+                <p class="text-xs text-slate-500 max-w-xl">
+                    展示本医院关联委托；可在委托下登记<strong>销售产品</strong>，再为产品挂载具体设备与检测类型。
+                    委托仍可直接挂设备（见项目工作台 / 下方单位设备「加入项目」），销售产品用于记录销售情况。
+                </p>
+            </div>
+        </div>
+        <a href="{% url 'product_catalog_manage' %}" class="text-xs font-medium text-emerald-700 hover:text-emerald-900">产品目录 →</a>
+    </header>
+
+    {% if org_commission_projects %}
+    <div class="space-y-4">
+        {% for proj in org_commission_projects %}
+        <details class="rounded-2xl ring-1 ring-slate-200/80 bg-slate-50/50 open:bg-white open:shadow-sm" {% if forloop.first %}open{% endif %}>
+            <summary class="cursor-pointer list-none px-4 py-3 flex flex-wrap items-center gap-2">
+                <i class="ri-arrow-right-s-line text-slate-400"></i>
+                <span class="font-semibold text-slate-900">{{ proj.code }}</span>
+                <span class="text-slate-600">{{ proj.name }}</span>
+                <span class="ml-auto text-[11px] text-slate-500 tabular-nums">
+                    产品 {{ proj.product_count }} · 直挂设备 {{ proj.direct_equipment_count }}
+                </span>
+            </summary>
+            <div class="px-4 pb-4 space-y-3 border-t border-slate-100 pt-3">
+                {% if proj.direct_equipments %}
+                <div class="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                    <span class="font-medium text-slate-700">直挂设备（保留）：</span>
+                    {% for de in proj.direct_equipments %}
+                    <span class="inline-flex items-center gap-1 mr-2">{{ de.equipment_name }}{% if de.inspection_type %} · {{ de.inspection_type }}{% endif %}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+                {% if proj.products %}
+                <ul class="space-y-3">
+                    {% for pp in proj.products %}
+                    <li class="rounded-xl ring-1 ring-emerald-100 bg-emerald-50/40 p-3">
+                        <div class="flex flex-wrap items-start justify-between gap-2">
+                            <div>
+                                <p class="text-sm font-semibold text-slate-900">{{ pp.product_name }}</p>
+                                <p class="text-xs text-slate-500 mt-0.5">
+                                    数量 {{ pp.quantity }}{% if pp.unit %} {{ pp.unit }}{% endif %}
+                                    · 单价 ¥{{ pp.unit_price }}
+                                    · 金额 ¥{{ pp.amount }}
+                                </p>
+                            </div>
+                            {% if hospital_info_edit %}
+                            <form method="post" onsubmit="return confirm('确定移除此销售产品？');">
+                                {% csrf_token %}
+                                <input type="hidden" name="edit" value="1">
+                                <input type="hidden" name="action" value="remove_project_product">
+                                <input type="hidden" name="project_product_id" value="{{ pp.id }}">
+                                <input type="hidden" name="fl_path" value="{{ fl_path }}">
+                                <button type="submit" class="text-xs text-red-600 hover:underline">移除</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                        {% if pp.equipment_links %}
+                        <ul class="mt-2 space-y-1">
+                            {% for link in pp.equipment_links %}
+                            <li class="flex flex-wrap items-center gap-2 text-xs text-slate-700">
+                                <i class="ri-device-line text-emerald-600"></i>
+                                <span>{{ link.equipment_name }}{% if link.device_type %}（{{ link.device_type }}）{% endif %}</span>
+                                {% if link.inspection_type %}<span class="text-slate-500">· {{ link.inspection_type }}</span>{% endif %}
+                                {% if hospital_info_edit %}
+                                <form method="post" class="ml-auto">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="edit" value="1">
+                                    <input type="hidden" name="action" value="unbind_project_product_equipment">
+                                    <input type="hidden" name="link_id" value="{{ link.id }}">
+                                    <input type="hidden" name="fl_path" value="{{ fl_path }}">
+                                    <button type="submit" class="text-slate-400 hover:text-red-600">解除</button>
+                                </form>
+                                {% endif %}
+                            </li>
+                            {% endfor %}
+                        </ul>
+                        {% else %}
+                        <p class="mt-2 text-xs text-slate-400">尚未挂载设备与检测</p>
+                        {% endif %}
+                        {% if hospital_info_edit and org_equipments %}
+                        <form method="post" class="mt-2 flex flex-wrap gap-2 items-end">
+                            {% csrf_token %}
+                            <input type="hidden" name="edit" value="1">
+                            <input type="hidden" name="action" value="bind_project_product_equipment">
+                            <input type="hidden" name="project_product_id" value="{{ pp.id }}">
+                            <input type="hidden" name="fl_path" value="{{ fl_path }}">
+                            <select name="equipment_id" required class="text-xs rounded-lg ring-1 ring-slate-200 px-2 py-1.5 bg-white min-w-[10rem]">
+                                <option value="">选择设备</option>
+                                {% for eq in org_equipments %}
+                                <option value="{{ eq.pk }}">{{ eq.name }}{% if eq.device_type %} · {{ eq.device_type }}{% endif %}</option>
+                                {% endfor %}
+                            </select>
+                            <select name="inspection_type" class="text-xs rounded-lg ring-1 ring-slate-200 px-2 py-1.5 bg-white">
+                                <option value="">检测类型（可选）</option>
+                                {% for it in sales_inspection_type_choices %}
+                                <option value="{{ it }}">{{ it }}</option>
+                                {% endfor %}
+                            </select>
+                            <button type="submit" class="text-xs px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">挂载</button>
+                        </form>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-xs text-slate-400">该委托暂无销售产品记录</p>
+                {% endif %}
+
+                {% if hospital_info_edit and listed_sales_products %}
+                <form method="post" class="rounded-xl border border-dashed border-emerald-200 bg-white p-3 flex flex-wrap gap-2 items-end">
+                    {% csrf_token %}
+                    <input type="hidden" name="edit" value="1">
+                    <input type="hidden" name="action" value="add_project_product">
+                    <input type="hidden" name="project_id" value="{{ proj.id }}">
+                    <input type="hidden" name="fl_path" value="{{ fl_path }}">
+                    <select name="product_id" required class="text-xs rounded-lg ring-1 ring-slate-200 px-2 py-1.5 bg-white min-w-[12rem]">
+                        <option value="">添加销售产品…</option>
+                        {% for sp in listed_sales_products %}
+                        <option value="{{ sp.pk }}">{{ sp.name }} · ¥{{ sp.standard_price }}{% if sp.unit %}/{{ sp.unit }}{% endif %}</option>
+                        {% endfor %}
+                    </select>
+                    <input type="number" name="quantity" value="1" min="0.01" step="0.01" placeholder="数量"
+                           class="w-20 text-xs rounded-lg ring-1 ring-slate-200 px-2 py-1.5">
+                    <input type="number" name="unit_price" step="0.01" min="0" placeholder="单价(可空)"
+                           class="w-28 text-xs rounded-lg ring-1 ring-slate-200 px-2 py-1.5">
+                    <button type="submit" class="text-xs px-3 py-1.5 rounded-lg bg-slate-900 text-white hover:bg-slate-800">添加</button>
+                </form>
+                {% elif hospital_info_edit and not listed_sales_products %}
+                <p class="text-xs text-amber-700">暂无上架产品，请先到「产品管理」上架或初始化示例产品。</p>
+                {% endif %}
+            </div>
+        </details>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-sm text-slate-500">本机构下暂无关联委托项目。可在项目工作台创建委托并绑定本医院后，在此登记销售产品。</p>
+    {% endif %}
+</article>
+
 {# 设备卡片区 #}
 <article class="rounded-3xl bg-white p-6 shadow-[0_4px_24px_-8px_rgba(15,23,42,0.08)] ring-1 ring-slate-200/60">
     <header class="flex flex-wrap items-start justify-between gap-3 mb-5">

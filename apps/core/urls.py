@@ -3,7 +3,7 @@ Web 路由配置
 前后端不分离的页面路由
 """
 from django.urls import path
-from apps.core import views
+from apps.core import product_catalog_views, views
 
 urlpatterns = [
     path('static/preview/<str:name>', views.pipeline_preview_static, name='pipeline_preview_static'),
@@ -69,6 +69,11 @@ urlpatterns = [
     path('files/hub/review-sign/', views.workflow_hub_review_sign, name='workflow_hub_review_sign'),
     path('files/hub/report-download/', views.workflow_hub_report_download, name='workflow_hub_report_download'),
     path('files/hospital-info/', views.hospital_info_manage, name='hospital_info_manage'),
+    path(
+        'files/hospital-info/products/',
+        product_catalog_views.product_catalog_manage,
+        name='product_catalog_manage',
+    ),
     path(
         'files/biz-operation-logs/',
         views.biz_operation_logs_api,

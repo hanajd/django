@@ -55,7 +55,8 @@
 | `/files/projects/create-wizard-options/` | 创建立项向导 JSON 选项 |
 | `/files/projects/mock-inspection-submit/` | 模拟 App 检测提交（需 `perm_mock_inspection_submit`） |
 | `/files/commission-manage/` | **委托管理**：按用户汇总项目/任务，分配/撤回、指定主要负责人 |
-| `/files/hospital-info/` | **医院信息管理**：委托单位树、联系人、科室设备、合并报告绑定 |
+| `/files/hospital-info/` | **医院信息管理**：委托单位树、联系人、科室设备、合并报告绑定；详情含**委托销售产品**挂载 |
+| `/files/hospital-info/products/` | **产品管理**：销售目录 CRUD、分类/产品线、上下架、默认设备/检测类型、修改日志 |
 | `/files/hospital-info/api/equipment/` | 科室设备 CRUD JSON API |
 | `/files/hospital-info/api/equipment/history/` | 设备检测历史 JSON API |
 | `/files/task-management/` | **任务模板库**：分类树、报告/现场记录模板绑定、默认仪器种类、**绑定历史回溯** |

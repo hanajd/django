@@ -3,16 +3,29 @@
 {% block page_title %}调试设置{% endblock %}
 
 {% block content %}
-<div class="mx-auto max-w-5xl space-y-8">
+<div class="mx-auto max-w-5xl space-y-6">
     <div>
         <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">系统管理 · 超级管理员</p>
         <h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-900">调试设置</h1>
         <p class="mt-1 text-sm leading-relaxed text-slate-600">
-            PDF 回填、LLM API（切换模型 / 兼容接口）与 OCR 设备抽取 Prompt。保存后写入配置文件，无需重启服务。
+            按分类调整运行时配置，保存后写入配置文件，无需重启服务。
         </p>
     </div>
 
-    {# —— PDF —— #}
+    {# —— 分类导航 —— #}
+    <nav class="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm ring-1 ring-slate-900/[0.04]" aria-label="调试设置分类">
+        {% for key, title, hint in debug_tabs %}
+        <a href="{% url 'system_debug_settings' %}?tab={{ key }}"
+           class="min-w-[9.5rem] flex-1 rounded-xl px-3 py-2.5 text-left transition
+                  {% if debug_tab == key %}bg-slate-900 text-white shadow-sm{% else %}text-slate-700 hover:bg-slate-50{% endif %}">
+            <span class="block text-sm font-medium">{{ title }}</span>
+            <span class="mt-0.5 block text-[11px] leading-snug {% if debug_tab == key %}text-slate-300{% else %}text-slate-500{% endif %}">{{ hint }}</span>
+        </a>
+        {% endfor %}
+    </nav>
+
+    {% if debug_tab == 'pdf' %}
+    {# —— PDF 回填 —— #}
     <form method="post" class="space-y-6">
         {% csrf_token %}
         <input type="hidden" name="action" value="save_pdf">
@@ -125,9 +138,174 @@
             <p class="text-xs text-slate-500">
                 <code class="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-700">{{ pdf_fill_config_path }}</code>
             </p>
+            <a href="{% url 'dashboard' %}" class="text-sm text-slate-500 hover:text-slate-800">返回首页</a>
         </div>
     </form>
 
+    {% elif debug_tab == 'precision' %}
+    {# —— 小数精度 —— #}
+    <form method="post" class="space-y-6">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="save_decimal_precision">
+
+        <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-8">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                    <h2 class="text-lg font-semibold text-slate-900">小数精度</h2>
+                    <p class="mt-1 text-sm text-slate-600">
+                        当前：全局 <strong>{{ dec_global_precision }}</strong> 位 ·
+                        {{ dec_chapter5_label }} ·
+                        <strong>{{ dec_backfill_label }}</strong>
+                    </p>
+                </div>
+                <span class="inline-flex items-center rounded-full bg-violet-50 px-3 py-1 text-xs font-medium text-violet-800 ring-1 ring-violet-200">
+                    热更新
+                </span>
+            </div>
+
+            <div class="mt-6 grid gap-4 sm:grid-cols-2">
+                <label class="block">
+                    <span class="text-sm font-medium text-slate-800">全局默认小数位</span>
+                    <input type="number" name="global_precision" min="0" max="12" step="1"
+                           value="{{ dec_global_precision }}"
+                           class="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100">
+                    <span class="mt-1 block text-xs text-slate-500">非第五章特殊栏、公式栏等默认位数</span>
+                </label>
+            </div>
+
+            <div class="mt-6 space-y-4 rounded-xl border border-violet-100 bg-violet-50/40 p-4">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <h3 class="text-sm font-semibold text-slate-900">第五章 · 工作场所放射防护表</h3>
+                    <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+                        <input type="checkbox" name="chapter5_enabled" value="1" class="h-4 w-4 rounded border-slate-300 text-violet-600"
+                               {% if dec_chapter5_enabled %}checked{% endif %}>
+                        启用第五章特殊规则
+                    </label>
+                </div>
+
+                <div class="grid gap-4 sm:grid-cols-3">
+                    <label class="block">
+                        <span class="text-sm font-medium text-slate-800">测量均值小数位</span>
+                        <input type="number" name="chapter5_mean_precision" min="0" max="12" step="1"
+                               value="{{ dec_chapter5_mean_precision }}"
+                               class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100">
+                    </label>
+                    <label class="block">
+                        <span class="text-sm font-medium text-slate-800">测量读数小数位</span>
+                        <input type="number" name="chapter5_reading_precision" min="0" max="12" step="1"
+                               value="{{ dec_chapter5_reading_precision }}"
+                               class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100">
+                    </label>
+                    <label class="block">
+                        <span class="text-sm font-medium text-slate-800">报出值固定小数位</span>
+                        <input type="number" name="chapter5_report_fixed_precision" min="0" max="12" step="1"
+                               value="{{ dec_chapter5_report_fixed_precision }}"
+                               class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100">
+                        <span class="mt-1 block text-xs text-slate-500">仅在关闭「量级分档」时使用</span>
+                    </label>
+                </div>
+
+                <label class="flex items-start gap-3">
+                    <input type="checkbox" name="chapter5_report_tiered" value="1" class="mt-1 h-4 w-4 rounded border-slate-300 text-violet-600"
+                           {% if dec_chapter5_report_tiered %}checked{% endif %}>
+                    <span class="text-sm text-slate-700">
+                        报出值按量级分档
+                        <span class="block text-xs text-slate-500">开启后按下方三档；关闭则用上面的固定小数位</span>
+                    </span>
+                </label>
+
+                <div class="grid gap-4 sm:grid-cols-3">
+                    <label class="block">
+                        <span class="text-sm font-medium text-slate-800">&lt; 10 保留位数</span>
+                        <input type="number" name="chapter5_report_lt10_precision" min="0" max="12" step="1"
+                               value="{{ dec_chapter5_report_lt10_precision }}"
+                               class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100">
+                    </label>
+                    <label class="block">
+                        <span class="text-sm font-medium text-slate-800">10 – 100 保留位数</span>
+                        <input type="number" name="chapter5_report_lt100_precision" min="0" max="12" step="1"
+                               value="{{ dec_chapter5_report_lt100_precision }}"
+                               class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100">
+                    </label>
+                    <label class="block">
+                        <span class="text-sm font-medium text-slate-800">≥ 100 保留位数</span>
+                        <input type="number" name="chapter5_report_gte100_precision" min="0" max="12" step="1"
+                               value="{{ dec_chapter5_report_gte100_precision }}"
+                               class="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100">
+                        <span class="mt-1 block text-xs text-slate-500">0 = 取整数</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="mt-6 space-y-3 rounded-xl border border-amber-100 bg-amber-50/50 p-4">
+                <h3 class="text-sm font-semibold text-slate-900">PDF 回填行为</h3>
+                <label class="flex cursor-pointer gap-4 rounded-xl border border-slate-200 bg-white p-4 transition hover:border-amber-200 has-[:checked]:border-amber-300 has-[:checked]:bg-amber-50/40">
+                    <input type="radio" name="apply_on_backfill" value="1" class="mt-1 h-4 w-4 text-amber-600"
+                           {% if dec_apply_on_backfill %}checked{% endif %}>
+                    <span class="min-w-0">
+                        <span class="block font-medium text-slate-900">回填时套用精度</span>
+                        <span class="mt-1 block text-sm leading-relaxed text-slate-600">
+                            导出现场记录 PDF 时按上方规则格式化均值/报出值等数值格。
+                        </span>
+                    </span>
+                </label>
+                <label class="flex cursor-pointer gap-4 rounded-xl border border-slate-200 bg-white p-4 transition hover:border-slate-300 has-[:checked]:border-slate-400">
+                    <input type="radio" name="apply_on_backfill" value="0" class="mt-1 h-4 w-4 text-slate-700"
+                           {% if not dec_apply_on_backfill %}checked{% endif %}>
+                    <span class="min-w-0">
+                        <span class="block font-medium text-slate-900">回填原样（不调精度）</span>
+                        <span class="mt-1 block text-sm leading-relaxed text-slate-600">
+                            前端提交什么数就回填什么数，便于对照调试；不影响模板 JSON 上的 precision 元数据。
+                        </span>
+                    </span>
+                </label>
+            </div>
+
+            <div class="mt-6 flex flex-wrap items-center gap-3">
+                <button type="submit"
+                        class="inline-flex items-center gap-2 rounded-xl bg-violet-700 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-violet-800">
+                    <i class="ri-save-line text-lg"></i>
+                    保存小数精度设置
+                </button>
+                <p class="text-xs text-slate-500">
+                    <code class="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-700">{{ dec_config_path }}</code>
+                </p>
+            </div>
+        </section>
+    </form>
+
+    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-8">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+                <h3 class="text-base font-semibold text-slate-900">写入活动模板 JSON</h3>
+                <p class="mt-1 text-sm text-slate-600">
+                    按<strong>当前已保存</strong>的第五章规则，批量更新现场记录活动模板的
+                    <code class="text-xs">precision</code> /
+                    <code class="text-xs">precisionRule</code>。写盘前备份到
+                    <code class="text-xs">history/</code>。
+                </p>
+            </div>
+            <span class="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-200">
+                模板 JSON
+            </span>
+        </div>
+        <form method="post" class="mt-4 flex flex-wrap items-center gap-3">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="apply_chapter5_decimal_precision">
+            <button type="submit" name="dry_run" value="1"
+                    class="inline-flex items-center gap-2 rounded-xl border border-violet-300 bg-white px-4 py-2.5 text-sm font-medium text-violet-800 shadow-sm transition hover:bg-violet-50">
+                预览（不写盘）
+            </button>
+            <button type="submit"
+                    class="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800"
+                    onclick="return confirm('将按当前小数精度设置扫描全部现场记录活动模板。修改前会备份到 history/。确定继续？');">
+                应用第五章小数精度到模板
+            </button>
+            <a href="{% url 'dashboard' %}" class="text-sm text-slate-500 hover:text-slate-800">返回首页</a>
+        </form>
+    </section>
+
+    {% elif debug_tab == 'llm' %}
     {# —— LLM API —— #}
     <form method="post" class="space-y-6">
         {% csrf_token %}
@@ -243,10 +421,12 @@
             <p class="text-xs text-slate-500">
                 <code class="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-700">{{ llm_config_path }}</code>
             </p>
+            <a href="{% url 'dashboard' %}" class="text-sm text-slate-500 hover:text-slate-800">返回首页</a>
         </div>
     </form>
 
-    {# —— Prompts —— #}
+    {% else %}
+    {# —— OCR Prompt —— #}
     <form method="post" class="space-y-6">
         {% csrf_token %}
         <input type="hidden" name="action" value="save_prompts">
@@ -285,5 +465,6 @@
             <a href="{% url 'dashboard' %}" class="text-sm text-slate-500 hover:text-slate-800">返回首页</a>
         </div>
     </form>
+    {% endif %}
 </div>
 {% endblock %}

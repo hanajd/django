@@ -90,7 +90,11 @@ def record_biz_operation(
     summary = (summary or "").strip()
     if not summary:
         return None
-    if scope not in (BizOperationLog.SCOPE_HOSPITAL, BizOperationLog.SCOPE_PROJECT):
+    if scope not in (
+        BizOperationLog.SCOPE_HOSPITAL,
+        BizOperationLog.SCOPE_PROJECT,
+        BizOperationLog.SCOPE_PRODUCT,
+    ):
         scope = BizOperationLog.SCOPE_PROJECT
     valid_actions = {c for c, _ in BizOperationLog.ACTION_CHOICES}
     if action not in valid_actions:
@@ -134,6 +138,9 @@ def biz_operation_logs_queryset(
         qs = qs.filter(scope=BizOperationLog.SCOPE_PROJECT)
         if project_id:
             qs = qs.filter(project_id=project_id)
+        return qs
+    if scope == BizOperationLog.SCOPE_PRODUCT:
+        qs = qs.filter(scope=BizOperationLog.SCOPE_PRODUCT)
         return qs
     return qs.none()
 

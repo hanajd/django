@@ -622,39 +622,60 @@ def _field_should_skip_mock_fill(field: dict) -> bool:
 
 
 def _field_precision(field: dict | None = None) -> int:
-    """栏位 `precision` 优先；未配置时默认 2。"""
+    """栏位 `precision` 优先；第五章均值默认 3；其余默认 2。"""
+    try:
+        from radiation_detection_report.chapter5_field_sync import (
+            resolve_field_number_precision,
+            protection_numeric_cell_kind,
+        )
+
+        if isinstance(field, dict):
+            kind = protection_numeric_cell_kind(field)
+            if kind == "report":
+                # 模拟生成时先按上限 2，真正写入时走 format_protection_cell_display 分档
+                return 2
+            return resolve_field_number_precision(field)
+    except ImportError:
+        pass
     if isinstance(field, dict) and field.get("precision") not in (None, ""):
         try:
             return max(0, int(field.get("precision")))
         except (TypeError, ValueError):
             pass
-    try:
-        from radiation_detection_report.chapter5_field_sync import (
-            PROTECTION_NUMBER_PRECISION,
-            field_is_protection_chapter_numeric_cell,
-        )
-
-        if isinstance(field, dict) and field_is_protection_chapter_numeric_cell(field):
-            return PROTECTION_NUMBER_PRECISION
-        if isinstance(field, dict):
-            ftype = str(field.get("type") or "").strip().lower()
-            if ftype == "computed" or _field_has_formula(field):
-                return PROTECTION_NUMBER_PRECISION
-    except ImportError:
-        pass
     return _MOCK_DEFAULT_PRECISION
 
 
 def _format_mock_field_value(field: dict | None, value: Any) -> Any:
     if isinstance(value, bool):
         return value
+    if value is None:
+        return None
+    try:
+        from radiation_detection_report.chapter5_field_sync import (
+            format_protection_cell_display,
+            protection_numeric_cell_kind,
+        )
+
+        if isinstance(field, dict) and protection_numeric_cell_kind(field):
+            text = format_protection_cell_display(value, field, fixed=True)
+            if text == "":
+                return None
+            # 尽量保持数值类型：整数报出值用 int，其余用 float
+            try:
+                if "." not in text and "e" not in text.lower() and "~" not in text:
+                    return int(text)
+                if "~" in text:
+                    return text
+                return float(text)
+            except (TypeError, ValueError):
+                return text
+    except ImportError:
+        pass
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         prec = _field_precision(field)
         if prec == 0:
             return int(round(float(value)))
         return round(float(value), prec)
-    if value is None:
-        return None
     return value if isinstance(value, (int, float, bool)) else str(value)
 
 
@@ -2907,6 +2928,7 @@ def _build_mock_formula_value_mapping(payload: dict, frontend_obj: dict) -> dict
 def _apply_mock_formula_fields(payload: dict, frontend_obj: dict) -> int:
     from utils.conditional_field_rules import resolve_field_formula_for_eval
     from utils.dynamic_form_expression import eval_computed_formula
+    from utils.fit_ref_eval import index_pdf_fields_by_pid
 
     constants = frontend_obj.get("constants") if isinstance(frontend_obj.get("constants"), dict) else {}
     enums = frontend_obj.get("enums") if isinstance(frontend_obj.get("enums"), dict) else {}
@@ -2914,6 +2936,9 @@ def _apply_mock_formula_fields(payload: dict, frontend_obj: dict) -> int:
         frontend_obj.get("lookupTables") if isinstance(frontend_obj.get("lookupTables"), dict) else {}
     )
     formula_fields = [f for f in _iter_mock_formula_fields(frontend_obj) if _field_has_formula(f)]
+    field_by_pid = index_pdf_fields_by_pid(
+        list(_iter_mock_formula_fields(frontend_obj))
+    )
     applied = 0
     for _ in range(32):
         changed = 0
@@ -2940,6 +2965,7 @@ def _apply_mock_formula_fields(payload: dict, frontend_obj: dict) -> int:
                     constants=constants,
                     enums=enums,
                     lookup_tables=lookup_tables,
+                    field_by_pid=field_by_pid,
                 )
             except Exception:
                 res = None

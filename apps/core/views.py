@@ -1752,10 +1752,20 @@ def account_profile(request):
     )
 
 
+def _system_debug_settings_redirect(tab: str = "pdf"):
+    """保存后回到对应分类页签。"""
+    from django.urls import reverse
+
+    key = (tab or "pdf").strip().lower()
+    if key not in ("pdf", "precision", "llm", "prompt"):
+        key = "pdf"
+    return redirect(f"{reverse('system_debug_settings')}?tab={key}")
+
+
 @login_required
 def system_debug_settings(request):
     """
-    超级管理员调试页：PDF 回填着色 / 字号、LLM API、OCR prompt 热更新。
+    超级管理员调试页（分类页签）：PDF 回填 / 小数精度 / LLM API / OCR Prompt。
     """
     denied = _require_super_admin_debug(request)
     if denied:
@@ -1771,6 +1781,11 @@ def system_debug_settings(request):
         pdf_fill_runtime_config_path,
         write_pdf_fill_runtime_config,
     )
+    from apps.core.decimal_precision_runtime_config import (
+        decimal_precision_runtime_config_path,
+        get_decimal_precision_runtime_config,
+        write_decimal_precision_runtime_config,
+    )
 
     if request.method == "POST":
         action = (request.POST.get("action") or "save_pdf").strip().lower()
@@ -1779,12 +1794,12 @@ def system_debug_settings(request):
             provider = (request.POST.get("llm_provider") or "ollama").strip().lower()
             if provider not in ("ollama", "openai_compatible"):
                 messages.error(request, "请选择有效的 LLM 提供方")
-                return redirect("system_debug_settings")
+                return _system_debug_settings_redirect("llm")
             base_url = (request.POST.get("llm_base_url") or "").strip()
             model = (request.POST.get("llm_model") or "").strip()
             if not base_url or not model:
                 messages.error(request, "API 地址与模型名不能为空")
-                return redirect("system_debug_settings")
+                return _system_debug_settings_redirect("llm")
             clear_key = (request.POST.get("clear_api_key") or "").strip() in ("1", "on", "true", "yes")
             api_key_raw = request.POST.get("llm_api_key")
             if clear_key:
@@ -1803,7 +1818,7 @@ def system_debug_settings(request):
                         raise ValueError("须为 JSON 对象")
                 except (ValueError, TypeError) as e:
                     messages.error(request, f"Ollama options 须为合法 JSON 对象：{e}")
-                    return redirect("system_debug_settings")
+                    return _system_debug_settings_redirect("llm")
             else:
                 parsed_opts = None
             try:
@@ -1811,7 +1826,7 @@ def system_debug_settings(request):
                 max_retries = int(request.POST.get("llm_max_retries") or 3)
             except (TypeError, ValueError):
                 messages.error(request, "temperature / 重试次数须为数字")
-                return redirect("system_debug_settings")
+                return _system_debug_settings_redirect("llm")
             json_mode = (request.POST.get("llm_json_mode") or "").strip() in ("1", "on", "true", "yes")
             try:
                 cfg = write_llm_runtime_config(
@@ -1826,7 +1841,7 @@ def system_debug_settings(request):
                 )
             except Exception as e:
                 messages.error(request, f"保存 LLM 配置失败：{e}")
-                return redirect("system_debug_settings")
+                return _system_debug_settings_redirect("llm")
             messages.success(
                 request,
                 (
@@ -1834,50 +1849,143 @@ def system_debug_settings(request):
                     f"{cfg.base_url}。下次 OCR 铭牌抽取即生效。"
                 ),
             )
-            return redirect("system_debug_settings")
+            return _system_debug_settings_redirect("llm")
 
         if action == "save_prompts":
             devices = request.POST.get("devices_prompt")
             if devices is None:
                 messages.error(request, "Prompt 内容缺失")
-                return redirect("system_debug_settings")
+                return _system_debug_settings_redirect("prompt")
             if "{struct}" not in devices or "{md}" not in devices:
                 messages.error(request, "设备抽取 Prompt 须包含占位符 {struct} 与 {md}")
-                return redirect("system_debug_settings")
+                return _system_debug_settings_redirect("prompt")
             try:
                 # 前端模板 LLM 暂停用：只保存设备抽取 Prompt，保留文件中 frontend 模板字段
                 write_llm_runtime_config(devices_prompt=devices)
             except Exception as e:
                 messages.error(request, f"保存 Prompt 失败：{e}")
-                return redirect("system_debug_settings")
+                return _system_debug_settings_redirect("prompt")
             messages.success(request, "已保存 OCR 设备抽取 Prompt，立即生效。")
-            return redirect("system_debug_settings")
+            return _system_debug_settings_redirect("prompt")
 
         if action == "reset_prompts":
             try:
                 write_llm_runtime_config(devices_prompt=DEFAULT_DEVICES_PROMPT)
             except Exception as e:
                 messages.error(request, f"恢复默认 Prompt 失败：{e}")
-                return redirect("system_debug_settings")
+                return _system_debug_settings_redirect("prompt")
             messages.success(request, "已恢复内置默认设备抽取 Prompt。")
-            return redirect("system_debug_settings")
+            return _system_debug_settings_redirect("prompt")
+
+        if action == "save_decimal_precision":
+            try:
+                global_precision = int(request.POST.get("global_precision") or 2)
+                chapter5_mean_precision = int(request.POST.get("chapter5_mean_precision") or 3)
+                chapter5_reading_precision = int(request.POST.get("chapter5_reading_precision") or 2)
+                chapter5_report_lt10_precision = int(
+                    request.POST.get("chapter5_report_lt10_precision") or 2
+                )
+                chapter5_report_lt100_precision = int(
+                    request.POST.get("chapter5_report_lt100_precision") or 1
+                )
+                chapter5_report_gte100_precision = int(
+                    request.POST.get("chapter5_report_gte100_precision") or 0
+                )
+                chapter5_report_fixed_precision = int(
+                    request.POST.get("chapter5_report_fixed_precision") or 2
+                )
+            except (TypeError, ValueError):
+                messages.error(request, "小数位数须为 0–12 的整数")
+                return _system_debug_settings_redirect("precision")
+            chapter5_enabled = (request.POST.get("chapter5_enabled") or "").strip() in (
+                "1",
+                "on",
+                "true",
+                "yes",
+            )
+            chapter5_report_tiered = (request.POST.get("chapter5_report_tiered") or "").strip() in (
+                "1",
+                "on",
+                "true",
+                "yes",
+            )
+            apply_raw = (request.POST.get("apply_on_backfill") or "1").strip().lower()
+            apply_on_backfill = apply_raw in ("1", "on", "true", "yes")
+            try:
+                cfg = write_decimal_precision_runtime_config(
+                    global_precision=global_precision,
+                    chapter5_enabled=chapter5_enabled,
+                    chapter5_mean_precision=chapter5_mean_precision,
+                    chapter5_reading_precision=chapter5_reading_precision,
+                    chapter5_report_tiered=chapter5_report_tiered,
+                    chapter5_report_lt10_precision=chapter5_report_lt10_precision,
+                    chapter5_report_lt100_precision=chapter5_report_lt100_precision,
+                    chapter5_report_gte100_precision=chapter5_report_gte100_precision,
+                    chapter5_report_fixed_precision=chapter5_report_fixed_precision,
+                    apply_on_backfill=apply_on_backfill,
+                )
+            except Exception as e:
+                messages.error(request, f"保存小数精度配置失败：{e}")
+                return _system_debug_settings_redirect("precision")
+            messages.success(
+                request,
+                (
+                    f"已保存小数精度：全局 {cfg.global_precision} 位；{cfg.chapter5_label_zh}；"
+                    f"{cfg.apply_on_backfill_label_zh}。重新导出 PDF / 拉取前端 JSON 即生效。"
+                ),
+            )
+            return _system_debug_settings_redirect("precision")
+
+        if action == "apply_chapter5_decimal_precision":
+            from apps.core.chapter5_decimal_precision_update import (
+                apply_chapter5_decimal_precision_update,
+            )
+
+            dry_run = (request.POST.get("dry_run") or "").strip() in ("1", "on", "true", "yes")
+            try:
+                result = apply_chapter5_decimal_precision_update(dry_run=dry_run)
+            except Exception as e:
+                messages.error(request, f"第五章小数精度更新失败：{e}")
+                return _system_debug_settings_redirect("precision")
+            prefix = "【预览】" if dry_run else ""
+            dec_cfg = get_decimal_precision_runtime_config(force_reload=True)
+            messages.success(
+                request,
+                (
+                    f"{prefix}第五章小数精度：扫描 {result.get('scanned', 0)} 个模板，"
+                    f"更新 {result.get('updated', 0)}，跳过 {result.get('skipped', 0)}，"
+                    f"失败 {result.get('failed', 0)}；"
+                    f"均值栏 {result.get('mean_fields', 0)}，报出值栏 {result.get('report_fields', 0)}。"
+                    f"{' 未写盘。' if dry_run else ' 已备份至 history/ 后写盘。'}"
+                    f" 当前规则：{dec_cfg.chapter5_label_zh}。"
+                ),
+            )
+            if result.get("errors"):
+                messages.warning(
+                    request,
+                    "部分失败："
+                    + "；".join(
+                        f"{e.get('path')}: {e.get('error')}" for e in result["errors"][:5]
+                    ),
+                )
+            return _system_debug_settings_redirect("precision")
 
         # 默认：保存 PDF 回填
         mode = (request.POST.get("pdf_fill_mode") or "").strip().lower()
         font_fit = (request.POST.get("pdf_font_fit") or "").strip().lower()
         if mode not in ("test", "formal"):
             messages.error(request, "请选择有效的回填着色模式")
-            return redirect("system_debug_settings")
+            return _system_debug_settings_redirect("pdf")
         if font_fit not in ("auto", "fixed"):
             messages.error(request, "请选择有效的字号适应方式")
-            return redirect("system_debug_settings")
+            return _system_debug_settings_redirect("pdf")
         try:
             site_font_pt = float(request.POST.get("site_font_pt") or 10.5)
             report_font_pt = float(request.POST.get("report_font_pt") or 12.0)
             font_min_pt = float(request.POST.get("font_min_pt") or 5.0)
         except (TypeError, ValueError):
             messages.error(request, "字号须为数字（单位 pt）")
-            return redirect("system_debug_settings")
+            return _system_debug_settings_redirect("pdf")
         cfg = write_pdf_fill_runtime_config(
             mode=mode,
             site_font_pt=site_font_pt,
@@ -1893,10 +2001,15 @@ def system_debug_settings(request):
                 f"（最小 {cfg.font_min_pt:g}pt）。重新导出 PDF 即可生效。"
             ),
         )
-        return redirect("system_debug_settings")
+        return _system_debug_settings_redirect("pdf")
+
+    debug_tab = (request.GET.get("tab") or "pdf").strip().lower()
+    if debug_tab not in ("pdf", "precision", "llm", "prompt"):
+        debug_tab = "pdf"
 
     pdf_cfg = get_pdf_fill_runtime_config(force_reload=True)
     llm_cfg = get_llm_runtime_config(force_reload=True)
+    dec_cfg = get_decimal_precision_runtime_config(force_reload=True)
     api_key_set = bool((llm_cfg.api_key or "").strip())
     return render(
         request,
@@ -1910,6 +2023,19 @@ def system_debug_settings(request):
             "pdf_font_fit": pdf_cfg.font_fit,
             "pdf_font_fit_label": pdf_cfg.font_fit_label_zh,
             "font_min_pt": pdf_cfg.font_min_pt,
+            "dec_global_precision": dec_cfg.global_precision,
+            "dec_chapter5_enabled": dec_cfg.chapter5_enabled,
+            "dec_chapter5_mean_precision": dec_cfg.chapter5_mean_precision,
+            "dec_chapter5_reading_precision": dec_cfg.chapter5_reading_precision,
+            "dec_chapter5_report_tiered": dec_cfg.chapter5_report_tiered,
+            "dec_chapter5_report_lt10_precision": dec_cfg.chapter5_report_lt10_precision,
+            "dec_chapter5_report_lt100_precision": dec_cfg.chapter5_report_lt100_precision,
+            "dec_chapter5_report_gte100_precision": dec_cfg.chapter5_report_gte100_precision,
+            "dec_chapter5_report_fixed_precision": dec_cfg.chapter5_report_fixed_precision,
+            "dec_apply_on_backfill": dec_cfg.apply_on_backfill,
+            "dec_chapter5_label": dec_cfg.chapter5_label_zh,
+            "dec_backfill_label": dec_cfg.apply_on_backfill_label_zh,
+            "dec_config_path": str(decimal_precision_runtime_config_path()),
             "llm_provider": llm_cfg.provider,
             "llm_provider_label": llm_cfg.provider_label_zh,
             "llm_base_url": llm_cfg.base_url,
@@ -1921,6 +2047,13 @@ def system_debug_settings(request):
             "llm_json_mode": llm_cfg.json_mode,
             "llm_config_path": str(llm_runtime_config_path()),
             "devices_prompt": llm_cfg.devices_prompt,
+            "debug_tab": debug_tab,
+            "debug_tabs": (
+                ("pdf", "PDF 回填", "着色与字号"),
+                ("precision", "小数精度", "全局 / 第五章 / 回填"),
+                ("llm", "LLM API", "模型与接口"),
+                ("prompt", "OCR Prompt", "铭牌抽取模板"),
+            ),
         },
     )
 
@@ -11225,6 +11358,136 @@ def hospital_info_manage(request):
             messages.warning(request, "当前为浏览模式，请点击「编辑」后再修改")
             return _redir(edit=False)
 
+        if action == "add_project_product":
+            from apps.core.sales_product_service import add_product_to_project
+
+            def _safe_pid(key: str) -> int:
+                raw = (request.POST.get(key) or "").strip()
+                if not raw or raw.lower() == "undefined":
+                    return 0
+                try:
+                    return int(raw)
+                except ValueError:
+                    return 0
+
+            pp, err = add_product_to_project(
+                user=request.user,
+                project_id=_safe_pid("project_id"),
+                product_id=_safe_pid("product_id"),
+                quantity=request.POST.get("quantity", "1"),
+                unit_price=request.POST.get("unit_price", ""),
+                notes=request.POST.get("notes", ""),
+            )
+            if err:
+                messages.error(request, err)
+            else:
+                messages.success(request, f"已添加销售产品：{pp.product.name}")
+                record_biz_operation(
+                    actor=request.user,
+                    scope=BizOperationLog.SCOPE_PROJECT,
+                    action=BizOperationLog.ACTION_BIND,
+                    summary=f"委托挂载产品：{pp.product.name}",
+                    project=pp.project,
+                    organization=pp.project.commission_org,
+                    entity_type="library_project_product",
+                    entity_id=pp.pk,
+                )
+            fl_path = (request.POST.get("fl_path") or fl_path).strip()
+            return _redir(edit=True)
+
+        if action == "remove_project_product":
+            from apps.core.models import LibraryProjectProduct
+            from apps.core.sales_product_service import remove_project_product
+
+            raw = (request.POST.get("project_product_id") or "").strip()
+            try:
+                ppid = int(raw) if raw and raw.lower() != "undefined" else 0
+            except ValueError:
+                ppid = 0
+            row = LibraryProjectProduct.objects.filter(pk=ppid).select_related(
+                "project", "product"
+            ).first()
+            err = remove_project_product(ppid)
+            if err:
+                messages.error(request, err)
+            else:
+                messages.success(request, "已移除委托产品")
+                if row:
+                    record_biz_operation(
+                        actor=request.user,
+                        scope=BizOperationLog.SCOPE_PROJECT,
+                        action=BizOperationLog.ACTION_UNBIND,
+                        summary=f"委托移除产品：{row.product.name if row.product_id else ppid}",
+                        project=row.project,
+                        organization=row.project.commission_org if row.project_id else None,
+                        entity_type="library_project_product",
+                        entity_id=ppid,
+                    )
+            fl_path = (request.POST.get("fl_path") or fl_path).strip()
+            return _redir(edit=True)
+
+        if action == "bind_project_product_equipment":
+            from apps.core.sales_product_service import bind_equipment_to_project_product
+
+            def _safe_pid(key: str) -> int:
+                raw = (request.POST.get(key) or "").strip()
+                if not raw or raw.lower() == "undefined":
+                    return 0
+                try:
+                    return int(raw)
+                except ValueError:
+                    return 0
+
+            link, err = bind_equipment_to_project_product(
+                project_product_id=_safe_pid("project_product_id"),
+                equipment_id=_safe_pid("equipment_id"),
+                inspection_type=request.POST.get("inspection_type", ""),
+            )
+            if err:
+                messages.error(request, err)
+            else:
+                messages.success(request, "已挂载设备与检测类型")
+                record_biz_operation(
+                    actor=request.user,
+                    scope=BizOperationLog.SCOPE_PROJECT,
+                    action=BizOperationLog.ACTION_BIND,
+                    summary=f"产品下挂载设备：{link.equipment.name}",
+                    project=link.project_product.project,
+                    organization=link.project_product.project.commission_org,
+                    entity_type="library_project_product_equipment",
+                    entity_id=link.pk,
+                    detail={
+                        "equipment_id": link.equipment_id,
+                        "inspection_type": link.inspection_type,
+                    },
+                )
+            fl_path = (request.POST.get("fl_path") or fl_path).strip()
+            return _redir(edit=True)
+
+        if action == "unbind_project_product_equipment":
+            from apps.core.sales_product_service import unbind_equipment_from_project_product
+
+            raw = (request.POST.get("link_id") or "").strip()
+            try:
+                lid = int(raw) if raw and raw.lower() != "undefined" else 0
+            except ValueError:
+                lid = 0
+            err = unbind_equipment_from_project_product(lid)
+            if err:
+                messages.error(request, err)
+            else:
+                messages.success(request, "已解除产品设备挂载")
+                record_biz_operation(
+                    actor=request.user,
+                    scope=BizOperationLog.SCOPE_PROJECT,
+                    action=BizOperationLog.ACTION_UNBIND,
+                    summary=f"解除产品设备挂载 #{lid}",
+                    entity_type="library_project_product_equipment",
+                    entity_id=lid,
+                )
+            fl_path = (request.POST.get("fl_path") or fl_path).strip()
+            return _redir(edit=True)
+
         if action == "delete_commission_organization":
             try:
                 oid = int(request.POST.get("org_id", "") or 0)
@@ -11314,7 +11577,14 @@ def hospital_info_manage(request):
                 messages.error(request, "委托单位不存在")
                 return _redir(edit=True)
             cid_raw = (request.POST.get("contact_id") or "").strip()
-            cid = int(cid_raw) if cid_raw else None
+            if not cid_raw or cid_raw.lower() == "undefined":
+                cid = None
+            else:
+                try:
+                    cid = int(cid_raw)
+                except ValueError:
+                    messages.error(request, "联系人编号无效")
+                    return _redir(edit=True)
             row, err = upsert_org_contact(
                 org,
                 contact_id=cid,
@@ -11392,7 +11662,14 @@ def hospital_info_manage(request):
                 messages.error(request, dept_err)
                 return _redir(edit=True)
             eid_raw = (request.POST.get("equipment_id") or "").strip()
-            eid = int(eid_raw) if eid_raw else None
+            if not eid_raw or eid_raw.lower() in ("undefined", "null"):
+                eid = None
+            else:
+                try:
+                    eid = int(eid_raw)
+                except ValueError:
+                    messages.error(request, "设备编号无效")
+                    return _redir(edit=True)
             raw_report_f = (request.POST.get("report_file_id") or "").strip()
             parsed_report_f = parse_report_file_id_for_org(org_ctx, request.user, raw_report_f)
             if raw_report_f and parsed_report_f is None:
@@ -11718,11 +11995,23 @@ def hospital_info_manage(request):
     report_task_options: list[dict] = []
     project_options: list[dict] = []
     org_project_count = 0
+    org_commission_projects: list = []
+    listed_sales_products: list = []
+    sales_inspection_type_choices: list = []
     if explorer_org:
         org_contacts = list(
             explorer_org.contacts.filter(is_active=True).order_by("sort_order", "id")
         )
         org_project_count = projects_for_org_binding(explorer_org).count()
+        from apps.core.sales_product_service import (
+            inspection_type_choices as _insp_choices,
+            projects_with_products_for_org,
+        )
+
+        org_commission_projects, listed_sales_products = projects_with_products_for_org(
+            explorer_org
+        )
+        sales_inspection_type_choices = _insp_choices()
         for lf in report_files_for_org_binding(explorer_org)[:300]:
             if library_file_access_allowed(request.user, lf):
                 report_file_options.append(
@@ -11809,6 +12098,9 @@ def hospital_info_manage(request):
             "project_options": project_options,
             "report_file_options": report_file_options,
             "org_project_count": org_project_count,
+            "org_commission_projects": org_commission_projects,
+            "listed_sales_products": listed_sales_products,
+            "sales_inspection_type_choices": sales_inspection_type_choices,
         },
     )
 
@@ -11894,7 +12186,25 @@ def biz_operation_logs_api(request):
         items = [serialize_biz_operation_log(r) for r in qs[:limit]]
         return JsonResponse({"ok": True, "items": items, "scope": scope})
 
-    return JsonResponse({"ok": False, "message": "scope 须为 hospital 或 project"}, status=400)
+    if scope == BizOperationLog.SCOPE_PRODUCT:
+        if not library_user_may_access_hospital_info_nav(request.user):
+            return JsonResponse({"ok": False, "message": "无权查看产品日志"}, status=403)
+        entity_id = None
+        try:
+            entity_id = int(request.GET.get("entity_id") or 0) or None
+        except (TypeError, ValueError):
+            entity_id = None
+        qs = (
+            BizOperationLog.objects.filter(scope=BizOperationLog.SCOPE_PRODUCT)
+            .select_related("actor", "organization", "project")
+            .order_by("-created_at", "-id")
+        )
+        if entity_id:
+            qs = qs.filter(entity_type="sales_product", entity_id=entity_id)
+        items = [serialize_biz_operation_log(r) for r in qs[:limit]]
+        return JsonResponse({"ok": True, "items": items, "scope": scope})
+
+    return JsonResponse({"ok": False, "message": "scope 须为 hospital、project 或 product"}, status=400)
 
 
 @login_required

@@ -10,6 +10,7 @@
 | [部署流程-从零安装与源码保护评估.md](部署流程-从零安装与源码保护评估.md) | **交付部署计划**：从零安装（含 Ollama/MinerU）、生产清单、甲方源码保护评估 |
 | [ANDROID_OTA_UPDATE_SPEC.md](ANDROID_OTA_UPDATE_SPEC.md) | **Android APK OTA**：`/api/v2/app/version` 与下载、超管发版页 |
 | [组织主任账号说明.md](组织主任账号说明.md) | **行政 / 检测部 / 评价部**主任演示账号与初始密码 |
+| [医院信息-产品管理说明.md](医院信息-产品管理说明.md) | **产品目录**、委托挂销售产品、设备/检测挂载与直挂并存 |
 | [07-features-catalog.md](07-features-catalog.md) | **功能总览**：Web/API 模块、工作流、权限、模型与服务索引 |
 | [01-configuration.md](01-configuration.md) | `settings`、环境变量、媒体与文件库路径、JWT/CORS |
 | [02-web-ui-core.md](02-web-ui-core.md) | Web 路由、`views` 功能域、模板、权限与菜单 |

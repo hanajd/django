@@ -2919,8 +2919,8 @@ def _backfill_use_strict_pdf_field_id_only(task_obj=None, field: dict | None = N
 def _format_protection_numeric_pdf_text(field: dict, picked, *, task_obj=None) -> str:
     """
     现场记录 PDF 数值展示：
-    - 第五章防护表数值格：固定小数位（默认 2）
-    - 其余 number/computed 公式栏：小数位不超过 precision（默认 2）
+    - 第五章防护表：按热更新小数精度规则（可在调试设置关闭「回填套用精度」）
+    - 其余 number/computed 公式栏：小数位不超过 precision / 全局默认
     """
     if picked is None or isinstance(picked, bool):
         return "" if picked is None else str(picked)
@@ -2931,11 +2931,19 @@ def _format_protection_numeric_pdf_text(field: dict, picked, *, task_obj=None) -
     if task_obj is not None and getattr(task_obj, "output_target", None) != LibraryTask.OUTPUT_SITE_RECORD:
         return text
     try:
+        from apps.core.decimal_precision_runtime_config import (
+            get_decimal_precision_runtime_config,
+        )
         from radiation_detection_report.chapter5_field_sync import (
             field_is_protection_chapter_numeric_cell,
+            format_protection_cell_display,
             format_protection_numeric_display,
             resolve_field_number_precision,
         )
+
+        # 调试开关：回填不套用精度 → 前端提交什么就写什么
+        if not get_decimal_precision_runtime_config().apply_on_backfill:
+            return text
 
         ftype = str(field.get("type") or "").strip().lower()
         is_protection = field_is_protection_chapter_numeric_cell(field)
@@ -2944,11 +2952,13 @@ def _format_protection_numeric_pdf_text(field: dict, picked, *, task_obj=None) -
         )
         if not is_protection and not is_formula_numeric:
             return text
+        if is_protection:
+            return format_protection_cell_display(text, field, fixed=True)
         prec = resolve_field_number_precision(field)
         # 公式/数值格按 precision 固定位输出（如 R²=0.9967→1.00），避免 fixed=False
         # 把 1.00 收成「1」或剥掉末尾 0 后丢失约定小数位。
         return format_protection_numeric_display(
-            text, precision=prec, fixed=True if is_formula_numeric else is_protection
+            text, precision=prec, fixed=True
         )
     except ImportError:
         return text
@@ -3380,6 +3390,7 @@ def _apply_computed_fields_from_steps_to_mapping(
         return
     try:
         from utils.dynamic_form_expression import eval_computed_formula
+        from utils.fit_ref_eval import index_pdf_fields_by_pid
     except ImportError:
         return
     const = template_constants if isinstance(template_constants, dict) else {}
@@ -3390,9 +3401,12 @@ def _apply_computed_fields_from_steps_to_mapping(
     except ImportError:
         resolve_field_formula_for_eval = None  # type: ignore[assignment]
 
+    schema_fields = list(_iter_schema_fields_from_steps(steps))
+    field_by_pid = index_pdf_fields_by_pid(schema_fields)
+
     for _ in range(32):
         changed = 0
-        for f in _iter_schema_fields_from_steps(steps):
+        for f in schema_fields:
             fid = str(f.get("id") or f.get("pdfFieldId") or "").strip()
             if not fid:
                 continue
@@ -3418,6 +3432,7 @@ def _apply_computed_fields_from_steps_to_mapping(
                     enums=enums,
                     lookup_tables=lts,
                     row=None,
+                    field_by_pid=field_by_pid,
                 )
             except Exception:
                 res = None
@@ -3430,16 +3445,10 @@ def _apply_computed_fields_from_steps_to_mapping(
             elif isinstance(res, (int, float)):
                 try:
                     from radiation_detection_report.chapter5_field_sync import (
-                        format_protection_numeric_display,
-                        resolve_field_number_precision,
+                        format_protection_cell_display,
                     )
 
-                    prec = resolve_field_number_precision(f)
-                    out_val = format_protection_numeric_display(
-                        res,
-                        precision=prec,
-                        fixed=True,
-                    )
+                    out_val = format_protection_cell_display(res, f, fixed=True)
                 except ImportError:
                     out_val = str(res)
             else:

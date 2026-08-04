@@ -67,10 +67,95 @@ _SEQ_LABEL_RE = re.compile(r"^序号_r\d+", re.I)
 _F_ID_RE = re.compile(r"^f\d+$", re.I)
 _RP_LOCATION_COLUMN_ROLES = frozenset({"检测点位置", "位置细分"})
 PROTECTION_NUMBER_PRECISION = 2
+# 第五章表格：测量均值固定 3 位；报出值按量级分档（见 format_protection_report_value_display）
+# 实际运行时以 apps.core.decimal_precision_runtime_config 为准（可在调试设置热更新）。
+PROTECTION_MEAN_PRECISION = 3
+PROTECTION_REPORT_PRECISION_RULE = "magnitude_tiered"
 _HEADER_READING_RE = re.compile(r"测量读数|读数\s*M", re.I)
 _HEADER_MEAN_RE = re.compile(r"测量均值|均值\s*M", re.I)
 _HEADER_REPORT_RE = re.compile(r"报出值", re.I)
 _HEADER_ANNUAL_DOSE_RE = re.compile(r"年剂量|估算\s*mSv", re.I)
+
+
+def _decimal_precision_cfg():
+    """读取小数精度热更新配置；失败时返回 None（调用方用模块常量兜底）。"""
+    try:
+        from apps.core.decimal_precision_runtime_config import (
+            get_decimal_precision_runtime_config,
+        )
+
+        return get_decimal_precision_runtime_config()
+    except Exception:
+        return None
+
+
+def _cfg_global_precision() -> int:
+    cfg = _decimal_precision_cfg()
+    if cfg is None:
+        return PROTECTION_NUMBER_PRECISION
+    return max(0, int(cfg.global_precision))
+
+
+def _cfg_mean_precision() -> int:
+    cfg = _decimal_precision_cfg()
+    if cfg is None or not cfg.chapter5_enabled:
+        return _cfg_global_precision()
+    return max(0, int(cfg.chapter5_mean_precision))
+
+
+def _cfg_reading_precision() -> int:
+    cfg = _decimal_precision_cfg()
+    if cfg is None or not cfg.chapter5_enabled:
+        return _cfg_global_precision()
+    return max(0, int(cfg.chapter5_reading_precision))
+
+
+def _cfg_chapter5_enabled() -> bool:
+    cfg = _decimal_precision_cfg()
+    return True if cfg is None else bool(cfg.chapter5_enabled)
+
+
+def _cfg_report_precision_for_magnitude(num: float) -> int:
+    cfg = _decimal_precision_cfg()
+    if cfg is None:
+        av = abs(float(num))
+        if av < 10:
+            return 2
+        if av < 100:
+            return 1
+        return 0
+    if not cfg.chapter5_enabled:
+        return max(0, int(cfg.global_precision))
+    if not cfg.chapter5_report_tiered:
+        return max(0, int(cfg.chapter5_report_fixed_precision))
+    av = abs(float(num))
+    if av < 10:
+        return max(0, int(cfg.chapter5_report_lt10_precision))
+    if av < 100:
+        return max(0, int(cfg.chapter5_report_lt100_precision))
+    return max(0, int(cfg.chapter5_report_gte100_precision))
+
+
+def _cfg_report_precision_cap() -> int:
+    """写入 JSON 的报出值 precision 上限（分档时取各档最大值）。"""
+    cfg = _decimal_precision_cfg()
+    if cfg is None:
+        return 2
+    if not cfg.chapter5_enabled:
+        return max(0, int(cfg.global_precision))
+    if not cfg.chapter5_report_tiered:
+        return max(0, int(cfg.chapter5_report_fixed_precision))
+    return max(
+        0,
+        int(cfg.chapter5_report_lt10_precision),
+        int(cfg.chapter5_report_lt100_precision),
+        int(cfg.chapter5_report_gte100_precision),
+    )
+
+
+def _cfg_apply_on_backfill() -> bool:
+    cfg = _decimal_precision_cfg()
+    return True if cfg is None else bool(cfg.apply_on_backfill)
 
 
 def _is_annual_dose_field_label(text: str) -> bool:
@@ -513,6 +598,7 @@ def resolve_background_calibration_factor_pid(
 
 
 def background_range_expression(reading_pids: Sequence[str], factor_pid: str) -> str:
+    """兼容旧脚本：拼本底范围式。新逻辑不再自动写入栏位。"""
     refs = [_norm(pid) for pid in reading_pids if _norm(pid)]
     if len(refs) < 2 or not _norm(factor_pid):
         return ""
@@ -528,52 +614,51 @@ def apply_background_formulas_to_pdf_fields(
     geometry_fields: Optional[Sequence[Any]] = None,
 ) -> None:
     """
-    本底水平及范围：写入 min(f…)~max(f…)×校准因子（仿 CT 验收 f603），
-    不被章节报出值规则 {mean}*f927 覆盖。
+    本底相关：不再自动提取校准因子、不自动写本底报出公式。
 
-    ``geometry_fields``：用于识别本底①–⑩与报出格的几何来源。导出前端 JSON 时
-    steps 栏位的 pdfAnchor 易把末几行测量点误判为本底，应传入原始 ``pdf.fields``。
+    本底报出值由编辑器章节/栏位公式人工配置。此处仅清掉误套到本底
+    **读数格**上的 avg（忽略 override），避免把十格读数当成测量均值。
     """
     chapter = chapter if isinstance(chapter, dict) else {}
     field_list = [f for f in (fields or []) if isinstance(f, dict)]
     geo_source = [f for f in (geometry_fields or []) if isinstance(f, dict)]
     if len(geo_source) < 2:
         geo_source = field_list
-    # 优先章节已保存的本底绑定，避免导出态重推几何串格
+    reading_pids: set[str] = set()
     saved_bb = chapter.get("backgroundBinding") if isinstance(chapter.get("backgroundBinding"), dict) else {}
-    saved_report = _norm(saved_bb.get("report_d") or "")
-    saved_readings = [
-        _norm(saved_bb.get(f"bg_reading_{i}") or "")
-        for i in range(1, 11)
-        if _norm(saved_bb.get(f"bg_reading_{i}") or "")
-    ]
-    geo = infer_background_geometry_from_fields(geo_source)
-    reading_rows = list(geo.get("readings") or [])
-    if saved_readings and len(saved_readings) >= 2:
-        reading_pids = saved_readings
-    else:
-        reading_pids = [str(r["pid"]) for r in reading_rows]
-    if len(reading_pids) < 2:
-        return
-    factor_pid = resolve_background_calibration_factor_pid(chapter, geo_source or field_list)
-    if not factor_pid:
-        return
-    expr = background_range_expression(reading_pids, factor_pid)
-    if not expr:
-        return
-    report_pid = saved_report or _norm(geo.get("report_d") or "")
-    if not report_pid:
+    for i in range(1, 11):
+        p = _norm(saved_bb.get(f"bg_reading_{i}") or "")
+        if p:
+            reading_pids.add(p)
+    if len(reading_pids) < 1:
+        geo = infer_background_geometry_from_fields(geo_source)
+        reading_pids = {
+            _norm(r.get("pid") or "")
+            for r in (geo.get("readings") or [])
+            if isinstance(r, dict) and _norm(r.get("pid") or "")
+        }
+    if not reading_pids:
         return
     for field in field_list:
-        pid = export_field_pdf_id(field)
-        if not pid or pid != report_pid:
+        if not isinstance(field, dict):
             continue
-        field["fieldExpression"] = expr
-        field["formula"] = expr
-        src = field.get("source") if isinstance(field.get("source"), dict) else {}
-        if isinstance(src, dict):
-            field["source"] = {**src, "pdfFieldExpression": expr}
-        field["fieldFormulaUserOverride"] = True
+        pid = export_field_pdf_id(field)
+        if not pid or pid not in reading_pids:
+            continue
+        expr = _norm(
+            field.get("fieldExpression")
+            or field.get("formula")
+            or field.get("pdfFieldExpression")
+            or ""
+        )
+        if not re.match(r"^avg\s*\(", expr, re.I):
+            continue
+        field["fieldExpression"] = ""
+        field["formula"] = ""
+        field.pop("fieldFormulaUserOverride", None)
+        src = field.get("source") if isinstance(field.get("source"), dict) else None
+        if isinstance(src, dict) and "pdfFieldExpression" in src:
+            field["source"] = {**src, "pdfFieldExpression": ""}
 
 
 def is_protection_pdf_field(field: Mapping[str, Any]) -> bool:
@@ -1580,7 +1665,7 @@ def apply_protection_field_export_typing(
     *,
     column_layout: Optional[Mapping[str, Any]] = None,
 ) -> None:
-    """第五章导出：检测点位置列 text；其余数值 precision=2。"""
+    """第五章导出：检测点位置列 text；均值 precision=3；报出值分档规则；其余数值 precision=2。"""
     if str(item.get("templateSectionKey") or "") != CHAPTER_KEY:
         return
     src = field_obj.get("source") if isinstance(field_obj.get("source"), dict) else {}
@@ -1589,6 +1674,7 @@ def apply_protection_field_export_typing(
     if role in _RP_LOCATION_COLUMN_ROLES:
         field_obj["type"] = "text"
         field_obj.pop("precision", None)
+        field_obj.pop("precisionRule", None)
         field_obj.pop("unit", None)
         if isinstance(src, dict):
             sem = src.setdefault("autoSemantic", {})
@@ -1596,13 +1682,29 @@ def apply_protection_field_export_typing(
                 sem.setdefault("radiationColumn", role)
                 sem.setdefault("typeName", role)
         return
-    if str(field_obj.get("type") or "").lower() == "number":
-        field_obj["precision"] = PROTECTION_NUMBER_PRECISION
+    ftype = str(field_obj.get("type") or "").lower()
+    if ftype not in ("number", "computed"):
+        return
+    # 合成语义后再判定均值/报出（仅第五章）
+    probe = dict(field_obj)
+    probe["templateSectionKey"] = CHAPTER_KEY
+    probe["sectionKey"] = CHAPTER_KEY
+    if isinstance(auto_sem, dict) and auto_sem:
+        src2 = probe.setdefault("source", {})
+        if isinstance(src2, dict):
+            src2["autoSemantic"] = auto_sem
+    if role and not ((probe.get("source") or {}).get("autoSemantic") or {}).get("radiationColumn"):
+        src2 = probe.setdefault("source", {})
+        if isinstance(src2, dict):
+            sem = src2.setdefault("autoSemantic", {})
+            if isinstance(sem, dict):
+                sem["radiationColumn"] = role
+    apply_chapter5_decimal_precision_to_field(field_obj, probe_field=probe)
 
 
 def field_is_protection_chapter_numeric_cell(field: Mapping[str, Any]) -> bool:
     """现场记录第五章数值格：读数/均值/报出值/本底/表前因子等（非序号、非位置文字）。"""
-    if not is_protection_pdf_field(field):
+    if not _field_belongs_to_chapter5_table(field):
         return False
     if is_rp_table_seq_field(field):
         return False
@@ -1632,18 +1734,185 @@ def field_is_protection_chapter_numeric_cell(field: Mapping[str, Any]) -> bool:
     return True
 
 
+def _field_belongs_to_chapter5_table(field: Mapping[str, Any]) -> bool:
+    """严格限定第五章「工作场所放射防护」表，排除质控等章节的同名「报出值/均值」。"""
+    if not isinstance(field, Mapping):
+        return False
+    sk = _norm(field.get("templateSectionKey") or field.get("sectionKey") or "")
+    if sk in _RP_SECTION_KEYS:
+        return True
+    if _norm(field.get("sectionType") or "") == "radiationProtection":
+        return True
+    src = field.get("source") if isinstance(field.get("source"), dict) else {}
+    if _norm(src.get("sectionKey") or src.get("templateSectionKey") or "") in _RP_SECTION_KEYS:
+        return True
+    if is_protection_pdf_field(field):
+        return True
+    return False
+
+
+def protection_numeric_cell_kind(field: Optional[Mapping[str, Any]]) -> str:
+    """
+    第五章表格数值格种类：mean / report / reading / other / ''（非第五章或不适用）。
+    """
+    if not isinstance(field, Mapping):
+        return ""
+    if not _field_belongs_to_chapter5_table(field):
+        return ""
+    if is_rp_table_seq_field(field):
+        return ""
+    sem = protection_field_semantic_unified(field)
+    role = _column_role(sem, field)
+    blob = _field_label_blob(field)
+    if role == _COLUMN_ANNUAL_DOSE or _is_annual_dose_field_label(blob) or _is_annual_dose_field_label(role):
+        return "other"
+    if role in _RP_LOCATION_COLUMN_ROLES or role in ("检测点位置", "位置细分"):
+        return ""
+    if role == _COLUMN_MEAN or ("均值" in role and "年" not in role):
+        return "mean"
+    if role == _COLUMN_REPORT or ("报出" in role and "年" not in role):
+        return "report"
+    if role == _COLUMN_READING or role.startswith("测量读数") or role == "测量值":
+        return "reading"
+    if "均值" in blob or "Mbar" in blob or "M̄" in blob:
+        return "mean"
+    if "报出" in blob and not _is_annual_dose_field_label(blob):
+        return "report"
+    if "读数" in blob or ("测量值" in blob and "报出" not in blob):
+        return "reading"
+    return "other"
+
+
+def resolve_protection_report_value_precision(num: float) -> int:
+    """报出值分档：默认 |x|<10 → 2 位；10≤|x|<100 → 1 位；|x|≥100 → 整数（可热更新）。"""
+    return _cfg_report_precision_for_magnitude(num)
+
+
+def format_protection_report_value_display(value: Any) -> str:
+    """第五章报出值（含 a~b 范围）按量级分档保留小数。"""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return str(int(value))
+    text = str(value).strip()
+    if not text or text == "/":
+        return text
+    if text.startswith("模拟_") or text.startswith("mock_"):
+        return text
+    if "~" in text:
+        parts = re.split(r"\s*~\s*", text, maxsplit=1)
+        if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+            left = format_protection_report_value_display(parts[0].strip())
+            right = format_protection_report_value_display(parts[1].strip())
+            if left and right:
+                return f"{left}~{right}"
+        return text
+    try:
+        num = float(text)
+    except (TypeError, ValueError):
+        return text
+    if math.isnan(num) or math.isinf(num):
+        return text
+    prec = resolve_protection_report_value_precision(num)
+    rounded = round(num, prec)
+    # 跨档后再判定一次（如 9.996→10.00 应按 10–100 规则变为 10.0）
+    prec2 = resolve_protection_report_value_precision(rounded)
+    return format_protection_numeric_display(rounded, precision=prec2, fixed=True)
+
+
+def apply_chapter5_decimal_precision_to_field(
+    field_obj: Dict[str, Any],
+    *,
+    probe_field: Optional[Mapping[str, Any]] = None,
+) -> bool:
+    """
+    给第五章均值/报出栏写入 precision / precisionRule。返回是否有改动。
+    仅处理 number/computed；其它类型不动。位数取自热更新配置。
+    """
+    if not isinstance(field_obj, dict):
+        return False
+    if not _cfg_chapter5_enabled():
+        return False
+    ftype = str(field_obj.get("type") or "").lower()
+    if ftype not in ("number", "computed", ""):
+        # pdf.fields 常无 type，允许空 type
+        if ftype:
+            return False
+    probe = probe_field if isinstance(probe_field, Mapping) else field_obj
+    kind = protection_numeric_cell_kind(probe)
+    if not kind:
+        # pdf 无 type 时：仅当能识别为第五章 mean/report 才写
+        return False
+    mean_prec = _cfg_mean_precision()
+    reading_prec = _cfg_reading_precision()
+    report_cap = _cfg_report_precision_cap()
+    cfg = _decimal_precision_cfg()
+    report_tiered = True if cfg is None else bool(cfg.chapter5_report_tiered)
+    changed = False
+    if kind == "mean":
+        if field_obj.get("precision") != mean_prec:
+            field_obj["precision"] = mean_prec
+            changed = True
+        if "precisionRule" in field_obj:
+            field_obj.pop("precisionRule", None)
+            changed = True
+        if not ftype:
+            field_obj["type"] = "number"
+            changed = True
+    elif kind == "report":
+        if field_obj.get("precision") != report_cap:
+            field_obj["precision"] = report_cap
+            changed = True
+        if report_tiered:
+            if field_obj.get("precisionRule") != PROTECTION_REPORT_PRECISION_RULE:
+                field_obj["precisionRule"] = PROTECTION_REPORT_PRECISION_RULE
+                changed = True
+        elif "precisionRule" in field_obj:
+            field_obj.pop("precisionRule", None)
+            changed = True
+        if not ftype:
+            field_obj["type"] = "number"
+            changed = True
+    elif kind in ("reading", "other"):
+        if ftype in ("number", "computed") or not ftype:
+            target = reading_prec if kind == "reading" else _cfg_global_precision()
+            if field_obj.get("precision") != target:
+                field_obj["precision"] = target
+                changed = True
+            if "precisionRule" in field_obj:
+                field_obj.pop("precisionRule", None)
+                changed = True
+    return changed
+
+
 def resolve_field_number_precision(
     field: Optional[Mapping[str, Any]] = None,
     *,
-    default: int = PROTECTION_NUMBER_PRECISION,
+    default: Optional[int] = None,
 ) -> int:
-    """栏位 `precision` 优先；未配置时用 default（默认 2 位）。"""
-    if isinstance(field, Mapping) and field.get("precision") not in (None, ""):
-        try:
-            return max(0, int(field.get("precision")))
-        except (TypeError, ValueError):
-            pass
-    return max(0, int(default))
+    """栏位 `precision` 优先；第五章按热更新规则；其余用全局默认。"""
+    fallback = _cfg_global_precision() if default is None else max(0, int(default))
+    if isinstance(field, Mapping):
+        kind = protection_numeric_cell_kind(field)
+        if kind == "mean" and _cfg_chapter5_enabled():
+            if field.get("precision") not in (None, ""):
+                try:
+                    return max(0, int(field.get("precision")))
+                except (TypeError, ValueError):
+                    pass
+            return _cfg_mean_precision()
+        if field.get("precision") not in (None, ""):
+            try:
+                return max(0, int(field.get("precision")))
+            except (TypeError, ValueError):
+                pass
+        if kind == "reading" and _cfg_chapter5_enabled():
+            return _cfg_reading_precision()
+        if kind == "report" and _cfg_chapter5_enabled():
+            return _cfg_report_precision_cap()
+        if kind == "other" and _cfg_chapter5_enabled():
+            return _cfg_global_precision()
+    return fallback
 
 
 def format_protection_numeric_display(
@@ -1665,7 +1934,10 @@ def format_protection_numeric_display(
     text = str(value).strip()
     if not text or text == "/":
         return text
-    if "~" in text or text.startswith("模拟_") or text.startswith("mock_"):
+    if text.startswith("模拟_") or text.startswith("mock_"):
+        return text
+    # 范围串留给 format_protection_report_value_display / format_protection_cell_display
+    if "~" in text:
         return text
     try:
         num = float(text)
@@ -1682,6 +1954,30 @@ def format_protection_numeric_display(
     if abs(rounded - int(rounded)) < 1e-12:
         return str(int(rounded))
     return f"{rounded:.{prec}f}".rstrip("0").rstrip(".")
+
+
+def format_protection_cell_display(
+    value: Any,
+    field: Optional[Mapping[str, Any]] = None,
+    *,
+    fixed: bool = True,
+) -> str:
+    """
+    按第五章栏位种类格式化：均值/报出值规则取自热更新配置；其它用全局或栏位 precision。
+    非第五章栏位：按 resolve_field_number_precision + format_protection_numeric_display。
+    """
+    kind = protection_numeric_cell_kind(field) if isinstance(field, Mapping) else ""
+    if kind == "mean" and _cfg_chapter5_enabled():
+        return format_protection_numeric_display(
+            value, precision=_cfg_mean_precision(), fixed=True
+        )
+    if kind == "report" and _cfg_chapter5_enabled():
+        return format_protection_report_value_display(value)
+    prec = resolve_field_number_precision(field if isinstance(field, Mapping) else None)
+    use_fixed = bool(fixed)
+    if isinstance(field, Mapping) and kind in ("reading", "other"):
+        use_fixed = True
+    return format_protection_numeric_display(value, precision=prec, fixed=use_fixed)
 
 
 def _binding_has_dual_group(binding: Mapping[str, Any]) -> bool:
@@ -3702,7 +3998,7 @@ def apply_chapter_formulas_to_export_payload(
         for item in pdf_fields:
             if isinstance(item, dict) and export_field_pdf_id(item) and export_field_pdf_id(item) not in seen:
                 export_fields.append(item)
-    # 本底范围公式必须按坐标模板 pdf.fields 几何定位；勿用 steps 导出栏位重推（会把测量报出格如 f465 误写成 min~max）
+    # 本底：仅按 pdf.fields 几何清读数格误写 avg；本底报出公式由人工配置，不再自动写因子
     apply_background_formulas_to_pdf_fields(
         export_fields,
         chapter=chapter,
@@ -3779,3 +4075,145 @@ def update_reference_layout_file(
     with path.open("w", encoding="utf-8") as f:
         json.dump(merged, f, ensure_ascii=False, indent=2)
     return path
+
+
+def _collect_chapter5_slot_pids(payload: Mapping[str, Any]) -> Dict[str, set]:
+    """从 radiationProtectionChapter.fieldBindings / backgroundBinding 收集均值与报出值 f 号。"""
+    mean_pids: set = set()
+    report_pids: set = set()
+    fs = payload.get("formSchema") if isinstance(payload.get("formSchema"), dict) else {}
+    chapter = fs.get(SCHEMA_KEY) if isinstance(fs.get(SCHEMA_KEY), dict) else {}
+    if not chapter and isinstance(payload.get(SCHEMA_KEY), dict):
+        chapter = payload.get(SCHEMA_KEY) or {}
+    for binding in chapter.get("fieldBindings") or []:
+        if not isinstance(binding, Mapping):
+            continue
+        for key in ("mean_m", "mean_m_2"):
+            pid = _norm(binding.get(key) or "").lower()
+            if _F_ID_RE.match(pid):
+                mean_pids.add(pid)
+        for key in ("report_d", "report_d_2"):
+            pid = _norm(binding.get(key) or "").lower()
+            if _F_ID_RE.match(pid):
+                report_pids.add(pid)
+    bb = chapter.get("backgroundBinding") if isinstance(chapter.get("backgroundBinding"), dict) else {}
+    bg_report = _norm(bb.get("report_d") or "").lower()
+    if _F_ID_RE.match(bg_report):
+        report_pids.add(bg_report)
+    return {"mean": mean_pids, "report": report_pids}
+
+
+def _stamp_field_precision_by_kind(field_obj: Dict[str, Any], kind: str) -> bool:
+    mean_prec = _cfg_mean_precision()
+    report_cap = _cfg_report_precision_cap()
+    cfg = _decimal_precision_cfg()
+    report_tiered = True if cfg is None else bool(cfg.chapter5_report_tiered)
+    if kind == "mean":
+        changed = False
+        if field_obj.get("precision") != mean_prec:
+            field_obj["precision"] = mean_prec
+            changed = True
+        if field_obj.pop("precisionRule", None) is not None:
+            changed = True
+        return changed
+    if kind == "report":
+        changed = False
+        if field_obj.get("precision") != report_cap:
+            field_obj["precision"] = report_cap
+            changed = True
+        if report_tiered:
+            if field_obj.get("precisionRule") != PROTECTION_REPORT_PRECISION_RULE:
+                field_obj["precisionRule"] = PROTECTION_REPORT_PRECISION_RULE
+                changed = True
+        elif field_obj.pop("precisionRule", None) is not None:
+            changed = True
+        return changed
+    return False
+
+
+def apply_chapter5_decimal_precision_to_template_payload(
+    payload: Dict[str, Any],
+) -> Dict[str, int]:
+    """
+    就地更新模板 JSON：仅第五章工作场所放射防护表的测量均值 / 报出值栏位。
+    位数与 precisionRule 取自热更新配置。
+    返回统计 {mean, report, fields_touched}。
+    """
+    stats = {"mean": 0, "report": 0, "fields_touched": 0}
+    if not isinstance(payload, dict):
+        return stats
+    if not _cfg_chapter5_enabled():
+        return stats
+    slots = _collect_chapter5_slot_pids(payload)
+    mean_pids = slots["mean"]
+    report_pids = slots["report"]
+
+    def _touch(field_obj: Dict[str, Any], *, force_kind: str = "") -> None:
+        nonlocal stats
+        if not isinstance(field_obj, dict):
+            return
+        pid = export_field_pdf_id(field_obj) or _norm(field_obj.get("id") or "").lower()
+        kind = force_kind
+        if not kind:
+            if pid in mean_pids:
+                kind = "mean"
+            elif pid in report_pids:
+                kind = "report"
+            else:
+                # 无 binding 时：仅当栏位已归属第五章再按语义推断
+                probe = dict(field_obj)
+                if not _norm(probe.get("templateSectionKey") or ""):
+                    probe["templateSectionKey"] = CHAPTER_KEY
+                kind = protection_numeric_cell_kind(probe)
+                if kind not in ("mean", "report"):
+                    return
+        if kind == "mean" and _stamp_field_precision_by_kind(field_obj, "mean"):
+            stats["mean"] += 1
+            stats["fields_touched"] += 1
+        elif kind == "report" and _stamp_field_precision_by_kind(field_obj, "report"):
+            stats["report"] += 1
+            stats["fields_touched"] += 1
+
+    pdf = payload.get("pdf") if isinstance(payload.get("pdf"), dict) else {}
+    for field in pdf.get("fields") or []:
+        if not isinstance(field, dict):
+            continue
+        if _norm(field.get("templateSectionKey") or "") not in _RP_SECTION_KEYS:
+            # 仍可用 binding pid 命中
+            pid = export_field_pdf_id(field) or _norm(field.get("id") or "").lower()
+            if pid not in mean_pids and pid not in report_pids:
+                continue
+            force = "mean" if pid in mean_pids else "report"
+            _touch(field, force_kind=force)
+            continue
+        _touch(field)
+
+    fs = payload.get("formSchema") if isinstance(payload.get("formSchema"), dict) else None
+    if isinstance(fs, dict):
+        for step in fs.get("steps") or []:
+            if not isinstance(step, dict):
+                continue
+            for sec in step.get("sections") or []:
+                if not isinstance(sec, dict):
+                    continue
+                sk = _norm(sec.get("sectionKey") or sec.get("key") or "")
+                title = _norm(sec.get("title") or "")
+                sec_is_ch5 = sk in _RP_SECTION_KEYS or (
+                    "工作场所放射防护" in title and "仪器" not in title
+                )
+                for field in sec.get("fields") or []:
+                    if not isinstance(field, dict):
+                        continue
+                    pid = export_field_pdf_id(field) or _norm(field.get("id") or "").lower()
+                    if pid in mean_pids:
+                        _touch(field, force_kind="mean")
+                    elif pid in report_pids:
+                        _touch(field, force_kind="report")
+                    elif sec_is_ch5:
+                        probe = dict(field)
+                        probe.setdefault("templateSectionKey", CHAPTER_KEY)
+                        probe.setdefault("sectionKey", CHAPTER_KEY)
+                        kind = protection_numeric_cell_kind(probe)
+                        if kind in ("mean", "report"):
+                            _touch(field, force_kind=kind)
+    return stats

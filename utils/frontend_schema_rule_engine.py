@@ -2285,7 +2285,13 @@ def _compact_single_form_field(
             }
     elif isinstance(fb, dict) and (fb.get("x") or fb.get("y") or fb.get("r2FieldId")):
         out["type"] = "computed"
-        if not str(out.get("displayFormat") or "").strip():
+        out_mode = str(fb.get("output") or "equation").strip().lower()
+        source_only = out_mode in ("none", "source", "sourceonly")
+        if source_only:
+            out.pop("displayFormat", None)
+            out["formula"] = ""
+            out["fieldExpression"] = ""
+        elif not str(out.get("displayFormat") or "").strip():
             out["displayFormat"] = "latex"
         out.pop("fitConfigRef", None)
 
@@ -4838,12 +4844,87 @@ def _finalize_frontend_schema_result(result: Dict[str, Any], *, merge_split_date
     result = _coerce_radio_select_defaults_to_string(result)
     result = _apply_radiation_protection_chapter_formulas(result)
     result = _apply_conditional_field_rules_globally(result)
+    result = _expand_fit_ref_calls_globally(result)
     result = _inject_template_section_metadata(result)
     result = _sort_fields_by_editor_list_order(result)
     result = _compact_form_schema_payload(result)
     if isinstance(result, dict):
         result.setdefault("schema", "frontend_form_schema/v1")
     return result
+
+
+def _iter_form_schema_field_dicts(payload: Dict[str, Any]):
+    """遍历 formSchema / 导出结果中的栏位 dict（含 matrix cells）。"""
+    steps = payload.get("steps")
+    if not isinstance(steps, list):
+        return
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        for sec in step.get("sections") or []:
+            if not isinstance(sec, dict):
+                continue
+            stack = list(sec.get("fields") or [])
+            while stack:
+                field = stack.pop(0)
+                if not isinstance(field, dict):
+                    continue
+                yield field
+                for nested in field.get("fields") or []:
+                    if isinstance(nested, dict):
+                        stack.append(nested)
+                cells = field.get("cells")
+                if isinstance(cells, dict):
+                    for cell in cells.values():
+                        if isinstance(cell, dict):
+                            stack.append(cell)
+            matrix = sec.get("matrix")
+            if isinstance(matrix, dict):
+                cells = matrix.get("cells")
+                if isinstance(cells, dict):
+                    for cell in cells.values():
+                        if isinstance(cell, dict):
+                            yield cell
+
+
+def _expand_fit_ref_calls_globally(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """把整式 fit_a/b/y/x(...) 展开为与 R² 同类的可求值算术式，供平板直接计算。"""
+    try:
+        from utils.fit_ref_expand import expand_field_fit_ref_inplace
+        from utils.pdf_field_formulas import normalize_pdf_field_id
+    except Exception:
+        return payload
+    fields = [f for f in _iter_form_schema_field_dicts(payload) if isinstance(f, dict)]
+    by_pid = {}
+    for f in fields:
+        pid = normalize_pdf_field_id(str(f.get("pdfFieldId") or f.get("id") or ""))
+        if pid:
+            by_pid[pid] = f
+            by_pid[pid.lower()] = f
+    for f in fields:
+        try:
+            expand_field_fit_ref_inplace(f, by_pid)
+        except Exception:
+            continue
+    # 同步顶层 pdf.fields（若存在）
+    pdf = payload.get("pdf") if isinstance(payload.get("pdf"), dict) else None
+    pdf_fields = pdf.get("fields") if isinstance(pdf, dict) else None
+    if isinstance(pdf_fields, list):
+        pdf_by = {}
+        for f in pdf_fields:
+            if not isinstance(f, dict):
+                continue
+            pid = normalize_pdf_field_id(str(f.get("pdfFieldId") or f.get("id") or ""))
+            if pid:
+                pdf_by[pid] = f
+                pdf_by[pid.lower()] = f
+        for f in pdf_fields:
+            if isinstance(f, dict):
+                try:
+                    expand_field_fit_ref_inplace(f, pdf_by)
+                except Exception:
+                    continue
+    return payload
 
 
 def _apply_conditional_field_rules_globally(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -5361,13 +5442,21 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
         elif isinstance(fb, dict) and (fb.get("x") or fb.get("y") or fb.get("r2FieldId")):
             field_obj["fitBinding"] = copy.deepcopy(fb)
             field_obj["type"] = "computed"
-            dfmt = str(item.get("displayFormat") or field_obj.get("displayFormat") or "latex").strip()
-            field_obj["displayFormat"] = dfmt or "latex"
+            out_mode = str(fb.get("output") or "equation").strip().lower()
+            source_only = out_mode in ("none", "source", "sourceonly")
             if isinstance(rules, list) and rules:
                 field_obj["formulaRules"] = copy.deepcopy(rules)
-            # 拟合由 fitBinding + formulaRules 中的 fit(y=...) 驱动
-            if not str(field_obj.get("formula") or "").strip():
-                field_obj["formula"] = "fit(y=a*x+b)"
+            if source_only:
+                field_obj.pop("displayFormat", None)
+                field_obj["formula"] = ""
+                field_obj["fieldExpression"] = ""
+                field_obj["defaultValue"] = None
+            else:
+                dfmt = str(item.get("displayFormat") or field_obj.get("displayFormat") or "latex").strip()
+                field_obj["displayFormat"] = dfmt or "latex"
+                # 拟合由 fitBinding + formulaRules 中的 fit(y=...) 驱动
+                if not str(field_obj.get("formula") or "").strip():
+                    field_obj["formula"] = "fit(y=a*x+b)"
             field_obj["dependsOn"] = list(field_obj.get("dependsOn") or [])
         # 条件公式 / 单条公式：覆盖 testResult→number，强制 type=computed
         elif (isinstance(rules, list) and rules) or str(

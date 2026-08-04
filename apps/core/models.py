@@ -2166,13 +2166,15 @@ class UserSignatureEvent(models.Model):
 
 
 class BizOperationLog(models.Model):
-    """医院信息 / 委托项目相关写库操作日志（增删改、派工等）。"""
+    """医院信息 / 委托项目 / 产品目录相关写库操作日志（增删改、派工等）。"""
 
     SCOPE_HOSPITAL = "hospital"
     SCOPE_PROJECT = "project"
+    SCOPE_PRODUCT = "product"
     SCOPE_CHOICES = [
         (SCOPE_HOSPITAL, _("医院信息")),
         (SCOPE_PROJECT, _("委托项目")),
+        (SCOPE_PRODUCT, _("产品管理")),
     ]
 
     ACTION_CREATE = "create"
@@ -2246,3 +2248,246 @@ class BizOperationLog(models.Model):
         if self.actor_id is None:
             return "（已删除用户）"
         return self.actor.get_username()
+
+
+class SalesProductCategory(models.Model):
+    """销售产品分类（如放射卫生）。"""
+
+    name = models.CharField(max_length=128, db_index=True, verbose_name=_("分类名称"))
+    sort_order = models.PositiveIntegerField(default=0, verbose_name=_("排序"))
+    is_active = models.BooleanField(default=True, db_index=True, verbose_name=_("启用"))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("创建时间"))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_("更新时间"))
+
+    class Meta:
+        verbose_name = _("销售产品分类")
+        verbose_name_plural = verbose_name
+        ordering = ["sort_order", "id"]
+
+    def __str__(self):
+        return self.name
+
+
+class SalesProductLine(models.Model):
+    """销售产品线（如普放、核磁、个人剂量监测）。"""
+
+    name = models.CharField(max_length=128, db_index=True, verbose_name=_("产品线名称"))
+    sort_order = models.PositiveIntegerField(default=0, verbose_name=_("排序"))
+    is_active = models.BooleanField(default=True, db_index=True, verbose_name=_("启用"))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("创建时间"))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_("更新时间"))
+
+    class Meta:
+        verbose_name = _("销售产品线")
+        verbose_name_plural = verbose_name
+        ordering = ["sort_order", "id"]
+
+    def __str__(self):
+        return self.name
+
+
+class SalesProduct(models.Model):
+    """产品目录：用于销售登记；可预设对应设备类型与检测类型。"""
+
+    STATUS_LISTED = "listed"
+    STATUS_UNLISTED = "unlisted"
+    STATUS_CHOICES = (
+        (STATUS_LISTED, _("已上架")),
+        (STATUS_UNLISTED, _("已下架")),
+    )
+
+    name = models.CharField(max_length=255, db_index=True, verbose_name=_("产品名称"))
+    standard_price = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0, verbose_name=_("标准价格")
+    )
+    unit = models.CharField(max_length=32, blank=True, default="", verbose_name=_("单位"))
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_LISTED,
+        db_index=True,
+        verbose_name=_("上下架"),
+    )
+    listed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name=_("上架时间"),
+        help_text=_("最近一次设为已上架的时间；新建且上架时写入"),
+    )
+    category = models.ForeignKey(
+        SalesProductCategory,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="products",
+        verbose_name=_("分类"),
+    )
+    product_line = models.ForeignKey(
+        SalesProductLine,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="products",
+        verbose_name=_("产品线"),
+    )
+    owner_name = models.CharField(max_length=64, blank=True, default="", verbose_name=_("负责人"))
+    notes = models.CharField(max_length=500, blank=True, default="", verbose_name=_("备注"))
+    specs = models.TextField(blank=True, default="", verbose_name=_("规格属性"))
+    default_device_types = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name=_("默认设备类型"),
+        help_text=_('如 ["CT","DR"]，可多选；与医院设备类型一致'),
+    )
+    default_device_counts = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name=_("各设备类型台数"),
+        help_text=_('如 {"CT": 2, "DR": 1}；未写的类型按 1 台计'),
+    )
+    default_inspection_types = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name=_("默认检测类型"),
+        help_text=_('如 ["验收检测","状态检测"]'),
+    )
+    is_active = models.BooleanField(default=True, db_index=True, verbose_name=_("启用"))
+    created_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="sales_products_created",
+        verbose_name=_("创建者"),
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("创建时间"))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_("更新时间"))
+
+    class Meta:
+        verbose_name = _("销售产品")
+        verbose_name_plural = verbose_name
+        ordering = ["-updated_at", "-id"]
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def status_label(self) -> str:
+        return dict(self.STATUS_CHOICES).get(self.status, self.status)
+
+    @property
+    def is_listed(self) -> bool:
+        return self.status == self.STATUS_LISTED and self.is_active
+
+    def device_count_for(self, device_type: str) -> int:
+        counts = self.default_device_counts if isinstance(self.default_device_counts, dict) else {}
+        try:
+            n = int(counts.get(device_type) or 1)
+        except (TypeError, ValueError):
+            n = 1
+        return max(1, n)
+
+    @property
+    def device_bindings_label(self) -> str:
+        types = list(self.default_device_types or [])
+        if not types:
+            return ""
+        parts = []
+        for dt in types:
+            n = self.device_count_for(dt)
+            parts.append(f"{dt}×{n}" if n > 1 else dt)
+        return "、".join(parts)
+
+
+class LibraryProjectProduct(models.Model):
+    """委托项目上的销售产品记录（与直接挂载设备并行，主要用于销售情况）。"""
+
+    project = models.ForeignKey(
+        LibraryProject,
+        on_delete=models.CASCADE,
+        related_name="project_products",
+        verbose_name=_("所属委托"),
+    )
+    product = models.ForeignKey(
+        SalesProduct,
+        on_delete=models.PROTECT,
+        related_name="project_links",
+        verbose_name=_("产品"),
+    )
+    quantity = models.DecimalField(
+        max_digits=12, decimal_places=2, default=1, verbose_name=_("数量")
+    )
+    unit_price = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        verbose_name=_("成交单价"),
+        help_text=_("挂载时快照标准价格，可按单笔调整"),
+    )
+    notes = models.CharField(max_length=500, blank=True, default="", verbose_name=_("备注"))
+    sort_order = models.PositiveIntegerField(default=0, verbose_name=_("排序"))
+    created_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="library_project_products_created",
+        verbose_name=_("创建者"),
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("创建时间"))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_("更新时间"))
+
+    class Meta:
+        verbose_name = _("委托销售产品")
+        verbose_name_plural = verbose_name
+        ordering = ["sort_order", "id"]
+
+    def __str__(self):
+        return f"{self.project_id} / {self.product_id}"
+
+    @property
+    def amount(self):
+        try:
+            return (self.quantity or 0) * (self.unit_price or 0)
+        except Exception:
+            return 0
+
+
+class LibraryProjectProductEquipment(models.Model):
+    """销售产品下挂载的具体设备与检测类型。"""
+
+    project_product = models.ForeignKey(
+        LibraryProjectProduct,
+        on_delete=models.CASCADE,
+        related_name="equipment_links",
+        verbose_name=_("委托产品"),
+    )
+    equipment = models.ForeignKey(
+        CommissionOrgEquipment,
+        on_delete=models.CASCADE,
+        related_name="product_links",
+        verbose_name=_("受检设备"),
+    )
+    inspection_type = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        verbose_name=_("检测类型"),
+    )
+    sort_order = models.PositiveIntegerField(default=0, verbose_name=_("排序"))
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("加入时间"))
+
+    class Meta:
+        verbose_name = _("委托产品设备")
+        verbose_name_plural = verbose_name
+        ordering = ["sort_order", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["project_product", "equipment", "inspection_type"],
+                name="uniq_project_product_equipment_inspection",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.project_product_id} / {self.equipment_id} / {self.inspection_type}"

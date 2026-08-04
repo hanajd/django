@@ -595,9 +595,11 @@
     }
 
     function fillForm(eq, st) {
-        var isEdit = !!(eq && eq.id);
+        var isEdit = !!(eq && eq.id != null && eq.id !== '');
         setUiAddVsEdit(isEdit);
-        document.getElementById('eq-form-equipment-id').value = eq ? eq.id : '';
+        // 新建时 eq 可能是仅含 device_type 的 {}；eq.id 为 undefined 时勿写入字符串 "undefined"
+        document.getElementById('eq-form-equipment-id').value =
+            (eq && eq.id != null && eq.id !== '') ? String(eq.id) : '';
         if (!isEdit) {
             resetBatchTypeChecks(eq && eq.device_type ? String(eq.device_type) : '');
         }

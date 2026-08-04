@@ -259,6 +259,14 @@ def _fn_max(*args: Any) -> Optional[float]:
     return float(max(xs))
 
 
+def _fn_max_abs(*args: Any) -> Optional[float]:
+    """返回绝对值最大的原数（保留正负），等价于 max(xs, key=abs)。"""
+    xs = _flatten_numbers(*args)
+    if not xs:
+        return None
+    return float(max(xs, key=abs))
+
+
 def _fn_coalesce(*args: Any) -> Any:
     for a in args:
         if a is not None and not (isinstance(a, str) and a.strip() == ""):
@@ -472,6 +480,7 @@ def build_eval_namespace(
         "round",
         "min",
         "max",
+        "max_abs",
         "len",
         "sum",
         "avg",
@@ -492,6 +501,7 @@ def build_eval_namespace(
         "ctdiw",
         "ln",
         "log",
+        "exp",
         "sqrt",
         "constants",
         "enums",
@@ -514,6 +524,7 @@ def build_eval_namespace(
         "round": round,
         "min": _fn_min,
         "max": _fn_max,
+        "max_abs": _fn_max_abs,
         "len": len,
         "sum": _fn_sum,
         "avg": _fn_avg,
@@ -531,6 +542,7 @@ def build_eval_namespace(
         "toBool": _to_bool,
         "ln": math.log,
         "log": math.log,
+        "exp": math.exp,
         "sqrt": math.sqrt,
         "unitFactor": lambda v, n=None: _fn_unit_factor(v, n, enums=enums_d),
         "lookup": lambda tid, m: _fn_lookup(tid, m, lookup_tables=lt_d),
@@ -668,9 +680,22 @@ def eval_computed_formula(
     enums: Optional[Mapping[str, Any]] = None,
     lookup_tables: Optional[Mapping[str, Any]] = None,
     row: Optional[Mapping[str, Any]] = None,
+    field_by_pid: Optional[Mapping[str, Any]] = None,
 ) -> Any:
-    """计算字段公式求值；失败返回 None。"""
+    """计算字段公式求值；失败返回 None。支持 fit_a/fit_b/fit_y/fit_x/fit_eq 引用。"""
     try:
+        from utils.fit_ref_eval import expression_has_fit_ref, evaluate_with_fit_refs
+
+        if expression_has_fit_ref(formula or ""):
+            return evaluate_with_fit_refs(
+                formula,
+                value_mapping,
+                field_by_pid=field_by_pid,  # type: ignore[arg-type]
+                constants=constants,
+                enums=enums,
+                lookup_tables=lookup_tables,
+                row=row,
+            )
         return evaluate_expression(
             formula,
             value_mapping,

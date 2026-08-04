@@ -504,6 +504,118 @@
             gap: 8px;
             margin-bottom: 10px;
         }
+        .fit-ref-panel {
+            margin: 10px 0 12px;
+            padding: 12px;
+            border: 1px solid #ddd6fe;
+            border-radius: 10px;
+            background: #f5f3ff;
+        }
+        .fit-ref-panel-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #3730a3;
+            margin-bottom: 4px;
+        }
+        .fit-ref-panel-desc {
+            font-size: 12px;
+            color: #64748b;
+            line-height: 1.45;
+            margin-bottom: 10px;
+        }
+        .fit-ref-panel-grid {
+            display: grid;
+            gap: 8px;
+        }
+        .fit-ref-panel-grid label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: #475569;
+        }
+        .fit-ref-panel-grid select,
+        .fit-ref-panel-grid input[type="text"] {
+            margin-top: 4px;
+            width: 100%;
+            border: 1px solid #c4b5fd;
+            border-radius: 8px;
+            padding: 7px 10px;
+            font-size: 13px;
+            background: #fff;
+            color: #0f172a;
+        }
+        .fit-ref-usage-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 4px;
+        }
+        .fit-ref-usage-row label {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-weight: 500;
+            font-size: 12px;
+            padding: 5px 8px;
+            border: 1px solid #ddd6fe;
+            border-radius: 999px;
+            background: #fff;
+            cursor: pointer;
+            color: #4338ca;
+        }
+        .fit-ref-usage-row label:has(input:checked) {
+            background: #4f46e5;
+            border-color: #4f46e5;
+            color: #fff;
+        }
+        .fit-ref-empty {
+            font-size: 12px;
+            color: #b45309;
+            background: #fffbeb;
+            border: 1px solid #fde68a;
+            border-radius: 8px;
+            padding: 8px 10px;
+            line-height: 1.45;
+        }
+        .fit-model-cond-panel {
+            margin: 12px 0;
+            padding: 12px;
+            border: 1px solid #bbf7d0;
+            border-radius: 10px;
+            background: #f0fdf4;
+        }
+        .fit-model-cond-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #166534;
+            margin-bottom: 4px;
+        }
+        .fit-model-cond-desc {
+            font-size: 12px;
+            color: #64748b;
+            line-height: 1.45;
+            margin-bottom: 10px;
+        }
+        .fit-model-cond-row {
+            display: grid;
+            grid-template-columns: 52px 1fr auto;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .fit-model-cond-row .kind {
+            font-size: 13px;
+            font-weight: 700;
+            color: #15803d;
+        }
+        .fit-model-cond-row input[type="text"] {
+            width: 100%;
+            border: 1px solid #86efac;
+            border-radius: 8px;
+            padding: 7px 10px;
+            font-size: 13px;
+            background: #fff;
+        }
         .formula-mode-btn,
         .formula-tool-btn,
         .formula-chip,
@@ -4239,6 +4351,7 @@
         let selectedFieldId = null;
         let formulaModalOpen = false;
         let formulaModalChapterMode = false;
+        let formulaFitRefExpanded = false;
         let formulaPanelCommitFn = null;
 
         function openFormulaModal(id) {
@@ -4538,6 +4651,112 @@
             return '((' + num + ')*(' + num + ')/' + den + ')';
         }
 
+        /** OLS 变换点列（与 R² / 拟合系数同一约定） */
+        function buildOlsTransformedXY(xList, yList, fitKindOrModel) {
+            const kind = parseFitModelKind(fitKindOrModel) || String(fitKindOrModel || 'linear').trim().toLowerCase();
+            const xs = [];
+            const ys = [];
+            const nIn = Math.min((xList || []).length, (yList || []).length);
+            for (let i = 0; i < nIn; i++) {
+                const xid = String(xList[i] || '').trim().toLowerCase();
+                const yid = String(yList[i] || '').trim().toLowerCase();
+                if (!xid || !yid) continue;
+                if (kind === 'log') {
+                    xs.push('ln(' + xid + ')');
+                    ys.push(yid);
+                } else if (kind === 'exp') {
+                    xs.push(xid);
+                    ys.push('ln(' + yid + ')');
+                } else {
+                    xs.push(xid);
+                    ys.push(yid);
+                }
+            }
+            return { kind: kind === 'log' || kind === 'exp' ? kind : 'linear', xs: xs, ys: ys };
+        }
+
+        /** 返回变换空间斜率/截距表达式；指数模型另给物理 a=exp(截距)、b=斜率 */
+        function buildOlsSlopeInterceptExprs(xList, yList, fitKindOrModel) {
+            const t = buildOlsTransformedXY(xList, yList, fitKindOrModel);
+            const xs = t.xs;
+            const ys = t.ys;
+            const n = xs.length;
+            if (n < 2) return null;
+            const sx = xs.join('+');
+            const sy = ys.join('+');
+            const sxy = xs.map((x, i) => '(' + x + ')*(' + ys[i] + ')').join('+');
+            const sx2 = xs.map((x) => '(' + x + ')*(' + x + ')').join('+');
+            const den = '((' + n + ')*(' + sx2 + ')-(' + sx + ')*(' + sx + '))';
+            const slope = '(((' + n + ')*(' + sxy + ')-(' + sx + ')*(' + sy + '))/' + den + ')';
+            const intercept = '((' + sy + '-(' + slope + ')*(' + sx + '))/' + n + ')';
+            if (t.kind === 'exp') {
+                return { kind: 'exp', slope: slope, intercept: intercept, a: 'exp(' + intercept + ')', b: slope };
+            }
+            return { kind: t.kind, slope: slope, intercept: intercept, a: slope, b: intercept };
+        }
+
+        /**
+         * 将 fit_a/b/y/x 展开为前端可直接求值的算术式（同 R² 展开策略）。
+         * fit_eq 无法展开为数值式，返回空。
+         */
+        function buildFitRefExpandedExpression(fitKindOrModel, usage, xList, yList, argExpr) {
+            const u = String(usage || '').trim().toLowerCase();
+            if (u === 'eq') return '';
+            const ab = buildOlsSlopeInterceptExprs(xList, yList, fitKindOrModel);
+            if (!ab) return '';
+            if (u === 'a') return ab.a;
+            if (u === 'b') return ab.b;
+            const arg = String(argExpr || '').trim();
+            if (!arg) return '';
+            if (u === 'y') {
+                if (ab.kind === 'log') return '((' + ab.a + ')*ln(' + arg + ')+(' + ab.b + '))';
+                if (ab.kind === 'exp') return 'exp((' + ab.slope + ')*(' + arg + ')+(' + ab.intercept + '))';
+                return '((' + ab.a + ')*(' + arg + ')+(' + ab.b + '))';
+            }
+            if (u === 'x') {
+                if (ab.kind === 'log') return 'exp(((' + arg + ')-(' + ab.b + '))/(' + ab.a + '))';
+                if (ab.kind === 'exp') return '((ln(' + arg + ')-(' + ab.intercept + '))/(' + ab.slope + '))';
+                return '(((' + arg + ')-(' + ab.b + '))/(' + ab.a + '))';
+            }
+            return '';
+        }
+
+        function expandFitRefCallToRules(srcField, usageKind, argExpr) {
+            if (!srcField || !srcField.fitBinding) return [];
+            const xb = Array.isArray(srcField.fitBinding.x) ? srcField.fitBinding.x : [];
+            const yb = Array.isArray(srcField.fitBinding.y) ? srcField.fitBinding.y : [];
+            const srcRules = Array.isArray(srcField.formulaRules) ? srcField.formulaRules : [];
+            const out = [];
+            const pushRule = (label, condition, kind) => {
+                const expr = buildFitRefExpandedExpression(kind, usageKind, xb, yb, argExpr);
+                if (!expr) return;
+                out.push({
+                    id: newConditionalRuleId(),
+                    label: String(label || ''),
+                    condition: String(condition || '').trim(),
+                    expression: expr,
+                    formula: expr
+                });
+            };
+            if (srcRules.length) {
+                srcRules.forEach((r) => {
+                    if (!r || typeof r !== 'object') return;
+                    const model = migrateFitRuleExpression(
+                        r.expression || r.formula || '',
+                        r.fitKind || ''
+                    );
+                    const kind = parseFitModelKind(model) || 'linear';
+                    pushRule(r.label || '', r.condition || '', kind);
+                });
+            }
+            if (!out.length) {
+                [['linear', '线性'], ['log', '对数'], ['exp', '指数']].forEach(([kind, label]) => {
+                    pushRule(label, '', kind);
+                });
+            }
+            return out;
+        }
+
         function getFitR2MasterRef(f) {
             if (!f) return '';
             const fromExpr = parseFitR2MasterPid(
@@ -4668,9 +4887,306 @@
         }
 
         function isFitMasterField(f) {
-            // 方程主格：有 fitBinding，且不是 R² 从格 / 待绑 R²
+            // 方程主格 / 仅源格：有 fitBinding，且不是 R² 从格 / 待绑 R²
             return !!(f && f.fitBinding && typeof f.fitBinding === 'object'
                 && !isFitR2Field(f) && !f.fitR2Pending);
+        }
+
+        function getFitSourceDisplayName(ff) {
+            if (!ff || !ff.fitBinding) return '';
+            const named = String(ff.fitBinding.name || '').trim();
+            if (named) return named;
+            return getFieldShortName(ff) || '';
+        }
+
+        function listFitSourceFields(excludeFieldId) {
+            const out = [];
+            (fields || []).forEach((ff, idx) => {
+                if (!ff || ff.id === excludeFieldId) return;
+                if (!isFitMasterField(ff)) return;
+                const srcPid = String(getFieldFormulaId(ff, idx) || '').trim().toLowerCase();
+                if (!srcPid) return;
+                const fb = ff.fitBinding || {};
+                const xn = Array.isArray(fb.x) ? fb.x.length : 0;
+                const yn = Array.isArray(fb.y) ? fb.y.length : 0;
+                const sourceOnly = String(fb.output || 'equation') === 'none';
+                const disp = getFitSourceDisplayName(ff) || srcPid;
+                out.push({
+                    field: ff,
+                    pid: srcPid,
+                    name: disp,
+                    page: Number(ff.page) || 0,
+                    xCount: xn,
+                    yCount: yn,
+                    sourceOnly: sourceOnly,
+                    // 调用侧展示「配置名」，不强调主格；仅源也会出现
+                    label: disp
+                        + (sourceOnly ? '（仅源·不出方程）' : '（出方程）')
+                        + ' · ' + xn + '点'
+                        + (disp !== srcPid ? (' · ' + srcPid) : '')
+                });
+            });
+            out.sort((a, b) => (a.page - b.page) || a.pid.localeCompare(b.pid, undefined, { numeric: true }));
+            return out;
+        }
+
+        function buildFitRefInsertPanel(opts) {
+            const options = opts || {};
+            const excludeField = options.excludeField || null;
+            const excludeId = excludeField ? excludeField.id : null;
+            const getTargetInput = typeof options.getTargetInput === 'function'
+                ? options.getTargetInput
+                : () => null;
+            const onInserted = typeof options.onInserted === 'function' ? options.onInserted : () => {};
+
+            const panel = document.createElement('div');
+            panel.className = 'fit-ref-panel';
+            const title = document.createElement('div');
+            title.className = 'fit-ref-panel-title';
+            title.textContent = '调用已配置的拟合';
+            const desc = document.createElement('div');
+            desc.className = 'fit-ref-panel-desc';
+            desc.innerHTML = '直接从下方列表选用，<strong>不必再点选拟合主格</strong>。写入的是与 R² 同类的<strong>展开计算公式</strong>（不是 <code>fit_x(...)</code> 抽象调用），平板可直接求值。';
+            panel.appendChild(title);
+            panel.appendChild(desc);
+
+            const sources = listFitSourceFields(excludeId);
+            if (!sources.length) {
+                const empty = document.createElement('div');
+                empty.className = 'fit-ref-empty';
+                empty.innerHTML = '当前模板还没有拟合配置。请先在任意格点「拟合公式」配好 X/Y；若报告不需要显示方程，勾选「仅作拟合源」即可——之后在本面板列表里调用，无需可见主格。';
+                panel.appendChild(empty);
+                return panel;
+            }
+
+            const grid = document.createElement('div');
+            grid.className = 'fit-ref-panel-grid';
+
+            const srcLabel = document.createElement('label');
+            const srcSelect = document.createElement('select');
+            sources.forEach((s) => {
+                const opt = document.createElement('option');
+                opt.value = s.pid;
+                opt.textContent = s.label;
+                srcSelect.appendChild(opt);
+            });
+            if (sources.length === 1) {
+                srcLabel.textContent = '1. 拟合配置（本模板仅 1 个，已自动选用）';
+                srcSelect.disabled = true;
+            } else {
+                srcLabel.textContent = '1. 选择拟合配置（含仅源）';
+            }
+            srcLabel.appendChild(srcSelect);
+            grid.appendChild(srcLabel);
+
+            const usageLabel = document.createElement('label');
+            usageLabel.textContent = '2. 选择调用方式';
+            const usageRow = document.createElement('div');
+            usageRow.className = 'fit-ref-usage-row';
+            const usages = [
+                ['a', '系数 a', 'fit_a(源)'],
+                ['b', '系数 b', 'fit_b(源)'],
+                ['y', '用 x 求 y', 'fit_y(源, x)'],
+                ['x', '用 y 求 x', 'fit_x(源, y)'],
+                ['eq', '输出方程', 'fit_eq(源)']
+            ];
+            let usageKind = 'a';
+            const usageRadioName = 'fit-ref-usage-' + String(excludeId || 'x') + '-' + Math.random().toString(36).slice(2, 8);
+            usages.forEach(([kind, text, tip], i) => {
+                const lab = document.createElement('label');
+                lab.title = tip;
+                const radio = document.createElement('input');
+                radio.type = 'radio';
+                radio.name = usageRadioName;
+                radio.value = kind;
+                if (i === 0) radio.checked = true;
+                radio.addEventListener('change', () => {
+                    if (radio.checked) {
+                        usageKind = kind;
+                        refreshArgUi();
+                        refreshPreview();
+                    }
+                });
+                lab.appendChild(radio);
+                lab.appendChild(document.createTextNode(text));
+                usageRow.appendChild(lab);
+            });
+            usageLabel.appendChild(usageRow);
+            grid.appendChild(usageLabel);
+
+            const argWrap = document.createElement('div');
+            const argLabel = document.createElement('label');
+            const argTitle = document.createElement('span');
+            argTitle.textContent = '3. 已知 x（栏位或表达式）';
+            argLabel.appendChild(argTitle);
+            const argRow = document.createElement('div');
+            argRow.style.cssText = 'display:flex;gap:8px;align-items:center;margin-top:4px;';
+            const argInput = document.createElement('input');
+            argInput.type = 'text';
+            argInput.placeholder = '如 f179 或表达式';
+            argInput.style.flex = '1';
+            const argPickBtn = document.createElement('button');
+            argPickBtn.type = 'button';
+            argPickBtn.className = 'formula-tool-btn';
+            argPickBtn.textContent = 'PDF 选栏';
+            argPickBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openFormulaFieldPicker(argPickBtn, argInput, excludeId, {
+                    pid: excludeField ? (getFieldFormulaId(excludeField, fields.indexOf(excludeField)) || '') : '',
+                    pickMode: 'insert',
+                    syncFormulaUi: () => { refreshPreview(); }
+                });
+            });
+            argRow.appendChild(argInput);
+            argRow.appendChild(argPickBtn);
+            argLabel.appendChild(argRow);
+            argWrap.appendChild(argLabel);
+            grid.appendChild(argWrap);
+
+            function refreshArgUi() {
+                const needArg = usageKind === 'y' || usageKind === 'x';
+                argWrap.style.display = needArg ? 'block' : 'none';
+                argTitle.textContent = usageKind === 'y'
+                    ? '3. 已知 x（栏位或表达式，可空后手填）'
+                    : usageKind === 'x'
+                        ? '3. 已知 y（栏位或表达式，可空后手填）'
+                        : '3. 自变量';
+            }
+            refreshArgUi();
+
+            const preview = document.createElement('div');
+            preview.className = 'formula-preview';
+            preview.style.marginTop = '8px';
+            const previewCode = document.createElement('code');
+            preview.appendChild(previewCode);
+
+            function getSelectedSourceField() {
+                const srcPid = String(srcSelect.value || '').trim().toLowerCase();
+                if (!srcPid) return null;
+                return typeof findFieldByPdfFieldId === 'function'
+                    ? findFieldByPdfFieldId(srcPid)
+                    : null;
+            }
+
+            function buildExpandedPreview() {
+                const srcPid = String(srcSelect.value || '').trim().toLowerCase();
+                if (!srcPid) return { text: '', rules: [], compact: '' };
+                if (usageKind === 'eq') {
+                    const compact = 'fit_eq(' + srcPid + ')';
+                    return { text: compact, rules: [], compact: compact };
+                }
+                const arg = String(argInput.value || '').trim();
+                if ((usageKind === 'y' || usageKind === 'x') && !arg) {
+                    return {
+                        text: '',
+                        rules: [],
+                        compact: '',
+                        needArg: true
+                    };
+                }
+                const srcField = getSelectedSourceField();
+                if (!srcField || !isFitMasterField(srcField)) {
+                    return { text: '', rules: [], compact: '', missingSrc: true };
+                }
+                const rules = expandFitRefCallToRules(srcField, usageKind, arg);
+                const primary = rules.length ? String(rules[0].expression || '') : '';
+                return {
+                    text: primary,
+                    rules: rules,
+                    compact: usageKind === 'a'
+                        ? ('fit_a(' + srcPid + ')')
+                        : usageKind === 'b'
+                            ? ('fit_b(' + srcPid + ')')
+                            : usageKind === 'y'
+                                ? ('fit_y(' + srcPid + ', ' + arg + ')')
+                                : ('fit_x(' + srcPid + ', ' + arg + ')')
+                };
+            }
+
+            function refreshPreview() {
+                const built = buildExpandedPreview();
+                if (built.needArg) {
+                    previewCode.textContent = '将写入：请先填写已知 ' + (usageKind === 'y' ? 'x' : 'y');
+                    return;
+                }
+                if (built.missingSrc) {
+                    previewCode.textContent = '将写入：找不到拟合配置';
+                    return;
+                }
+                if (usageKind === 'eq') {
+                    previewCode.textContent = '将插入：' + (built.compact || '');
+                    return;
+                }
+                if (!built.text) {
+                    previewCode.textContent = '将写入：无法展开（请检查源的 X/Y 点数）';
+                    return;
+                }
+                const head = built.text.length > 96 ? (built.text.slice(0, 96) + '…') : built.text;
+                previewCode.textContent = '将写入展开计算公式（同 R²，前端可直接求值'
+                    + (built.rules.length > 1 ? ('，' + built.rules.length + ' 条规则') : '')
+                    + '）：' + head;
+            }
+            srcSelect.addEventListener('change', refreshPreview);
+            argInput.addEventListener('input', refreshPreview);
+            usageRow.querySelectorAll('input[type="radio"]').forEach((r) => {
+                r.addEventListener('change', refreshPreview);
+            });
+            refreshPreview();
+            grid.appendChild(preview);
+
+            const actions = document.createElement('div');
+            actions.className = 'formula-actions';
+            actions.style.marginTop = '8px';
+            const insertBtn = document.createElement('button');
+            insertBtn.type = 'button';
+            insertBtn.className = 'primary';
+            insertBtn.textContent = '写入展开公式';
+            insertBtn.addEventListener('click', () => {
+                const built = buildExpandedPreview();
+                if (built.needArg) {
+                    alert(usageKind === 'y' ? '请先填写已知 x' : '请先填写已知 y');
+                    return;
+                }
+                if (usageKind === 'eq') {
+                    const targetInput = getTargetInput();
+                    if (!targetInput || !built.compact) {
+                        alert('当前没有可写入的公式输入框');
+                        return;
+                    }
+                    insertTextAtCursor(targetInput, built.compact, {
+                        cursorOffset: String(built.compact).length
+                    });
+                    onInserted(built.compact);
+                    return;
+                }
+                if (!built.rules.length || !built.text) {
+                    alert('无法展开为计算公式，请确认拟合源已配置 X/Y');
+                    return;
+                }
+                if (excludeField) {
+                    excludeField.formulaRules = built.rules;
+                    excludeField.fieldExpression = built.text;
+                    excludeField.formula = built.text;
+                    excludeField.fitRefSource = {
+                        srcPid: String(srcSelect.value || '').trim().toLowerCase(),
+                        usage: usageKind,
+                        arg: String(argInput.value || '').trim()
+                    };
+                    markFieldFormulaUserOverride(excludeField);
+                }
+                const targetInput = getTargetInput();
+                if (targetInput) {
+                    targetInput.value = built.text;
+                    targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+                onInserted(built.text);
+                if (typeof renderFormulaPanel === 'function') renderFormulaPanel();
+            });
+            actions.appendChild(insertBtn);
+            grid.appendChild(actions);
+
+            panel.appendChild(grid);
+            return panel;
         }
 
         function isFitR2Field(f) {
@@ -4702,14 +5218,36 @@
         function ensureFitBinding(f) {
             if (!f) return null;
             if (!f.fitBinding || typeof f.fitBinding !== 'object') {
-                f.fitBinding = { x: [], y: [], r2FieldId: '' };
+                f.fitBinding = { x: [], y: [], r2FieldId: '', output: 'equation' };
             }
             if (!Array.isArray(f.fitBinding.x)) f.fitBinding.x = [];
             if (!Array.isArray(f.fitBinding.y)) f.fitBinding.y = [];
             f.fitBinding.x = f.fitBinding.x.map(v => String(v || '').trim().toLowerCase()).filter(Boolean);
             f.fitBinding.y = f.fitBinding.y.map(v => String(v || '').trim().toLowerCase()).filter(Boolean);
             f.fitBinding.r2FieldId = String(f.fitBinding.r2FieldId || '').trim().toLowerCase();
-            if (!String(f.displayFormat || '').trim()) f.displayFormat = 'latex';
+            if (f.fitBinding.name != null) {
+                f.fitBinding.name = String(f.fitBinding.name || '').trim();
+            }
+            if (!f.fitBinding.modelConditions || typeof f.fitBinding.modelConditions !== 'object') {
+                f.fitBinding.modelConditions = { linear: '', log: '', exp: '' };
+            } else {
+                f.fitBinding.modelConditions = {
+                    linear: String(f.fitBinding.modelConditions.linear || '').trim().toLowerCase(),
+                    log: String(f.fitBinding.modelConditions.log || '').trim().toLowerCase(),
+                    exp: String(f.fitBinding.modelConditions.exp || '').trim().toLowerCase()
+                };
+            }
+            const outMode = String(f.fitBinding.output || 'equation').trim().toLowerCase();
+            f.fitBinding.output = (outMode === 'none' || outMode === 'source' || outMode === 'sourceonly')
+                ? 'none'
+                : 'equation';
+            if (f.fitBinding.output === 'none') {
+                if (String(f.displayFormat || '').trim().toLowerCase() === 'latex') {
+                    delete f.displayFormat;
+                }
+            } else if (!String(f.displayFormat || '').trim()) {
+                f.displayFormat = 'latex';
+            }
             ensureFormulaRules(f);
             const hasFitModel = (f.formulaRules || []).some(r =>
                 isFitModelExpression(r.expression || r.formula || '')
@@ -4736,6 +5274,27 @@
                 });
             }
             return f.fitBinding;
+        }
+
+        function applyFitMasterOutputMode(f) {
+            if (!f) return;
+            ensureFitBinding(f);
+            if (f.fitBinding.output === 'none') {
+                if (String(f.displayFormat || '').trim().toLowerCase() === 'latex') {
+                    delete f.displayFormat;
+                }
+                f.fieldExpression = '';
+                f.formula = '';
+                f.pdfFieldExpression = '';
+            } else {
+                if (!String(f.displayFormat || '').trim()) f.displayFormat = 'latex';
+                const primary = (f.formulaRules && f.formulaRules[0]
+                    && (f.formulaRules[0].expression || f.formulaRules[0].formula)) || '';
+                if (!String(f.fieldExpression || f.formula || '').trim() && primary) {
+                    f.fieldExpression = String(primary).trim();
+                    f.formula = f.fieldExpression;
+                }
+            }
         }
 
         function clearFieldFitConfig(f) {
@@ -4792,6 +5351,215 @@
             if (!masterPid) return;
             applyFitR2Formula(r2, masterPid, masterField);
             updateFieldRowIndicators(r2.id);
+        }
+
+        function inferFitRuleModelKind(rule) {
+            if (!rule || typeof rule !== 'object') return '';
+            const fromExpr = parseFitModelKind(rule.expression || rule.formula || '');
+            if (fromExpr) return fromExpr;
+            const pending = String(rule._pendingFitModel || rule.fitKind || '').trim().toLowerCase();
+            if (pending === 'linear' || pending === 'log' || pending === 'exp') return pending;
+            const label = String(rule.label || '').trim();
+            if (label.indexOf('对数') >= 0) return 'log';
+            if (label.indexOf('指数') >= 0) return 'exp';
+            if (label.indexOf('线性') >= 0) return 'linear';
+            return '';
+        }
+
+        function readFitModelConditions(f) {
+            const out = { linear: '', log: '', exp: '' };
+            if (!f) return out;
+            ensureFitBinding(f);
+            const mc = f.fitBinding.modelConditions || {};
+            ['linear', 'log', 'exp'].forEach((k) => {
+                out[k] = String(mc[k] || '').trim().toLowerCase();
+            });
+            // 若 modelConditions 为空，从已有规则条件回填
+            (f.formulaRules || []).forEach((r) => {
+                const kind = inferFitRuleModelKind(r);
+                if (!kind || !(kind in out)) return;
+                if (!out[kind]) out[kind] = String(r.condition || '').trim().toLowerCase();
+            });
+            return out;
+        }
+
+        /** 判断某格是否为引用该拟合源的调用格（展开式 / fitRefSource） */
+        function isFitCallerFieldOf(masterField, callerField) {
+            if (!masterField || !callerField || masterField === callerField) return false;
+            if (isFitMasterField(callerField)) return false;
+            const masterPid = String(getFieldFormulaId(masterField, fields.indexOf(masterField)) || '').trim().toLowerCase();
+            if (!masterPid) return false;
+            const r2Pid = String((masterField.fitBinding && masterField.fitBinding.r2FieldId) || '').trim().toLowerCase();
+            const callerPid = String(getFieldFormulaId(callerField, fields.indexOf(callerField)) || '').trim().toLowerCase();
+            if (r2Pid && callerPid === r2Pid) return false; // R² 另同步
+            const ref = callerField.fitRefSource;
+            if (ref && String(ref.srcPid || '').trim().toLowerCase() === masterPid) return true;
+            const rules = Array.isArray(callerField.formulaRules) ? callerField.formulaRules : [];
+            if (rules.length < 2) return false;
+            const kinds = rules.map(inferFitRuleModelKind).filter(Boolean);
+            if (!kinds.some((k) => k === 'linear' || k === 'log' || k === 'exp')) return false;
+            // 展开式中大量出现源的 X/Y 栏，视为同一套拟合的调用格
+            const xb = (masterField.fitBinding && masterField.fitBinding.x) || [];
+            const yb = (masterField.fitBinding && masterField.fitBinding.y) || [];
+            const pts = xb.concat(yb).map((p) => String(p || '').trim().toLowerCase()).filter(Boolean);
+            if (pts.length < 2) return false;
+            const blob = rules.map((r) => String((r && (r.expression || r.formula)) || '')).join(' ').toLowerCase();
+            let hits = 0;
+            pts.forEach((pid) => { if (blob.indexOf(pid) >= 0) hits += 1; });
+            const need = Math.min(4, pts.length);
+            return hits >= need;
+        }
+
+        /** 把源的线性/对数/指数条件同步到所有调用格的 formulaRules */
+        function syncFitCallerConditionsFromMaster(masterField) {
+            if (!masterField || !isFitMasterField(masterField)) return 0;
+            const conds = readFitModelConditions(masterField);
+            let n = 0;
+            (fields || []).forEach((ff) => {
+                if (!isFitCallerFieldOf(masterField, ff)) return;
+                let changed = false;
+                (ff.formulaRules || []).forEach((r) => {
+                    const kind = inferFitRuleModelKind(r);
+                    if (!kind || !(kind in conds)) return;
+                    const nextCond = conds[kind] || '';
+                    if (String(r.condition || '').trim().toLowerCase() !== nextCond) {
+                        r.condition = nextCond;
+                        changed = true;
+                    }
+                });
+                if (changed) {
+                    markFieldFormulaUserOverride(ff);
+                    updateFieldRowIndicators(ff.id);
+                    n += 1;
+                }
+            });
+            return n;
+        }
+
+        /** 同一套拟合共用的线性/对数/指数条件 → 写回规则，并同步 R² 与调用格 */
+        function applyFitModelConditions(f, conds, opts) {
+            if (!f) return;
+            const options = opts || {};
+            ensureFitBinding(f);
+            const next = {
+                linear: String((conds && conds.linear) || '').trim().toLowerCase(),
+                log: String((conds && conds.log) || '').trim().toLowerCase(),
+                exp: String((conds && conds.exp) || '').trim().toLowerCase()
+            };
+            f.fitBinding.modelConditions = next;
+            ensureFormulaRules(f);
+            const byKind = {};
+            (f.formulaRules || []).forEach((r) => {
+                const kind = inferFitRuleModelKind(r);
+                if (kind && !byKind[kind]) byKind[kind] = r;
+            });
+            [
+                ['linear', '线性', 'fit(y=a*x+b)'],
+                ['log', '对数', 'fit(y=a*ln(x)+b)'],
+                ['exp', '指数', 'fit(y=a*exp(b*x))']
+            ].forEach(([kind, label, modelExpr]) => {
+                let r = byKind[kind];
+                if (!r) {
+                    r = {
+                        id: newConditionalRuleId(),
+                        label: label,
+                        condition: '',
+                        expression: modelExpr,
+                        formula: modelExpr
+                    };
+                    f.formulaRules.push(r);
+                    byKind[kind] = r;
+                }
+                r.condition = next[kind] || '';
+                if (!String(r.label || '').trim()) r.label = label;
+                // 主格保持模型式；勿覆盖已是 Pearson 的 R² 从格
+                if (options.forceModelExpr || isFitModelExpression(r.expression || r.formula || '')
+                    || !(r.expression || r.formula)) {
+                    if (!isFitR2Field(f)) {
+                        r.expression = modelExpr;
+                        r.formula = modelExpr;
+                    }
+                }
+            });
+            if (String((f.fitBinding && f.fitBinding.output) || 'equation') !== 'none' && !isFitR2Field(f)) {
+                const primary = (f.formulaRules[0] && (f.formulaRules[0].expression || f.formulaRules[0].formula)) || '';
+                f.fieldExpression = String(primary || '').trim();
+                f.formula = f.fieldExpression;
+            }
+            markFieldFormulaUserOverride(f);
+            syncLinkedFitR2FromMaster(f);
+            syncFitCallerConditionsFromMaster(f);
+        }
+
+        function buildFitModelConditionsPanel(f, opts) {
+            const options = opts || {};
+            const readOnly = !!options.readOnly;
+            const panel = document.createElement('div');
+            panel.className = 'fit-model-cond-panel';
+            const title = document.createElement('div');
+            title.className = 'fit-model-cond-title';
+            title.textContent = '模型选用条件（线性 / 对数 / 指数）';
+            const desc = document.createElement('div');
+            desc.className = 'fit-model-cond-desc';
+            desc.innerHTML = readOnly
+                ? '与拟合源共用同一套条件（只读）。要改请到源格的「拟合公式」面板。'
+                : '同一套 X/Y 数据共用这里的条件。<strong>R² 与调用展开式会跟随同步</strong>；在 PDF 上点选对应勾选框即可，无需在每条规则里重复填。';
+            panel.appendChild(title);
+            panel.appendChild(desc);
+
+            const conds = readFitModelConditions(f);
+            const inputs = {};
+            [
+                ['linear', '线性'],
+                ['log', '对数'],
+                ['exp', '指数']
+            ].forEach(([kind, label]) => {
+                const row = document.createElement('div');
+                row.className = 'fit-model-cond-row';
+                const kindEl = document.createElement('div');
+                kindEl.className = 'kind';
+                kindEl.textContent = label;
+                const inp = document.createElement('input');
+                inp.type = 'text';
+                inp.placeholder = '勾选框编号，如 f913';
+                inp.value = conds[kind] || '';
+                inp.disabled = readOnly;
+                inputs[kind] = inp;
+                const pickBtn = document.createElement('button');
+                pickBtn.type = 'button';
+                pickBtn.className = 'formula-tool-btn';
+                pickBtn.textContent = 'PDF 点选';
+                pickBtn.disabled = readOnly;
+                if (!readOnly) {
+                    const commit = () => {
+                        applyFitModelConditions(f, {
+                            linear: inputs.linear.value,
+                            log: inputs.log.value,
+                            exp: inputs.exp.value
+                        }, { forceModelExpr: false });
+                        if (typeof options.onChange === 'function') options.onChange();
+                    };
+                    inp.addEventListener('change', commit);
+                    inp.addEventListener('blur', commit);
+                    pickBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        openFormulaFieldPicker(pickBtn, null, f.id, {
+                            pid: getFieldFormulaId(f, fields.indexOf(f)) || '',
+                            pickMode: 'fitModelCond',
+                            onPickField: (fid) => {
+                                inp.value = String(fid || '').trim().toLowerCase();
+                                commit();
+                                closeFormulaFieldPicker({ applyOverlay: false });
+                            }
+                        });
+                    });
+                }
+                row.appendChild(kindEl);
+                row.appendChild(inp);
+                row.appendChild(pickBtn);
+                panel.appendChild(row);
+            });
+            return panel;
         }
 
         function remapPdfFieldIdList(list, remap) {
@@ -4953,6 +5721,10 @@
                     condIn.addEventListener('focus', () => {
                         if (cfg.setActiveExpressionInput) cfg.setActiveExpressionInput(condIn);
                     });
+                    if (cfg.hideCondition) {
+                        condLbl.style.display = 'none';
+                        condIn.style.display = 'none';
+                    }
                     const exprLbl = document.createElement('div');
                     exprLbl.className = 'formula-input-label';
                     exprLbl.textContent = cfg.expressionLabel || '公式';
@@ -5734,8 +6506,18 @@
                 formulaPickPdfContainer.appendChild(wrap);
                 await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
                 if (token !== formulaPickRenderToken) return;
+                const pickModeNow = formulaPickSession && formulaPickSession.pickMode;
                 fields.filter(ff => Number(ff.page) === p).forEach(ff => {
-                    if ((ff.fieldType || 'text') !== 'text') return;
+                    const ft = String(ff.fieldType || 'text').toLowerCase();
+                    // 可选勾选框与普通栏位；选 X/Y 仍以文本/数值为主
+                    let pickable = false;
+                    if (pickModeNow === 'fitX' || pickModeNow === 'fitY') {
+                        pickable = (ft === 'text' || ft === 'number' || ft === '' || ft === 'check' || ft === 'checkbox');
+                    } else {
+                        // insert / fitModelCond / fitR2 / fitMaster / fitRefMaster 等：文本+勾选都可选
+                        pickable = (ft === 'text' || ft === 'check' || ft === 'checkbox' || ft === 'number' || ft === '');
+                    }
+                    if (!pickable) return;
                     const gidx = fields.indexOf(ff);
                     const fid = getFieldFormulaId(ff, gidx);
                     const el = document.createElement('div');
@@ -5824,6 +6606,8 @@
                 else if (pickMode === 'fitY') formulaPickTitle.textContent = '在 PDF 上选择 Y 栏位（可多选）';
                 else if (pickMode === 'fitR2') formulaPickTitle.textContent = '在 PDF 上选择 R² 输出栏位';
                 else if (pickMode === 'fitMaster') formulaPickTitle.textContent = '在 PDF 上选择拟合公式主格';
+                else if (pickMode === 'fitRefMaster') formulaPickTitle.textContent = '在 PDF 上选择拟合源（插入引用）';
+                else if (pickMode === 'fitModelCond') formulaPickTitle.textContent = '在 PDF 上选择模型条件栏位';
                 else formulaPickTitle.textContent = '在 PDF 上选择栏位插入公式';
             }
             if (formulaPickHint) {
@@ -5831,6 +6615,10 @@
                     formulaPickHint.innerHTML = '点击 PDF 栏位<strong>追加</strong>到列表（顺序即配对顺序）。橙色为当前栏位。点「关闭」结束。';
                 } else if (pickMode === 'fitR2' || pickMode === 'fitMaster') {
                     formulaPickHint.innerHTML = '点击 PDF 栏位完成绑定。橙色为当前栏位。';
+                } else if (pickMode === 'fitModelCond') {
+                    formulaPickHint.innerHTML = '点选线性 / 对数 / 指数对应的条件栏位（勾选框或其它栏均可）。';
+                } else if (pickMode === 'fitRefMaster') {
+                    formulaPickHint.innerHTML = '请点选已配置 <code>fitBinding</code> 的拟合源格，将写入 <code>fit_a/fit_b/fit_y/fit_x/fit_eq</code> 引用。';
                 } else {
                     formulaPickHint.innerHTML = '左侧可<strong>直接改公式</strong>；右侧 PDF 悬停高亮、点击插入栏位编号。橙色为当前栏位（不可插入自身）。';
                 }
@@ -5959,61 +6747,135 @@
 
             let syncFormulaUi = () => {};
             let t1 = null;
+            let activeFormulaExprInput = null;
             if (!isCheckField) {
             const formulaSection = createFormulaSection(1, '计算公式', '支持条件公式、曲线拟合与范围输出。拟合：点选 X/Y，按条件选用线性/对数/指数；R² 另绑 number 格。');
             const modeRow = document.createElement('div');
-            modeRow.className = 'formula-chip-row';
-            const btnEnterFit = document.createElement('button');
-            btnEnterFit.type = 'button';
-            btnEnterFit.className = 'formula-tool-btn' + (isFitMasterField(f) ? ' primary' : '');
-            btnEnterFit.textContent = '拟合公式';
-            btnEnterFit.title = '将本格设为拟合主格：配置 X/Y、条件与拟合类型，并绑定 R² 格';
-            btnEnterFit.addEventListener('click', () => {
-                if (isFitR2Field(f) && !confirm('当前栏已绑定为 R²，改为拟合主格将清除 fit_r2 公式，继续？')) return;
-                clearFitR2Formula(f);
-                delete f.fitR2Pending;
-                ensureFitBinding(f);
-                markFieldFormulaUserOverride(f);
-                renderFormulaPanel();
-                updateFieldRowIndicators(f.id);
-            });
-            const btnEnterR2 = document.createElement('button');
-            btnEnterR2.type = 'button';
-            btnEnterR2.className = 'formula-tool-btn' + (isFitR2Field(f) ? ' primary' : '');
-            btnEnterR2.textContent = 'R²';
-            btnEnterR2.title = '将本格设为 R² 输出，并弹出选择拟合主格';
-            btnEnterR2.addEventListener('click', () => {
-                if (isFitMasterField(f) && !confirm('当前栏已是拟合主格，改为 R² 将清除本格 fitBinding，继续？')) return;
-                if (f.fitBinding && !isFitR2Field(f)) clearFieldFitConfig(f);
-                // 进入 R² 编辑态（替代旧版空 fitConfigRef），否则面板与选主格入口都不会出现
-                f.fitR2Pending = true;
-                if (!getFitR2MasterRef(f)) {
-                    f.fieldExpression = '';
-                    f.formula = '';
-                    f.formulaRules = [];
-                    delete f.fitBinding;
+            modeRow.className = 'formula-mode-row';
+            const inFitMode = isFitMasterField(f);
+            const inR2Mode = isFitR2Field(f);
+            const inPlainMode = !inFitMode && !inR2Mode;
+
+            function makeFormulaModeBtn(label, active, title, onClick) {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'formula-mode-btn' + (active ? ' active' : '');
+                b.textContent = label;
+                b.title = title;
+                b.addEventListener('click', onClick);
+                modeRow.appendChild(b);
+                return b;
+            }
+
+            makeFormulaModeBtn(
+                '普通公式',
+                inPlainMode,
+                '退出拟合 / R²，恢复普通计算公式',
+                () => {
+                    if (inPlainMode) {
+                        if (!formulaFitRefExpanded) return;
+                        formulaFitRefExpanded = false;
+                        renderFormulaPanel();
+                        return;
+                    }
+                    if (!confirm('将清除本格的拟合或 R² 配置，恢复为普通公式，继续？')) return;
+                    clearFieldFitConfig(f);
+                    delete f.fitR2Pending;
+                    formulaFitRefExpanded = false;
+                    markFieldFormulaUserOverride(f);
+                    renderFormulaPanel();
+                    updateFieldRowIndicators(f.id);
                 }
-                markFieldFormulaUserOverride(f);
-                renderFormulaPanel();
-                updateFieldRowIndicators(f.id);
-                // 单击即弹出选主格（与旧交互一致）
-                openFormulaFieldPicker(btnEnterR2, null, f.id, {
-                    pid: pid,
-                    pickMode: 'fitMaster',
-                    fitListText: getFitR2MasterRef(f) || '',
-                    onPickField: (fid, ff) => {
-                        if (!ff.fitBinding) ensureFitBinding(ff);
-                        linkFitPair(ff, f);
-                        closeFormulaFieldPicker({ applyOverlay: false });
+            );
+            makeFormulaModeBtn(
+                '拟合公式',
+                inFitMode,
+                '将本格设为拟合主格：配置 X/Y、条件与拟合类型，并绑定 R² 格。再次点「普通公式」可取消。',
+                () => {
+                    if (inFitMode) {
+                        if (!confirm('取消拟合配置，恢复普通公式？')) return;
+                        clearFieldFitConfig(f);
+                        delete f.fitR2Pending;
+                        formulaFitRefExpanded = false;
+                        markFieldFormulaUserOverride(f);
                         renderFormulaPanel();
                         updateFieldRowIndicators(f.id);
-                        updateFieldRowIndicators(ff.id);
+                        return;
                     }
-                });
-            });
-            modeRow.appendChild(btnEnterFit);
-            modeRow.appendChild(btnEnterR2);
+                    if (inR2Mode && !confirm('当前栏已绑定为 R²，改为拟合主格将清除 fit_r2 公式，继续？')) return;
+                    clearFitR2Formula(f);
+                    delete f.fitR2Pending;
+                    formulaFitRefExpanded = false;
+                    ensureFitBinding(f);
+                    markFieldFormulaUserOverride(f);
+                    renderFormulaPanel();
+                    updateFieldRowIndicators(f.id);
+                }
+            );
+            const btnEnterR2 = makeFormulaModeBtn(
+                'R²',
+                inR2Mode,
+                '将本格设为 R² 输出。再次点「普通公式」或本按钮可取消。',
+                () => {
+                    if (inR2Mode) {
+                        if (!confirm('解除 R² 绑定，恢复普通公式？')) return;
+                        clearFieldFitConfig(f);
+                        delete f.fitR2Pending;
+                        formulaFitRefExpanded = false;
+                        markFieldFormulaUserOverride(f);
+                        renderFormulaPanel();
+                        updateFieldRowIndicators(f.id);
+                        return;
+                    }
+                    if (inFitMode && !confirm('当前栏已是拟合主格，改为 R² 将清除本格 fitBinding，继续？')) return;
+                    if (f.fitBinding && !isFitR2Field(f)) clearFieldFitConfig(f);
+                    f.fitR2Pending = true;
+                    formulaFitRefExpanded = false;
+                    if (!getFitR2MasterRef(f)) {
+                        f.fieldExpression = '';
+                        f.formula = '';
+                        f.formulaRules = [];
+                        delete f.fitBinding;
+                    }
+                    markFieldFormulaUserOverride(f);
+                    renderFormulaPanel();
+                    updateFieldRowIndicators(f.id);
+                    openFormulaFieldPicker(btnEnterR2, null, f.id, {
+                        pid: pid,
+                        pickMode: 'fitMaster',
+                        fitListText: getFitR2MasterRef(f) || '',
+                        onPickField: (fid, ff) => {
+                            if (!ff.fitBinding) ensureFitBinding(ff);
+                            linkFitPair(ff, f);
+                            closeFormulaFieldPicker({ applyOverlay: false });
+                            renderFormulaPanel();
+                            updateFieldRowIndicators(f.id);
+                            updateFieldRowIndicators(ff.id);
+                        }
+                    });
+                }
+            );
+            makeFormulaModeBtn(
+                '调用拟合源',
+                formulaFitRefExpanded,
+                '从已配置列表插入系数 / 正反算 / 方程（含仅源，无需点选主格）',
+                () => {
+                    formulaFitRefExpanded = !formulaFitRefExpanded;
+                    renderFormulaPanel();
+                }
+            );
             formulaSection.appendChild(modeRow);
+
+            if (formulaFitRefExpanded) {
+                formulaSection.appendChild(buildFitRefInsertPanel({
+                    excludeField: f,
+                    getTargetInput: () => activeFormulaExprInput || t1,
+                    onInserted: () => {
+                        if (typeof syncFormulaUi === 'function') syncFormulaUi();
+                        markFieldFormulaUserOverride(f);
+                    }
+                }));
+            }
 
             function renderFitPidList(hostEl, list, onRemove) {
                 hostEl.innerHTML = '';
@@ -6058,6 +6920,24 @@
                     || (f.formulaRules || []).some(r => parseFitR2MasterPid((r && (r.expression || r.formula)) || '')))) {
                     const masterAuto = findFieldByPdfFieldId(masterRef);
                     if (masterAuto) applyFitR2Formula(f, masterRef, masterAuto);
+                }
+                const masterForCond = masterRef ? findFieldByPdfFieldId(masterRef) : null;
+                if (masterForCond && isFitMasterField(masterForCond)) {
+                    // 在 R² 格也可改同一套模型条件（写回主格并重同步）
+                    panel.appendChild(buildFitModelConditionsPanel(masterForCond, {
+                        onChange: () => {
+                            syncLinkedFitR2FromMaster(masterForCond);
+                            renderFormulaPanel();
+                            updateFieldRowIndicators(f.id);
+                            updateFieldRowIndicators(masterForCond.id);
+                        }
+                    }));
+                } else {
+                    const condHint = document.createElement('div');
+                    condHint.className = 'fit-model-cond-desc';
+                    condHint.style.margin = '8px 0';
+                    condHint.textContent = '尚未绑定拟合源时无法配置线性/对数/指数条件；请先选择主格。';
+                    panel.appendChild(condHint);
                 }
                 const refLbl = document.createElement('div');
                 refLbl.className = 'formula-input-label';
@@ -6156,9 +7036,12 @@
                 const btnClearR2 = document.createElement('button');
                 btnClearR2.type = 'button';
                 btnClearR2.className = 'formula-tool-btn danger';
-                btnClearR2.textContent = '解除 R² 绑定';
+                btnClearR2.textContent = '取消 R²（恢复普通公式）';
                 btnClearR2.addEventListener('click', () => {
+                    if (!confirm('解除 R² 绑定，恢复普通公式？')) return;
                     clearFieldFitConfig(f);
+                    delete f.fitR2Pending;
+                    formulaFitRefExpanded = false;
                     renderFormulaPanel();
                     updateFieldRowIndicators(f.id);
                 });
@@ -6174,7 +7057,9 @@
                     rules: f.formulaRules,
                     showFitKind: true,
                     pearsonFromModel: true,
+                    hideCondition: true,
                     expressionPlaceholder: 'Pearson R² 展开式，如 ((5)*(...)-...)/((...)*(...))',
+                    setActiveExpressionInput: (el) => { activeFormulaExprInput = el; },
                     onChange: (next) => {
                         f.formulaRules = next;
                         // 模型选择器变更或空/旧哨兵时，按当前 X/Y 重算 Pearson
@@ -6211,12 +7096,80 @@
                 panel.className = 'fit-panel';
                 const title = document.createElement('div');
                 title.className = 'fit-panel-title';
-                title.textContent = '曲线拟合（本格为主格）';
+                title.textContent = (f.fitBinding && f.fitBinding.output === 'none')
+                    ? '曲线拟合配置（仅源·本格不输出方程）'
+                    : '曲线拟合配置（可选输出方程）';
                 const desc = document.createElement('div');
                 desc.className = 'fit-panel-desc';
-                desc.textContent = 'X/Y 顺序一一配对；条件勾选命中后，用公式中的 fit(y=...) 待定系数模型做最小二乘。系数由现场前端根据实测计算，后台只保存配置。';
+                desc.innerHTML = '在此配置 X/Y 与模型即可。其它格点「调用拟合源」从<strong>列表</strong>选用，无需再到 PDF 上点主格。不需要报告显示方程时勾选下方「仅作拟合源」。';
                 panel.appendChild(title);
                 panel.appendChild(desc);
+
+                const exitFitRow = document.createElement('div');
+                exitFitRow.className = 'formula-actions';
+                exitFitRow.style.marginBottom = '8px';
+                const btnExitFitTop = document.createElement('button');
+                btnExitFitTop.type = 'button';
+                btnExitFitTop.className = 'formula-tool-btn danger';
+                btnExitFitTop.textContent = '取消拟合（恢复普通公式）';
+                btnExitFitTop.title = '退出拟合配置模式';
+                btnExitFitTop.addEventListener('click', () => {
+                    if (!confirm('取消拟合配置，恢复普通公式？')) return;
+                    clearFieldFitConfig(f);
+                    delete f.fitR2Pending;
+                    formulaFitRefExpanded = false;
+                    markFieldFormulaUserOverride(f);
+                    renderFormulaPanel();
+                    updateFieldRowIndicators(f.id);
+                });
+                exitFitRow.appendChild(btnExitFitTop);
+                panel.appendChild(exitFitRow);
+
+                const nameLbl = document.createElement('label');
+                nameLbl.style.cssText = 'display:block;margin:8px 0 6px;font-size:12px;font-weight:600;color:#475569;';
+                nameLbl.textContent = '拟合名称（调用列表显示，可选）';
+                const nameInput = document.createElement('input');
+                nameInput.type = 'text';
+                nameInput.placeholder = '如：剂量校准曲线';
+                nameInput.value = String((f.fitBinding && f.fitBinding.name) || '');
+                nameInput.style.cssText = 'margin-top:4px;width:100%;border:1px solid #c4b5fd;border-radius:8px;padding:7px 10px;font-size:13px;';
+                nameInput.addEventListener('input', () => {
+                    ensureFitBinding(f);
+                    f.fitBinding.name = String(nameInput.value || '').trim();
+                    markFieldFormulaUserOverride(f);
+                });
+                nameLbl.appendChild(nameInput);
+                panel.appendChild(nameLbl);
+
+                const outLabel = document.createElement('label');
+                outLabel.style.cssText = 'display:flex;align-items:flex-start;gap:8px;margin:10px 0 6px;font-size:13px;color:#334155;cursor:pointer;';
+                const outCb = document.createElement('input');
+                outCb.type = 'checkbox';
+                outCb.checked = String((f.fitBinding && f.fitBinding.output) || 'equation') === 'none';
+                outCb.addEventListener('change', () => {
+                    ensureFitBinding(f);
+                    f.fitBinding.output = outCb.checked ? 'none' : 'equation';
+                    applyFitMasterOutputMode(f);
+                    markFieldFormulaUserOverride(f);
+                    renderFormulaPanel();
+                    updateFieldRowIndicators(f.id);
+                });
+                const outTxt = document.createElement('span');
+                outTxt.innerHTML = '仅作拟合源（<strong>不输出方程</strong>）——本格只挂配置、报告不写方程；其它格在「调用拟合源」列表里选用即可，<strong>不需要另设可见主格</strong>。';
+                outLabel.appendChild(outCb);
+                outLabel.appendChild(outTxt);
+                panel.appendChild(outLabel);
+
+                // 集中配置线性/对数/指数条件（同一套 X/Y 共用，并同步到 R²）
+                applyFitModelConditions(f, readFitModelConditions(f), { forceModelExpr: false });
+                panel.appendChild(buildFitModelConditionsPanel(f, {
+                    onChange: () => {
+                        updateFieldRowIndicators(f.id);
+                        if (typeof renderFormulaPanel === 'function') {
+                            // 仅刷新规则展示中的条件，避免打断当前编辑：轻量同步即可
+                        }
+                    }
+                }));
 
                 const xLbl = document.createElement('div');
                 xLbl.className = 'formula-input-label';
@@ -6362,14 +7315,14 @@
                 formulaSection.appendChild(panel);
 
                 ensureFormulaRules(f);
-                let activeFormulaExprInput = null;
                 const formulaRulesEditor = createConditionalRulesEditor({
                     rules: f.formulaRules,
-                    hint: '每条规则的公式写 fit(y=...) 模型式；判断条件可空。勾选对应条件后，前端用实测点求待定系数 a、b。',
+                    hint: '模型式在此维护；线性/对数/指数勾选条件请用上方绿色「模型选用条件」统一配置（会同步到 R²）。',
                     expressionLabel: '拟合模型式',
                     expressionPlaceholder: 'fit(y=a*x+b)',
                     showFitKind: true,
                     hideExpression: false,
+                    hideCondition: true,
                     addButtonLabel: '添加拟合规则',
                     setActiveExpressionInput: (el) => { activeFormulaExprInput = el; },
                     commitHooks: panelCommitHooks,
@@ -6378,9 +7331,16 @@
                             Object.assign(r, normalizeConditionalRuleRow(r, i));
                             delete r.fitKind;
                         });
-                        const primary = (f.formulaRules[0] && (f.formulaRules[0].expression || f.formulaRules[0].formula)) || '';
-                        f.fieldExpression = String(primary || '').trim();
-                        f.formula = f.fieldExpression;
+                        applyFitModelConditions(f, readFitModelConditions(f), { forceModelExpr: false });
+                        if (String((f.fitBinding && f.fitBinding.output) || 'equation') === 'none') {
+                            f.fieldExpression = '';
+                            f.formula = '';
+                            f.pdfFieldExpression = '';
+                        } else {
+                            const primary = (f.formulaRules[0] && (f.formulaRules[0].expression || f.formulaRules[0].formula)) || '';
+                            f.fieldExpression = String(primary || '').trim();
+                            f.formula = f.fieldExpression;
+                        }
                         markFieldFormulaUserOverride(f);
                         updateFieldRowIndicators(f.id);
                         syncLinkedFitR2FromMaster(f);
@@ -6390,27 +7350,16 @@
 
                 const condPickRow = document.createElement('div');
                 condPickRow.className = 'formula-actions';
-                const condPickBtn = document.createElement('button');
-                condPickBtn.type = 'button';
-                condPickBtn.className = 'formula-tool-btn';
-                condPickBtn.textContent = '在 PDF 上选条件栏位';
-                condPickBtn.title = '点选栏位编号，写入当前焦点条件框（若无焦点则无效）';
-                // 条件框由规则编辑器管理；提供隐藏 textarea 作为插入目标备用
-                const condScratch = document.createElement('textarea');
-                condScratch.style.display = 'none';
-                formulaSection.appendChild(condScratch);
-                condPickBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const targetInput = activeFormulaExprInput || condScratch;
-                    openFormulaFieldPicker(condPickBtn, targetInput, f.id, { pid: pid });
-                });
-                condPickRow.appendChild(condPickBtn);
                 const btnClearFit = document.createElement('button');
                 btnClearFit.type = 'button';
                 btnClearFit.className = 'formula-tool-btn danger';
-                btnClearFit.textContent = '清除拟合配置';
+                btnClearFit.textContent = '取消拟合（恢复普通公式）';
+                btnClearFit.title = '清除本格 fitBinding，与点「普通公式」相同';
                 btnClearFit.addEventListener('click', () => {
+                    if (!confirm('取消拟合配置，恢复普通公式？')) return;
                     clearFieldFitConfig(f);
+                    delete f.fitR2Pending;
+                    formulaFitRefExpanded = false;
                     renderFormulaPanel();
                     updateFieldRowIndicators(f.id);
                 });
@@ -6421,7 +7370,6 @@
                 refreshLists();
             } else {
             ensureFormulaRules(f);
-            let activeFormulaExprInput = null;
             const formulaRulesEditor = createConditionalRulesEditor({
                 rules: f.formulaRules,
                 expressionLabel: '公式',
@@ -6509,6 +7457,7 @@
             fnRow.className = 'formula-chip-row';
             const fnInserts = [
                 ['max', 'max()', -1],
+                ['max_abs', 'max_abs()', -1],
                 ['min', 'min()', -1],
                 ['sum', 'sum()', -1],
                 ['avg', 'avg()', -1],
@@ -6544,11 +7493,15 @@
                 + '<h5>常用函数</h5>'
                 + '<ul>'
                 + '<li><code>max(f1,f2)</code> / <code>min</code> / <code>sum</code> / <code>avg</code>：最大、最小、求和、平均</li>'
+                + '<li><code>max_abs(f1,f2,f3)</code>：绝对值最大的原数（保留正负，等同 Python <code>max(..., key=abs)</code>）</li>'
                 + '<li><code>std(f1,f2,f3)</code> / <code>stdev</code> / <code>stddev</code>：样本标准差（n-1）；<code>var</code> / <code>variance</code>：样本方差</li>'
                 + '<li><code>median(f1,f2,f3)</code>：中位数；<code>count(f1,f2)</code>：有效数值个数</li>'
                 + '<li><code>round(f1, 2)</code>：保留小数；<code>if(条件, 真, 假)</code>：按条件取值</li>'
                 + '<li><code>min(f1,f2)~max(f1,f2)</code>：范围输出，两侧分别求值后拼接为 <code>左~右</code></li>'
                 + '<li><code>parseNum(f1)</code>：从带单位文字取数字</li>'
+                + '<li><code>fit_a(f源)</code> / <code>fit_b(f源)</code>：引用拟合源的系数 a、b</li>'
+                + '<li><code>fit_y(f源, x)</code> / <code>fit_x(f源, y)</code>：用拟合模型正算 / 反算</li>'
+                + '<li><code>fit_eq(f源)</code>：输出拟合方程字符串（整格使用）</li>'
                 + '</ul>'
                 + '<p class="formula-fn-note">栏位用 <code>f数字</code>；只写等号右边，例如 <code>f34+f35</code> 或 <code>min(f1,f3)~max(f1,f3)</code>。</p>';
             fnToggle.addEventListener('click', () => {
@@ -7919,6 +8872,7 @@
         }
 
         function resolveBackgroundCalibrationFactorPid(ch) {
+            // 保留供旧逻辑/调试；本底报出不再自动用此因子写公式
             const rules = (ch && Array.isArray(ch.reportValueRules)) ? ch.reportValueRules : [];
             for (let i = 0; i < rules.length; i++) {
                 const expr = String((rules[i] && (rules[i].expression || rules[i].formula)) || '');
@@ -7930,6 +8884,7 @@
         }
 
         function backgroundRangeExpression(readingPids, factorPid) {
+            // 兼容旧调用；不再由章节「完成」自动写入本底报出格
             const refs = (readingPids || []).map(p => String(p || '').trim().toLowerCase()).filter(Boolean);
             const factor = String(factorPid || '').trim().toLowerCase();
             if (refs.length < 2 || !factor) return '';
@@ -7937,7 +8892,7 @@
             return factor + '*min(' + joined + ')~' + factor + '*max(' + joined + ')';
         }
 
-        /** 章节「完成」：本底报出格写 min~max×校准因子，并清掉本底读数格上的误写 avg。 */
+        /** 章节「完成」：不自动配本底报出因子/公式；仅清掉本底读数格上误写的 avg。 */
         function applyBackgroundFormulasToFields() {
             const ch = syncRadiationProtectionChapterBindings();
             const bb = (ch && ch.backgroundBinding && typeof ch.backgroundBinding === 'object')
@@ -7948,35 +8903,27 @@
                 const p = String(bb['bg_reading_' + i] || '').trim().toLowerCase();
                 if (p) readingPids.push(p);
             }
-            const reportPid = String(bb.report_d || '').trim().toLowerCase();
-            const factorPid = resolveBackgroundCalibrationFactorPid(ch);
-            const expr = backgroundRangeExpression(readingPids, factorPid);
             const readingSet = new Set(readingPids);
+            let cleared = 0;
             fields.forEach(f => {
                 if (!f || !isRadiationProtectionChapterField(f)) return;
                 const pid = String(f.pdfFieldId || f.id || '').trim().toLowerCase();
-                if (!pid) return;
-                if (readingSet.has(pid)) {
-                    const fe = String(f.fieldExpression || '').trim();
-                    if (/^avg\s*\(/i.test(fe)) {
-                        f.fieldExpression = '';
-                        delete f.fieldFormulaUserOverride;
-                    }
-                    return;
-                }
-                if (reportPid && pid === reportPid && expr) {
-                    if (fieldHasFormulaUserOverride(f)) return;
-                    f.fieldExpression = expr;
-                    f.fieldFormulaUserOverride = true;
+                if (!pid || !readingSet.has(pid)) return;
+                const fe = String(f.fieldExpression || '').trim();
+                if (/^avg\s*\(/i.test(fe)) {
+                    f.fieldExpression = '';
+                    delete f.fieldFormulaUserOverride;
+                    cleared += 1;
                     updateFieldRowIndicators(f.id);
                 }
             });
-            return expr ? 1 : 0;
+            return cleared;
         }
 
         /**
          * 章节公式「完成」：立刻写进编辑器内存里的各行报出值/年剂量栏位（不落盘）。
          * 同时按表几何重建 fieldBindings / backgroundBinding，避免磁盘旧绑定把本底格当成均值。
+         * 本底报出值不自动配校准因子，由栏位/章节公式人工维护；仅清本底读数格误写 avg。
          * 磁盘上的 JSON 仍须点「保存坐标模板 JSON」才更新。
          * 之后可单独改某一格（会标 fieldFormulaUserOverride）；保存时不再用章节规则覆盖已有栏位公式。
          */
