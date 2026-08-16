@@ -1,0 +1,54 @@
+{
+  "schema": "f1_eval_base_format/v1",
+  "description": "表 F.1 基础表格格式：控制整表页面、边距、字体、表题、分页与外框，不包含各表头业务内容。",
+  "page_size": {
+    "width": 595.3,
+    "height": 841.9
+  },
+  "orientation": "portrait",
+  "margins_mm": {
+    "top": 26.0,
+    "bottom": 26.0,
+    "left": 28.0,
+    "right": 28.0
+  },
+  "text": {
+    "font": "simsun",
+    "font_size_pt": 12.0,
+    "line_spacing_pt": 25.0,
+    "char_spacing": "standard"
+  },
+  "title": {
+    "table_label": "",
+    "table_name": "建设项目放射性职业病危害预评价报告表",
+    "title_line1": "",
+    "title_line2": "",
+    "report_no": "",
+    "align": "center",
+    "gap_below_pt": 2.0,
+    "repeat_on_continuation": false,
+    "draw_on_landscape": false
+  },
+  "table": {
+    "row_min_height_pt": 25.0,
+    "border_width_pt": 0.6
+  },
+  "pagination": {
+    "repeat_title_on_each_page": false,
+    "repeat_row_label_on_continue": true,
+    "page_number": "outer_bottom",
+    "page_number_uses_actual_page_size": true,
+    "report_chrome": true
+  },
+  "landscape_figure_page": {
+    "default_width_pt": 1190.55,
+    "default_height_pt": 841.9,
+    "use_a4_margins": true,
+    "inner_pad_pt": 3.0,
+    "draw_table_frame": true,
+    "draw_title": false,
+    "draw_side_labels": true,
+    "side_labels_keep_a4_column_width": true,
+    "title_keep_a4_table_width": true
+  }
+}

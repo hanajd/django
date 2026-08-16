@@ -1,13 +1,21 @@
 {# 项目工作台 · 委托情况（设备为中心） #}
 <div id="guide-project-commission" class="rounded-xl border border-rose-100 bg-rose-50/30 p-5 space-y-6">
-    <div>
-        <h3 class="text-base font-semibold text-slate-900 mb-1">委托立项 · 受检设备</h3>
-        <p class="text-xs text-slate-600 max-w-3xl">
-            根据合同新建项目后：在左侧树进入<strong>医院 → 院区 → 科室</strong>，在本页勾选受检设备并选择<strong>本次检测类型</strong>（须与
-            <a href="{% url 'hospital_info_manage' %}" class="text-rose-700 font-medium underline">医院信息管理</a> 中设备已绑定的类型一致）。
-            系统将按类型挂载报告与现场记录任务。下一步在
-            <a href="?project_id={{ selected_project_id }}{{ workbench_fl_query }}&tab=dispatch" class="text-rose-700 font-medium underline">人员派工</a> 分配给工作人员。
-        </p>
+    <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0 flex-1">
+            <h3 class="text-base font-semibold text-slate-900 mb-1">委托立项 · 受检设备</h3>
+            <p class="text-xs text-slate-600 max-w-3xl">
+                根据合同新建项目后：在左侧树进入<strong>医院 → 院区 → 科室</strong>，在本页添加受检设备并选择<strong>本次检测类型</strong>（须与
+                <a href="{% url 'hospital_info_manage' %}" class="text-rose-700 font-medium underline">医院信息管理</a> 中设备已绑定的类型一致）。
+                同一设备可多次加入同类型（例如两份验收报告），加入后可分别更换报告模板。下一步在
+                <a href="?project_id={{ selected_project_id }}{{ workbench_fl_query }}&tab=dispatch" class="text-rose-700 font-medium underline">人员派工</a> 分配给工作人员。
+            </p>
+        </div>
+        {% if project_has_hospital and selected_project and can_edit_project_workbench %}
+        <button type="button" id="open-bind-project-equipments-modal"
+                class="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 text-white text-sm font-medium hover:bg-rose-700 shadow-sm">
+            <i class="ri-add-line text-base"></i> 添加设备到本次委托
+        </button>
+        {% endif %}
     </div>
 
     {% if not project_has_hospital %}
@@ -126,98 +134,274 @@
         </table>
     </div>
     {% else %}
-    <p class="text-sm text-slate-500 rounded-xl bg-white px-4 py-6 text-center ring-1 ring-slate-200">尚未绑定受检设备，请在下方勾选设备并选择本次检测类型。</p>
+    <p class="text-sm text-slate-500 rounded-xl bg-white px-4 py-6 text-center ring-1 ring-slate-200">
+        尚未绑定受检设备，请点击右上角<strong>添加设备到本次委托</strong>。
+    </p>
     {% endif %}
 
-    <div class="rounded-xl border border-slate-200 bg-white p-4">
-        <h4 class="text-sm font-semibold text-slate-900 mb-2">添加设备到本次委托</h4>
-        {% if project_equipment_scope_label %}
-        <p class="text-xs text-slate-600 mb-2 rounded-lg bg-slate-50 px-3 py-2 ring-1 ring-slate-200">
-            当前范围：<strong>{{ project_equipment_scope_label }}</strong>及其下属科室的设备；不可跨同级院区或科室选择。
-        </p>
-        {% endif %}
-        <p class="text-xs text-slate-500 mb-3">
-            勾选设备后选择<strong>本次检测类型</strong>（如验收检测、状态检测）。同一设备若需做多种类型，可多次加入并分别选择类型。
-            请先在左侧树进入对应院区或科室。
-        </p>
-        {% if project_available_equipment_rows %}
-        <form method="post" id="bind-project-equipments-form" class="space-y-3">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="bind_project_equipments">
-            <input type="hidden" name="project_id" value="{{ selected_project_id }}">
-            {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
-            <div class="max-h-80 overflow-y-auto rounded-lg border border-slate-100 divide-y divide-slate-100">
-                {% for row in project_available_equipment_rows %}
-                {% with eq=row.equipment %}
-                <div class="flex items-start gap-3 px-4 py-3 hover:bg-slate-50 text-sm project-eq-bind-row" data-eq-id="{{ eq.id }}">
-                    <input type="checkbox" name="equipment_ids" value="{{ eq.id }}"
-                           class="mt-1 rounded border-slate-300 text-rose-600 project-eq-bind-check">
-                    <div class="flex-1 min-w-0 grid gap-2 sm:grid-cols-[1fr_minmax(10rem,12rem)] sm:items-center">
-                        <div>
-                            <span class="font-medium text-slate-900">{{ eq.name }}</span>
-                            {% if eq.model or eq.serial_no %}
-                            <span class="text-slate-500 text-xs"> · {{ eq.model }}{% if eq.serial_no %} / {{ eq.serial_no }}{% endif %}</span>
-                            {% endif %}
-                            <span class="block text-xs text-slate-500 mt-0.5">{{ eq.department.full_display_name }}</span>
+    {# 添加设备弹窗 #}
+    <div id="bind-project-equipments-modal"
+         class="fixed inset-0 z-[100] hidden"
+         aria-hidden="true"
+         role="dialog"
+         aria-modal="true"
+         aria-labelledby="bind-project-equipments-modal-title">
+        <div class="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px]" data-bind-eq-modal-dismiss aria-hidden="true"></div>
+        <div class="relative z-10 flex h-full items-center justify-center p-3 sm:p-4">
+            <div class="w-[min(36rem,calc(100vw-1.5rem))] h-[min(36rem,calc(100vh-2rem))] flex flex-col rounded-2xl bg-white shadow-xl ring-1 ring-slate-200 overflow-hidden"
+                 role="document"
+                 onclick="event.stopPropagation()">
+                <div class="flex items-start justify-between gap-3 px-4 py-3 border-b border-slate-100 shrink-0">
+                    <div class="min-w-0">
+                        <h4 id="bind-project-equipments-modal-title" class="text-sm font-semibold text-slate-900">添加设备到本次委托</h4>
+                        <p class="text-[11px] text-slate-500 mt-0.5">勾选设备 → 选检测类型 → 勾选报告模板（可多选；已挂载的模板不再列出）</p>
+                    </div>
+                    <button type="button" class="shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100" data-bind-eq-modal-dismiss aria-label="关闭">
+                        <i class="ri-close-line text-lg"></i>
+                    </button>
+                </div>
+                {% if project_available_equipment_rows %}
+                <form method="post" id="bind-project-equipments-form" class="flex flex-col flex-1 min-h-0 overflow-hidden">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="bind_project_equipments">
+                    <input type="hidden" name="project_id" value="{{ selected_project_id }}">
+                    {% if fl_path %}<input type="hidden" name="fl_path" value="{{ fl_path }}">{% endif %}
+                    <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-2 space-y-2">
+                        {% if project_equipment_scope_label %}
+                        <p class="text-[11px] text-slate-500 px-1 sticky top-0 bg-white/95 backdrop-blur-sm z-[1] py-1">
+                            范围：{{ project_equipment_scope_label }}（共 {{ project_available_equipment_rows|length }} 台）· 列表可滚动
+                        </p>
+                        {% endif %}
+                        {% for row in project_available_equipment_rows %}
+                        {% with eq=row.equipment %}
+                        <div class="project-eq-bind-row rounded-xl border border-slate-200 bg-white px-3 py-2.5 transition-colors"
+                             data-eq-id="{{ eq.id }}"
+                             data-groups='{{ row.template_groups_json|escape }}'>
+                            <label class="flex items-center gap-2.5 cursor-pointer select-none">
+                                <input type="checkbox" name="equipment_ids" value="{{ eq.id }}"
+                                       class="project-eq-bind-check h-5 w-5 shrink-0 rounded border-slate-300 text-rose-600 focus:ring-rose-500 cursor-pointer">
+                                <span class="min-w-0 flex-1">
+                                    <span class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                                        <span class="font-medium text-slate-900 text-sm">{{ eq.name }}</span>
+                                        {% if row.device_type_label %}
+                                        <span class="text-[10px] font-medium text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">{{ row.device_type_label }}</span>
+                                        {% endif %}
+                                    </span>
+                                    <span class="block text-[11px] text-slate-500 mt-0.5 truncate">
+                                        {% if eq.model or eq.serial_no %}{{ eq.model }}{% if eq.serial_no %} / {{ eq.serial_no }}{% endif %} · {% endif %}{{ eq.department.full_display_name }}
+                                    </span>
+                                </span>
+                            </label>
+                            <div class="project-eq-bind-controls mt-2 pl-7 space-y-2 hidden">
+                                <div class="project-eq-type-radios flex flex-wrap gap-1.5">
+                                    {% for g in row.template_groups %}
+                                    <label class="project-eq-type-btn inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer ring-1 ring-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors">
+                                        <input type="radio" name="inspection_type_{{ eq.id }}" value="{{ g.inspection_type }}"
+                                               class="project-eq-inspection-type sr-only"
+                                               {% if forloop.first %}checked{% endif %}
+                                               disabled>
+                                        <span>{{ g.inspection_type }}</span>
+                                        <span class="project-eq-type-count opacity-70">{{ g.templates|length }}</span>
+                                    </label>
+                                    {% endfor %}
+                                </div>
+                                <div>
+                                    <p class="text-[10px] text-slate-500 mb-1">报告模板（可多选）</p>
+                                    <div class="project-eq-template-list space-y-0.5 max-h-24 overflow-y-auto rounded-lg bg-slate-50 ring-1 ring-slate-200 p-1.5"></div>
+                                    <p class="project-eq-template-hint text-[11px] text-amber-700 mt-1 hidden">请至少勾选一个报告模板</p>
+                                </div>
+                            </div>
                         </div>
-                        <label class="block">
-                            <span class="text-[10px] font-medium text-slate-500">本次检测类型 *</span>
-                            <select name="inspection_type_{{ eq.id }}"
-                                    class="project-eq-inspection-type mt-0.5 w-full px-2 py-1.5 text-sm rounded-lg bg-white ring-1 ring-slate-200 border-0 disabled:opacity-50"
-                                    disabled>
-                                {% for opt in row.type_options %}
-                                <option value="{{ opt.inspection_type }}"{% if opt.inspection_type == row.default_inspection_type %} selected{% endif %}>
-                                    {{ opt.inspection_type }} · {{ opt.task_label }}
-                                </option>
-                                {% endfor %}
-                            </select>
-                        </label>
+                        {% endwith %}
+                        {% endfor %}
+                    </div>
+                    <div class="shrink-0 flex flex-wrap items-center justify-end gap-2 px-4 py-3 border-t border-slate-100 bg-slate-50/80">
+                        <button type="button" class="px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-700 hover:bg-slate-50" data-bind-eq-modal-dismiss>取消</button>
+                        <button type="submit" class="px-3.5 py-1.5 rounded-lg bg-rose-600 text-white text-sm font-medium hover:bg-rose-700">加入本次委托</button>
+                    </div>
+                </form>
+                {% else %}
+                <div class="flex-1 min-h-0 overflow-y-auto px-4 py-5 space-y-3">
+                    <p class="text-sm text-slate-500">
+                        {% if project_equipment_scope_label %}
+                        {{ project_equipment_scope_label }}范围内暂无可用设备。请确认设备已填写设备类型，或在左侧进入正确院区/科室。
+                        {% else %}
+                        该医院下暂无可用设备，请先在医院信息管理录入并设置设备类型。
+                        {% endif %}
+                    </p>
+                    <div class="flex justify-end">
+                        <button type="button" class="px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-700 hover:bg-slate-50" data-bind-eq-modal-dismiss>关闭</button>
                     </div>
                 </div>
-                {% endwith %}
-                {% endfor %}
+                {% endif %}
             </div>
-            <button type="submit" class="px-4 py-2 rounded-xl bg-rose-600 text-white text-sm font-medium hover:bg-rose-700">加入本次委托</button>
-        </form>
-        <script>
-        (function () {
-            var form = document.getElementById('bind-project-equipments-form');
-            if (!form) return;
-            function syncRow(row) {
-                var cb = row.querySelector('.project-eq-bind-check');
-                var sel = row.querySelector('.project-eq-inspection-type');
-                if (!cb || !sel) return;
-                sel.disabled = !cb.checked;
-                sel.required = cb.checked;
+        </div>
+    </div>
+    <script>
+    (function () {
+        var modal = document.getElementById('bind-project-equipments-modal');
+        var openBtn = document.getElementById('open-bind-project-equipments-modal');
+        if (!modal) return;
+
+        function openModal() {
+            modal.classList.remove('hidden');
+            modal.setAttribute('aria-hidden', 'false');
+            document.body.classList.add('overflow-hidden');
+        }
+        function closeModal() {
+            modal.classList.add('hidden');
+            modal.setAttribute('aria-hidden', 'true');
+            document.body.classList.remove('overflow-hidden');
+        }
+        if (openBtn) openBtn.addEventListener('click', openModal);
+        modal.querySelectorAll('[data-bind-eq-modal-dismiss]').forEach(function (el) {
+            el.addEventListener('click', closeModal);
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
+        });
+
+        var form = document.getElementById('bind-project-equipments-form');
+        if (!form) return;
+
+        function parseGroups(row) {
+            try {
+                return JSON.parse(row.getAttribute('data-groups') || '[]');
+            } catch (err) {
+                return [];
             }
-            form.querySelectorAll('.project-eq-bind-row').forEach(function (row) {
-                syncRow(row);
-                var cb = row.querySelector('.project-eq-bind-check');
-                if (cb) cb.addEventListener('change', function () { syncRow(row); });
+        }
+
+        function selectedType(row) {
+            var checked = row.querySelector('.project-eq-inspection-type:checked');
+            return checked ? checked.value : '';
+        }
+
+        function syncTypeButtons(row) {
+            row.querySelectorAll('.project-eq-type-btn').forEach(function (btn) {
+                var radio = btn.querySelector('.project-eq-inspection-type');
+                var on = !!(radio && radio.checked);
+                btn.classList.toggle('bg-rose-600', on);
+                btn.classList.toggle('text-white', on);
+                btn.classList.toggle('ring-rose-600', on);
+                btn.classList.toggle('shadow-sm', on);
+                btn.classList.toggle('bg-white', !on);
+                btn.classList.toggle('text-slate-600', !on);
+                btn.classList.toggle('ring-slate-200', !on);
             });
-            form.addEventListener('submit', function (e) {
-                var any = false;
-                form.querySelectorAll('.project-eq-bind-check').forEach(function (cb) {
-                    if (cb.checked) any = true;
+        }
+
+        function renderTemplates(row) {
+            var list = row.querySelector('.project-eq-template-list');
+            if (!list) return;
+            var eqId = row.getAttribute('data-eq-id');
+            var groups = parseGroups(row);
+            var itype = selectedType(row);
+            var group = null;
+            for (var i = 0; i < groups.length; i++) {
+                if (groups[i].inspection_type === itype) {
+                    group = groups[i];
+                    break;
+                }
+            }
+            var templates = (group && group.templates) ? group.templates : [];
+            list.innerHTML = '';
+            if (!templates.length) {
+                list.innerHTML = '<p class="text-[11px] text-slate-400 px-1 py-1.5">该检测类型下暂无报告模板</p>';
+                return;
+            }
+            templates.forEach(function (tpl) {
+                var id = 'eq-' + eqId + '-tpl-' + tpl.report_task_id;
+                var label = document.createElement('label');
+                label.className = 'flex items-start gap-2 px-1.5 py-1.5 rounded-md hover:bg-white cursor-pointer';
+                label.setAttribute('for', id);
+                var input = document.createElement('input');
+                input.type = 'checkbox';
+                input.name = 'report_task_ids_' + eqId;
+                input.value = String(tpl.report_task_id);
+                input.id = id;
+                input.className = 'project-eq-template-check mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-rose-600 focus:ring-rose-500 cursor-pointer';
+                var text = document.createElement('span');
+                text.className = 'min-w-0 text-xs text-slate-800 leading-snug';
+                text.textContent = tpl.task_label || ('模板 #' + tpl.report_task_id);
+                label.appendChild(input);
+                label.appendChild(text);
+                list.appendChild(label);
+            });
+        }
+
+        function syncRow(row) {
+            var cb = row.querySelector('.project-eq-bind-check');
+            var controls = row.querySelector('.project-eq-bind-controls');
+            var active = !!(cb && cb.checked);
+            row.classList.toggle('ring-2', active);
+            row.classList.toggle('ring-rose-400', active);
+            row.classList.toggle('border-rose-200', active);
+            row.classList.toggle('bg-rose-50/40', active);
+            if (controls) {
+                controls.classList.toggle('hidden', !active);
+            }
+            row.querySelectorAll('.project-eq-inspection-type').forEach(function (r) {
+                r.disabled = !active;
+            });
+            row.querySelectorAll('.project-eq-template-check').forEach(function (t) {
+                t.disabled = !active;
+                if (!active) t.checked = false;
+            });
+            syncTypeButtons(row);
+            var hint = row.querySelector('.project-eq-template-hint');
+            if (hint) hint.classList.add('hidden');
+        }
+
+        form.querySelectorAll('.project-eq-bind-row').forEach(function (row) {
+            renderTemplates(row);
+            syncTypeButtons(row);
+            syncRow(row);
+            var cb = row.querySelector('.project-eq-bind-check');
+            if (cb) {
+                cb.addEventListener('change', function () {
+                    if (cb.checked) renderTemplates(row);
+                    syncRow(row);
                 });
-                if (!any) {
-                    e.preventDefault();
-                    alert('请至少勾选一台设备');
+            }
+            row.querySelectorAll('.project-eq-inspection-type').forEach(function (radio) {
+                radio.addEventListener('change', function () {
+                    renderTemplates(row);
+                    syncTypeButtons(row);
+                    syncRow(row);
+                });
+            });
+        });
+
+        form.addEventListener('submit', function (e) {
+            var anyEq = false;
+            var missingTpl = false;
+            form.querySelectorAll('.project-eq-bind-row').forEach(function (row) {
+                var cb = row.querySelector('.project-eq-bind-check');
+                if (!cb || !cb.checked) return;
+                anyEq = true;
+                var n = 0;
+                row.querySelectorAll('.project-eq-template-check:checked').forEach(function () { n += 1; });
+                var hint = row.querySelector('.project-eq-template-hint');
+                if (n < 1) {
+                    missingTpl = true;
+                    if (hint) hint.classList.remove('hidden');
+                } else if (hint) {
+                    hint.classList.add('hidden');
                 }
             });
-        })();
-        </script>
-        {% else %}
-        <p class="text-sm text-slate-500">
-            {% if project_equipment_scope_label %}
-            {{ project_equipment_scope_label }}范围内可加入的设备已全部在本项目中，或尚未在<a href="{% url 'hospital_info_manage' %}" class="text-indigo-600 underline">医院信息管理</a>录入/绑定检测类型模板。
-            若需其他科室/院区的设备，请先在左侧进入对应委托单位层级。
-            {% else %}
-            该医院下可加入的设备已全部在本项目中，或尚未在医院信息管理录入设备并配置检测类型。
-            {% endif %}
-        </p>
-        {% endif %}
-    </div>
+            if (!anyEq) {
+                e.preventDefault();
+                alert('请至少勾选一台设备');
+                return;
+            }
+            if (missingTpl) {
+                e.preventDefault();
+                alert('已勾选的设备请至少选择一个报告模板');
+            }
+        });
+    })();
+    </script>
 
     {% if report_task_picker_catalog %}
     {% include "core/partials/library_report_task_picker_sheet.html" %}

@@ -13,6 +13,7 @@ from apps.core.library_access import (
     library_user_can_delete_library_project,
     library_user_has_task_assignment_on_project,
     library_user_is_project_primary_responsible,
+    library_user_may_access_f1_eval,
     library_user_may_assign_on_project,
     library_user_scoped_project_ids,
     role_has,
@@ -80,6 +81,14 @@ def library_user_may_access_commission_manage(user) -> bool:
         return False
     if not role_has(user, "perm_file_library"):
         return False
+    try:
+        from apps.core.org_roles import user_is_evaluation_org
+
+        # 评价部：委托管理展示评价报告表/书（非检测任务）
+        if user_is_evaluation_org(user):
+            return library_user_may_access_f1_eval(user)
+    except Exception:
+        pass
     if library_user_can_assign_tasks_to_participants(user):
         return True
     if getattr(user, "is_superuser", False) or _role_code(user) in (
@@ -354,8 +363,29 @@ def build_commission_project_item_progress(
     viewer: User,
 ) -> list[dict]:
     """委托内各检测项目（设备×任务）的签发流程进度。"""
+    from apps.api.inspection_pdf_service import (
+        _resolve_library_task_for_task_no,
+        exportable_site_task_keys,
+    )
+    from apps.core.models import LibraryTask
+
     items: list[dict] = []
     seen_task_nos: set[str] = set()
+    exportable = exportable_site_task_keys(viewer, [project])
+
+    def _has_site_source(task_no: str, library_task_id: int = 0) -> bool:
+        sid = int(library_task_id or 0) or 0
+        if not sid and task_no:
+            try:
+                st = _resolve_library_task_for_task_no(task_no, project)
+                if (
+                    st is not None
+                    and getattr(st, "output_target", None) == LibraryTask.OUTPUT_SITE_RECORD
+                ):
+                    sid = int(st.pk)
+            except Exception:
+                sid = 0
+        return bool(sid and (int(project.pk), sid) in exportable)
 
     for card in project_equipment_cards(project):
         eq = card["equipment"]
@@ -386,6 +416,21 @@ def build_commission_project_item_progress(
                     submission=sub,
                     viewer=viewer,
                 )
+                signed_slots = {
+                    str(s.get("slot") or "")
+                    for s in (report_sig.get("slots") or [])
+                    if isinstance(s, dict) and s.get("signed")
+                }
+                variant_sign_targets = [
+                    {
+                        "export_variant": str(vr.get("export_variant") or ""),
+                        "label": str(vr.get("label") or ""),
+                        "signed_slots": set(vr.get("signed_slots") or []),
+                        "stage_code": str(vr.get("stage_code") or ""),
+                    }
+                    for vr in (report_sig.get("variants") or [])
+                    if isinstance(vr, dict) and vr.get("export_variant")
+                ]
                 items.append(
                     {
                         "item_key": f"{project.pk}-{task_no}",
@@ -406,6 +451,11 @@ def build_commission_project_item_progress(
                             project,
                             effective_stage=stage or "",
                             has_case=bool(case_id),
+                            signed_slots=signed_slots,
+                            has_site_source=_has_site_source(
+                                task_no, int(row.get("libraryTaskId") or 0) or 0
+                            ),
+                            variant_sign_targets=variant_sign_targets,
                         ),
                         "report_signature": report_sig,
                     }
@@ -436,6 +486,27 @@ def build_commission_project_item_progress(
             continue
         stage = _submission_workflow_stage(sub)
         bar = build_issuance_progress_bar(stage or None)
+        report_sig = build_report_signature_status(
+            case=sub.case if sub.case_id else None,
+            project=project,
+            submission=sub,
+            viewer=viewer,
+        )
+        signed_slots = {
+            str(s.get("slot") or "")
+            for s in (report_sig.get("slots") or [])
+            if isinstance(s, dict) and s.get("signed")
+        }
+        variant_sign_targets = [
+            {
+                "export_variant": str(vr.get("export_variant") or ""),
+                "label": str(vr.get("label") or ""),
+                "signed_slots": set(vr.get("signed_slots") or []),
+                "stage_code": str(vr.get("stage_code") or ""),
+            }
+            for vr in (report_sig.get("variants") or [])
+            if isinstance(vr, dict) and vr.get("export_variant")
+        ]
         items.append(
             {
                 "item_key": f"{project.pk}-{task_no}-orphan",
@@ -455,13 +526,11 @@ def build_commission_project_item_progress(
                     project,
                     effective_stage=stage or "",
                     has_case=bool(sub.case_id),
+                    signed_slots=signed_slots,
+                    has_site_source=_has_site_source(task_no, 0),
+                    variant_sign_targets=variant_sign_targets,
                 ),
-                "report_signature": build_report_signature_status(
-                    case=sub.case if sub.case_id else None,
-                    project=project,
-                    submission=sub,
-                    viewer=viewer,
-                ),
+                "report_signature": report_sig,
             }
         )
 
@@ -484,7 +553,141 @@ def build_commission_project_item_progress(
                 "report_signature": {"enabled": False, "slots": [], "timeline": []},
             }
         )
-    return items
+    return _expand_progress_items_by_report_variant(items)
+
+
+def _narrow_report_signature_to_variant(rs: dict, vr: dict) -> dict:
+    """把汇总签字状态收窄为单一报告版本，供分开展示。"""
+    v = str(vr.get("export_variant") or "")
+    pending = str(vr.get("pending_slot") or "").strip()
+    pending_label = ""
+    if pending:
+        from apps.core.report_signature_service import SIGN_SLOT_LABELS
+
+        pending_label = f"待您签字（{SIGN_SLOT_LABELS.get(pending, pending)}）"
+    timeline = [
+        t
+        for t in (rs.get("timeline") or [])
+        if isinstance(t, dict) and str(t.get("export_variant") or "full") == v
+    ]
+    return {
+        "enabled": bool(vr.get("report_file") or vr.get("report_file_name")),
+        "report_file": vr.get("report_file"),
+        "report_file_name": vr.get("report_file_name") or "",
+        "report_download_url": vr.get("report_download_url") or "",
+        "report_preview_url": vr.get("report_preview_url") or "",
+        "slots": list(vr.get("slots") or []),
+        "timeline": timeline,
+        "pending_slot": pending,
+        "pending_label": pending_label,
+        "user_has_signature": bool(rs.get("user_has_signature")),
+        "can_sign": bool(vr.get("can_sign")),
+        "variants": [vr],
+        "export_variant": v,
+        "no_report_hint": "" if vr.get("report_file") or vr.get("report_file_name") else (rs.get("no_report_hint") or ""),
+        "no_signature_hint": rs.get("no_signature_hint") or "",
+    }
+
+
+def _apply_variant_stage_to_progress_row(row: dict, vr: dict) -> None:
+    """用单个报告版本的独立环节覆盖进度行展示。"""
+    from apps.core.models import InspectionCaseWorkflowState
+    from apps.core.project_workflow_ui import build_issuance_progress_bar
+    from apps.core.report_signature_service import variant_report_stage_from_signed_slots
+
+    v_stage = str(vr.get("stage_code") or "").strip()
+    if not v_stage:
+        v_stage = variant_report_stage_from_signed_slots(
+            vr.get("signed_slots") or [],
+            case_stage=str(row.get("stage_code") or ""),
+        )
+    row["stage_code"] = v_stage
+    row["stage_label"] = str(vr.get("stage_label") or "").strip() or dict(
+        InspectionCaseWorkflowState.STAGE_CHOICES
+    ).get(v_stage, v_stage or "—")
+    row["progress_bar"] = build_issuance_progress_bar(v_stage or None)
+
+
+def _expand_progress_items_by_report_variant(items: list[dict]) -> list[dict]:
+    """
+    多个报告版本时拆成多条进度行，各自独立环节与签字按钮。
+    """
+    from radiation_detection_report.report_pdf_integrator import REPORT_EXPORT_VARIANT_FULL
+
+    out: list[dict] = []
+    for item in items:
+        rs = item.get("report_signature") if isinstance(item.get("report_signature"), dict) else {}
+        variants = [
+            vr
+            for vr in (rs.get("variants") or [])
+            if isinstance(vr, dict) and str(vr.get("export_variant") or "").strip()
+        ]
+        if len(variants) <= 1:
+            row = dict(item)
+            row["show_hub_export"] = True
+            if len(variants) == 1:
+                vr = variants[0]
+                row["export_variant"] = str(vr.get("export_variant") or "")
+                row["report_variant_label"] = str(vr.get("label") or "")
+                row["report_signature"] = _narrow_report_signature_to_variant(rs, vr)
+                _apply_variant_stage_to_progress_row(row, vr)
+                acts = list(item.get("advance_actions") or [])
+                v = row["export_variant"]
+                cleaned = []
+                for a in acts:
+                    a2 = dict(a)
+                    if a2.get("requires_report_signature") and not a2.get("export_variant"):
+                        a2["export_variant"] = v
+                    cleaned.append(_strip_variant_suffix_from_action(a2, row["report_variant_label"]))
+                row["advance_actions"] = cleaned
+            out.append(row)
+            continue
+
+        # 非签字推进（如确认现场）只挂在全本行，避免重复
+        base_acts = list(item.get("advance_actions") or [])
+        other_acts = [a for a in base_acts if not a.get("requires_report_signature")]
+        has_full = any(
+            str(x.get("export_variant") or "") == REPORT_EXPORT_VARIANT_FULL for x in variants
+        )
+        for vr in variants:
+            v = str(vr.get("export_variant") or "")
+            vlabel = str(vr.get("label") or v).strip() or v
+            row = dict(item)
+            row["item_key"] = f"{item.get('item_key')}-{v}"
+            row["export_variant"] = v
+            row["report_variant_label"] = vlabel
+            row["report_signature"] = _narrow_report_signature_to_variant(rs, vr)
+            _apply_variant_stage_to_progress_row(row, vr)
+            # 多版本时「重新导出」只挂在全本行（无全本则挂第一条），避免每行都出导出区
+            row["show_hub_export"] = (
+                v == REPORT_EXPORT_VARIANT_FULL
+                if has_full
+                else vr is variants[0]
+            )
+            sign_acts = [
+                _strip_variant_suffix_from_action(dict(a), vlabel)
+                for a in base_acts
+                if a.get("requires_report_signature")
+                and str(a.get("export_variant") or "") == v
+            ]
+            attach_other = other_acts if v == REPORT_EXPORT_VARIANT_FULL else []
+            # 若没有全本，挂到第一条
+            if not has_full and vr is variants[0]:
+                attach_other = other_acts
+            row["advance_actions"] = list(attach_other) + sign_acts
+            out.append(row)
+    return out
+
+
+def _strip_variant_suffix_from_action(act: dict, vlabel: str) -> dict:
+    """行标题已含版本名时，按钮不再重复「（全本报告）」后缀。"""
+    lab = str(act.get("label") or "")
+    for suffix in (f"（{vlabel}）", f"({vlabel})"):
+        if lab.endswith(suffix):
+            act = dict(act)
+            act["label"] = lab[: -len(suffix)].rstrip()
+            break
+    return act
 
 
 def _bulk_project_item_progress(

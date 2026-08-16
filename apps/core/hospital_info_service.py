@@ -373,27 +373,73 @@ def equipment_report_bindings_for_api(eq: CommissionOrgEquipment) -> list[dict]:
 
 
 def equipment_project_bind_type_options(eq: CommissionOrgEquipment) -> list[dict]:
-    """工作台加入委托时可选的检测类型（来自设备主数据绑定）。"""
+    """工作台加入委托时可选的检测类型（优先任务库全量；兼容旧主数据绑定）。"""
+    groups = equipment_project_bind_template_groups(eq)
+    return [
+        {
+            "inspection_type": g["inspection_type"],
+            "report_task_id": (g["templates"][0]["report_task_id"] if g.get("templates") else 0),
+            "task_label": (
+                g["templates"][0]["task_label"]
+                if g.get("templates")
+                else g["inspection_type"]
+            ),
+            "templates": g.get("templates") or [],
+        }
+        for g in groups
+    ]
+
+
+def equipment_project_bind_template_groups(eq: CommissionOrgEquipment) -> list[dict]:
+    """
+    加入委托时：按设备类型列出各检测类型下任务库中的全部报告模板。
+    若设备类型目录无结果，回退到设备主数据 report_task_bindings。
+    """
+    from apps.core.equipment_device_type_service import inspection_template_groups_for_device_type
+
+    dt = (getattr(eq, "device_type", None) or "").strip()
+    if dt:
+        groups = inspection_template_groups_for_device_type(dt)
+        if groups:
+            return groups
+
     rows = equipment_report_bindings_for_api(eq)
     if rows:
+        by_type: dict[str, list[dict]] = {}
+        for r in rows:
+            itype = r["inspection_type"]
+            by_type.setdefault(itype, []).append(
+                {
+                    "report_task_id": r["report_task_id"],
+                    "task_code": r.get("task_code") or "",
+                    "task_name": r.get("task_name") or "",
+                    "task_label": r["task_label"],
+                }
+            )
         return [
-            {
-                "inspection_type": r["inspection_type"],
-                "report_task_id": r["report_task_id"],
-                "task_label": r["task_label"],
-            }
-            for r in rows
+            {"inspection_type": itype, "templates": templates}
+            for itype, templates in by_type.items()
         ]
+
     task = normalize_equipment_report_task(eq.report_task) if eq.report_task_id else None
     if task is not None:
         from apps.core.equipment_device_type_service import infer_inspection_type_for_report_task
 
         itype = infer_inspection_type_for_report_task(task) or "默认"
+        code = (task.code or "").strip()
+        name = (task.name or "").strip()
+        label = f"{code} · {name}" if code else (name or f"模板 #{task.pk}")
         return [
             {
                 "inspection_type": itype,
-                "report_task_id": task.pk,
-                "task_label": f"{task.code} · {task.name}",
+                "templates": [
+                    {
+                        "report_task_id": task.pk,
+                        "task_code": code,
+                        "task_name": name,
+                        "task_label": label,
+                    }
+                ],
             }
         ]
     return []
@@ -407,6 +453,8 @@ def equipment_report_binding_labels(eq: CommissionOrgEquipment) -> list[str]:
 
 
 def equipment_has_report_template_config(eq: CommissionOrgEquipment) -> bool:
+    if equipment_project_bind_template_groups(eq):
+        return True
     if normalize_equipment_report_task_bindings(
         eq.report_task_bindings if isinstance(eq.report_task_bindings, list) else []
     ):

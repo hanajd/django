@@ -3310,14 +3310,29 @@ def compile_report_expression(
     binding: Mapping[str, Any],
     *,
     default_formula: str = "",
+    report_group: int = 1,
 ) -> str:
-    """将含 condition 的章节规则编译为 if 嵌套；condition 为空的规则不写入此表达式（前端人工选公式）。"""
-    substituter: Callable[[str], str] = lambda s: _substitute_row_tokens(s, binding)
-    normalized = normalize_rule_list(rules)
+    """将含 condition 的章节规则编译为 if 嵌套；仅含本报出列组（第一组/第二组）规则。
+
+    condition 为空的规则不写入此表达式（前端人工选公式）。
+    """
+    substituter: Callable[[str], str] = lambda s: _substitute_row_tokens(
+        s, binding, report_group=report_group
+    )
+    normalized = [
+        r
+        for r in normalize_rule_list(rules)
+        if _rule_belongs_to_report_group(
+            _norm(r.get("expression") or r.get("formula")),
+            report_group=report_group,
+        )
+    ]
     return compile_conditional_expression(
         normalized,
         substituter=substituter,
-        default_expression=_substitute_row_tokens(default_formula, binding),
+        default_expression=_substitute_row_tokens(
+            default_formula, binding, report_group=report_group
+        ),
     )
 
 
@@ -3327,7 +3342,10 @@ def report_expression_for_binding(
     *,
     report_group: int = 1,
 ) -> str:
-    """章节报出值规则套用到绑定行：{mean}/{mean2} 替换为该行均值 f 号（如 f177*f984）。"""
+    """章节报出值规则套用到绑定行：优先编译条件 if；否则取首条无 condition 表达式。"""
+    auto_expr = compile_report_expression(rules, binding, report_group=report_group)
+    if auto_expr and auto_expr != '""':
+        return auto_expr
     manual = manual_report_value_rules_for_binding(rules, binding, report_group=report_group)
     if not manual:
         return ""
@@ -3342,9 +3360,8 @@ def chapter_report_rules_for_field_group(
     """章节报出值规则（保留 {mean}/{mean2} 占位），按报出列组筛选，供栏位 formulaRules 展示。"""
     manual_rows: List[Dict[str, Any]] = []
     for rule in normalize_rule_list(rules):
-        cond = _norm(rule.get("condition"))
         expr = _norm(rule.get("expression") or rule.get("formula"))
-        if cond or not expr:
+        if not expr:
             continue
         if report_group == 1 and "{mean2}" in expr and "{mean}" not in expr:
             continue
@@ -3356,22 +3373,35 @@ def chapter_report_rules_for_field_group(
     return manual_rows
 
 
-def manual_report_value_rules_for_binding(
+def _rule_belongs_to_report_group(expr: str, *, report_group: int) -> bool:
+    e = _norm(expr)
+    if not e:
+        return False
+    if report_group == 1 and "{mean2}" in e and "{mean}" not in e:
+        return False
+    if report_group == 2 and "{mean}" in e and "{mean2}" not in e and "mean2" not in e.lower():
+        return False
+    return True
+
+
+def report_value_rules_for_binding(
     rules: List[Mapping[str, Any]],
     binding: Mapping[str, Any],
     *,
     report_group: int = 1,
 ) -> List[Dict[str, Any]]:
-    """condition 为空的章节报出值规则 → 栏位级列表（{mean}/{mean2} 已替换为该行均值 f 号，仅后端求值）。"""
-    manual_rows: List[Dict[str, Any]] = []
+    """
+    章节报出值规则 → 栏位级 formulaRules。
+
+    含 condition / 空 condition 全部保留；``{mean}/{mean2}`` 替换为该行均值 f 号，
+    供前端按条件自动匹配（勿再只留下编译后的嵌套 if）。
+    """
+    rows: List[Dict[str, Any]] = []
     for rule in normalize_rule_list(rules):
-        cond = _norm(rule.get("condition"))
         expr = _norm(rule.get("expression") or rule.get("formula"))
-        if cond or not expr:
+        if not expr:
             continue
-        if report_group == 1 and "{mean2}" in expr and "{mean}" not in expr:
-            continue
-        if report_group == 2 and "{mean}" in expr and "{mean2}" not in expr and "mean2" not in expr.lower():
+        if not _rule_belongs_to_report_group(expr, report_group=report_group):
             continue
         row = export_rule_for_frontend(rule)
         row["expression"] = _substitute_row_tokens(
@@ -3379,9 +3409,28 @@ def manual_report_value_rules_for_binding(
             binding,
             report_group=report_group,
         )
+        row["condition"] = _substitute_row_tokens(
+            row.get("condition") or "",
+            binding,
+            report_group=report_group,
+        )
         if row["expression"]:
-            manual_rows.append(row)
-    return manual_rows
+            rows.append(row)
+    return rows
+
+
+def manual_report_value_rules_for_binding(
+    rules: List[Mapping[str, Any]],
+    binding: Mapping[str, Any],
+    *,
+    report_group: int = 1,
+) -> List[Dict[str, Any]]:
+    """condition 为空的章节报出值规则 → 栏位级列表（{mean}/{mean2} 已替换为该行均值 f 号）。"""
+    return [
+        row
+        for row in report_value_rules_for_binding(rules, binding, report_group=report_group)
+        if not _norm(row.get("condition"))
+    ]
 
 
 def _write_manual_report_rules_to_field(
@@ -3425,6 +3474,68 @@ def _write_manual_report_rules_to_field(
         report_field["type"] = "computed"
 
 
+def _write_report_value_rules_to_field(
+    report_field: Dict[str, Any],
+    field_rules: List[Dict[str, Any]],
+    *,
+    auto_expr: str = "",
+    chapter_rules: Optional[List[Mapping[str, Any]]] = None,
+    force: bool = False,
+) -> None:
+    """
+    将章节报出值规则（含 condition）写入栏位 formulaRules。
+
+    - 有自动条件：以分条 formulaRules 为准；编译后的 if 仅作 fieldExpression 兜底。
+    - 仅一条且无 condition：写 fieldExpression，可不保留 formulaRules。
+    - 多条空 condition：保留 formulaRules 供人工下拉选择。
+    """
+    if not force and field_has_per_cell_formula_override(report_field, chapter_rules=chapter_rules):
+        return
+    if not field_rules:
+        return
+    if force:
+        report_field.pop("fieldFormulaUserOverride", None)
+
+    has_auto = any(_norm(r.get("condition")) and _norm(r.get("expression")) for r in field_rules)
+    only_manual = all(not _norm(r.get("condition")) for r in field_rules)
+
+    if has_auto:
+        report_field["formulaRules"] = copy.deepcopy(field_rules)
+        report_field.pop("fieldExpressionRules", None)
+        if auto_expr:
+            _set_chapter_field_expression(
+                report_field,
+                auto_expr,
+                chapter_rules=chapter_rules,
+                force=force,
+            )
+        if str(report_field.get("type") or "").lower() in ("", "number", "text"):
+            report_field["type"] = "computed"
+        return
+
+    if only_manual and len(field_rules) == 1 and not auto_expr:
+        _set_chapter_field_expression(
+            report_field,
+            field_rules[0].get("expression") or "",
+            chapter_rules=chapter_rules,
+            force=force,
+        )
+        report_field.pop("formulaRules", None)
+        report_field.pop("fieldExpressionRules", None)
+        return
+
+    report_field["formulaRules"] = copy.deepcopy(field_rules)
+    report_field.pop("fieldExpressionRules", None)
+    if not auto_expr and (
+        force or not _field_has_user_cell_formula(report_field, chapter_rules=chapter_rules)
+    ):
+        report_field.pop("fieldExpression", None)
+        report_field.pop("pdfFieldExpression", None)
+        report_field.pop("formula", None)
+    if str(report_field.get("type") or "").lower() in ("", "number", "text"):
+        report_field["type"] = "computed"
+
+
 def _binding_with_mean_fallback(
     binding: Mapping[str, Any],
     report_field: Mapping[str, Any],
@@ -3455,8 +3566,8 @@ def apply_chapter_report_rules_to_field(
 ) -> None:
     """
     报出值栏位（steps / pdf.fields 均可）：
-    - condition 非空 → fieldExpression（if 嵌套，自动判定，仅后端/导出求值）；
-    - condition 为空 → fieldExpression 写行内 f 号公式（如 f177*f984），章节占位 {mean} 仅保留在 reportValueRules。
+    - 章节规则写入栏位 ``formulaRules``（含 condition，{mean} 已换行内 f 号）；
+    - 若存在自动条件，另编译 if 嵌套写入 fieldExpression 作兜底。
     force=True：编辑器「完成」或显式重套时覆盖已有栏位公式。
     """
     pid = export_field_pdf_id(report_field)
@@ -3464,7 +3575,6 @@ def apply_chapter_report_rules_to_field(
         return
     if is_background_range_pdf_field(report_field):
         return
-    # 用户单格覆盖始终保留；force 仅用于「完成」时清掉 override 后再写
     if field_has_per_cell_formula_override(report_field, chapter_rules=rules) and not force:
         return
     if force:
@@ -3473,18 +3583,11 @@ def apply_chapter_report_rules_to_field(
     mean_pid = _norm(binding.get(_binding_mean_key(group=report_group)) or "")
     if mean_pid:
         report_field["chapterMeanPdfFieldId"] = mean_pid
-    auto_expr = compile_report_expression(rules, binding)
-    if auto_expr:
-        _set_chapter_field_expression(
-            report_field,
-            auto_expr,
-            chapter_rules=rules,
-            force=force,
-        )
-    manual = manual_report_value_rules_for_binding(rules, binding, report_group=report_group)
-    _write_manual_report_rules_to_field(
+    auto_expr = compile_report_expression(rules, binding, report_group=report_group)
+    field_rules = report_value_rules_for_binding(rules, binding, report_group=report_group)
+    _write_report_value_rules_to_field(
         report_field,
-        manual,
+        field_rules,
         auto_expr=auto_expr,
         chapter_rules=rules,
         force=force,

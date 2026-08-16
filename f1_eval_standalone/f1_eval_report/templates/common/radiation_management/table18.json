@@ -1,0 +1,167 @@
+{
+  "schema": "embedded_generic_table/v1",
+  "title": "表18 个人剂量管理计划情况及评价",
+  "source": "radiation_management",
+  "column_count": 4,
+  "column_fractions": [
+    0.0,
+    0.18,
+    0.42,
+    0.72,
+    1.0
+  ],
+  "band_count": 4,
+  "row_min_height_pt": 18.0,
+  "repeat_header_on_new_page": true,
+  "header_band_count": 1,
+  "rows": [
+    {
+      "band": 0,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "项目",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "计划情况",
+          "align": "center"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "法规/标准要求",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "评价/建议",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 1,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "个人剂量管理对象",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "计划委托有资质的机构对本项目放射工作人员进行个人剂量监测",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射工作人员均应接受个人剂量监测",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "评价：符合；\n建议：放射工作人员佩戴个人剂量计后方可从事放射工作",
+          "align": "left"
+        }
+      ]
+    },
+    {
+      "band": 2,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "委托个人剂量监测单位",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "个人剂量监测工作应当由具有资质的个人剂量监测技术服务机构承担",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        }
+      ]
+    },
+    {
+      "band": 3,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "监测周期",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "不超过3个月每周期",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "常规监测周期一般为1个月，最长不得超过3个月",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        }
+      ]
+    }
+  ]
+}

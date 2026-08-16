@@ -1,0 +1,39 @@
+<li class="px-4 py-3.5 flex flex-col gap-2 {% if selected_project_id == proj.id %}bg-teal-50/50{% endif %}">
+    <div class="flex flex-col sm:flex-row sm:items-start gap-3">
+        <div class="flex-1 min-w-0">
+            <a href="?project={{ proj.id|urlencode }}" class="text-sm font-medium text-slate-900 hover:text-teal-800 truncate block">
+                {{ proj.name|default:"未命名项目" }}
+            </a>
+            <p class="text-xs text-slate-500 mt-0.5 truncate">
+                {% if proj.is_dispatched %}{{ proj.dispatch_label }}{% else %}未派工{% endif %}
+                · {{ proj.progress_label }}
+                · 信息表{% if proj.has_info_sheet %}已传{% else %}未传{% endif %}
+                · 封面{% if proj.cover_brief %}{{ proj.cover_brief|truncatechars:24 }}{% else %}未填{% endif %}
+            </p>
+        </div>
+        <div class="flex flex-wrap items-center gap-1.5 shrink-0">
+            <a href="?project={{ proj.id|urlencode }}"
+               class="inline-flex items-center rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                管理
+            </a>
+            {% if capabilities.can_assign %}
+            <button type="button"
+                    class="eval-wb-assign inline-flex items-center rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    data-id="{{ proj.id }}"
+                    data-name="{{ proj.name|default:proj.id }}"
+                    data-assignees="{% for a in proj.assignee_ids %}{{ a }}{% if not forloop.last %},{% endif %}{% endfor %}">
+                指派
+            </button>
+            {% endif %}
+            <form method="post" class="inline">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="eval_open_project">
+                <input type="hidden" name="project_id" value="{{ proj.id }}">
+                <button type="submit"
+                        class="inline-flex items-center rounded-lg bg-teal-700 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-teal-800">
+                    打开
+                </button>
+            </form>
+        </div>
+    </div>
+</li>

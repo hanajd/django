@@ -3594,7 +3594,7 @@
                     );
                     if (forceServerExplicit || !sessionNorm.length) {
                         explicitNorm = serverNorm;
-                    } else {
+                } else {
                         explicitNorm = mergeClientExplicitOverServer(sessionNorm, serverNorm);
                     }
                 } else {
@@ -3987,8 +3987,8 @@
             const skipFlush = !!(opts && opts.skipFlush);
             if (!skipFlush) {
                 syncMapDraftFromUi();
-                flushMapSessionDraftToCache();
-                persistMapCacheNow();
+            flushMapSessionDraftToCache();
+            persistMapCacheNow();
             }
             mapSession = null;
             setMapOverlayOpen(false);
@@ -4012,9 +4012,9 @@
                 let preview = evaluateValueCasesPreview(draft.valueCases, draft.sources);
                 if (preview == null || !mappingHasActionableValueCases(draft.valueCases)) {
                     preview = renderValueTemplatePreview(
-                        (mapValueTemplateInput && mapValueTemplateInput.value) || draft.valueTemplate,
-                        draft.sources
-                    );
+                    (mapValueTemplateInput && mapValueTemplateInput.value) || draft.valueTemplate,
+                    draft.sources
+                );
                 }
                 if (f.fieldType === 'check') {
                     f.checked = /^(1|true|yes|是|y)$/i.test(String(preview).trim());
@@ -4832,8 +4832,21 @@
             return out;
         }
 
-        function applyFitR2Formula(r2Field, masterPid, masterField) {
+        /** 仅同步主格模型条件到 R² 规则，不重写 Pearson / 用户二次编辑式 */
+        function syncR2RuleConditionsFromMaster(r2Field, masterField) {
+            if (!r2Field || !masterField) return;
+            const conds = readFitModelConditions(masterField);
+            (r2Field.formulaRules || []).forEach((r) => {
+                if (!r || typeof r !== 'object') return;
+                const kind = inferFitRuleModelKind(r);
+                if (!kind || !(kind in conds)) return;
+                r.condition = conds[kind] || '';
+            });
+        }
+
+        function applyFitR2Formula(r2Field, masterPid, masterField, opts) {
             if (!r2Field) return;
+            const force = !!(opts && opts.force);
             delete r2Field.fitR2Pending;
             let master = masterField;
             if (!master || typeof master !== 'object') {
@@ -4845,6 +4858,21 @@
             if (String(r2Field.displayFormat || '').trim().toLowerCase() === 'latex') {
                 delete r2Field.displayFormat;
             }
+            // 已有可编辑 Pearson（含 round 等二次编辑）：非强制时只镜像 X/Y 与条件，不覆盖公式
+            if (!force && !r2NeedsBootstrapFromMaster(r2Field)) {
+                if (master) {
+                    ensureFitBinding(master);
+                    if (!r2Field.fitBinding || typeof r2Field.fitBinding !== 'object') {
+                        r2Field.fitBinding = { x: [], y: [], r2FieldId: '' };
+                    }
+                    r2Field.fitBinding.x = (master.fitBinding.x || []).slice();
+                    r2Field.fitBinding.y = (master.fitBinding.y || []).slice();
+                    r2Field.fitBinding.r2FieldId = '';
+                    syncR2RuleConditionsFromMaster(r2Field, master);
+                }
+                return;
+            }
+            if (force) clearFieldFormulaUserOverride(r2Field);
             if (master) {
                 ensureFitBinding(master);
                 r2Field.formulaRules = cloneFitRulesAsR2(master, masterPid);
@@ -4863,6 +4891,15 @@
                 r2Field.formulaRules = [];
                 delete r2Field.fitBinding;
             }
+        }
+
+        /** R² 是否仍需从主格引导生成（空规则 / 无点列 / 旧 fit_r2 哨兵） */
+        function r2NeedsBootstrapFromMaster(f) {
+            if (!f) return true;
+            if (!Array.isArray(f.formulaRules) || !f.formulaRules.length) return true;
+            if (!(f.fitBinding && Array.isArray(f.fitBinding.x) && f.fitBinding.x.length)) return true;
+            return (f.formulaRules || []).some((r) =>
+                parseFitR2MasterPid((r && (r.expression || r.formula)) || ''));
         }
 
         function clearFitR2Formula(f) {
@@ -5336,12 +5373,16 @@
             }
             if (isFitMasterField(r2Field)) clearFieldFitConfig(r2Field);
             masterField.fitBinding.r2FieldId = r2Pid;
-            applyFitR2Formula(r2Field, masterPid, masterField);
+            applyFitR2Formula(r2Field, masterPid, masterField, { force: true });
             markFieldFormulaUserOverride(masterField);
             markFieldFormulaUserOverride(r2Field);
         }
 
-        function syncLinkedFitR2FromMaster(masterField) {
+        /**
+         * 把主格变更同步到已绑 R²。
+         * 默认 soft：保留用户二次编辑的 Pearson（如 round(...,3)）；改 X/Y 或点「重新同步」时传 { force: true }。
+         */
+        function syncLinkedFitR2FromMaster(masterField, opts) {
             if (!masterField || !isFitMasterField(masterField) || !masterField.fitBinding) return;
             const r2Pid = String(masterField.fitBinding.r2FieldId || '').trim().toLowerCase();
             if (!r2Pid) return;
@@ -5349,7 +5390,8 @@
             if (!r2) return;
             const masterPid = String(getFieldFormulaId(masterField, fields.indexOf(masterField)) || '').trim().toLowerCase();
             if (!masterPid) return;
-            applyFitR2Formula(r2, masterPid, masterField);
+            const force = !!(opts && opts.force);
+            applyFitR2Formula(r2, masterPid, masterField, { force: force });
             updateFieldRowIndicators(r2.id);
         }
 
@@ -5581,7 +5623,7 @@
             const masterRef = getFitR2MasterRef(f);
             if (masterRef) {
                 const next = remap.has(masterRef) ? remap.get(masterRef) : masterRef;
-                applyFitR2Formula(f, next);
+                applyFitR2Formula(f, next, null, { force: true });
             }
         }
 
@@ -5804,13 +5846,13 @@
                         });
                     }
                     cardCommits.push(() => {
-                        rule.label = String(labelIn.value || '');
-                        rule.condition = String(condIn.value || '');
-                        let val = String(exprIn.value || '');
-                        if (typeof cfg.normalizeExpression === 'function') {
-                            val = cfg.normalizeExpression(val);
-                            exprIn.value = val;
-                        }
+                            rule.label = String(labelIn.value || '');
+                            rule.condition = String(condIn.value || '');
+                            let val = String(exprIn.value || '');
+                            if (typeof cfg.normalizeExpression === 'function') {
+                                val = cfg.normalizeExpression(val);
+                                exprIn.value = val;
+                            }
                         if (cfg.showFitKind && fitKindSel) {
                             const v = String(fitKindSel.value || rule._pendingFitModel || '').trim().toLowerCase();
                             delete rule.fitKind;
@@ -5823,10 +5865,10 @@
                                 }
                             }
                         }
-                        rule.expression = val;
-                        rule.formula = val;
-                        syncRuleMeta();
-                    });
+                            rule.expression = val;
+                            rule.formula = val;
+                            syncRuleMeta();
+                        });
                     card.appendChild(labelLbl);
                     card.appendChild(labelIn);
                     card.appendChild(condLbl);
@@ -5906,21 +5948,44 @@
         }
 
         function normalizeFieldExpressionInput(raw, pdfFieldId) {
+            // 仅去掉「f12 = …」前缀；不自动把中文/全角改成半角（文本映射常需保留中文）
             let s = String(raw || '').trim();
             if (!s) return '';
             const esc = String(pdfFieldId || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const re = new RegExp('^' + esc + '\\s*=\\s*(.+)$', 'i');
             const m = s.match(re);
             if (m) s = String(m[1] || '').trim();
-            s = s
-                .replace(/[，]/g, ',')
-                .replace(/[（]/g, '(')
-                .replace(/[）]/g, ')')
-                .replace(/[×]/g, '*')
-                .replace(/[÷]/g, '/')
-                .replace(/[％]/g, '%')
-                .replace(/[～]/g, '~');
             return s;
+        }
+
+        /** 计算类公式中常见的中文/全角标点 → 建议半角（仅用于提示，不改写原文） */
+        const FORMULA_FULLWIDTH_HINT_PAIRS = [
+            ['，', ','], ['。', '.'], ['；', ';'], ['：', ':'],
+            ['（', '('], ['）', ')'], ['【', '['], ['】', ']'],
+            ['［', '['], ['］', ']'], ['｛', '{'], ['｝', '}'],
+            ['＋', '+'], ['－', '-'], ['−', '-'], ['＝', '='],
+            ['＜', '<'], ['＞', '>'], ['＊', '*'], ['／', '/'],
+            ['％', '%'], ['＆', '&'], ['｜', '|'], ['！', '!'],
+            ['×', '*'], ['÷', '/'], ['～', '~'], ['　', '空格']
+        ];
+
+        function describeFormulaFullwidthIssues(expr) {
+            // 只检查会影响运算的全角/中文标点；中文变量名、单位、映射文本不要求加引号
+            const bare = stripQuotedStringsForFormulaCheck(expr);
+            if (!bare) return '';
+            const hits = [];
+            const seen = new Set();
+            FORMULA_FULLWIDTH_HINT_PAIRS.forEach(([fw, hw]) => {
+                if (bare.indexOf(fw) === -1 || seen.has(fw)) return;
+                seen.add(fw);
+                hits.push(fw === '　' ? '全角空格→半角空格' : ('「' + fw + '」→「' + hw + '」'));
+            });
+            if (/[\uFF10-\uFF19]/.test(bare)) hits.push('全角数字→半角 0-9');
+            if (!hits.length) return '';
+            return '函数/运算符号请用半角：'
+                + hits.slice(0, 8).join('、')
+                + (hits.length > 8 ? '…' : '')
+                + '。文本与单位不必加引号。';
         }
 
         function splitTopLevelRangeFormula(expr) {
@@ -6084,10 +6149,11 @@
                     return { level: 'error', message: '公式含有不允许的写法，请删除后重试。' };
                 }
             }
-            const bare = stripQuotedStringsForFormulaCheck(raw);
-            if (/[^A-Za-z0-9_\s.,+\-*/%():?<>&|!~\[\]{}fF'"]/.test(bare)) {
-                return { level: 'error', message: '公式中含有无法识别的符号。请使用栏位编号（如 f12）、数字、括号、运算符，以及下方列出的英文函数名。' };
+            const fullwidthHint = describeFormulaFullwidthIssues(raw);
+            if (fullwidthHint) {
+                return { level: 'error', message: fullwidthHint };
             }
+            // 不再因中文/英文文本、单位、≥≤ 等拦截；仅上方全角运算符号提示
             const refs = raw.match(/f\d+/gi) || [];
             const known = new Set(fields.map(item => getFieldFormulaId(item)).filter(Boolean));
             const missing = refs.map(x => x.toLowerCase()).filter(x => !known.has(x));
@@ -6591,7 +6657,7 @@
                 fitListLabel: options.fitListLabel || ''
             };
             if (pickMode === 'insert') {
-                pullFormulaPickEditorFromModal();
+            pullFormulaPickEditorFromModal();
             } else if (formulaPickFormulaInput) {
                 formulaPickFormulaInput.value = String(options.fitListText || '');
                 formulaPickFormulaInput.readOnly = true;
@@ -6620,7 +6686,7 @@
                 } else if (pickMode === 'fitRefMaster') {
                     formulaPickHint.innerHTML = '请点选已配置 <code>fitBinding</code> 的拟合源格，将写入 <code>fit_a/fit_b/fit_y/fit_x/fit_eq</code> 引用。';
                 } else {
-                    formulaPickHint.innerHTML = '左侧可<strong>直接改公式</strong>；右侧 PDF 悬停高亮、点击插入栏位编号。橙色为当前栏位（不可插入自身）。';
+                formulaPickHint.innerHTML = '左侧可<strong>直接改公式</strong>；右侧 PDF 悬停高亮、点击插入栏位编号。橙色为当前栏位（不可插入自身）。';
                 }
             }
             setFormulaPickOverlayOpen(true);
@@ -6911,19 +6977,18 @@
                 title.textContent = 'R² 绑定（本格为从格）';
                 const desc = document.createElement('div');
                 desc.className = 'fit-panel-desc';
-                desc.textContent = '选完主格后自动写入三条可直接求值的 R² 公式（Pearson，含 ln），并镜像 X/Y。可点「从主格重新同步」。';
+                desc.textContent = '选完主格或改模型条件后自动写入可求值的 R² 公式；可在下方二次编辑。若要恢复自动生成式，点「从主格重新同步」。';
                 panel.appendChild(title);
                 panel.appendChild(desc);
                 const masterRef = getFitR2MasterRef(f);
-                if (masterRef && (!Array.isArray(f.formulaRules) || !f.formulaRules.length
-                    || !(f.fitBinding && (f.fitBinding.x || []).length)
-                    || (f.formulaRules || []).some(r => parseFitR2MasterPid((r && (r.expression || r.formula)) || '')))) {
+                // 仅在空规则 / 无点列 / 旧哨兵时引导生成；已有 Pearson（含用户二次编辑）不覆盖
+                if (masterRef && r2NeedsBootstrapFromMaster(f)) {
                     const masterAuto = findFieldByPdfFieldId(masterRef);
                     if (masterAuto) applyFitR2Formula(f, masterRef, masterAuto);
                 }
                 const masterForCond = masterRef ? findFieldByPdfFieldId(masterRef) : null;
                 if (masterForCond && isFitMasterField(masterForCond)) {
-                    // 在 R² 格也可改同一套模型条件（写回主格并重同步）
+                    // soft 同步条件，勿 force，否则会冲掉 round(...) 等二次编辑
                     panel.appendChild(buildFitModelConditionsPanel(masterForCond, {
                         onChange: () => {
                             syncLinkedFitR2FromMaster(masterForCond);
@@ -7015,7 +7080,8 @@
                         alert('找不到主格 ' + masterRef);
                         return;
                     }
-                    linkFitPair(master, f);
+                    applyFitR2Formula(f, masterRef, master, { force: true });
+                    markFieldFormulaUserOverride(f);
                     renderFormulaPanel();
                     updateFieldRowIndicators(f.id);
                     updateFieldRowIndicators(master.id);
@@ -7060,9 +7126,10 @@
                     hideCondition: true,
                     expressionPlaceholder: 'Pearson R² 展开式，如 ((5)*(...)-...)/((...)*(...))',
                     setActiveExpressionInput: (el) => { activeFormulaExprInput = el; },
-                    onChange: (next) => {
-                        f.formulaRules = next;
-                        // 模型选择器变更或空/旧哨兵时，按当前 X/Y 重算 Pearson
+                    commitHooks: panelCommitHooks,
+                    onChange: () => {
+                        // 勿写 f.formulaRules = next：编辑器调用 onChange() 无参，会把规则数组冲成 undefined
+                        ensureFormulaRules(f);
                         const xb = (f.fitBinding && f.fitBinding.x) || [];
                         const yb = (f.fitBinding && f.fitBinding.y) || [];
                         (f.formulaRules || []).forEach((r) => {
@@ -7070,6 +7137,7 @@
                             const kind = parseFitModelKind(r.expression || r.formula || '')
                                 || String(r._pendingFitModel || r.fitKind || 'linear').toLowerCase();
                             const cur = String(r.expression || r.formula || '').trim();
+                            // 仅空/哨兵/模型式时按 X/Y 重算；已手工改过的 Pearson 原样保留
                             if (!cur || parseFitR2MasterPid(cur) || isFitModelExpression(cur) || cur === 'fit_eq()') {
                                 const expr = buildPearsonR2Expression(xb, yb, kind);
                                 if (expr) {
@@ -7086,6 +7154,18 @@
                         f.formula = f.fieldExpression;
                         markFieldFormulaUserOverride(f);
                         updateFieldRowIndicators(f.id);
+                    }
+                });
+                // 完成/保存时把规则写回 fieldExpression，并打上 override（commit 钩子本身不触发 onChange）
+                panelCommitHooks.push(() => {
+                    ensureFormulaRules(f);
+                    const e0 = String(
+                        (f.formulaRules[0] && (f.formulaRules[0].expression || f.formulaRules[0].formula)) || ''
+                    ).trim();
+                    if (e0) {
+                        f.fieldExpression = e0;
+                        f.formula = e0;
+                        markFieldFormulaUserOverride(f);
                     }
                 });
                 formulaSection.appendChild(r2RulesEditor);
@@ -7211,7 +7291,8 @@
                         ? warn.join('；')
                         : ('已配置 ' + f.fitBinding.x.length + ' 对点' + (f.fitBinding.r2FieldId ? ('，R²→' + f.fitBinding.r2FieldId) : '，尚未绑 R²'));
                     fitStatus.className = 'formula-status ' + (warn.length ? 'warn' : 'ok');
-                    syncLinkedFitR2FromMaster(f);
+                    // X/Y 变更必须重算 Pearson；条件-only 同步走 soft，以免冲掉 round 等二次编辑
+                    syncLinkedFitR2FromMaster(f, { force: true });
                 };
                 const xyActions = document.createElement('div');
                 xyActions.className = 'formula-actions';
@@ -7343,7 +7424,8 @@
                         }
                         markFieldFormulaUserOverride(f);
                         updateFieldRowIndicators(f.id);
-                        syncLinkedFitR2FromMaster(f);
+                        // 主格模型式变更时重算 R²；仅改条件时 applyFitModelConditions 内已 soft 同步
+                        syncLinkedFitR2FromMaster(f, { force: true });
                     }
                 });
                 formulaSection.appendChild(formulaRulesEditor);
@@ -7682,8 +7764,8 @@
                 judgmentSection.appendChild(buildCheckboxFlatJudgmentBlock('status', '状态检测'));
             } else {
                 ensureJudgmentRuleSets(f);
-                judgmentSection.appendChild(buildJudgmentTestTypeBlock('acceptance', '验收检测'));
-                judgmentSection.appendChild(buildJudgmentTestTypeBlock('status', '状态检测'));
+            judgmentSection.appendChild(buildJudgmentTestTypeBlock('acceptance', '验收检测'));
+            judgmentSection.appendChild(buildJudgmentTestTypeBlock('status', '状态检测'));
             }
 
             const judgmentStatus = document.createElement('div');
@@ -7784,20 +7866,20 @@
                         f.judgmentRuleSets.status.rules = [];
                         f.judgmentRuleSets.status.logicExpression = '';
                     } else {
-                        const src = f.judgmentRuleSets.acceptance;
-                        const dst = f.judgmentRuleSets.status;
-                        dst.combine = src.combine;
-                        dst.logicExpression = src.logicExpression;
-                        dst.rules = (src.rules || []).map((r, i) => {
-                            const norm = normalizeConditionalRuleRow(r, i);
-                            return {
-                                id: newConditionalRuleId(),
-                                label: norm.label,
-                                condition: norm.condition,
-                                expression: norm.expression,
-                                formula: norm.expression
-                            };
-                        });
+                const src = f.judgmentRuleSets.acceptance;
+                const dst = f.judgmentRuleSets.status;
+                dst.combine = src.combine;
+                dst.logicExpression = src.logicExpression;
+                dst.rules = (src.rules || []).map((r, i) => {
+                    const norm = normalizeConditionalRuleRow(r, i);
+                    return {
+                        id: newConditionalRuleId(),
+                        label: norm.label,
+                        condition: norm.condition,
+                        expression: norm.expression,
+                        formula: norm.expression
+                    };
+                });
                     }
                     renderFormulaPanel();
                     return;
@@ -7850,13 +7932,13 @@
             };
             if (!isCheckField) {
             const judgmentChips = [
-                    ['插入「不超过」', '<='],
-                    ['插入「不低于」', '>='],
-                    ['插入「±」', '±'],
-                    ['插入「且」', ' 且 '],
-                    ['插入「或」', ' 或 '],
-                    ['插入「(」', '('],
-                    ['插入「)」', ')']
+                ['插入「不超过」', '<='],
+                ['插入「不低于」', '>='],
+                ['插入「±」', '±'],
+                ['插入「且」', ' 且 '],
+                ['插入「或」', ' 或 '],
+                ['插入「(」', '('],
+                ['插入「)」', ')']
                 ];
             judgmentChips.forEach(([label, snippet]) => {
                 const btn = document.createElement('button');
@@ -7881,7 +7963,7 @@
                 if (isCheckField) {
                     commitCheckboxJudgmentPanel(f);
                 } else {
-                    syncJudgmentCriteriaFromRuleSets(f, { skipFlatHydrate: true });
+                syncJudgmentCriteriaFromRuleSets(f, { skipFlatHydrate: true });
                 }
                 updateFieldRowIndicators(f.id);
             };
@@ -8042,10 +8124,10 @@
             const reports = byRole('报出值D');
             const annuals = byRole('年剂量估算');
             const readKeys1 = ['reading_1', 'reading_2', 'reading_3'];
-            readKeys1.forEach((k, i) => { if (readings[i]) out[k] = readings[i].pid; });
-            if (means[0]) out.mean_m = means[0].pid;
-            if (reports[0]) out.report_d = reports[0].pid;
-            if (reports[1]) out.report_d_2 = reports[1].pid;
+                readKeys1.forEach((k, i) => { if (readings[i]) out[k] = readings[i].pid; });
+                if (means[0]) out.mean_m = means[0].pid;
+                if (reports[0]) out.report_d = reports[0].pid;
+                if (reports[1]) out.report_d_2 = reports[1].pid;
             if (annuals.length) {
                 out.annual_dose_msv = annuals[annuals.length - 1].pid;
             }
@@ -8444,7 +8526,7 @@
                     Object.assign(row, assignSlotsToProtectionPointRow(items, true));
                 } else {
                     const singleKeys = ['reading_1', 'reading_2', 'reading_3', 'mean_m', 'report_d'];
-                    items.forEach(it => {
+                items.forEach(it => {
                         if (it.slot && singleKeys.includes(it.slot) && it.pid && !row[it.slot]) {
                             row[it.slot] = it.pid;
                         }
@@ -9175,48 +9257,48 @@
                 host.appendChild(reportSec2);
             } else {
                 const reportSec = createFormulaSection(2, '报出值公式', '点击「添加公式」配置。判断条件按需填写；可用 {mean}、{mean2}。');
-                let activeFormulaInput = null;
-                const rulesEditor = createConditionalRulesEditor({
+            let activeFormulaInput = null;
+            const rulesEditor = createConditionalRulesEditor({
                     rules: splitRules.group1,
-                    expressionLabel: '报出值公式',
-                    expressionPlaceholder: '例：{mean}*f20 或 if(...)',
+                expressionLabel: '报出值公式',
+                expressionPlaceholder: '例：{mean}*f20 或 if(...)',
                     conditionPlaceholder: '例：f12>=f13；可不填',
                     hint: '点击「添加公式」配置报出值。判断条件按需填写；可用 {mean} / {mean2}。',
                     addButtonLabel: '添加公式',
-                    setActiveExpressionInput: (el) => { activeFormulaInput = el; },
+                setActiveExpressionInput: (el) => { activeFormulaInput = el; },
                     commitHooks: panelCommitHooks,
-                    onChange: syncReportRulesFromEditors
-                });
-                reportSec.appendChild(rulesEditor);
+                onChange: syncReportRulesFromEditors
+            });
+            reportSec.appendChild(rulesEditor);
 
-                const toolRow = document.createElement('div');
-                toolRow.className = 'formula-chip-row';
-                const meanBtn = document.createElement('button');
-                meanBtn.type = 'button';
-                meanBtn.className = 'formula-tool-btn';
-                meanBtn.textContent = '插入测量均值 {mean}';
-                meanBtn.title = '在报出值公式中插入占位符 {mean}，导出时替换为该行均值栏位编号';
-                meanBtn.addEventListener('click', () => {
-                    const ta = activeFormulaInput || reportSec.querySelector('textarea[placeholder*="mean"]');
-                    if (ta) insertTextAtCursor(ta, '{mean}');
+            const toolRow = document.createElement('div');
+            toolRow.className = 'formula-chip-row';
+            const meanBtn = document.createElement('button');
+            meanBtn.type = 'button';
+            meanBtn.className = 'formula-tool-btn';
+            meanBtn.textContent = '插入测量均值 {mean}';
+            meanBtn.title = '在报出值公式中插入占位符 {mean}，导出时替换为该行均值栏位编号';
+            meanBtn.addEventListener('click', () => {
+                const ta = activeFormulaInput || reportSec.querySelector('textarea[placeholder*="mean"]');
+                if (ta) insertTextAtCursor(ta, '{mean}');
+            });
+            const pickBtn = document.createElement('button');
+            pickBtn.type = 'button';
+            pickBtn.className = 'primary';
+            pickBtn.textContent = '在 PDF 上选栏位';
+            pickBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const ta = activeFormulaInput || reportSec.querySelector('textarea');
+                if (!ta) return;
+                openFormulaFieldPicker(pickBtn, ta, triggerField ? triggerField.id : null, {
+                    pid: '{param}',
+                    syncFormulaUi: () => {}
                 });
-                const pickBtn = document.createElement('button');
-                pickBtn.type = 'button';
-                pickBtn.className = 'primary';
-                pickBtn.textContent = '在 PDF 上选栏位';
-                pickBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const ta = activeFormulaInput || reportSec.querySelector('textarea');
-                    if (!ta) return;
-                    openFormulaFieldPicker(pickBtn, ta, triggerField ? triggerField.id : null, {
-                        pid: '{param}',
-                        syncFormulaUi: () => {}
-                    });
-                });
-                toolRow.appendChild(meanBtn);
-                toolRow.appendChild(pickBtn);
-                reportSec.appendChild(toolRow);
-                host.appendChild(reportSec);
+            });
+            toolRow.appendChild(meanBtn);
+            toolRow.appendChild(pickBtn);
+            reportSec.appendChild(toolRow);
+            host.appendChild(reportSec);
             }
 
             if (hasAnnualDose) {
@@ -10688,7 +10770,7 @@
                     || ((item.formulaRules || []).map(r => parseFitR2MasterPid((r && (r.expression || r.formula)) || '')).find(Boolean) || '');
                 if (!masterPid) return;
                 const master = findFieldByPdfFieldId(masterPid);
-                if (master) applyFitR2Formula(item, masterPid, master);
+                if (master) applyFitR2Formula(item, masterPid, master, { force: true });
                 delete item.fitConfigRef;
             });
             mountAllFields();
@@ -11084,7 +11166,7 @@
                 if (String(i.fieldType || '').toLowerCase() === 'check') {
                     pruneCheckboxFlatDuplicatedRules(i);
                     if (judgmentRuleSetsHaveConditions(i.judgmentRuleSets)) {
-                        syncJudgmentCriteriaFromRuleSets(i, { skipFlatHydrate: true });
+                syncJudgmentCriteriaFromRuleSets(i, { skipFlatHydrate: true });
                     }
                 } else {
                     syncJudgmentCriteriaFromRuleSets(i, { skipFlatHydrate: true });
@@ -11285,11 +11367,18 @@
         }
 
         document.getElementById('saveTemplate').onclick = async () => {
+            // 公式弹窗未点「完成」时也先落盘 DOM，避免 round(...) 等编辑只留在 textarea
+            if (typeof formulaPanelCommitFn === 'function') {
+                try { formulaPanelCommitFn(); } catch (err) { console.warn('save pre-commit formula panel', err); }
+            }
             await syncAutoRedNamesBeforeSave();
             ensurePdfFieldIds(fields);
             exportJsonMerged();
         };
         function saveFrontendTemplate() {
+            if (typeof formulaPanelCommitFn === 'function') {
+                try { formulaPanelCommitFn(); } catch (err) { console.warn('frontend save pre-commit formula panel', err); }
+            }
             const baseName = document.getElementById('templateName').value.trim() || 'template';
             const name = baseName.endsWith('.json') ? baseName.replace(/\.json$/i, '_frontend.json') : (baseName + '_frontend.json');
             const libTpl = resolvedLibraryTemplateFileIdStr()

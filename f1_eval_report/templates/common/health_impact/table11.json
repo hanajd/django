@@ -1,0 +1,1116 @@
+{
+  "schema": "embedded_generic_table/v1",
+  "title": "表11 本项目13台设备（X射线影像诊断）预期工作量",
+  "source": "health_impact",
+  "from_info_sheet": false,
+  "column_count": 7,
+  "column_fractions": [
+    0.0,
+    0.07,
+    0.22,
+    0.4,
+    0.54,
+    0.7,
+    0.86,
+    1.0
+  ],
+  "band_count": 18,
+  "row_min_height_pt": 18.0,
+  "repeat_header_on_new_page": true,
+  "header_band_count": 1,
+  "workload_formula": "年工作负荷(h)=年诊疗人数×单次出束时间(h)",
+  "note": "注：①机房名称、所在楼层由信息表装置/屏蔽位置写入；②设备操作方式、单次检查平均出束时间为固定默认（可改）；③年诊疗人数手工填写；④年工作负荷按公式自动计算：年工作负荷(h)=年诊疗人数×单次出束时间(换算为小时)。",
+  "device_count": 13,
+  "rows": [
+    {
+      "band": 0,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "序号",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "机房名称",
+          "align": "center"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "所在楼层",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "设备操作方式",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "单次检查平均出束时间",
+          "align": "center"
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "年诊疗人数",
+          "align": "center"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "年工作负荷",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 1,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "CT机房",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "门急诊楼一楼",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "隔室",
+          "align": "center",
+          "cell_role": "op_mode"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "20s",
+          "align": "center",
+          "cell_role": "beam_time",
+          "time_seconds": 20.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "45000人次/年",
+          "align": "center",
+          "cell_role": "patients"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "250.0h",
+          "align": "center",
+          "cell_role": "workload",
+          "formula": "年工作负荷(h)=年诊疗人数×单次出束时间(h)",
+          "time_seconds": 20.0
+        }
+      ]
+    },
+    {
+      "band": 2,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "DR机房",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "隔室",
+          "align": "center",
+          "cell_role": "op_mode"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.2s",
+          "align": "center",
+          "cell_role": "beam_time",
+          "time_seconds": 0.2
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "45000人次/年",
+          "align": "center",
+          "cell_role": "patients"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5h",
+          "align": "center",
+          "cell_role": "workload",
+          "formula": "年工作负荷(h)=年诊疗人数×单次出束时间(h)",
+          "time_seconds": 0.2
+        }
+      ]
+    },
+    {
+      "band": 3,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "CT机房1",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "医技楼一楼影像中心",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "隔室",
+          "align": "center",
+          "cell_role": "op_mode"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "20s",
+          "align": "center",
+          "cell_role": "beam_time",
+          "time_seconds": 20.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "45000人次/年",
+          "align": "center",
+          "cell_role": "patients"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "250.0h",
+          "align": "center",
+          "cell_role": "workload",
+          "formula": "年工作负荷(h)=年诊疗人数×单次出束时间(h)",
+          "time_seconds": 20.0
+        }
+      ]
+    },
+    {
+      "band": 4,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "CT机房2",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "隔室",
+          "align": "center",
+          "cell_role": "op_mode"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "20s",
+          "align": "center",
+          "cell_role": "beam_time",
+          "time_seconds": 20.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "45000人次/年",
+          "align": "center",
+          "cell_role": "patients"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "250.0h",
+          "align": "center",
+          "cell_role": "workload",
+          "formula": "年工作负荷(h)=年诊疗人数×单次出束时间(h)",
+          "time_seconds": 20.0
+        }
+      ]
+    },
+    {
+      "band": 5,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "5",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "DR机房1",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "隔室",
+          "align": "center",
+          "cell_role": "op_mode"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.2s",
+          "align": "center",
+          "cell_role": "beam_time",
+          "time_seconds": 0.2
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "20000人次/年",
+          "align": "center",
+          "cell_role": "patients"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1.1h",
+          "align": "center",
+          "cell_role": "workload",
+          "formula": "年工作负荷(h)=年诊疗人数×单次出束时间(h)",
+          "time_seconds": 0.2
+        }
+      ]
+    },
+    {
+      "band": 6,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "6",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "DR机房2",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "隔室",
+          "align": "center",
+          "cell_role": "op_mode"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.2s",
+          "align": "center",
+          "cell_role": "beam_time",
+          "time_seconds": 0.2
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "20000人次/年",
+          "align": "center",
+          "cell_role": "patients"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1.1h",
+          "align": "center",
+          "cell_role": "workload",
+          "formula": "年工作负荷(h)=年诊疗人数×单次出束时间(h)",
+          "time_seconds": 0.2
+        }
+      ]
+    },
+    {
+      "band": 7,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "7",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "全身骨密度仪机房",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "隔室",
+          "align": "center",
+          "cell_role": "op_mode"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2min",
+          "align": "center",
+          "cell_role": "beam_time",
+          "time_seconds": 120.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "6250人次/年",
+          "align": "center",
+          "cell_role": "patients"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "208.3h",
+          "align": "center",
+          "cell_role": "workload",
+          "formula": "年工作负荷(h)=年诊疗人数×单次出束时间(h)",
+          "time_seconds": 120.0
+        }
+      ]
+    },
+    {
+      "band": 8,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "8",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "乳腺DR机房",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "隔室",
+          "align": "center",
+          "cell_role": "op_mode"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1s",
+          "align": "center",
+          "cell_role": "beam_time",
+          "time_seconds": 1.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "7500人次/年",
+          "align": "center",
+          "cell_role": "patients"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.1h",
+          "align": "center",
+          "cell_role": "workload",
+          "formula": "年工作负荷(h)=年诊疗人数×单次出束时间(h)",
+          "time_seconds": 1.0
+        }
+      ]
+    },
+    {
+      "band": 9,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "9",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "数字胃肠机房",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "隔室（透视）",
+          "align": "center",
+          "cell_role": "op_mode"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "10min",
+          "align": "center",
+          "cell_role": "beam_time",
+          "time_seconds": 600.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2000人次/年",
+          "align": "center",
+          "cell_role": "patients"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "333.3h",
+          "align": "center",
+          "cell_role": "workload",
+          "formula": "年工作负荷(h)=年诊疗人数×单次出束时间(h)",
+          "time_seconds": 600.0
+        }
+      ]
+    },
+    {
+      "band": 10,
+      "cells": [
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "隔室（摄影）",
+          "align": "center",
+          "cell_role": "op_mode"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.5min",
+          "align": "center",
+          "cell_role": "beam_time",
+          "time_seconds": 30.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2000人次/年",
+          "align": "center",
+          "cell_role": "patients"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "16.7h",
+          "align": "center",
+          "cell_role": "workload",
+          "formula": "年工作负荷(h)=年诊疗人数×单次出束时间(h)",
+          "time_seconds": 30.0
+        }
+      ]
+    },
+    {
+      "band": 11,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "10",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "C形臂机房1",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "医技楼四楼手术中心",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "隔室（透视）",
+          "align": "center",
+          "cell_role": "op_mode"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "10min",
+          "align": "center",
+          "cell_role": "beam_time",
+          "time_seconds": 600.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1000人次/年",
+          "align": "center",
+          "cell_role": "patients"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "166.7h",
+          "align": "center",
+          "cell_role": "workload",
+          "formula": "年工作负荷(h)=年诊疗人数×单次出束时间(h)",
+          "time_seconds": 600.0
+        }
+      ]
+    },
+    {
+      "band": 12,
+      "cells": [
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "隔室（摄影）",
+          "align": "center",
+          "cell_role": "op_mode"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.5min",
+          "align": "center",
+          "cell_role": "beam_time",
+          "time_seconds": 30.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1000人次/年",
+          "align": "center",
+          "cell_role": "patients"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "8.3h",
+          "align": "center",
+          "cell_role": "workload",
+          "formula": "年工作负荷(h)=年诊疗人数×单次出束时间(h)",
+          "time_seconds": 30.0
+        }
+      ]
+    },
+    {
+      "band": 13,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "11",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "C形臂机房2",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "隔室（透视）",
+          "align": "center",
+          "cell_role": "op_mode"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "10min",
+          "align": "center",
+          "cell_role": "beam_time",
+          "time_seconds": 600.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1000人次/年",
+          "align": "center",
+          "cell_role": "patients"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "166.7h",
+          "align": "center",
+          "cell_role": "workload",
+          "formula": "年工作负荷(h)=年诊疗人数×单次出束时间(h)",
+          "time_seconds": 600.0
+        }
+      ]
+    },
+    {
+      "band": 14,
+      "cells": [
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "隔室（摄影）",
+          "align": "center",
+          "cell_role": "op_mode"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.5min",
+          "align": "center",
+          "cell_role": "beam_time",
+          "time_seconds": 30.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1000人次/年",
+          "align": "center",
+          "cell_role": "patients"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "8.3h",
+          "align": "center",
+          "cell_role": "workload",
+          "formula": "年工作负荷(h)=年诊疗人数×单次出束时间(h)",
+          "time_seconds": 30.0
+        }
+      ]
+    },
+    {
+      "band": 15,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "12",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "CT机房",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "发热门诊楼一楼",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "隔室",
+          "align": "center",
+          "cell_role": "op_mode"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "20s",
+          "align": "center",
+          "cell_role": "beam_time",
+          "time_seconds": 20.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "25000人次/年",
+          "align": "center",
+          "cell_role": "patients"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "138.9h",
+          "align": "center",
+          "cell_role": "workload",
+          "formula": "年工作负荷(h)=年诊疗人数×单次出束时间(h)",
+          "time_seconds": 20.0
+        }
+      ]
+    },
+    {
+      "band": 16,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "13",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "DR机房",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "隔室",
+          "align": "center",
+          "cell_role": "op_mode"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.2s",
+          "align": "center",
+          "cell_role": "beam_time",
+          "time_seconds": 0.2
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "20000人次/年",
+          "align": "center",
+          "cell_role": "patients"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1.1h",
+          "align": "center",
+          "cell_role": "workload",
+          "formula": "年工作负荷(h)=年诊疗人数×单次出束时间(h)",
+          "time_seconds": 0.2
+        }
+      ]
+    },
+    {
+      "band": 17,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 7,
+          "text": "注：①机房名称、所在楼层由信息表装置/屏蔽位置写入；②设备操作方式、单次检查平均出束时间为固定默认（可改）；③年诊疗人数手工填写；④年工作负荷按公式自动计算：年工作负荷(h)=年诊疗人数×单次出束时间(换算为小时)。",
+          "align": "left"
+        }
+      ]
+    }
+  ]
+}

@@ -2,6 +2,7 @@
 Django 项目配置文件
 """
 import os
+import sys
 from pathlib import Path
 from datetime import timedelta
 
@@ -145,6 +146,16 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 # 媒体文件配置
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+# F.1 评价报告表：引擎包 + 用户工作区（仅文件，不写业务 ORM / 不改 DATABASES）
+# 保证可 import f1_eval_report（与现网 radiation_detection_report 并列于项目根）
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+F1_EVAL_PACKAGE_DIR = BASE_DIR / 'f1_eval_report'
+F1_EVAL_WORKSPACE_ROOT = MEDIA_ROOT / 'f1_eval' / 'workspaces'
+# 信息表 / 附件可能较大（评价报告表上传）
+DATA_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024
+FILE_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024
 
 # File library + pipeline workspace under MEDIA_ROOT
 FILE_LIBRARY_ROOT = MEDIA_ROOT / 'file_library'

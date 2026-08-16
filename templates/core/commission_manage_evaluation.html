@@ -1,0 +1,96 @@
+{% extends 'base.html' %}
+
+{% block page_title %}委托管理{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-6xl space-y-5">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+            <h1 class="text-2xl font-semibold tracking-tight text-slate-900">委托管理</h1>
+            <p class="mt-1 text-sm text-slate-600">查看评价项目派工与完成进度。日常打开办理请用<a href="{% url 'library_projects' %}" class="text-teal-700 underline font-medium">项目工作台</a>。</p>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <p class="text-xs font-medium text-slate-500">项目</p>
+            <p class="mt-1 text-2xl font-bold text-slate-900">{{ overview.total }}</p>
+        </div>
+        <div class="rounded-xl border border-indigo-100 bg-indigo-50/50 p-4 shadow-sm">
+            <p class="text-xs font-medium text-indigo-800">已派工</p>
+            <p class="mt-1 text-2xl font-bold text-indigo-950">{{ overview.dispatched }}</p>
+        </div>
+        <div class="rounded-xl border border-amber-100 bg-amber-50/50 p-4 shadow-sm">
+            <p class="text-xs font-medium text-amber-900">未派工</p>
+            <p class="mt-1 text-2xl font-bold text-amber-950">{{ overview.undispatched }}</p>
+        </div>
+        <div class="rounded-xl border border-emerald-100 bg-emerald-50/50 p-4 shadow-sm">
+            <p class="text-xs font-medium text-emerald-800">已生成</p>
+            <p class="mt-1 text-2xl font-bold text-emerald-900">{{ overview.completed }}</p>
+        </div>
+    </div>
+
+    <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        {% if projects %}
+        <div class="overflow-x-auto">
+            <table class="min-w-full text-sm">
+                <thead class="bg-slate-50 text-left text-xs text-slate-500">
+                    <tr>
+                        <th class="px-4 py-3 font-medium">项目</th>
+                        <th class="px-4 py-3 font-medium">医院</th>
+                        <th class="px-4 py-3 font-medium">派工</th>
+                        <th class="px-4 py-3 font-medium">进度</th>
+                        <th class="px-4 py-3 font-medium text-right">操作</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for proj in projects %}
+                    <tr class="hover:bg-slate-50/80 {% if selected_project_id == proj.id %}bg-teal-50/40{% endif %}" id="eval-proj-{{ proj.id }}">
+                        <td class="px-4 py-3">
+                            <p class="font-medium text-slate-900">{{ proj.name|default:"未命名项目" }}</p>
+                            <p class="text-[11px] text-slate-500 mt-0.5">评价报告表 · {{ proj.updated_at|default:"—" }}</p>
+                        </td>
+                        <td class="px-4 py-3 text-slate-700">{{ proj.hospital_name|default:"未关联" }}</td>
+                        <td class="px-4 py-3">
+                            {% if proj.is_dispatched %}
+                            <span class="text-xs font-medium text-indigo-800">{{ proj.dispatch_label }}</span>
+                            {% else %}
+                            <span class="text-xs font-medium text-amber-800">未派工</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3">
+                            <span class="text-xs font-medium {% if proj.progress_status == 'completed' %}text-emerald-800{% elif proj.progress_status == 'in_progress' %}text-sky-800{% else %}text-slate-600{% endif %}">{{ proj.progress_label }}</span>
+                        </td>
+                        <td class="px-4 py-3 text-right whitespace-nowrap">
+                            <a href="{{ proj.workbench_url }}" class="text-xs font-medium text-slate-600 hover:text-teal-700 mr-2">去办理</a>
+                            <form method="post" action="{% url 'library_projects' %}" class="inline">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="eval_open_project">
+                                <input type="hidden" name="project_id" value="{{ proj.id }}">
+                                <button type="submit" class="inline-flex items-center rounded-lg bg-teal-700 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-teal-800">打开</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="px-5 py-14 text-center text-sm text-slate-500">
+            暂无评价报告表项目。
+            <a href="{% url 'library_projects' %}" class="text-teal-700 underline font-medium">前往工作台新建</a>
+        </div>
+        {% endif %}
+    </div>
+
+    <p class="text-xs text-slate-400 text-center">评价报告书上线后将并入本表。</p>
+</div>
+{% if selected_project_id %}
+<script>
+  (function () {
+    var el = document.getElementById('eval-proj-{{ selected_project_id|escapejs }}');
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+  })();
+</script>
+{% endif %}
+{% endblock %}

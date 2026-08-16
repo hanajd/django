@@ -567,7 +567,7 @@
                                     {% endif %}
                                     <th scope="col" class="min-w-[14rem] px-3 py-2.5 text-xs font-semibold text-slate-500">文件信息</th>
                                     <th scope="col" class="min-w-[5.5rem] px-3 py-2.5 text-xs font-semibold text-slate-500">上传者</th>
-                                    <th scope="col" class="whitespace-nowrap px-3 py-2.5 text-xs font-semibold text-slate-500">创建时间</th>
+                                    <th scope="col" class="whitespace-nowrap px-3 py-2.5 text-xs font-semibold text-slate-500">更新时间</th>
                                     <th scope="col" class="w-36 px-3 py-2.5 text-right text-xs font-semibold text-slate-500">操作</th>
                                 </tr>
                             </thead>
@@ -587,7 +587,7 @@
                                         {% include "core/file_library_file_cell.html" %}
                                     </td>
                                     <td class="px-3 py-3 align-top text-xs font-medium text-slate-800 break-words">{{ f.file_library_uploader_display }}</td>
-                                    <td class="whitespace-nowrap px-3 py-3 align-top text-xs tabular-nums text-slate-600">{{ f.created_at|date:"Y-m-d H:i" }}</td>
+                                    <td class="whitespace-nowrap px-3 py-3 align-top text-xs tabular-nums text-slate-600">{% if f.updated_at %}{{ f.updated_at|date:"Y-m-d H:i" }}{% else %}{{ f.created_at|date:"Y-m-d H:i" }}{% endif %}</td>
                                     <td class="px-3 py-3 align-top text-right">
                                         <div class="inline-flex flex-col items-end gap-1.5 sm:flex-row sm:flex-wrap sm:justify-end sm:gap-2">
                                             {% if role_perm.perm_file_download %}
@@ -685,7 +685,7 @@
                                                     {% endif %}
                                                     <th scope="col" class="min-w-[14rem] px-3 py-2.5 text-xs font-semibold text-slate-500">文件信息</th>
                                                     <th scope="col" class="min-w-[5.5rem] px-3 py-2.5 text-xs font-semibold text-slate-500">上传者</th>
-                                                    <th scope="col" class="whitespace-nowrap px-3 py-2.5 text-xs font-semibold text-slate-500">创建时间</th>
+                                                    <th scope="col" class="whitespace-nowrap px-3 py-2.5 text-xs font-semibold text-slate-500">更新时间</th>
                                                     <th scope="col" class="w-36 px-3 py-2.5 text-right text-xs font-semibold text-slate-500">操作</th>
                                                 </tr>
                                             </thead>
@@ -705,7 +705,7 @@
                                                         {% include "core/file_library_file_cell.html" %}
                                                     </td>
                                                     <td class="px-3 py-3 align-top text-xs font-medium text-slate-800 break-words">{{ f.file_library_uploader_display }}</td>
-                                                    <td class="whitespace-nowrap px-3 py-3 align-top text-xs tabular-nums text-slate-600">{{ f.created_at|date:"Y-m-d H:i" }}</td>
+                                                    <td class="whitespace-nowrap px-3 py-3 align-top text-xs tabular-nums text-slate-600">{% if f.updated_at %}{{ f.updated_at|date:"Y-m-d H:i" }}{% else %}{{ f.created_at|date:"Y-m-d H:i" }}{% endif %}</td>
                                                     <td class="px-3 py-3 align-top text-right">
                                                         <div class="inline-flex flex-col items-end gap-1.5 sm:flex-row sm:flex-wrap sm:justify-end sm:gap-2">
                                                             {% if role_perm.perm_file_download %}
@@ -770,7 +770,7 @@
                                             {% endif %}
                                             <th scope="col" class="min-w-[14rem] px-3 py-2.5 text-xs font-semibold text-slate-500">文件信息</th>
                                             <th scope="col" class="min-w-[5.5rem] px-3 py-2.5 text-xs font-semibold text-slate-500">上传者</th>
-                                            <th scope="col" class="whitespace-nowrap px-3 py-2.5 text-xs font-semibold text-slate-500">创建时间</th>
+                                            <th scope="col" class="whitespace-nowrap px-3 py-2.5 text-xs font-semibold text-slate-500">更新时间</th>
                                             <th scope="col" class="w-36 px-3 py-2.5 text-right text-xs font-semibold text-slate-500">操作</th>
                                         </tr>
                                     </thead>
@@ -790,7 +790,7 @@
                                                 {% include "core/file_library_file_cell.html" %}
                                             </td>
                                             <td class="px-3 py-3 align-top text-xs font-medium text-slate-800 break-words">{{ f.file_library_uploader_display }}</td>
-                                            <td class="whitespace-nowrap px-3 py-3 align-top text-xs tabular-nums text-slate-600">{{ f.created_at|date:"Y-m-d H:i" }}</td>
+                                            <td class="whitespace-nowrap px-3 py-3 align-top text-xs tabular-nums text-slate-600">{% if f.updated_at %}{{ f.updated_at|date:"Y-m-d H:i" }}{% else %}{{ f.created_at|date:"Y-m-d H:i" }}{% endif %}</td>
                                             <td class="px-3 py-3 align-top text-right">
                                                 <div class="inline-flex flex-col items-end gap-1.5 sm:flex-row sm:flex-wrap sm:justify-end sm:gap-2">
                                                     {% if role_perm.perm_file_download %}

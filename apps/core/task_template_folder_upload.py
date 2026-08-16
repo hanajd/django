@@ -123,21 +123,30 @@ def _upload_leaf_to_library(user, leaf: _UploadLeaf, *, library_task: LibraryTas
 
 
 def _bind_pair_to_task(user, task: LibraryTask, pair: dict[str, _UploadLeaf | None], stats: IngestStats) -> None:
-    ids: list[int] = []
+    from apps.core.library_task_template_binding_service import replace_task_template_file_binding
+
     pdf_leaf = pair.get("pdf")
     json_leaf = pair.get("json")
-    if pdf_leaf is not None:
-        lf = _upload_leaf_to_library(user, pdf_leaf, library_task=task)
-        if lf:
-            ids.append(lf.pk)
-            stats.files_uploaded += 1
-    if json_leaf is not None:
-        lf = _upload_leaf_to_library(user, json_leaf, library_task=task)
-        if lf:
-            ids.append(lf.pk)
-            stats.files_uploaded += 1
-    if ids:
-        attach_files_to_tasks(ids, [task.pk], user)
+    for leaf in (pdf_leaf, json_leaf):
+        if leaf is None:
+            continue
+        lf = _upload_leaf_to_library(user, leaf, library_task=task)
+        if lf is None:
+            continue
+        stats.files_uploaded += 1
+        result = replace_task_template_file_binding(
+            task=task,
+            new_file=lf,
+            user=user,
+            source="folder_tree_upload",
+        )
+        if not result.get("ok"):
+            # 回退：至少建立 M2M，并迁入 current/
+            attach_files_to_tasks([lf.pk], [task.pk], user)
+            err = result.get("error") or "未知错误"
+            stats.errors.append(
+                f"「{task.code}」绑定「{lf.original_name}」失败：{err}"
+            )
 
 
 def _create_report_task(

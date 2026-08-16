@@ -1,0 +1,324 @@
+{% extends "base.html" %}
+{% block title %}项目工作台{% endblock %}
+{% block page_title %}项目工作台{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+    <div class="flex flex-wrap items-end justify-between gap-3">
+        <div>
+            <h1 class="text-2xl font-bold text-slate-900 tracking-tight">项目工作台</h1>
+            <p class="mt-1 text-sm text-slate-500">
+                按医院分组管理评价报告表；可挂载医院、上传信息表、维护封面。
+                进度总览见<a href="{% url 'commission_manage' %}" class="text-teal-700 underline">委托管理</a>。
+            </p>
+        </div>
+        {% if capabilities.can_create %}
+        <button type="button" id="eval-wb-open-create"
+                class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-teal-700 text-white text-sm font-medium hover:bg-teal-800">
+            <i class="ri-add-line"></i> 新建项目
+        </button>
+        {% endif %}
+    </div>
+
+    <div class="grid grid-cols-1 {% if selected_project %}lg:grid-cols-[minmax(0,1fr)_minmax(320px,400px)]{% endif %} gap-5 items-start">
+        <div class="space-y-4 min-w-0">
+            {% if hospitals or ungrouped %}
+                {% for group in hospitals %}
+                <section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                    <div class="px-4 py-3 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between gap-2">
+                        <div class="min-w-0">
+                            <h2 class="text-sm font-semibold text-slate-900 truncate">
+                                <i class="ri-hospital-line text-teal-700 mr-1"></i>{{ group.hospital_name }}
+                            </h2>
+                            <p class="text-xs text-slate-500 mt-0.5">{{ group.form_count }} 个评价报告表</p>
+                        </div>
+                    </div>
+                    <ul class="divide-y divide-slate-100">
+                        {% for proj in group.projects %}
+                        {% include "core/partials/eval_workbench_project_row.html" %}
+                        {% endfor %}
+                    </ul>
+                </section>
+                {% endfor %}
+
+                {% if ungrouped %}
+                <section class="rounded-2xl border border-dashed border-amber-200 bg-amber-50/30 shadow-sm overflow-hidden">
+                    <div class="px-4 py-3 border-b border-amber-100 flex items-center justify-between gap-2">
+                        <div>
+                            <h2 class="text-sm font-semibold text-amber-950">未挂载医院</h2>
+                            <p class="text-xs text-amber-800/80 mt-0.5">{{ ungrouped|length }} 个项目 · 请挂载到医院信息管理中的医院</p>
+                        </div>
+                    </div>
+                    <ul class="divide-y divide-amber-100/80 bg-white/70">
+                        {% for proj in ungrouped %}
+                        {% include "core/partials/eval_workbench_project_row.html" %}
+                        {% endfor %}
+                    </ul>
+                </section>
+                {% endif %}
+            {% else %}
+            <div class="rounded-2xl border border-slate-200 bg-white px-4 py-14 text-center text-sm text-slate-500 shadow-sm">
+                暂无评价报告表项目。
+                {% if capabilities.can_create %}
+                <button type="button" id="eval-wb-empty-create" class="text-teal-700 underline font-medium">立即新建</button>
+                {% endif %}
+            </div>
+            {% endif %}
+            <p class="text-xs text-slate-400 text-center">评价报告书功能建设中，上线后将按医院一并展示。</p>
+        </div>
+
+        {% if selected_project %}
+        <aside class="rounded-2xl border border-teal-200 bg-white shadow-sm overflow-hidden lg:sticky lg:top-20">
+            <div class="px-4 py-3 border-b border-teal-100 bg-teal-50/70 flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                    <p class="text-[11px] text-teal-800">当前项目</p>
+                    <h3 class="text-sm font-semibold text-slate-900 truncate">{{ selected_project.name|default:"未命名项目" }}</h3>
+                    <p class="text-xs text-slate-500 mt-0.5 truncate">{{ selected_project.hospital_label }}</p>
+                </div>
+                <a href="{% url 'library_projects' %}" class="text-xs text-slate-500 hover:text-slate-800 shrink-0">收起</a>
+            </div>
+
+            <div class="p-4 space-y-5 max-h-[calc(100vh-8rem)] overflow-y-auto">
+                <section class="space-y-2">
+                    <h4 class="text-xs font-semibold uppercase tracking-wide text-slate-500">挂载医院</h4>
+                    <form method="post" class="space-y-2">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="eval_set_hospital">
+                        <input type="hidden" name="project_id" value="{{ selected_project.id }}">
+                        <select name="hospital_id" class="eval-wb-hosp-sel w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                            <option value="">选择医院…</option>
+                            {% for h in hospital_options %}
+                            <option value="{{ h.id }}" data-name="{{ h.name }}" {% if selected_project.hospital_id == h.id %}selected{% endif %}>{{ h.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <input type="hidden" name="hospital_name" class="eval-wb-hosp-name" value="{{ selected_project.hospital_name|default:'' }}">
+                        <div class="flex flex-wrap gap-2">
+                            <button type="submit" class="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">保存挂载</button>
+                            <button type="submit" name="clear_hospital" value="1" class="px-3 py-1.5 text-xs rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">取消挂载</button>
+                        </div>
+                    </form>
+                </section>
+
+                <section class="space-y-2">
+                    <h4 class="text-xs font-semibold uppercase tracking-wide text-slate-500">信息表</h4>
+                    <p class="text-xs text-slate-600">
+                        状态：
+                        {% if selected_project.has_info_sheet %}
+                        <span class="text-emerald-700 font-medium">已上传</span>
+                        {% else %}
+                        <span class="text-amber-700 font-medium">未上传</span>
+                        {% endif %}
+                    </p>
+                    <form method="post" enctype="multipart/form-data" class="space-y-2">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="eval_upload_info_sheet">
+                        <input type="hidden" name="project_id" value="{{ selected_project.id }}">
+                        <input type="file" name="info_sheet" accept="application/pdf,.pdf" required
+                               class="block w-full text-xs text-slate-600">
+                        <button type="submit" class="px-3 py-1.5 text-xs rounded-lg bg-amber-600 text-white hover:bg-amber-700">上传并提取</button>
+                    </form>
+                    <p class="text-[11px] text-slate-400">上传 PDF 后自动提取写入该项目各栏目。</p>
+                </section>
+
+                <section class="space-y-2">
+                    <h4 class="text-xs font-semibold uppercase tracking-wide text-slate-500">封面信息</h4>
+                    <form method="post" enctype="multipart/form-data" class="space-y-2">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="eval_save_cover">
+                        <input type="hidden" name="project_id" value="{{ selected_project.id }}">
+                        <div class="grid grid-cols-1 gap-2">
+                            <label class="text-[11px] text-slate-600">报告编号
+                                <input name="report_code" value="{{ selected_project.cover_meta.report_code|default:'' }}" class="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
+                            </label>
+                            <label class="text-[11px] text-slate-600">报告日期
+                                <input name="report_date" value="{{ selected_project.cover_meta.report_date|default:'' }}" placeholder="2025年3月" class="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
+                            </label>
+                            <label class="text-[11px] text-slate-600">封面第一行（单位/院区）
+                                <input name="cover_org_line" value="{{ selected_project.cover_meta.cover_org_line|default:'' }}" class="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
+                            </label>
+                            <label class="text-[11px] text-slate-600">封面第二行（项目类型）
+                                <input name="cover_project_type_line" value="{{ selected_project.cover_meta.cover_project_type_line|default:'' }}" class="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
+                            </label>
+                            <label class="text-[11px] text-slate-600">建设单位
+                                <input name="construction_unit" value="{{ selected_project.cover_meta.construction_unit|default:'' }}" class="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
+                            </label>
+                            <label class="text-[11px] text-slate-600">评价单位
+                                <input name="evaluation_unit" value="{{ selected_project.cover_meta.evaluation_unit|default:'' }}" class="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
+                            </label>
+                            <label class="text-[11px] text-slate-600">报告全称
+                                <input name="report_full_name" value="{{ selected_project.cover_meta.report_full_name|default:'' }}" class="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
+                            </label>
+                        </div>
+                        <p class="text-[11px] font-medium text-slate-500 pt-1">声明表人员</p>
+                        <div class="grid grid-cols-1 gap-2">
+                            <label class="text-[11px] text-slate-600">法定代表人
+                                <input name="decl_legal" value="{{ selected_project.cover_declaration.legal_person|default:'' }}" class="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
+                            </label>
+                            <label class="text-[11px] text-slate-600">项目负责人
+                                <input name="decl_leader" value="{{ selected_project.cover_declaration.project_leader|default:'' }}" class="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
+                            </label>
+                            <label class="text-[11px] text-slate-600">项目负责人证书编号
+                                <input name="decl_leader_cert" value="{{ selected_project.cover_declaration.project_leader_cert|default:'' }}" class="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
+                            </label>
+                            <label class="text-[11px] text-slate-600">报告编写人
+                                <input name="decl_author" value="{{ selected_project.cover_declaration.author|default:'' }}" class="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
+                            </label>
+                            <label class="text-[11px] text-slate-600">编写人证书编号
+                                <input name="decl_author_cert" value="{{ selected_project.cover_declaration.author_cert|default:'' }}" class="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
+                            </label>
+                            <label class="text-[11px] text-slate-600">报告审核人
+                                <input name="decl_reviewer" value="{{ selected_project.cover_declaration.reviewer|default:'' }}" class="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
+                            </label>
+                            <label class="text-[11px] text-slate-600">审核人证书编号
+                                <input name="decl_reviewer_cert" value="{{ selected_project.cover_declaration.reviewer_cert|default:'' }}" class="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
+                            </label>
+                            <label class="text-[11px] text-slate-600">报告签发人
+                                <input name="decl_issuer" value="{{ selected_project.cover_declaration.issuer|default:'' }}" class="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
+                            </label>
+                            <label class="text-[11px] text-slate-600">签发人证书编号
+                                <input name="decl_issuer_cert" value="{{ selected_project.cover_declaration.issuer_cert|default:'' }}" class="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
+                            </label>
+                            <label class="text-[11px] text-slate-600">资质证书图片（可选）
+                                <input type="file" name="certificate" accept="image/*" class="mt-0.5 block w-full text-xs">
+                            </label>
+                        </div>
+                        <button type="submit" class="px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white hover:bg-blue-700">保存封面信息</button>
+                    </form>
+                </section>
+
+                <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="eval_open_project">
+                    <input type="hidden" name="project_id" value="{{ selected_project.id }}">
+                    <button type="submit" class="w-full px-3 py-2 text-sm rounded-xl bg-teal-700 text-white hover:bg-teal-800">打开编辑器编制栏目</button>
+                </form>
+            </div>
+        </aside>
+        {% endif %}
+    </div>
+</div>
+
+{% if capabilities.can_create %}
+<div id="eval-wb-modal-create" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+    <div class="w-full max-w-md rounded-2xl bg-white shadow-xl border border-slate-200 overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-slate-900">新建评价报告表项目</h3>
+            <button type="button" class="eval-wb-close-create text-slate-400 hover:text-slate-700 text-lg leading-none">&times;</button>
+        </div>
+        <form method="post" class="p-5 space-y-4">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="eval_create_project">
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">项目名称</label>
+                <input type="text" name="name" required maxlength="200" placeholder="例如：某某医院预评价"
+                       class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">挂载医院</label>
+                <select name="hospital_id" class="eval-wb-hosp-sel w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                    <option value="">未分组 / 稍后指定</option>
+                    {% for h in hospital_options %}
+                    <option value="{{ h.id }}" data-name="{{ h.name }}">{{ h.name }}</option>
+                    {% endfor %}
+                </select>
+                <input type="hidden" name="hospital_name" class="eval-wb-hosp-name" value="">
+            </div>
+            <div class="flex justify-end gap-2 pt-1">
+                <button type="button" class="eval-wb-close-create px-3 py-2 text-sm rounded-xl border border-slate-200 text-slate-700">取消</button>
+                <button type="submit" class="px-4 py-2 text-sm rounded-xl bg-teal-700 text-white hover:bg-teal-800">创建并打开</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+{% if capabilities.can_assign %}
+<div id="eval-wb-modal-assign" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+    <div class="w-full max-w-md rounded-2xl bg-white shadow-xl border border-slate-200 overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+            <div>
+                <h3 class="text-sm font-semibold text-slate-900">指派项目</h3>
+                <p class="text-[11px] text-slate-500 mt-0.5" id="eval-wb-assign-label">选择评价部员工</p>
+            </div>
+            <button type="button" class="eval-wb-close-assign text-slate-400 hover:text-slate-700 text-lg leading-none">&times;</button>
+        </div>
+        <form method="post" class="p-5 space-y-4">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="eval_assign_project">
+            <input type="hidden" name="project_id" id="eval-wb-assign-project-id" value="">
+            <div class="max-h-64 overflow-y-auto space-y-2">
+                {% if assignable_users %}
+                    {% for u in assignable_users %}
+                    <label class="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 cursor-pointer">
+                        <input type="checkbox" name="assignee_ids" value="{{ u.id }}" class="eval-wb-assign-cb">
+                        <span class="font-medium text-slate-800">{{ u.username }}</span>
+                        <span class="text-xs text-slate-500">{{ u.role_name }}</span>
+                    </label>
+                    {% endfor %}
+                {% else %}
+                <p class="text-xs text-slate-500">暂无可指派的评价部员工。</p>
+                {% endif %}
+            </div>
+            <div class="flex justify-end gap-2 pt-1">
+                <button type="button" class="eval-wb-close-assign px-3 py-2 text-sm rounded-xl border border-slate-200 text-slate-700">取消</button>
+                <button type="submit" class="px-4 py-2 text-sm rounded-xl bg-teal-700 text-white hover:bg-teal-800">保存指派</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+<script>
+(function () {
+  function show(el) { if (el) el.classList.remove('hidden'); }
+  function hide(el) { if (el) el.classList.add('hidden'); }
+
+  document.querySelectorAll('.eval-wb-hosp-sel').forEach(function (sel) {
+    var form = sel.closest('form');
+    var nameInput = form ? form.querySelector('.eval-wb-hosp-name') : null;
+    function sync() {
+      if (!nameInput) return;
+      var opt = sel.options[sel.selectedIndex];
+      nameInput.value = opt && opt.value ? (opt.getAttribute('data-name') || opt.textContent || '') : '';
+    }
+    sel.addEventListener('change', sync);
+    sync();
+  });
+
+  var createModal = document.getElementById('eval-wb-modal-create');
+  var assignModal = document.getElementById('eval-wb-modal-assign');
+  function openCreate() { show(createModal); }
+  document.getElementById('eval-wb-open-create')?.addEventListener('click', openCreate);
+  document.getElementById('eval-wb-empty-create')?.addEventListener('click', openCreate);
+  document.querySelectorAll('.eval-wb-close-create').forEach(function (btn) {
+    btn.addEventListener('click', function () { hide(createModal); });
+  });
+  createModal?.addEventListener('click', function (ev) {
+    if (ev.target === createModal) hide(createModal);
+  });
+
+  document.querySelectorAll('.eval-wb-assign').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var pid = btn.getAttribute('data-id') || '';
+      var name = btn.getAttribute('data-name') || pid;
+      var raw = (btn.getAttribute('data-assignees') || '').trim();
+      var selected = new Set(raw ? raw.split(',').map(function (x) { return x.trim(); }).filter(Boolean) : []);
+      var idInput = document.getElementById('eval-wb-assign-project-id');
+      var label = document.getElementById('eval-wb-assign-label');
+      if (idInput) idInput.value = pid;
+      if (label) label.textContent = '项目：' + name;
+      document.querySelectorAll('.eval-wb-assign-cb').forEach(function (cb) {
+        cb.checked = selected.has(String(cb.value));
+      });
+      show(assignModal);
+    });
+  });
+  document.querySelectorAll('.eval-wb-close-assign').forEach(function (btn) {
+    btn.addEventListener('click', function () { hide(assignModal); });
+  });
+  assignModal?.addEventListener('click', function (ev) {
+    if (ev.target === assignModal) hide(assignModal);
+  });
+})();
+</script>
+{% endblock %}

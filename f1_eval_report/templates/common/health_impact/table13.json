@@ -1,0 +1,277 @@
+{
+  "schema": "embedded_generic_table/v1",
+  "title": "表13 本项目3台介入设备（介入放射学）预期工作量",
+  "source": "health_impact",
+  "from_info_sheet": false,
+  "column_count": 6,
+  "column_fractions": [
+    0.0,
+    0.14,
+    0.24,
+    0.48,
+    0.66,
+    0.8,
+    1.0
+  ],
+  "band_count": 6,
+  "row_min_height_pt": 18.0,
+  "repeat_header_on_new_page": true,
+  "header_band_count": 1,
+  "workload_formula": "单人年最大工作负荷=单例手术平均曝光时间×年工作负荷×设备台数÷工作人员批次数",
+  "note": "注：①根据建设单位提供的信息，ERCP工作人员可分为2批，DSA工作人员可分为2批/台。\n②单人年最大工作负荷为单例手术平均曝光时间×年工作负荷×设备台数÷工作人员批次数。",
+  "device_count": 3,
+  "rows": [
+    {
+      "band": 0,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "设备类型（备注）",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "设备台数",
+          "align": "center"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "单例手术平均曝光时间",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "年工作负荷",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "工作人员批次数",
+          "align": "center"
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "单人年最大工作负荷",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 1,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "ERCP设备",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "1",
+          "align": "center",
+          "cell_role": "device_count"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "10分钟（同室透视）",
+          "align": "center",
+          "cell_role": "exposure_time",
+          "time_hours": 0.16666666666666666,
+          "mode_role": "fluoro"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "600例手术/年/每台设备",
+          "align": "center",
+          "cell_role": "cases",
+          "cases_per_year": 600.0
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "2批",
+          "align": "center",
+          "cell_role": "batches",
+          "batch_count": 2.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "50.0小时",
+          "align": "center",
+          "cell_role": "max_load",
+          "max_load_h": 50.0,
+          "formula": "单人年最大工作负荷=单例手术平均曝光时间×年工作负荷×设备台数÷工作人员批次数",
+          "mode_role": "fluoro"
+        }
+      ]
+    },
+    {
+      "band": 2,
+      "cells": [
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1分钟（隔室摄影）",
+          "align": "center",
+          "cell_role": "exposure_time",
+          "time_hours": 0.016666666666666666,
+          "mode_role": "radio"
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "5小时",
+          "align": "center",
+          "cell_role": "max_load",
+          "max_load_h": 5.0,
+          "formula": "单人年最大工作负荷=单例手术平均曝光时间×年工作负荷×设备台数÷工作人员批次数",
+          "mode_role": "radio"
+        }
+      ]
+    },
+    {
+      "band": 3,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "DSA",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "2",
+          "align": "center",
+          "cell_role": "device_count"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "20分钟（同室透视）",
+          "align": "center",
+          "cell_role": "exposure_time",
+          "time_hours": 0.3333333333333333,
+          "mode_role": "fluoro"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "600例手术/年/每台设备",
+          "align": "center",
+          "cell_role": "cases",
+          "cases_per_year": 600.0
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "4批",
+          "align": "center",
+          "cell_role": "batches",
+          "batch_count": 4.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "100小时",
+          "align": "center",
+          "cell_role": "max_load",
+          "max_load_h": 100.0,
+          "formula": "单人年最大工作负荷=单例手术平均曝光时间×年工作负荷×设备台数÷工作人员批次数",
+          "mode_role": "fluoro"
+        }
+      ]
+    },
+    {
+      "band": 4,
+      "cells": [
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1分钟（隔室摄影+类CT模式）",
+          "align": "center",
+          "cell_role": "exposure_time",
+          "time_hours": 0.016666666666666666,
+          "mode_role": "radio"
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "5小时",
+          "align": "center",
+          "cell_role": "max_load",
+          "max_load_h": 5.0,
+          "formula": "单人年最大工作负荷=单例手术平均曝光时间×年工作负荷×设备台数÷工作人员批次数",
+          "mode_role": "radio"
+        }
+      ]
+    },
+    {
+      "band": 5,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 6,
+          "text": "注：①根据建设单位提供的信息，ERCP工作人员可分为2批，DSA工作人员可分为2批/台。\n②单人年最大工作负荷为单例手术平均曝光时间×年工作负荷×设备台数÷工作人员批次数。",
+          "align": "left"
+        }
+      ]
+    }
+  ]
+}

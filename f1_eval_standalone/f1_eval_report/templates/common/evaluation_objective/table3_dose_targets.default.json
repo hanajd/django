@@ -1,0 +1,99 @@
+{
+  "schema": "embedded_generic_table/v1",
+  "source": "common/evaluation_objective/table3_dose_targets.default.json",
+  "table_bbox": [
+    84.6,
+    123.24,
+    510.7,
+    210.24
+  ],
+  "column_fractions": [
+    0.0,
+    0.496949,
+    1.0
+  ],
+  "column_count": 2,
+  "band_count": 4,
+  "row_min_height_pt": 17.5,
+  "repeat_header_on_new_page": false,
+  "rows": [
+    {
+      "band": 0,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "项目"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "管理目标值"
+        }
+      ]
+    },
+    {
+      "band": 1,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射工作人员年有效剂量"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "取剂量限值的1/4，5mSv"
+        }
+      ]
+    },
+    {
+      "band": 2,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射工作人员四肢和皮肤年当量剂量"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "取剂量限值的1/4，125mSv"
+        }
+      ]
+    },
+    {
+      "band": 3,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "相关公众年有效剂量"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "取剂量限值的1/4，0.25mSv"
+        }
+      ]
+    }
+  ],
+  "title": "表3 管理目标值",
+  "note": "表3数值默认取剂量限值的1/4；正式项目优先从评价信息表写入。"
+}

@@ -1,0 +1,109 @@
+{
+  "schema": "f1_eval_templates_catalog/v1",
+  "description": "预评价报告表栏目模板目录：正文每栏目一个 md，便于调用与调整",
+  "front": {
+    "cover": "front/cover.md",
+    "toc": "front/toc.md"
+  },
+  "body": [
+    {
+      "id": "project_basic_info",
+      "order": 1,
+      "title": "项目基础信息",
+      "path": "body/01_project_basic_info.md",
+      "f1_section_keys": ["org_header", "project_info"]
+    },
+    {
+      "id": "radiation_source",
+      "order": 2,
+      "title": "辐射源项",
+      "path": "body/02_radiation_source.md",
+      "f1_section_keys": ["radiation_source"]
+    },
+    {
+      "id": "project_summary",
+      "order": 3,
+      "title": "项目概述",
+      "path": "body/03_project_summary.md",
+      "f1_section_keys": ["project_summary"]
+    },
+    {
+      "id": "project_classification",
+      "order": 4,
+      "title": "建设项目分类",
+      "path": "body/04_project_classification.md",
+      "f1_section_keys": ["project_classification"]
+    },
+    {
+      "id": "evaluation_basis",
+      "order": 5,
+      "title": "主要评价依据",
+      "path": "body/05_evaluation_basis.md",
+      "f1_section_keys": ["evaluation_basis"]
+    },
+    {
+      "id": "evaluation_objective",
+      "order": 6,
+      "title": "评价目标",
+      "path": "body/06_evaluation_objective.md",
+      "f1_section_keys": ["evaluation_objective"]
+    },
+    {
+      "id": "hazard_analysis",
+      "order": 7,
+      "title": "职业病危害因素分析",
+      "path": "body/07_hazard_analysis.md",
+      "f1_section_keys": ["hazard_analysis"],
+      "libraries": {
+        "device_principles": "library/device_principles",
+        "workflows": "library/workflows"
+      }
+    },
+    {
+      "id": "workplace_layout",
+      "order": 8,
+      "title": "工作场所布局",
+      "path": "body/08_workplace_layout.md",
+      "f1_section_keys": ["workplace_layout"]
+    },
+    {
+      "id": "protection_measures",
+      "order": 9,
+      "title": "防护设施和措施",
+      "path": "body/09_protection_measures.md",
+      "f1_section_keys": ["protection_measures"]
+    },
+    {
+      "id": "health_impact",
+      "order": 10,
+      "title": "健康影响评价",
+      "path": "body/10_health_impact.md",
+      "f1_section_keys": ["health_impact"]
+    },
+    {
+      "id": "radiation_management",
+      "order": 11,
+      "title": "放射防护管理",
+      "path": "body/11_radiation_management.md",
+      "f1_section_keys": ["radiation_management"]
+    },
+    {
+      "id": "conclusion",
+      "order": 12,
+      "title": "结论与建议",
+      "path": "body/12_conclusion.md",
+      "f1_section_keys": ["conclusion"]
+    },
+    {
+      "id": "attachments",
+      "order": 13,
+      "title": "附件",
+      "path": "body/13_attachments.md",
+      "f1_section_keys": ["attachments"],
+      "pages_format": "back/attachments.md"
+    }
+  ],
+  "back": {
+    "attachments": "back/attachments.md"
+  }
+}

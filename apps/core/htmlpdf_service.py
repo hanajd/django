@@ -18,12 +18,55 @@ DEFAULT_FONT_PT = 10.5
 MIN_TEXT_FIELD_WIDTH = (DEFAULT_FONT_PT * 1.05) + 10
 MIN_TEXT_FIELD_HEIGHT = (DEFAULT_FONT_PT * 1.2) + 6
 
-_FONTS_DIR = Path(settings.BASE_DIR) / "htmlpdf" / "fonts"
-SIMSUN_FONT = _FONTS_DIR / "SIMSUN.TTC"
+_FONTS_DIR = Path(settings.BASE_DIR) / "fonts"
+# 兼容历史软链 htmlpdf/fonts → ../fonts
+if not _FONTS_DIR.is_dir():
+    _FONTS_DIR = Path(settings.BASE_DIR) / "htmlpdf" / "fonts"
+
+
+def get_simsun_font() -> Path:
+    """宋体：思源宋体 Regular（缓存实例）；缺失时回退 SIMSUN.TTC。"""
+    from utils.pymupdf_fonts import song_font_path
+
+    p = song_font_path(bold=False)
+    return p if p is not None else (_FONTS_DIR / "SIMSUN.TTC")
+
+
+def get_simhei_font(*, bold: bool = False) -> Path:
+    """黑体：思源黑体 Regular/Bold。"""
+    from utils.pymupdf_fonts import hei_font_path
+
+    p = hei_font_path(bold=bold)
+    return p if p is not None else (_FONTS_DIR / "wqy-zenhei.ttc")
+
+
+# 兼容旧代码：首次访问时解析（勿在 import 时实例化可变字体）
+class _LazySimsunPath:
+    def __str__(self) -> str:
+        return str(get_simsun_font())
+
+    def __fspath__(self) -> str:
+        return str(get_simsun_font())
+
+    def exists(self) -> bool:
+        return get_simsun_font().is_file()
+
+    def is_file(self) -> bool:
+        return get_simsun_font().is_file()
+
+    @property
+    def name(self) -> str:
+        return get_simsun_font().name
+
+
+SIMSUN_FONT = _LazySimsunPath()
 TIMES_FONT_CANDIDATES = [
     _FONTS_DIR / "times.ttf",
+    _FONTS_DIR / "TIMES.TTF",
     _FONTS_DIR / "Times New Roman.ttf",
+    Path("/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf"),
     Path("/usr/share/fonts/truetype/msttcorefonts/times.ttf"),
+    Path("/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf"),
 ]
 CHECK_FONT_CANDIDATES = [
     _FONTS_DIR / "SEGUISYM.TTF",
@@ -31,6 +74,7 @@ CHECK_FONT_CANDIDATES = [
     _FONTS_DIR / "seguisym.ttf",
     _FONTS_DIR / "SegoeUISymbol.ttf",
     Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+    # 思源宋体作最后回退（延迟解析）
     SIMSUN_FONT,
 ]
 
@@ -1041,9 +1085,25 @@ def build_filled_pdf(
         doc.close()
         raise RuntimeError("missing checkmark font")
 
+    from utils.pdf_compress import (
+        compress_image_bytes_for_pdf,
+        pdf_document_to_compressed_bytes,
+    )
+
+    # 每页每种字体只 register 一次，减轻 subset 前的重复嵌入
+    fonts_on_page: Dict[int, set] = {}
+
+    def _ensure_font(page: fitz.Page, page_index: int, font_name: str, font_file: Path) -> None:
+        used = fonts_on_page.setdefault(page_index, set())
+        if font_name in used:
+            return
+        page.insert_font(fontname=font_name, fontfile=str(font_file))
+        used.add(font_name)
+
     try:
         for f in fields:
-            page = doc[int(f["page"]) - 1]
+            page_index = int(f["page"]) - 1
+            page = doc[page_index]
             field_type = (f.get("fieldType") or "text").lower()
             raw_rect = fitz.Rect(f["x0"], f["y0"], f["x1"], f["y1"])
             if field_type == "text" and not f.get("_syntheticQcVerdict"):
@@ -1060,7 +1120,7 @@ def build_filled_pdf(
                     "✓",
                 )
                 if checked:
-                    page.insert_font(fontname="F_CHECK", fontfile=str(check_font_path))
+                    _ensure_font(page, page_index, "F_CHECK", Path(check_font_path))
                     check_color = _pdf_check_mark_color()
                     remain = page.insert_textbox(
                         r,
@@ -1093,6 +1153,11 @@ def build_filled_pdf(
                 if image_data.startswith("data:"):
                     image_data = image_data.split(",", 1)[1]
                 image_bytes = base64.b64decode(image_data)
+                image_bytes = compress_image_bytes_for_pdf(
+                    image_bytes,
+                    box_width_pt=float(r.width),
+                    box_height_pt=float(r.height),
+                )
                 page.insert_image(r, stream=image_bytes, keep_proportion=True, overlay=True)
                 continue
 
@@ -1129,7 +1194,7 @@ def build_filled_pdf(
             use_simsun = contains_cjk(text) or not times_font_path
             font_file = SIMSUN_FONT if use_simsun else times_font_path
             font_name = "F_SIMSUN" if use_simsun else "F_TIMES"
-            page.insert_font(fontname=font_name, fontfile=str(font_file))
+            _ensure_font(page, page_index, font_name, Path(font_file))
             font_obj = fitz.Font(fontfile=str(font_file))
             is_instrument = _pdf_text_field_wants_justify_for_instrument_line(f)
             if _pdf_field_is_qc_verdict_slot(f):
@@ -1176,7 +1241,13 @@ def build_filled_pdf(
                         page, text_rect, wrapped_text, font_name, font_obj, fs, text_color
                     )
                 else:
-                    flat_text = wrapped_text.replace("\n", " ").strip()
+                    try:
+                        from utils.pdf_merge import _flatten_wrapped_text_for_fallback
+
+                        flat_text = _flatten_wrapped_text_for_fallback(wrapped_text)
+                    except Exception:
+                        flat_text = re.sub(r"(?<=[\u4e00-\u9fff])\n(?=[\u4e00-\u9fff])", "", wrapped_text)
+                        flat_text = flat_text.replace("\n", " ").strip()
                     if flat_text:
                         text_w = font_obj.text_length(flat_text, fontsize=fs)
                         cx = (text_rect.x0 + text_rect.x1) / 2.0
@@ -1191,7 +1262,11 @@ def build_filled_pdf(
                             overlay=True,
                         )
     finally:
-        out = io.BytesIO()
-        doc.save(out, clean=True, garbage=3)
+        try:
+            out_bytes = pdf_document_to_compressed_bytes(doc, subset_fonts=True)
+        except Exception:
+            out = io.BytesIO()
+            doc.save(out, clean=True, garbage=4, deflate=True)
+            out_bytes = out.getvalue()
         doc.close()
-    return out.getvalue()
+    return out_bytes

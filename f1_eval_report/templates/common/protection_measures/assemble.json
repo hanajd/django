@@ -1,0 +1,14 @@
+{
+  "schema": "f1_common_assemble/v1",
+  "id": "protection_measures",
+  "title": "防护设施和措施",
+  "parts": [
+    {"id": "zoning_intro", "path": "protection_measures/zoning_intro.md"},
+    {"id": "shielding_intro", "path": "protection_measures/shielding_intro.md"},
+    {"id": "shielding_after", "path": "protection_measures/shielding_after.md"},
+    {"id": "safety_intro", "path": "protection_measures/safety_intro.md"},
+    {"id": "ppe_intro", "path": "protection_measures/ppe_intro.md"},
+    {"id": "ppe_after", "path": "protection_measures/ppe_after.md"},
+    {"id": "waste_disposal", "path": "protection_measures/waste_disposal.md"}
+  ]
+}

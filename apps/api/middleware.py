@@ -31,6 +31,8 @@ class SmartGZipMiddleware(GZipMiddleware):
         "application/vnd.android.package-archive",
         "application/octet-stream",
         "application/zip",
+        # 浏览器内置 PDF 查看器对 gzip 流式 PDF 常显示空白
+        "application/pdf",
     )
 
     def process_response(self, request, response):

@@ -1,0 +1,99 @@
+{
+  "schema": "embedded_generic_table/v1",
+  "title": "表6 本项目放射防护分级设计情况及评价",
+  "source": "protection_zoning",
+  "from_info_sheet": true,
+  "room_count": 2,
+  "column_count": 4,
+  "column_fractions": [
+    0.0,
+    0.22,
+    0.52,
+    0.82,
+    1.0
+  ],
+  "band_count": 3,
+  "row_min_height_pt": 18.0,
+  "repeat_header_on_new_page": false,
+  "note": "机房间数来自信息表装置清单；见图号可再手工调整",
+  "rows": [
+    {
+      "band": 0,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 2,
+          "text": "设计情况"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "标准要求"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "评价"
+        }
+      ]
+    },
+    {
+      "band": 1,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "控制区"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "监督区"
+        }
+      ]
+    },
+    {
+      "band": 2,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2间X射线设备机房内部区域"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2间X射线设备机房控制室及其他与控制区相邻的人员可到达区域"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "GB 18871-2002第6.4条：应把辐射工作场所分为控制区和监督区，以利于辐射防护管理和职业照射控制"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合"
+        }
+      ]
+    }
+  ]
+}

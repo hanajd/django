@@ -2,3 +2,5 @@ media/
 db.sqlite3
 db.sqlite3-journal
 backups/
+# 思源可变字体按字重实例化后的缓存（可自动重建）
+fonts/cache/

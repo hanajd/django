@@ -48,6 +48,37 @@ def _normalize_rp_phrase_spacing(text: str) -> str:
     s = re.sub(r"防\s+护", "防护", s)
     return s.replace("\u2060", "").replace("\u200b", "")
 
+
+def _flatten_wrapped_text_for_fallback(text: str) -> str:
+    """
+    insert_textbox 溢出回退：把折行拼回单行。
+    中文词组中间不得插入空格（否则「防\\n护」会变成「防 护」并在 PDF 里显示为空隙）。
+    """
+    s = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    if "\n" not in s:
+        return _normalize_rp_phrase_spacing(s.strip())
+    parts = [p for p in s.split("\n") if p != ""]
+    if not parts:
+        return ""
+    out = parts[0]
+    for nxt in parts[1:]:
+        if not nxt:
+            continue
+        if not out:
+            out = nxt
+            continue
+        left, right = out[-1], nxt[0]
+        # CJK / 全角标点相邻：直接拼接；否则保留一个普通空格（西文断行）
+        if ("\u4e00" <= left <= "\u9fff" or left in "（）【】《》、，。；：") and (
+            "\u4e00" <= right <= "\u9fff" or right in "（）【】《》、，。；："
+        ):
+            out += nxt
+        elif left.isspace() or right.isspace():
+            out += nxt.lstrip() if left.isspace() else (out.rstrip() + " " + nxt)
+        else:
+            out += " " + nxt
+    return _normalize_rp_phrase_spacing(out.strip())
+
 # 报告合并封面/项目名称：优先从标题中识别的设备大类（后续版本可在此元组末尾追加新类型）。
 # 正则 alternation 按「长度降序、同长按字典序」排列，避免「DR」误匹配「动态DR」等子串。
 MERGED_REPORT_DEVICE_TYPE_LABELS: Tuple[str, ...] = (
@@ -77,7 +108,8 @@ _MERGE_OVERLAY_FIXED_RECT_1BASED_XYWH: Dict[str, Tuple[int, float, float, float,
     "summary_project_name": (3, 175.3, 94.42, 344.63, 34.27),
     # 第 3 页：受检单位名称取值格（叠印前读文本，并入基本情况「项目名称」）
     "summary_inspected_org_value": (3, 175.3, 163.74, 343.88, 34.0),
-    "summary_device_count": (3, 388.0, 322.0, 130.0, 16.0),
+    # 与「受检设备台数」标签同行（标签约 y0=311）；勿用偏下坐标，否则「2 台」会骑在下框线上
+    "summary_device_count": (3, 388.0, 310.5, 100.0, 14.0),
     # 二、评价正文区（y0 略下移约 14pt，避免叠字整体偏上）
     "summary_evaluation": (3, 65.58, 475.83, 453.47, 75.62),
 }
@@ -843,10 +875,35 @@ def _page_looks_like_next_major_section(text: str) -> bool:
     return False
 
 
+def _page_looks_like_table_of_contents(text: str) -> bool:
+    """
+    识别单份报告「目录」页。目录行常含「三、检测结果」字样，若当作节起点会把整页目录拼进合并稿，
+    造成「两份目录」且设备名误取模板占位「（型号：额定参数）」。
+    """
+    raw = text or ""
+    compact = re.sub(r"\s+", "", raw)
+    if "目录" not in compact and "目録" not in compact:
+        return False
+    # 点线引导符密集 → 典型目录版式
+    if compact.count("·") >= 6 or compact.count("…") >= 3 or raw.count("...") >= 3:
+        return True
+    # 「目/录」标题 + 一、项目基本情况 + 三、检测结果，且无受检编号正文
+    if "一、项目基本情况" in compact and "三、检测结果" in compact and "受检编号" not in compact:
+        return True
+    # 仅有「目录」短标题且无设备信息表头
+    if re.search(r"目\s*录", raw) and "受检编号" not in compact:
+        if "设备名称" not in compact and "设备型号" not in compact:
+            if any(m in compact for m in ("三、检测结果", "三.检测结果", "三．检测结果")):
+                return True
+    return False
+
+
 def detect_sanjian_jiance_jieguo_page_range(pdf_path: str) -> Optional[Tuple[int, int]]:
     """
     在 PDF 中定位「三、检测结果」所在页至下一主节之前的半开区间 [from_page, to_page)（0-based）。
     找不到则返回 None。
+
+    跳过目录页：目录正文也会出现「三、检测结果」条目文字。
     """
     if not fitz or not os.path.isfile(pdf_path):
         return None
@@ -854,16 +911,27 @@ def detect_sanjian_jiance_jieguo_page_range(pdf_path: str) -> Optional[Tuple[int
     doc = fitz.open(pdf_path)
     try:
         start: Optional[int] = None
+        fallback: Optional[int] = None
         for i in range(doc.page_count):
-            page_text = doc[i].get_text()
-            if any(m in page_text for m in markers_start):
+            page_text = doc[i].get_text() or ""
+            if not any(m in page_text for m in markers_start):
+                continue
+            if _page_looks_like_table_of_contents(page_text):
+                continue
+            compact = re.sub(r"\s+", "", page_text)
+            # 优先正文首页（含受检编号 / 设备表头）
+            if "受检编号" in compact or "设备名称" in compact or "设备型号" in compact:
                 start = i
                 break
+            if fallback is None:
+                fallback = i
+        if start is None:
+            start = fallback
         if start is None:
             return None
         end = int(doc.page_count)
         for j in range(start + 1, doc.page_count):
-            if _page_looks_like_next_major_section(doc[j].get_text()):
+            if _page_looks_like_next_major_section(doc[j].get_text() or ""):
                 end = j
                 break
         if end <= start:
@@ -1364,6 +1432,48 @@ def _normalize_pdf_field_value(raw: str) -> str:
     return re.sub(r"\s+", " ", (raw or "").strip())
 
 
+_DEVICE_FIELD_PLACEHOLDER_VALUES = frozenset(
+    {
+        "/",
+        "／",
+        "-",
+        "—",
+        "–",
+        "无",
+        "空",
+        "额定参数",
+        "设备名称",
+        "设备型号",
+        "设备类型",
+        "型号",
+        "待填",
+        "填写",
+        "xxx",
+        "XXX",
+        "n/a",
+        "N/A",
+    }
+)
+
+
+def _sanitize_extracted_device_field(raw: str, *, kind: str = "name") -> str:
+    """去掉目录模板占位（如「额定参数」）与空值标记，避免目录变成「检测设备（型号：额定参数）」。"""
+    t = _normalize_pdf_field_value(raw)
+    if not t:
+        return ""
+    compact = re.sub(r"\s+", "", t)
+    if compact in _DEVICE_FIELD_PLACEHOLDER_VALUES:
+        return ""
+    if kind == "model" and ("额定参数" in compact or compact in {"型号", "规格型号"}):
+        return ""
+    if kind == "name" and compact in {"检测设备", "受检设备"}:
+        return ""
+    # 「（型号：额定参数）」整段误吸入
+    if "型号" in compact and "额定参数" in compact and len(compact) <= 16:
+        return ""
+    return t[:200] if kind == "name" else t[:120]
+
+
 def _extract_device_fields_from_vertical_labels(text: str) -> Tuple[str, str, str]:
     """从竖排或横排「设备名称 / 设备型号」标签区取值，保留型号内空格。"""
     blob = text or ""
@@ -1376,21 +1486,21 @@ def _extract_device_fields_from_vertical_labels(text: str) -> Tuple[str, str, st
         re.DOTALL,
     )
     if m:
-        device_name = _normalize_pdf_field_value(m.group(1))[:200]
+        device_name = _sanitize_extracted_device_field(m.group(1), kind="name")
     m = re.search(
         r"设\s*备\s*型\s*号\s*(.+?)\s*额\s*定\s*参\s*数",
         blob,
         re.DOTALL,
     )
     if m:
-        device_model = _normalize_pdf_field_value(m.group(1))[:120]
+        device_model = _sanitize_extracted_device_field(m.group(1), kind="model")
     m = re.search(
         r"设\s*备\s*类\s*型\s*(.+?)\s*(?:设\s*备\s*名\s*称|设\s*备\s*型\s*号|额\s*定\s*参\s*数)",
         blob,
         re.DOTALL,
     )
     if m:
-        device_type = _normalize_pdf_field_value(m.group(1))[:80]
+        device_type = _sanitize_extracted_device_field(m.group(1), kind="type")
     return device_name, device_model, device_type
 
 
@@ -1404,16 +1514,16 @@ def _extract_device_fields_from_collapsed_text(collapsed: str) -> Tuple[str, str
         c,
     )
     if m:
-        device_name = m.group(1).strip()
+        device_name = _sanitize_extracted_device_field(m.group(1), kind="name")
     m = re.search(
         r"设备型号(.+?)(?=额定参数|生产厂家|生产厂|设备编号|设备所在场所|检测日期|检测依据)",
         c,
     )
     if m:
-        device_model = m.group(1).strip()
+        device_model = _sanitize_extracted_device_field(m.group(1), kind="model")
     m = re.search(r"设备类型(.+?)(?=设备名称|设备型号|额定参数|生产厂家)", c)
     if m:
-        device_type = m.group(1).strip()
+        device_type = _sanitize_extracted_device_field(m.group(1), kind="type")
     return device_name, device_model, device_type
 
 
@@ -1435,28 +1545,38 @@ def extract_device_fields_from_report_results_section(
             collapsed
         )
     if not device_name:
-        device_name = _extract_labeled_field_from_report_text(
-            text,
-            (
-                r"设备名称\s*[：:]\s*([^\n\r]+)",
-                r"仪器名称\s*[：:]\s*([^\n\r]+)",
-                r"产品名称\s*[：:]\s*([^\n\r]+)",
+        device_name = _sanitize_extracted_device_field(
+            _extract_labeled_field_from_report_text(
+                text,
+                (
+                    r"设备名称\s*[：:]\s*([^\n\r]+)",
+                    r"仪器名称\s*[：:]\s*([^\n\r]+)",
+                    r"产品名称\s*[：:]\s*([^\n\r]+)",
+                ),
             ),
+            kind="name",
         )
     if not device_model:
-        device_model = _extract_labeled_field_from_report_text(
-            text,
-            (
-                r"设备型号\s*[：:]\s*([^\n\r]+)",
-                r"设备规格型号\s*[：:]\s*([^\n\r]+)",
-                r"产品型号\s*[：:]\s*([^\n\r]+)",
-                r"(?<!设备)(?<!产品)型号\s*[：:]\s*([^\n\r]+)",
+        device_model = _sanitize_extracted_device_field(
+            _extract_labeled_field_from_report_text(
+                text,
+                (
+                    r"设备型号\s*[：:]\s*([^\n\r]+)",
+                    r"设备规格型号\s*[：:]\s*([^\n\r]+)",
+                    r"产品型号\s*[：:]\s*([^\n\r]+)",
+                    # 勿匹配「（型号：额定参数）」目录占位；要求冒号后首字非「额」
+                    r"(?<!设备)(?<!产品)型号\s*[：:]\s*(?!额定参数)([^\n\r]+)",
+                ),
             ),
+            kind="model",
         )
     if not device_type:
-        device_type = _extract_labeled_field_from_report_text(
-            text,
-            (r"设备类型\s*[：:]\s*([^\n\r]+)",),
+        device_type = _sanitize_extracted_device_field(
+            _extract_labeled_field_from_report_text(
+                text,
+                (r"设备类型\s*[：:]\s*([^\n\r]+)",),
+            ),
+            kind="type",
         )
     return device_name, device_model, device_type
 
@@ -1466,6 +1586,12 @@ def toc_chapter_title_from_report_pdf(pdf_path: str) -> str:
     device_name, device_model, device_type = extract_device_fields_from_report_results_section(
         pdf_path
     )
+    if not device_name and not device_model:
+        # 表内空值时，用检测依据/规范名推断设备大类（避免目录只剩「检测设备」）
+        text = _report_results_section_text(pdf_path)
+        inferred_name, inferred_type = _infer_device_title_from_results_standards(text)
+        device_name = device_name or inferred_name
+        device_type = device_type or inferred_type
     if device_name or device_model:
         return build_single_report_toc_device_title(
             device_name or device_type or "检测设备",
@@ -1473,6 +1599,121 @@ def toc_chapter_title_from_report_pdf(pdf_path: str) -> str:
             device_model,
         )
     return "检测设备"
+
+
+def _infer_device_title_from_results_standards(text: str) -> Tuple[str, str]:
+    """从「检测依据 / 评价依据」等正文推断 (设备名称, 设备类型)。"""
+    compact = re.sub(r"\s+", "", text or "")
+    if not compact:
+        return "", ""
+    if "乳腺" in compact or "WS517" in compact.upper().replace(" ", ""):
+        return "数字化乳腺X射线摄影系统", "乳腺DR"
+    if "WS519" in compact.upper().replace(" ", "") or "计算机体层" in compact:
+        return "X射线计算机体层摄影设备", "CT"
+    if "口腔" in compact and ("CBCT" in compact.upper() or "锥形束" in compact):
+        return "口腔X射线计算机体层摄影设备", "口腔CBCT"
+    if "胃肠" in compact:
+        return "医用诊断X射线机", "胃肠机"
+    if "DSA" in compact.upper() or "血管造影" in compact:
+        return "数字减影血管造影设备", "DSA"
+    if "WS76" in compact.upper().replace(" ", ""):
+        if "数字化" in compact and "摄影" in compact:
+            return "数字化医用X射线摄影系统", "DR"
+        return "医用X射线诊断设备", ""
+    return "", ""
+
+
+def _toc_device_title_from_page_text(text: str, preferred: str = "") -> str:
+    pref = (preferred or "").strip()
+    if pref and pref != "检测设备" and "额定参数" not in pref:
+        return pref
+    device_name, device_model, device_type = _extract_device_fields_from_vertical_labels(text)
+    if not device_name and not device_model:
+        collapsed = _collapse_pdf_text_for_labels(text)
+        device_name, device_model, device_type = _extract_device_fields_from_collapsed_text(collapsed)
+    if not device_name and not device_model:
+        inferred_name, inferred_type = _infer_device_title_from_results_standards(text)
+        device_name = device_name or inferred_name
+        device_type = device_type or inferred_type
+    if device_name or device_model:
+        return build_single_report_toc_device_title(
+            device_name or device_type or "检测设备",
+            device_type,
+            device_model,
+        )
+    return pref or "检测设备"
+
+
+def _collect_merged_section_device_chapters_for_toc(
+    pdf_path: str,
+    section_start_page_0: int,
+    section_end_page_exclusive: int,
+    merged_section_start_phys_1based: int,
+    preferred_title: str = "",
+) -> List[Tuple[str, int, List[Tuple[int, str, int, int]]]]:
+    """
+    按「受检编号」首页把一份 PDF 的检测结果节拆成多台设备目录章。
+
+    返回 [(一级标题, 节内起始页偏移0-based, [(mino, rest, 报告页码, 节内偏移), ...]), ...]
+    """
+    if not fitz:
+        return []
+    lo = max(0, int(section_start_page_0))
+    hi = int(section_end_page_exclusive)
+    doc = fitz.open(pdf_path)
+    try:
+        hi = min(hi, doc.page_count)
+        starts: List[int] = []
+        for pi in range(lo, hi):
+            try:
+                if _page_is_inspection_number_heading(doc[pi]):
+                    starts.append(pi)
+            except Exception:
+                continue
+        if not starts:
+            starts = [lo]
+        chapters: List[Tuple[str, int, List[Tuple[int, str, int, int]]]] = []
+        for di, start_pi in enumerate(starts):
+            end_pi = starts[di + 1] if di + 1 < len(starts) else hi
+            offset0 = start_pi - lo
+            chunks = []
+            for pi in range(start_pi, min(end_pi, start_pi + 3)):
+                chunks.append(doc[pi].get_text("text") or "")
+            title = _toc_device_title_from_page_text(
+                "\n".join(chunks),
+                preferred_title if di == 0 else "",
+            )
+            seen_mino: Dict[int, Tuple[str, int, int]] = {}
+            for pi in range(start_pi, end_pi):
+                page_text = doc[pi].get_text("text") or ""
+                if _page_looks_like_table_of_contents(page_text):
+                    continue
+                off = pi - lo
+                merged_phys = int(merged_section_start_phys_1based) + off
+                rp = _report_body_page_from_physical_1based(merged_phys)
+                if rp <= 0:
+                    continue
+                for raw_line in page_text.splitlines():
+                    line = raw_line.strip()
+                    if not line or len(line) > 160:
+                        continue
+                    if line.count("·") >= 3 or "…" in line or "..." in line:
+                        continue
+                    parsed = _parse_report_toc_minor_line(line)
+                    if parsed is None:
+                        continue
+                    _maj, mino, rest = parsed
+                    if mino in seen_mino:
+                        continue
+                    seen_mino[mino] = (rest, rp, off)
+            minors = [
+                (mino, seen_mino[mino][0], seen_mino[mino][1], seen_mino[mino][2])
+                for mino in sorted(seen_mino.keys())
+            ]
+            chapters.append((title, offset0, minors))
+        return chapters
+    finally:
+        doc.close()
 
 
 def _collect_merged_section_toc_minor_entries(
@@ -1486,38 +1727,44 @@ def _collect_merged_section_toc_minor_entries(
     扫描单份报告「三、检测结果」节内全部 n.k 小节标题。
 
     返回 (目录左文, 报告正文页码, 节内页偏移 0-based)。
+    同一 k 只保留首次出现（避免目录页残留/续页造成 1.1 重复多条）。
     """
     if not fitz:
         return []
     n_ord = max(1, int(section_ordinal_1based))
-    seen: Dict[Tuple[int, str], Tuple[int, int]] = {}
+    seen: Dict[int, Tuple[str, int, int]] = {}
     doc = fitz.open(pdf_path)
     try:
         lo = max(0, int(section_start_page_0))
         hi = min(int(section_end_page_exclusive), doc.page_count)
         for pi in range(lo, hi):
+            page_text = doc[pi].get_text("text") or ""
+            if _page_looks_like_table_of_contents(page_text):
+                continue
             offset = pi - lo
             merged_phys = int(merged_section_start_phys_1based) + offset
             rp = _report_body_page_from_physical_1based(merged_phys)
             if rp <= 0:
                 continue
-            for raw_line in (doc[pi].get_text("text") or "").splitlines():
+            for raw_line in page_text.splitlines():
                 line = raw_line.strip()
                 if not line or len(line) > 160:
+                    continue
+                # 带点线的目录行，勿当正文小节
+                if line.count("·") >= 3 or "…" in line or "..." in line:
                     continue
                 parsed = _parse_report_toc_minor_line(line)
                 if parsed is None:
                     continue
                 _maj, mino, rest = parsed
-                key = (mino, rest)
-                if key not in seen:
-                    seen[key] = (rp, offset)
+                if mino in seen:
+                    continue
+                seen[mino] = (rest, rp, offset)
     finally:
         doc.close()
     out: List[Tuple[str, int, int]] = []
-    for (mino, rest), (rp, offset) in sorted(
-        seen.items(), key=lambda kv: (kv[1][0], kv[0][0], kv[0][1])
-    ):
+    for mino in sorted(seen.keys()):
+        rest, rp, offset = seen[mino]
         left = f"{n_ord}.{mino}  {rest}"
         out.append((left, rp, offset))
     return out
@@ -1728,20 +1975,29 @@ def _refine_toc_geometry_for_draw(w: float, h: float, geom: Dict[str, Any]) -> D
 
 
 def _bundled_simsun_ttc_path() -> Optional[Path]:
-    """
-    与 apps.core.htmlpdf_service 一致：项目内 htmlpdf/fonts/SIMSUN.TTC。
-    请将 Windows 自带宋体集合复制为该文件名（用户所指的 @SIMSUN.TTC）。
-    """
+    """宋体：优先思源宋体实例；其次 fonts/SIMSUN.TTC。"""
     try:
-        from django.conf import settings
+        from utils.pymupdf_fonts import song_font_path
 
-        p = Path(settings.BASE_DIR) / "htmlpdf" / "fonts" / "SIMSUN.TTC"
-        if p.is_file():
+        p = song_font_path(bold=False)
+        if p is not None and p.is_file():
             return p
     except Exception:
         pass
-    p2 = Path(__file__).resolve().parent.parent / "htmlpdf" / "fonts" / "SIMSUN.TTC"
-    return p2 if p2.is_file() else None
+    try:
+        from utils.pymupdf_fonts import resolve_font_file
+
+        p = resolve_font_file("SIMSUN.TTC", "simsun.ttc", "SourceHanSerifSC-VF.ttf")
+        if p is not None:
+            return p
+    except Exception:
+        pass
+    root = Path(__file__).resolve().parent.parent
+    for rel in ("fonts/SIMSUN.TTC", "htmlpdf/fonts/SIMSUN.TTC"):
+        p = root / rel
+        if p.is_file():
+            return p
+    return None
 
 
 def _collect_song_font_file_candidates(*, overlay_textbox: bool = False) -> List[Path]:
@@ -1841,7 +2097,7 @@ def _merge_overlay_fallback_write(
     """insert_textbox 失败时回退：用已嵌入字体按 baseline 写入（居中/左对齐）。"""
     if not fitz or rect is None or rect.is_empty or not (text or "").strip():
         return
-    body = (text or "").replace("\n", " ").strip()[:400]
+    body = _flatten_wrapped_text_for_fallback(text)[:400]
     fs = float(fontsize)
     ac = int(getattr(fitz, "TEXT_ALIGN_CENTER", 1))
     al = int(getattr(fitz, "TEXT_ALIGN_LEFT", 0))
@@ -1916,9 +2172,9 @@ def _register_simsun_on_page(page: fitz.Page) -> str:
     path = _resolve_song_embed_font_path()
     if not path:
         logger.warning(
-            "未找到 SIMSUN.TTC：请将宋体复制为 %s（与 HTML 转 PDF 相同路径），"
+            "未找到 SIMSUN.TTC：请将宋体复制为 %s（项目统一字库 fonts/），"
             "否则目录/页码只能使用内置 china-s",
-            "htmlpdf/fonts/SIMSUN.TTC",
+            "fonts/SIMSUN.TTC",
         )
         return "china-s"
     is_ttc = path.lower().endswith(".ttc")
@@ -1977,6 +2233,64 @@ def _register_simsun_on_page(page: fitz.Page) -> str:
 
 _MERGE_OVERLAY_FONT_REGULAR = "F_MERGE_SIM"
 _MERGE_OVERLAY_FONT_BOLD = "F_MERGE_SIM_BOLD"
+_MERGE_OVERLAY_FONT_TIMES = "F_MERGE_TIMES"
+
+
+def _resolve_times_embed_font_path() -> Optional[str]:
+    """叠印数字/字母用 Times New Roman。"""
+    try:
+        from apps.core.htmlpdf_service import pick_times_font
+
+        p = pick_times_font()
+        if p is not None and p.is_file():
+            return str(p)
+    except Exception:
+        pass
+    root = Path(__file__).resolve().parent.parent
+    for rel in (
+        "fonts/TIMES.TTF",
+        "fonts/times.ttf",
+        "fonts/Times New Roman.ttf",
+        "htmlpdf/fonts/TIMES.TTF",
+        "htmlpdf/fonts/times.ttf",
+    ):
+        q = root / rel
+        if q.is_file():
+            return str(q)
+    for q in (
+        Path("/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf"),
+        Path("/usr/share/fonts/truetype/msttcorefonts/times.ttf"),
+        Path("/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf"),
+    ):
+        if q.is_file():
+            return str(q)
+    return None
+
+
+def _overlay_text_wants_times(text: str) -> bool:
+    """无中日韩及全角标点时，数字/字母走 Times New Roman。"""
+    try:
+        from apps.core.htmlpdf_service import contains_cjk
+
+        return not contains_cjk(text or "")
+    except Exception:
+        return bool(re.fullmatch(r"[\x00-\x7F\s]*", text or "")) and bool((text or "").strip())
+
+
+def _register_merge_overlay_times_font(page) -> Tuple[str, Any]:
+    """嵌入 Times；失败返回空 fontname。"""
+    if not fitz or page is None:
+        return "", None
+    path = _resolve_times_embed_font_path()
+    if not path:
+        return "", None
+    if not _embed_font_file_on_page(page, _MERGE_OVERLAY_FONT_TIMES, path):
+        return "", None
+    try:
+        fo = fitz.Font(fontfile=path)
+    except Exception:
+        fo = None
+    return _MERGE_OVERLAY_FONT_TIMES, fo
 
 
 def _collect_bold_font_file_candidates() -> List[Path]:
@@ -3248,35 +3562,53 @@ def _apply_report_cover_overlay_by_label_search(
                     float(write_band.y1) + cover_y_off,
                 )
             if use_dual_cells:
-                _merge_write_cover_project_name_dual_underline_cells(
-                    page,
-                    r_lab,
-                    x0,
-                    x1,
-                    org_s,
-                    crt,
-                    dual_ul_ys,
-                    align_center=ac,
-                    cover_y_off=cover_y_off,
-                    cell_pad=5.0,
+                # 双下划线模板仍按格写，但文案改为合并后自然折行（优先写入整段合并名）
+                combined_pn = f"{org_s}{crt}".strip() or org_s or crt
+                cell_top = fitz.Rect(
+                    float(x0) + 2.0,
+                    float(dual_ul_ys[0]) - 22.0 + cover_y_off,
+                    float(x1) - 2.0,
+                    float(dual_ul_ys[0]) - 1.5 + cover_y_off,
+                )
+                cell_bot = fitz.Rect(
+                    float(x0) + 2.0,
+                    float(dual_ul_ys[0]) + 1.0 + cover_y_off,
+                    float(x1) - 2.0,
+                    float(dual_ul_ys[1]) - 1.5 + cover_y_off,
+                )
+                natural_band = fitz.Rect(
+                    min(cell_top.x0, cell_bot.x0),
+                    min(cell_top.y0, cell_bot.y0),
+                    max(cell_top.x1, cell_bot.x1),
+                    max(cell_top.y1, cell_bot.y1),
+                )
+                _merge_write_cover_project_name_natural(
+                    page, natural_band, combined_pn, align_center=ac
                 )
             else:
-                _merge_write_cover_project_name_two_lines(
-                    page,
-                    r_lab,
-                    write_band,
-                    org_s,
-                    crt,
-                    align_center=ac,
-                    page_index_0based=page_index_0based,
-                    use_fixed_title_rect=use_fixed_title_rect,
-                    underline_y=(
-                        float(umy)
-                        if prof.cover_project_name_write_below_label and umy is not None and not align_label
-                        else None
-                    ),
-                    line2_above_underline_pt=line2_gap,
-                    precomputed_rows=precomputed_rows,
+                combined_pn = f"{org_s}{crt}".strip() or org_s or crt
+                # 用擦除全带高度做自然折行，避免「上行单位 / 下行种类」且种类被裁切
+                natural_band = fitz.Rect(
+                    float(write_band.x0),
+                    min(float(write_band.y0), float(full_band.y0) + 1.0),
+                    float(write_band.x1),
+                    max(float(write_band.y1), float(full_band.y1) - 1.0),
+                )
+                need_h, n_lines = _merge_estimate_wrapped_text_height(
+                    combined_pn,
+                    float(natural_band.width),
+                    fontsize=_MERGE_PT_SIHAO,
+                )
+                if n_lines >= 2 and float(natural_band.height) < need_h + 4.0:
+                    # 尽量用到受检单位标签前的全部空间
+                    natural_band = fitz.Rect(
+                        float(full_band.x0),
+                        float(full_band.y0) + 1.0,
+                        float(full_band.x1),
+                        float(full_band.y1) - 1.0,
+                    )
+                _merge_write_cover_project_name_natural(
+                    page, natural_band, combined_pn, align_center=ac
                 )
             if saved_underlines:
                 _merge_redraw_horizontal_line_segments(page, saved_underlines)
@@ -3512,7 +3844,10 @@ def _find_single_report_results_physical_page(doc) -> Optional[int]:
     if not fitz:
         return None
     for pi in range(2, doc.page_count):
-        compact = re.sub(r"\s+", "", doc[pi].get_text("text") or "")
+        page_text = doc[pi].get_text("text") or ""
+        if _page_looks_like_table_of_contents(page_text):
+            continue
+        compact = re.sub(r"\s+", "", page_text)
         if "三、检测结果" in compact or "三.检测结果" in compact:
             return pi + 1
     return None
@@ -3558,9 +3893,11 @@ def _build_single_report_toc_entries_merged_style(
     device_title: str = "",
     has_radiation_protection: bool = True,
     toc_page_0based: Optional[int] = None,
+    skip_qc_minors: bool = False,
 ) -> List[Tuple[str, str, int]]:
     """
-    单份报告目录：与合并报告一致——一级为受检设备标题，二级为 1.1 质控 / 1.2 防护。
+    单份报告目录：与合并报告一致——一级为受检设备标题，二级为小节。
+    skip_qc_minors：仅防护结果册——不写质控，防护 1.1、平面图由扫描补全为 1.2。
     """
     if not fitz:
         return []
@@ -3577,6 +3914,12 @@ def _build_single_report_toc_entries_merged_style(
         title = "检测结果"
     main_rp = _report_body_page_from_physical_1based(results_phys)
     entries: List[Tuple[str, str, int]] = [("major", f"一、{title}", main_rp)]
+    if skip_qc_minors:
+        if has_radiation_protection and rp_phys is not None:
+            rp_page = _report_body_page_from_physical_1based(rp_phys)
+            if rp_page > 0:
+                entries.append(("minor", "1.1  工作场所放射防护检测结果", rp_page))
+        return entries
     qc_phys_eff = qc_phys if qc_phys is not None else results_phys
     qc_page = _report_body_page_from_physical_1based(qc_phys_eff)
     if qc_page > 0:
@@ -3597,10 +3940,12 @@ def _collect_single_report_toc_entries(
     doc,
     *,
     has_radiation_protection: bool = True,
+    skip_qc_minors: bool = False,
 ) -> List[Tuple[str, str, int]]:
     """
     扫描全文标题，生成目录行：(level, left_text, report_page_num)。
     level 为 major / minor；保留全部次级标题（1.1、1.2…）。
+    skip_qc_minors：仅防护结果报告时跳过「质量控制」小节，小节序号从 1.1 重排。
     """
     if not fitz:
         return []
@@ -3617,11 +3962,19 @@ def _collect_single_report_toc_entries(
             or "检测点方位图" in compact
         )
 
+    def _skip_qc_minor(text: str) -> bool:
+        if not skip_qc_minors:
+            return False
+        compact = re.sub(r"\s+", "", text or "")
+        return "质量控制" in compact
+
     def _push(level: str, text: str, phys_1: int) -> None:
         t = re.sub(r"\s+", " ", text or "").strip()
         if len(t) < 3:
             return
         if _skip_without_radiation(t):
+            return
+        if level == "minor" and _skip_qc_minor(t):
             return
         if "错误!未定义书签" in t:
             return
@@ -3635,10 +3988,15 @@ def _collect_single_report_toc_entries(
         ordered.append((level, t, rp))
 
     for pi in range(2, doc.page_count):
+        page_text = doc[pi].get_text("text") or ""
+        if _page_looks_like_table_of_contents(page_text):
+            continue
         phys = pi + 1
-        for raw_line in (doc[pi].get_text("text") or "").splitlines():
+        for raw_line in page_text.splitlines():
             line = raw_line.strip()
             if not line or len(line) > 160:
+                continue
+            if line.count("·") >= 3 or "…" in line or "..." in line:
                 continue
             m_maj = _TOC_MAJOR_LINE_RE.match(line)
             if m_maj:
@@ -3654,6 +4012,21 @@ def _collect_single_report_toc_entries(
                     _push("minor", title, phys)
 
     ordered.sort(key=lambda x: (x[2], 0 if x[0] == "major" else 1, x[1]))
+    if skip_qc_minors:
+        # 拆册后不沿用全本序号：次级标题按出现顺序重编为 1.1、1.2…
+        renumbered: List[Tuple[str, str, int]] = []
+        minor_i = 0
+        for level, text, page in ordered:
+            if level != "minor":
+                renumbered.append((level, text, page))
+                continue
+            minor_i += 1
+            rest = text
+            m = re.match(r"^\d+\.\d+\s+(.+)$", text)
+            if m:
+                rest = m.group(1).strip()
+            renumbered.append((level, f"1.{minor_i}  {rest}", page))
+        return renumbered
     return ordered
 
 
@@ -3664,6 +4037,7 @@ def regenerate_single_report_table_of_contents(
     has_radiation_protection: bool = True,
     device_title: str = "",
     profile: Optional["ReportTemplateProfile"] = None,
+    skip_qc_minors: bool = False,
 ) -> None:
     """擦除模板目录残留，铺水印底图并重绘全部一/二级目录行。"""
     if not fitz or doc is None or doc.page_count < 4:
@@ -3697,14 +4071,43 @@ def regenerate_single_report_table_of_contents(
         device_title=device_title,
         has_radiation_protection=has_radiation_protection,
         toc_page_0based=toc_idx,
+        skip_qc_minors=skip_qc_minors,
     )
     scanned = _collect_single_report_toc_entries(
         doc,
         has_radiation_protection=has_radiation_protection,
+        skip_qc_minors=skip_qc_minors,
     )
     scanned_minors = sum(1 for e in scanned if e[0] == "minor")
     merged_minors = sum(1 for e in entries if e[0] == "minor")
-    if scanned_minors >= max(merged_minors + 1, 3):
+    if skip_qc_minors:
+        # 仅防护结果：优先用扫描结果（含 1.2 平面图），再与合并样式拼补
+        if scanned_minors >= merged_minors and scanned:
+            entries = scanned
+        elif not entries:
+            entries = scanned
+        elif scanned:
+            # 合并样式有 1.1 防护，扫描可补平面图等
+            have = {e[1] for e in entries}
+            for e in scanned:
+                if e[1] not in have:
+                    entries.append(e)
+            entries.sort(key=lambda x: (x[2], 0 if x[0] == "major" else 1, x[1]))
+        # 拼补后再次从 1.1 起编，避免残留全本序号
+        renumbered: List[Tuple[str, str, int]] = []
+        minor_i = 0
+        for level, text, page in entries:
+            if level != "minor":
+                renumbered.append((level, text, page))
+                continue
+            minor_i += 1
+            rest = text
+            m = re.match(r"^\d+\.\d+\s+(.+)$", text)
+            if m:
+                rest = m.group(1).strip()
+            renumbered.append((level, f"1.{minor_i}  {rest}", page))
+        entries = renumbered
+    elif scanned_minors >= max(merged_minors + 1, 3):
         entries = scanned
     elif not entries:
         entries = scanned
@@ -4749,11 +5152,8 @@ def _merge_write_cover_project_name_dual_underline_cells(
         )
     if crt_s:
         crt_fs = _MERGE_PT_SIHAO
+        # 封面项目名称第二行固定四号，宁可折行也不缩小
         crt_floor = _MERGE_PT_SIHAO
-        if crt_s and len(crt_s) > 32:
-            crt_fs, crt_floor = 11.0, 10.0
-        if crt_s and len(crt_s) > 34:
-            crt_fs, crt_floor = 10.5, 10.0
         use_bold = _cover_overlay_use_bold()
         _merge_overlay_write_text_html_style(
             page,
@@ -4794,10 +5194,6 @@ def _merge_write_cover_project_name_two_lines(
         use_bold = _cover_overlay_use_bold()
         crt_fs = _MERGE_PT_SIHAO
         crt_floor = _MERGE_PT_SIHAO
-        if crt_s and len(crt_s) > 32:
-            crt_fs, crt_floor = 11.0, 10.0
-        if crt_s and len(crt_s) > 34:
-            crt_fs, crt_floor = 10.5, 10.0
         if org_s:
             _merge_overlay_write_text_html_style(
                 page,
@@ -4859,10 +5255,6 @@ def _merge_write_cover_project_name_two_lines(
         )
     crt_fs = _MERGE_PT_SIHAO
     crt_floor = _MERGE_PT_SIHAO
-    if crt_s and len(crt_s) > 32:
-        crt_fs, crt_floor = 11.0, 10.0
-    if crt_s and len(crt_s) > 34:
-        crt_fs, crt_floor = 10.5, 10.0
     if org_s:
         _merge_overlay_write_cover_centered_band(
             page,
@@ -5008,6 +5400,378 @@ def _merge_fit_text_preferred_max(
     return wrapped, min_fs
 
 
+def _merge_estimate_wrapped_text_height(
+    text: str,
+    width: float,
+    *,
+    fontsize: float = _MERGE_PT_XIAOSI,
+    line_factor: float = 1.22,
+) -> Tuple[float, int]:
+    """估算在给定宽度、字号下折行后的正文高度与行数。"""
+    t = _normalize_rp_phrase_spacing((text or "").strip())
+    if not t:
+        return 0.0, 0
+    fs = float(fontsize)
+    w = max(1.0, float(width) - 2.0)
+    try:
+        from apps.core import htmlpdf_service as _hs
+
+        font_path = _resolve_song_embed_font_path(overlay_textbox=True) or ""
+        if not font_path and _hs.SIMSUN_FONT.is_file():
+            font_path = str(_hs.SIMSUN_FONT)
+        if not font_path:
+            # CJK 约等于字号宽
+            chars_per_line = max(1, int(w / max(fs, 1.0)))
+            lines = max(1, (len(t) + chars_per_line - 1) // chars_per_line)
+            return lines * fs * line_factor, lines
+        fo = fitz.Font(fontfile=font_path)
+        wrapped = _hs.wrap_text_to_width(t, w, fo, fs)
+        lines = max(1, wrapped.count("\n") + 1)
+        return lines * fs * line_factor, lines
+    except Exception:
+        chars_per_line = max(1, int(w / max(fs, 1.0)))
+        lines = max(1, (len(t) + chars_per_line - 1) // chars_per_line)
+        return lines * fs * line_factor, lines
+
+
+def _merge_find_basic_info_project_name_row_bottom(page, label_rect: Any) -> Optional[float]:
+    """基本情况表「项目名称」行下框线 y（下一行标签上缘或最近水平线）。"""
+    if not fitz or page is None or label_rect is None or label_rect.is_empty:
+        return None
+    y_lo, y_hi = _merge_basic_info_section_y_bounds(page)
+    y_next = None
+    for needle in ("委托编号", "受检单位名称", "受检单位", "受检设备台数"):
+        y_cand = _merge_basic_info_label_row_y0(page, needle, y_lo=y_lo, y_hi=y_hi)
+        if y_cand is not None and float(y_cand) > float(label_rect.y0) + 6.0:
+            y_next = float(y_cand)
+            break
+    # 水平线：取标签中线以下、下一标签以上最近的一条
+    cy = (float(label_rect.y0) + float(label_rect.y1)) * 0.5
+    hors: List[float] = []
+    try:
+        for dr in page.get_drawings() or []:
+            for it in dr.get("items") or []:
+                if not it or it[0] != "l" or len(it) < 3:
+                    continue
+                p0, p1 = it[1], it[2]
+                if abs(float(p1.y) - float(p0.y)) > 0.8:
+                    continue
+                if abs(float(p1.x) - float(p0.x)) < 120:
+                    continue
+                ym = (float(p0.y) + float(p1.y)) * 0.5
+                if ym <= cy + 2.0:
+                    continue
+                if y_next is not None and ym > y_next + 2.0:
+                    continue
+                hors.append(ym)
+    except Exception:
+        hors = []
+    if hors:
+        return min(hors)
+    if y_next is not None:
+        return y_next - 2.0
+    return float(label_rect.y1) + 18.0
+
+
+def _merge_detect_basic_info_table_grid(page) -> Optional[Dict[str, Any]]:
+    """
+    识别「一、项目基本情况」主表网格：外框横线 ys、贯通竖线、局部竖线。
+    返回 dict: x0,x1,ys,v_full,v_partial[(x,y0,y1)],stroke_w；失败返回 None。
+    """
+    if not fitz or page is None:
+        return None
+    y_head, _ = _merge_basic_info_section_y_bounds(page)
+    y_lo = float(y_head) if y_head is not None else 70.0
+    # 评价区之上
+    y_hi = float(page.rect.height) * 0.62
+    try:
+        for needle in ("二、评价", "二.评价", "二．评价"):
+            hits = page.search_for(needle) or []
+            if hits:
+                y_hi = min(y_hi, float(hits[0].y0) - 2.0)
+                break
+    except Exception:
+        pass
+
+    hors: List[Tuple[float, float, float, float]] = []  # y, x0, x1, w
+    verts: List[Tuple[float, float, float, float]] = []  # x, y0, y1, w
+    try:
+        for dr in page.get_drawings() or []:
+            sw = float(dr.get("width") or 0.5)
+            for it in dr.get("items") or []:
+                if not it or it[0] != "l" or len(it) < 3:
+                    continue
+                p0, p1 = it[1], it[2]
+                x0, y0, x1, y1 = float(p0.x), float(p0.y), float(p1.x), float(p1.y)
+                if abs(y1 - y0) <= 0.8 and abs(x1 - x0) >= 120.0:
+                    ym = (y0 + y1) * 0.5
+                    if ym < y_lo - 2.0 or ym > y_hi + 2.0:
+                        continue
+                    hors.append((ym, min(x0, x1), max(x0, x1), sw))
+                elif abs(x1 - x0) <= 0.8 and abs(y1 - y0) >= 12.0:
+                    xm = (x0 + x1) * 0.5
+                    ya, yb = min(y0, y1), max(y0, y1)
+                    if yb < y_lo - 2.0 or ya > y_hi + 2.0:
+                        continue
+                    verts.append((xm, ya, yb, sw))
+    except Exception:
+        return None
+    if len(hors) < 3:
+        return None
+
+    # 聚类横线 y
+    hors_sorted = sorted(hors, key=lambda t: t[0])
+    ys: List[float] = []
+    for ym, _xa, _xb, _sw in hors_sorted:
+        if not ys or abs(ym - ys[-1]) > 1.2:
+            ys.append(ym)
+        else:
+            ys[-1] = (ys[-1] + ym) * 0.5
+    if len(ys) < 3:
+        return None
+
+    # 表左右：取最长横线
+    longest = max(hors, key=lambda t: t[2] - t[1])
+    x0, x1 = float(longest[1]), float(longest[2])
+    stroke_w = float(longest[3]) if longest[3] > 0.1 else 0.5
+    table_h = max(1.0, ys[-1] - ys[0])
+
+    # 竖线：贯通（高度接近表高）vs 局部
+    v_full: List[float] = []
+    v_partial: List[Tuple[float, float, float]] = []
+    for xm, ya, yb, _sw in verts:
+        if xm < x0 - 4.0 or xm > x1 + 4.0:
+            continue
+        span = yb - ya
+        if span >= table_h * 0.72:
+            v_full.append(round(xm, 2))
+        elif span >= 12.0:
+            v_partial.append((round(xm, 2), float(ya), float(yb)))
+
+    # 左右外框必进贯通竖线
+    for edge in (round(x0, 2), round(x1, 2)):
+        if not any(abs(edge - x) < 1.0 for x in v_full):
+            v_full.append(edge)
+    v_full = sorted(set(v_full))
+    if len(v_full) < 2:
+        return None
+    return {
+        "x0": float(x0),
+        "x1": float(x1),
+        "ys": [float(y) for y in ys],
+        "v_full": [float(x) for x in v_full],
+        "v_partial": v_partial,
+        "stroke_w": float(stroke_w),
+    }
+
+
+def _merge_draw_basic_info_table_grid(page, grid: Dict[str, Any]) -> None:
+    """按网格结构重绘基本情况表（横线+贯通竖线+局部竖线）。"""
+    if not fitz or page is None or not grid:
+        return
+    sw = float(grid.get("stroke_w") or 0.5)
+    x0 = float(grid["x0"])
+    x1 = float(grid["x1"])
+    ys = [float(y) for y in (grid.get("ys") or [])]
+    color = (0.0, 0.0, 0.0)
+    for y in ys:
+        try:
+            page.draw_line(fitz.Point(x0, y), fitz.Point(x1, y), color=color, width=sw)
+        except Exception:
+            continue
+    if len(ys) >= 2:
+        y_top, y_bot = ys[0], ys[-1]
+        for x in grid.get("v_full") or []:
+            try:
+                page.draw_line(
+                    fitz.Point(float(x), y_top),
+                    fitz.Point(float(x), y_bot),
+                    color=color,
+                    width=sw,
+                )
+            except Exception:
+                continue
+    for item in grid.get("v_partial") or []:
+        try:
+            x, ya, yb = float(item[0]), float(item[1]), float(item[2])
+            page.draw_line(fitz.Point(x, ya), fitz.Point(x, yb), color=color, width=sw)
+        except Exception:
+            continue
+
+
+def _merge_expand_basic_info_table_row(
+    doc,
+    page_index: int,
+    *,
+    row_bottom: float,
+    dy: float,
+) -> Any:
+    """
+    按「表格」加高一行：
+
+    1) 识别主表网格
+    2) 下移 row_bottom 以下正文（矢量）
+    3) 按新行高重绘完整表框（横线+贯通竖线+局部竖线）盖住断口
+
+    不擦表、不回填文字、不做局部竖线缝补。
+    """
+    if not fitz or doc is None or dy < 0.5:
+        return doc[page_index] if doc is not None else None
+    if page_index < 0 or page_index >= doc.page_count:
+        return None
+    page = doc[page_index]
+    grid = _merge_detect_basic_info_table_grid(page)
+    row_bottom = float(row_bottom)
+    dy = float(dy)
+
+    page = _merge_shift_page_content_down(doc, page_index, row_bottom, dy)
+    if page is None:
+        return doc[page_index]
+
+    if not grid:
+        return page
+
+    new_ys = [y + dy if y >= row_bottom - 0.5 else y for y in grid["ys"]]
+    new_partial: List[Tuple[float, float, float]] = []
+    for x, ya, yb in grid.get("v_partial") or []:
+        ya2 = float(ya) + dy if float(ya) >= row_bottom - 0.5 else float(ya)
+        yb2 = float(yb) + dy if float(yb) >= row_bottom - 0.5 else float(yb)
+        if yb2 > ya2 + 1.0:
+            new_partial.append((float(x), ya2, yb2))
+    new_grid = {
+        "x0": float(grid["x0"]),
+        "x1": float(grid["x1"]),
+        "ys": new_ys,
+        "v_full": list(grid.get("v_full") or []),
+        "v_partial": new_partial,
+        "stroke_w": float(grid.get("stroke_w") or 0.5),
+    }
+    _merge_draw_basic_info_table_grid(page, new_grid)
+    return page
+
+
+def _merge_offset_overlay_rects_below_y(
+    template_rects: Dict[str, Any],
+    *,
+    y_from: float,
+    dy: float,
+) -> None:
+    """叠印用矩形：凡整体在 y_from 以下（或跨过该线）的框整体下移 dy。"""
+    if not fitz or not template_rects or dy < 0.5:
+        return
+    for key, rr in list(template_rects.items()):
+        if rr is None or getattr(rr, "is_empty", True):
+            continue
+        try:
+            if float(rr.y1) <= float(y_from) + 0.5:
+                continue
+            template_rects[key] = fitz.Rect(
+                float(rr.x0),
+                float(rr.y0) + dy,
+                float(rr.x1),
+                float(rr.y1) + dy,
+            )
+        except Exception:
+            continue
+
+
+def _merge_shift_page_content_down(doc, page_index: int, y_from: float, dy: float) -> Any:
+    """
+    将 page 上 y>=y_from 的内容整体下移 dy（矢量保留）。
+
+    做法：拷贝页 → 擦除严格高于 y_from 的上半（保留 y_from 处横线）并 set_cropbox
+    → 原页擦除下半 → show_pdf_page 贴到 +dy（目标框高度与源 CropBox 一致，避免压扁）。
+
+    不用 show_pdf_page(..., clip=…)：部分报告模板会无视 clip 整页重绘，叠出双表格线。
+    也不对拷贝页擦到 y_from 本身：红区会吞掉行底横线，加高后缺线。
+    """
+    if not fitz or doc is None or dy < 0.5:
+        return doc[page_index] if doc is not None else None
+    if page_index < 0 or page_index >= doc.page_count:
+        return None
+    page = doc[page_index]
+    r = page.rect
+    w = float(r.width)
+    h = float(r.height)
+    y_from = max(0.0, min(float(y_from), h - 4.0))
+    dy = float(dy)
+    # 略上收，保留 y_from 处表格横线；仅 cropbox 不够（仍可能带上半内容）
+    edge = 0.75
+    crop_y0 = max(0.0, y_from - edge)
+    src_h = h - crop_y0
+    if src_h < 2.0:
+        return page
+    doc_l = None
+    try:
+        doc_l = fitz.open()
+        doc_l.insert_pdf(doc, from_page=page_index, to_page=page_index)
+        pl = doc_l[0]
+        img_none = getattr(fitz, "PDF_REDACT_IMAGE_NONE", None)
+        # 擦掉严格高于行底线的内容，避免整页重贴；保留行底横线
+        if crop_y0 > 0.5:
+            pl.add_redact_annot(fitz.Rect(0.0, 0.0, w, crop_y0), fill=(1, 1, 1))
+            if img_none is not None:
+                pl.apply_redactions(images=img_none)
+            else:
+                pl.apply_redactions()
+        try:
+            pl.set_cropbox(fitz.Rect(0.0, crop_y0, w, h))
+        except Exception:
+            pl.cropbox = fitz.Rect(0.0, crop_y0, w, h)
+        crop_h = float(pl.cropbox.height)
+        if crop_h < 2.0:
+            return page
+
+        # 原页：擦掉下半（含原行底线），保留上方矢量
+        page.add_redact_annot(
+            fitz.Rect(0.0, max(0.0, y_from - 0.5), w, h),
+            fill=(1, 1, 1),
+        )
+        if img_none is not None:
+            page.apply_redactions(images=img_none)
+        else:
+            page.apply_redactions()
+
+        # crop_y0 + dy 对齐：源上 y_from 的横线落到 y_from+dy
+        dest = fitz.Rect(0.0, crop_y0 + dy, w, crop_y0 + dy + crop_h)
+        page.show_pdf_page(dest, doc_l, 0, keep_proportion=False)
+        return page
+    except Exception as exc:
+        logger.warning("shift page content down failed: %s", exc)
+        return doc[page_index]
+    finally:
+        if doc_l is not None:
+            try:
+                doc_l.close()
+            except Exception:
+                pass
+
+
+def _merge_write_cover_project_name_natural(
+    page,
+    write_band: fitz.Rect,
+    combined: str,
+    *,
+    align_center: int,
+) -> None:
+    """封面「项目名称」：单位+检测种类合并为一段，在取值区内自然折行（四号）。"""
+    text = _normalize_rp_phrase_spacing((combined or "").strip())
+    if not fitz or page is None or write_band is None or write_band.is_empty or not text:
+        return
+    use_bold = _cover_overlay_use_bold()
+    _merge_overlay_write_text_html_style(
+        page,
+        write_band,
+        text,
+        align=align_center,
+        paragraph_layout=True,
+        preferred_fontsize=_MERGE_PT_SIHAO,
+        fontsize_floor=_MERGE_PT_XIAOSI,
+        bold=use_bold,
+        valign_top=True,
+    )
+
+
 def _merge_overlay_write_text_html_style(
     page,
     rect: fitz.Rect,
@@ -5089,11 +5853,21 @@ def _merge_overlay_write_text_html_style(
     rr = _hs.ensure_min_text_rect(raw)
     r = _hs.safe_inset_rect(rr, 0.6)
     try:
-        fontname, fo = _register_merge_overlay_fonts(
-            page,
-            regular_path=regular_path,
-            want_bold=bold,
-        )
+        use_times = (not bold) and _overlay_text_wants_times(text)
+        if use_times:
+            fontname, fo = _register_merge_overlay_times_font(page)
+            if not fontname or fo is None:
+                fontname, fo = _register_merge_overlay_fonts(
+                    page,
+                    regular_path=regular_path,
+                    want_bold=False,
+                )
+        else:
+            fontname, fo = _register_merge_overlay_fonts(
+                page,
+                regular_path=regular_path,
+                want_bold=bold,
+            )
         if fo is None:
             raise RuntimeError("overlay font unavailable")
         if preferred_fontsize is not None:
@@ -5128,9 +5902,39 @@ def _merge_overlay_write_text_html_style(
         )
         if remain < 0:
             logger.debug("merge overlay insert_textbox overflow remain=%s", remain)
-            _merge_overlay_fallback_write(
-                page, text_rect, wrapped, fontsize=fs, fontname=fontname, align=align
-            )
+            # 先降字号重试，避免回退单行画出框外（「检测」残留在表外）
+            floor_fs = float(fontsize_floor) if fontsize_floor is not None else max(8.0, fs * 0.62)
+            retry_fs = fs - 0.5
+            wrote = False
+            while retry_fs >= floor_fs - 1e-6:
+                w2 = _hs.wrap_text_to_width(text, max(1.0, float(text_rect.width) - 2.0), fo, retry_fs)
+                rem2 = page.insert_textbox(
+                    text_rect,
+                    w2,
+                    fontname=fontname,
+                    fontsize=retry_fs,
+                    color=(0, 0, 0),
+                    align=align,
+                    overlay=True,
+                )
+                if rem2 >= 0:
+                    wrote = True
+                    break
+                retry_fs -= 0.5
+            if not wrote:
+                # 仍溢出：按行直写（中文折行不插空格），不再 flatten 成超宽单行
+                lines = [ln for ln in (wrapped or text).splitlines() if ln.strip()] or [text]
+                line_h = max(retry_fs, floor_fs) * 1.15
+                base_fs = max(retry_fs, floor_fs)
+                for i, ln in enumerate(lines):
+                    y = float(text_rect.y0) + base_fs * 0.85 + i * line_h
+                    if y > float(text_rect.y1) + 1.0:
+                        break
+                    x = float(text_rect.x0) + 1.0
+                    if int(align) == int(getattr(fitz, "TEXT_ALIGN_CENTER", 1)):
+                        tw = float(fo.text_length(ln, fontsize=base_fs))
+                        x = float(text_rect.x0) + max(0.0, (float(text_rect.width) - tw) / 2.0)
+                    _fitz_insert_text_line(page, x, y, ln, base_fs, fontname)
     except Exception as exc:
         logger.debug("merge overlay insert_textbox fallback: %s", exc)
         _fallback_insert()
@@ -5318,94 +6122,161 @@ def _merge_evaluation_body_rect(page, heading_rect: fitz.Rect) -> Optional[fitz.
 
 
 def _patch_inspection_number_on_section_first_page(page, section_ordinal_1based: int) -> int:
-    """将本页「受检编号：…」整行改为「（n）受检编号：nn」（n 为合并小节序号）。"""
+    """将本页全部「受检编号」相关行擦除后，写回唯一一行「（n）受检编号：nn」。"""
     if not fitz or page is None:
         return 0
     ord_i = max(1, int(section_ordinal_1based))
-    head_pat = re.compile(r"受检编号\s*[：:]")
+    head_pat = re.compile(r"受检编号\s*[：:]?")
     target = f"（{ord_i}）受检编号：{ord_i:02d}"
-    changed = 0
-    for _ in range(24):
-        d = page.get_text("dict") or {}
-        bbox: Optional[fitz.Rect] = None
-        for block in d.get("blocks", []):
-            if block.get("type") != 0:
+    target_compact = re.sub(r"\s+", "", target)
+
+    d = page.get_text("dict") or {}
+    wipe_boxes: List[fitz.Rect] = []
+    anchor: Optional[fitz.Rect] = None
+    matched_texts: List[str] = []
+    for block in d.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            spans = line.get("spans") or []
+            if not spans:
                 continue
-            for line in block.get("lines", []):
-                spans = line.get("spans") or []
-                if not spans:
-                    continue
-                txt = _line_text(line)
-                if not head_pat.search(txt):
-                    continue
-                compact = re.sub(r"\s+", "", txt)
-                if compact == re.sub(r"\s+", "", target):
-                    continue
-                bbox = _line_bbox_union(spans)
-                break
-            if bbox is not None:
-                break
-        if bbox is None or bbox.is_empty:
-            break
+            txt = _line_text(line)
+            if not head_pat.search(txt):
+                continue
+            bbox = _line_bbox_union(spans)
+            if bbox is None or bbox.is_empty:
+                continue
+            wipe_boxes.append(bbox)
+            matched_texts.append(txt)
+            if anchor is None or float(bbox.y0) < float(anchor.y0):
+                anchor = bbox
+
+    if not wipe_boxes or anchor is None:
+        return 0
+
+    if (
+        len(wipe_boxes) == 1
+        and matched_texts
+        and re.sub(r"\s+", "", matched_texts[0]) == target_compact
+    ):
+        return 0
+
+    for bbox in wipe_boxes:
         pad_x = 1.2
         pad_y = max(1.5, float(bbox.height) * 0.35)
-        wipe = bbox + fitz.Rect(-pad_x, -pad_y, pad_x, pad_y)
+        # 向右多擦一点，覆盖原编号尾巴
+        wipe = bbox + fitz.Rect(-pad_x, -pad_y, pad_x + 48.0, pad_y)
         _merge_overlay_erase_transparent(page, wipe, pad=0.35)
-        _merge_apply_redactions_overlay(page)
-        fs = float(_MERGE_PT_XIAOSI)
-        prefix = f"（{ord_i}）受检编号："
-        suffix = f"{ord_i:02d}"
-        x0 = float(bbox.x0)
-        bl_y = float(bbox.y1) - fs * 0.22
-        drawn = False
-        try:
-            from apps.core import htmlpdf_service as _hs
+    _merge_apply_redactions_overlay(page)
 
-            if _hs.SIMSUN_FONT.is_file():
-                page.insert_font(fontname="F_MERGE_SIM", fontfile=str(_hs.SIMSUN_FONT))
-                fo = fitz.Font(fontfile=str(_hs.SIMSUN_FONT))
-                tw = float(fo.text_length(prefix, fontsize=fs))
-                for dx, dy in ((0.0, 0.0), (0.22, 0.0), (-0.12, 0.0)):
-                    page.insert_text(
-                        (x0 + dx, bl_y + dy),
-                        prefix,
-                        fontname="F_MERGE_SIM",
-                        fontsize=fs,
-                        color=(0, 0, 0),
-                        render_mode=0,
-                        overlay=True,
-                    )
-                page.insert_text(
-                    (x0 + tw, bl_y),
-                    suffix,
-                    fontname="F_MERGE_SIM",
-                    fontsize=fs,
-                    color=(0, 0, 0),
-                    render_mode=0,
-                    overlay=True,
-                )
-                drawn = True
-        except Exception as exc:
-            logger.debug("patch inspection bold draw: %s", exc)
-        if not drawn:
-            write_rect = fitz.Rect(
-                float(bbox.x0),
-                float(bbox.y0) - max(0.5, float(bbox.height) * 0.08),
-                min(float(page.rect.width) - 8.0, float(bbox.x1) + 220.0),
-                float(bbox.y1) + max(1.0, float(bbox.height) * 0.55),
+    fs = float(_MERGE_PT_XIAOSI)
+    prefix = f"（{ord_i}）受检编号："
+    suffix = f"{ord_i:02d}"
+    x0 = float(anchor.x0)
+    bl_y = float(anchor.y1) - fs * 0.22
+    drawn = False
+    try:
+        from apps.core import htmlpdf_service as _hs
+
+        if _hs.SIMSUN_FONT.is_file():
+            page.insert_font(fontname="F_MERGE_SIM", fontfile=str(_hs.SIMSUN_FONT))
+            fo = fitz.Font(fontfile=str(_hs.SIMSUN_FONT))
+            tw = float(fo.text_length(prefix, fontsize=fs))
+            page.insert_text(
+                (x0, bl_y),
+                prefix,
+                fontname="F_MERGE_SIM",
+                fontsize=fs,
+                color=(0, 0, 0),
+                render_mode=0,
+                overlay=True,
             )
-            _merge_overlay_write_text_html_style(
-                page,
-                write_rect,
-                target,
-                align=int(getattr(fitz, "TEXT_ALIGN_LEFT", 0)),
-                preferred_fontsize=_MERGE_PT_XIAOSI,
-                fontsize_floor=_MERGE_PT_XIAOSI,
+            page.insert_text(
+                (x0 + tw, bl_y),
+                suffix,
+                fontname="F_MERGE_SIM",
+                fontsize=fs,
+                color=(0, 0, 0),
+                render_mode=0,
+                overlay=True,
             )
-        changed += 1
-        # get_text 仍可能读到底层未删净的旧串，导致反复命中同一 bbox 叠画多遍 → 乱码
-        break
-    return changed
+            drawn = True
+    except Exception as exc:
+        logger.debug("patch inspection no simsun: %s", exc)
+    if not drawn:
+        write_rect = fitz.Rect(
+            x0,
+            float(anchor.y0) - 1.0,
+            min(float(page.rect.width) - 8.0, x0 + 220.0),
+            float(anchor.y1) + 2.0,
+        )
+        _merge_overlay_write_text_html_style(
+            page,
+            write_rect,
+            target,
+            align=int(getattr(fitz, "TEXT_ALIGN_LEFT", 0)),
+            preferred_fontsize=_MERGE_PT_XIAOSI,
+            fontsize_floor=_MERGE_PT_XIAOSI,
+            valign_top=True,
+        )
+    return 1
+
+
+def _page_is_inspection_number_heading(page) -> bool:
+    """本页是否为「受检编号」设备信息首页（用于全局按出现次序编号）。"""
+    if page is None:
+        return False
+    text = page.get_text("text") or ""
+    if not re.search(r"受检编号\s*[：:]?", text):
+        return False
+    if _page_looks_like_table_of_contents(text):
+        return False
+    compact = re.sub(r"\s+", "", text)
+    if any(k in compact for k in ("设备名称", "设备型号", "检测依据", "评价依据", "生产厂家")):
+        return True
+    for line in text.splitlines()[:16]:
+        if re.search(r"^[（(]?\d*[）)]?\s*受检编号", (line or "").strip()):
+            return True
+    return True
+
+
+def _merged_result_page_device_ordinals(
+    doc,
+    *,
+    toc_page_0based: int,
+    section_page_counts: Sequence[int],
+) -> Dict[int, int]:
+    """
+    目录页之后每一页对应的受检设备序号 n（按「受检编号」首页出现次序累计）。
+    供受检编号改写与小节 1.k→n.k 共用。
+    """
+    start = int(toc_page_0based) + 1
+    out: Dict[int, int] = {}
+    if not fitz or start >= getattr(doc, "page_count", 0):
+        return out
+    current = 0
+    for pi in range(start, doc.page_count):
+        try:
+            page = doc[pi]
+        except Exception:
+            continue
+        if _page_is_inspection_number_heading(page):
+            current += 1
+        if current > 0:
+            out[pi] = current
+    if out:
+        return out
+    # 回退：按合并份数切段
+    acc = start
+    for i, cnt in enumerate(section_page_counts or []):
+        cnt = int(cnt)
+        for j in range(max(0, cnt)):
+            pi2 = acc + j
+            if 0 <= pi2 < doc.page_count:
+                out[pi2] = i + 1
+        acc += cnt
+    return out
 
 
 def apply_merged_inspection_numbers_on_section_heads(
@@ -5414,47 +6285,46 @@ def apply_merged_inspection_numbers_on_section_heads(
     toc_page_0based: int,
     section_page_counts: Sequence[int],
 ) -> None:
-    """各份「三、检测结果」插入块内：将该节各页「受检编号」行改为「（n）受检编号：nn」格式。"""
+    """
+    合并稿目录页之后：按「受检编号」出现次序写「（n）受检编号：nn」。
+
+    同一份 PDF 内多次出现受检设备信息头时也递增 n（第 2 次→（2），第 3 次→（3））。
+    """
     if not fitz or not section_page_counts:
         return
-    start = int(toc_page_0based) + 1
-    acc = start
-    for i, cnt in enumerate(section_page_counts):
-        cnt = int(cnt)
-        if cnt <= 0:
-            acc += cnt
-            continue
-        for j in range(cnt):
-            pi2 = acc + j
-            if 0 <= pi2 < doc.page_count:
-                try:
-                    _patch_inspection_number_on_section_first_page(doc[pi2], i + 1)
-                except Exception as exc:
-                    logger.warning("patch inspection no page %s: %s", pi2, exc)
-        acc += cnt
+    page_ordinal = _merged_result_page_device_ordinals(
+        doc,
+        toc_page_0based=toc_page_0based,
+        section_page_counts=section_page_counts,
+    )
+    for pi, ord_i in sorted(page_ordinal.items()):
+        try:
+            if _page_is_inspection_number_heading(doc[pi]):
+                _patch_inspection_number_on_section_first_page(doc[pi], ord_i)
+        except Exception as exc:
+            logger.warning("patch inspection no page %s: %s", pi, exc)
 
 
-def _should_renumber_leading_1_k_subheading_line(txt: str) -> bool:
+def _should_renumber_leading_n_k_subheading_line(txt: str) -> bool:
     """
-    判断是否为小节标题行：行首「1.k」在合并第 2 份及以后应改为「n.k」。
-
-    - 保留旧规则：含「1.1」且行内有「质量控制检测项目及结果」。
-    - 扩展：行首「1.k」且整行较短、后续为标题性文字（含中文或拉丁字母），
-      排除「三、」「四、」等大节行，避免误改表内数值。
+    判断是否为小节标题行：行首「m.k」（m、k 为个位）且后续为标题性文字。
     """
     if not txt or not str(txt).strip():
         return False
     raw = str(txt)
     compact = re.sub(r"\s+", "", raw)
-    if re.search(r"1\s*[.．]\s*1", raw) and "质量控制检测项目及结果" in compact:
+    if re.search(r"\d\s*[.．]\s*1", raw) and "质量控制检测项目及结果" in compact:
         return True
     st = raw.strip()
     if len(st) > 200:
         return False
     if re.match(r"^[三四五六七八九十百千]+[、.．]", st):
         return False
-    m = re.match(r"^1\s*[.．]\s*(\d+)(?!\d)", st)
+    m = re.match(r"^(\d{1,2})\s*[.．]\s*(\d)(?!\d)", st)
     if not m:
+        return False
+    maj = int(m.group(1))
+    if maj < 1 or maj > 30:
         return False
     tail = st[m.end() :].strip()
     if len(tail) < 2:
@@ -5465,22 +6335,34 @@ def _should_renumber_leading_1_k_subheading_line(txt: str) -> bool:
     return True
 
 
-def _sub_leading_1_k_with_n_k(txt: str, n: int) -> Optional[str]:
-    """将行首「1.k」替换为「n.k」，仅替换首处编号；不匹配则返回 None。"""
-    m = re.match(r"^(\s*)1\s*([.．])\s*(\d+)(?!\d)(.*)$", txt, re.DOTALL)
+def _sub_leading_m_k_with_n_k(txt: str, n: int) -> Optional[str]:
+    """将行首「m.k」替换为「n.k」；已是 n.k 则返回 None。"""
+    m = re.match(r"^(\s*)(\d{1,2})\s*([.．])\s*(\d)(?!\d)(.*)$", txt, re.DOTALL)
     if not m:
         return None
-    prefix, dot, k, rest = m.group(1), m.group(2), m.group(3), m.group(4)
+    prefix, maj_s, dot, k, rest = m.group(1), m.group(2), m.group(3), m.group(4), m.group(5)
+    if int(maj_s) == int(n):
+        return None
     return f"{prefix}{n}{dot}{k}{rest}"
 
 
+# 兼容旧名
+def _should_renumber_leading_1_k_subheading_line(txt: str) -> bool:
+    return _should_renumber_leading_n_k_subheading_line(txt)
+
+
+def _sub_leading_1_k_with_n_k(txt: str, n: int) -> Optional[str]:
+    return _sub_leading_m_k_with_n_k(txt, n)
+
+
 def _patch_quality_subheadings_1_k_to_n_k_on_page(page, section_ordinal_1based: int) -> int:
-    """第 2 份及以后：将本页行首「1.1」「1.2」…小节标题改为「n.1」「n.2…」，与目录 n.1 一致。"""
+    """将本页行首「m.1」「m.2」…小节标题改为「n.1」「n.2…」，与目录 / 受检序号一致。"""
     if not fitz or page is None:
         return 0
     n = max(1, int(section_ordinal_1based))
     if n <= 1:
-        return 0
+        # 第 1 台：仍把误写成 2.k/3.k 的改回 1.k
+        pass
     changed = 0
     for _ in range(64):
         d = page.get_text("dict") or {}
@@ -5490,9 +6372,9 @@ def _patch_quality_subheadings_1_k_to_n_k_on_page(page, section_ordinal_1based: 
                 continue
             for line in block.get("lines", []):
                 txt = _line_text(line)
-                if not _should_renumber_leading_1_k_subheading_line(txt):
+                if not _should_renumber_leading_n_k_subheading_line(txt):
                     continue
-                new_txt = _sub_leading_1_k_with_n_k(txt, n)
+                new_txt = _sub_leading_m_k_with_n_k(txt, n)
                 if not new_txt or new_txt == txt:
                     continue
                 spans = line.get("spans") or []
@@ -5526,7 +6408,7 @@ def _patch_quality_subheadings_1_k_to_n_k_on_page(page, section_ordinal_1based: 
                 )
                 drawn = True
         except Exception as exc:
-            logger.debug("patch 1.k line: %s", exc)
+            logger.debug("patch m.k line: %s", exc)
         if not drawn:
             write_rect = fitz.Rect(
                 float(bbox.x0),
@@ -5552,28 +6434,21 @@ def apply_merged_quality_subheading_renumbers(
     toc_page_0based: int,
     section_page_counts: Sequence[int],
 ) -> None:
-    """各「三、检测结果」小节内：第 2 份起将行首「1.1」「1.2」…改为「n.1」「n.2…」与目录一致。"""
+    """按受检设备出现次序，将各页小节标题行首编号改为 n.k（与（n）受检编号一致）。"""
     if not fitz or not section_page_counts:
         return
-    start = int(toc_page_0based) + 1
-    acc = start
-    for i, cnt in enumerate(section_page_counts):
-        cnt = int(cnt)
-        if cnt <= 0:
-            acc += cnt
+    page_ordinal = _merged_result_page_device_ordinals(
+        doc,
+        toc_page_0based=toc_page_0based,
+        section_page_counts=section_page_counts,
+    )
+    for pi, ord_i in sorted(page_ordinal.items()):
+        if ord_i <= 0:
             continue
-        nsec = i + 1
-        if nsec <= 1:
-            acc += cnt
-            continue
-        for j in range(cnt):
-            pi2 = acc + j
-            if 0 <= pi2 < doc.page_count:
-                try:
-                    _patch_quality_subheadings_1_k_to_n_k_on_page(doc[pi2], nsec)
-                except Exception as exc:
-                    logger.warning("quality subheading patch page %s: %s", pi2, exc)
-        acc += cnt
+        try:
+            _patch_quality_subheadings_1_k_to_n_k_on_page(doc[pi], ord_i)
+        except Exception as exc:
+            logger.warning("patch quality subhead page %s: %s", pi, exc)
 
 
 def extract_cover_inspected_unit_fallback(pdf_path: str) -> str:
@@ -6205,6 +7080,7 @@ def _apply_summary_basic_info_label_row_overlay(
         return
     band = _merge_basic_info_value_cell_rect_single_row(page, r_lab)
     band = _merge_clamp_basic_info_value_rect(band, profile=profile)
+    band = _merge_inset_rect(band, 1.5)
     if band is None or band.is_empty:
         return
     _merge_overlay_erase_transparent(page, band, pad=0.12)
@@ -6229,18 +7105,18 @@ def _apply_summary_project_name_overlay(
     combined: str = "",
     single_report_mode: bool = False,
     profile: Optional["ReportTemplateProfile"] = None,
-) -> None:
-    """基本情况页：项目名称先合并为一行，按取值列宽高自适应换行（坐标逻辑不变）。"""
+):
+    """
+    基本情况页：项目名称合并为一段自然折行。
+    单行装不下时加高「项目名称」表格行（下移后续内容），保证两行完整显示。
+    返回可能被替换后的 page（调用方须继续用返回值）。
+    """
     if not fitz or page is None:
-        return
+        return page
     pfn = (combined or f"{(org or '').strip()}{(title or '').strip()}").strip()
     pfn = _normalize_rp_phrase_spacing(pfn)
-    prof_early = _resolve_report_template_profile(profile)
-    if pfn and len(pfn) > 36 and "及" in pfn and prof_early.basic_info_project_name_split_at_and:
-        head, tail = pfn.split("及", 1)
-        pfn = f"{head.rstrip()}\n及{tail.lstrip()}"
     if not pfn:
-        return
+        return page
     allow_fixed = not single_report_mode
     use_dsa_cap = allow_fixed
     r_lab = _merge_basic_info_project_name_label_rect(page)
@@ -6283,7 +7159,7 @@ def _apply_summary_project_name_overlay(
             max(float(org_w.y1), float(title_w.y1)),
         )
     if write_band is None or write_band.is_empty:
-        return
+        return page
     if single_report_mode:
         prof = _resolve_report_template_profile(profile)
         y_off = float(prof.basic_info_project_name_write_y_offset or 0.0)
@@ -6293,14 +7169,61 @@ def _apply_summary_project_name_overlay(
             float(prof.basic_info_table_x1) - 2.0,
             float(write_band.y1) + y_off,
         )
-        min_h = max(40.0, _MERGE_PT_XIAOSI * 3.0)
-        if float(write_band.y1 - write_band.y0) < min_h:
+        max_y1 = float(write_band.y1)
+        rr_comm = template_rects.get("summary_commission_no")
+        if rr_comm is not None and not rr_comm.is_empty:
+            max_y1 = min(max_y1 + 4.0, float(rr_comm.y0) - 1.5)
+        else:
+            y_next = _merge_basic_info_label_row_y0(page, "委托编号", y_lo=float(write_band.y0) - 2.0)
+            if y_next is not None:
+                max_y1 = min(max_y1 + 4.0, float(y_next) - 2.0)
+        if max_y1 > float(write_band.y0) + 10.0:
             write_band = fitz.Rect(
                 float(write_band.x0),
                 float(write_band.y0),
                 float(write_band.x1),
-                float(write_band.y0) + min_h,
+                max_y1,
             )
+
+        # 一行装不下：加高项目名称行，把后续表格/正文整体下移
+        need_h, n_lines = _merge_estimate_wrapped_text_height(
+            pfn,
+            float(write_band.width),
+            fontsize=_MERGE_PT_XIAOSI,
+        )
+        cur_h = max(1.0, float(write_band.y1) - float(write_band.y0))
+        pad = 8.0
+        if n_lines >= 2 and need_h + pad > cur_h + 0.8:
+            row_bottom = _merge_find_basic_info_project_name_row_bottom(page, r_lab)
+            if row_bottom is None:
+                row_bottom = float(write_band.y1)
+            dy = min(36.0, max(8.0, (need_h + pad) - cur_h))
+            doc = page.parent
+            if doc is not None:
+                pi = page.number
+                page = _merge_expand_basic_info_table_row(
+                    doc,
+                    pi,
+                    row_bottom=float(row_bottom),
+                    dy=dy,
+                )
+                _merge_offset_overlay_rects_below_y(
+                    template_rects, y_from=float(row_bottom), dy=dy
+                )
+                write_band = fitz.Rect(
+                    float(write_band.x0),
+                    float(write_band.y0),
+                    float(write_band.x1),
+                    float(write_band.y1) + dy,
+                )
+                # 同步模板项目名称框高度，便于后续逻辑
+                if rr_pn_full is not None and not rr_pn_full.is_empty:
+                    template_rects["summary_project_name"] = fitz.Rect(
+                        float(rr_pn_full.x0),
+                        float(rr_pn_full.y0),
+                        float(rr_pn_full.x1),
+                        float(rr_pn_full.y1) + dy,
+                    )
     if not single_report_mode:
         # 合成报告定版叠印微调：右移 12pt、上移 12pt（PyMuPDF y 向下为正）
         write_band = fitz.Rect(
@@ -6311,6 +7234,7 @@ def _apply_summary_project_name_overlay(
         )
     _merge_overlay_erase_transparent(page, write_band, pad=0.08)
     _merge_apply_redactions_overlay(page)
+    # 基本情况表与其它栏位一致：固定小四；长标题折行，不缩小字号
     _merge_overlay_write_text_html_style(
         page,
         write_band,
@@ -6321,6 +7245,7 @@ def _apply_summary_project_name_overlay(
         fontsize_floor=_MERGE_PT_XIAOSI,
         valign_top=True,
     )
+    return page
 
 
 def _apply_summary_page_overlay_boxes(
@@ -6358,8 +7283,20 @@ def _apply_summary_page_overlay_boxes(
     wrote = False
     if dcl_s and rr_dc is not None and not rr_dc.is_empty:
         rr_dc = _merge_adjust_basic_info_device_count_write_rect(rr_dc, profile=profile)
-        rr_dc = _merge_expand_device_count_erase_rect(rr_dc)
-        _merge_write_summary_overlay_cell(page, rr_dc, dcl_s, al=al, paragraph_layout=False)
+        # 擦除可略向下扩，避免模板残留；写入必须用原高度并顶对齐，否则「2 台」会垂直居中骑在下框线上
+        erase_dc = _merge_expand_device_count_erase_rect(rr_dc)
+        _merge_overlay_erase_transparent(page, _merge_inset_rect(erase_dc, 1.8), pad=0.12)
+        _merge_apply_redactions_overlay(page)
+        _merge_overlay_write_text_html_style(
+            page,
+            _merge_inset_rect(rr_dc, 1.0),
+            dcl_s,
+            align=al,
+            preferred_fontsize=_MERGE_PT_XIAOSI,
+            fontsize_floor=_MERGE_PT_XIAOSI,
+            paragraph_layout=False,
+            valign_top=True,
+        )
         wrote = True
 
     if eva_s:
@@ -6616,17 +7553,22 @@ def apply_merged_report_merge_overlay(
                     band.x1 = max(float(band.x1), float(ext.x1))
             band.x0 = max(float(band.x0), lx1)
             band.y0, band.y1 = float(band0.y0), float(band0.y1)
+            combined_pn = f"{(org or '').strip()}{(crt or '').strip()}".strip()
+            need_h, n_lines = _merge_estimate_wrapped_text_height(
+                combined_pn, float(band.width), fontsize=_MERGE_PT_SIHAO
+            )
+            if n_lines >= 2 and float(band.height) < need_h + 4.0:
+                y1_cap = _merge_cover_next_field_top(
+                    page, r_lab, ("受检单位", "检测类型", "报告日期", "受检编号")
+                )
+                if y1_cap is not None:
+                    band.y1 = max(float(band.y1), min(float(y1_cap) - 3.0, float(band.y0) + need_h + 6.0))
+                else:
+                    band.y1 = float(band.y0) + need_h + 6.0
             _merge_overlay_erase_transparent(page, band)
             _merge_apply_redactions_overlay(page)
-            _merge_write_cover_project_name_two_lines(
-                page,
-                r_lab,
-                band,
-                org or "",
-                crt or "",
-                align_center=ac,
-                page_index_0based=pi,
-                use_fixed_title_rect=True,
+            _merge_write_cover_project_name_natural(
+                page, band, combined_pn, align_center=ac
             )
 
     def _apply_summary(pi: int) -> None:
@@ -6658,7 +7600,7 @@ def apply_merged_report_merge_overlay(
                 pfn_title=crt,
                 profile=profile,
             )
-            _apply_summary_project_name_overlay(
+            page = _apply_summary_project_name_overlay(
                 page,
                 template_rects,
                 org_for_pfn or org,
@@ -6669,7 +7611,22 @@ def apply_merged_report_merge_overlay(
             )
             return
 
-        # 单份报告：坐标仅来自 template_parsed（pdf.fields / steps.pdfAnchor）；缺框时再搜 PDF 文本层。
+        # 单份报告：先处理项目名称（可能加高行并下移后续内容），再叠印台数/评价等。
+        page = _apply_summary_project_name_overlay(
+            page,
+            template_rects,
+            org_for_pfn or org,
+            crt,
+            al=al,
+            combined=pfn,
+            single_report_mode=True,
+            profile=profile,
+        )
+        rr_pn = template_rects.get("summary_project_name")
+        rr_pn_org = template_rects.get("summary_project_name_org")
+        rr_pn_title = template_rects.get("summary_project_name_title")
+        rr_dc = template_rects.get("summary_device_count")
+        rr_ev = template_rects.get("summary_evaluation")
         _apply_summary_page_overlay_boxes(
             page,
             rr_pn=rr_pn,
@@ -6743,20 +7700,14 @@ def apply_merged_report_merge_overlay(
                             fontsize_floor=_MERGE_PT_XIAOSI,
                         )
 
-        _apply_summary_project_name_overlay(
-            page,
-            template_rects,
-            org_for_pfn or org,
-            crt,
-            al=al,
-            combined=pfn,
-            single_report_mode=True,
-            profile=profile,
-        )
-
         prof = _resolve_report_template_profile(profile)
-        skip_htmlpdf_slots = frozenset(prof.htmlpdf_basic_info_pdf_field_ids or ())
-        if commission_no and "f1" not in skip_htmlpdf_slots:
+        skip_htmlpdf_slots = frozenset(
+            str(x).strip().lower() for x in (prof.htmlpdf_basic_info_pdf_field_ids or ()) if str(x).strip()
+        )
+        # 常见模板槽位：委托编号 / 受检单位地址（勿用写死的 f1/f3 误判）
+        _COMMISSION_PIDS = frozenset({"f1", "f3", "f5", "f6", "f20"})
+        _ADDRESS_PIDS = frozenset({"f3", "f5", "f7", "f8", "f22"})
+        if commission_no and not (skip_htmlpdf_slots & _COMMISSION_PIDS):
             rr_comm = template_rects.get("summary_commission_no")
             if rr_comm is not None and not rr_comm.is_empty:
                 band = _merge_inset_rect(rr_comm, 1.0)
@@ -6767,7 +7718,7 @@ def apply_merged_report_merge_overlay(
                     page,
                     band,
                     commission_no,
-                    align=al,
+                    align=ac,
                     preferred_fontsize=_MERGE_PT_XIAOSI,
                     fontsize_floor=_MERGE_PT_XIAOSI,
                 )
@@ -6776,14 +7727,15 @@ def apply_merged_report_merge_overlay(
                     page,
                     ("委托编号",),
                     commission_no,
-                    al=al,
+                    al=ac,
                     profile=profile,
                 )
-        if inspected_addr and "f3" not in skip_htmlpdf_slots:
+        if inspected_addr and not (skip_htmlpdf_slots & _ADDRESS_PIDS):
             rr_addr = template_rects.get("summary_inspected_org_address")
             if rr_addr is not None and not rr_addr.is_empty:
-                band = _merge_inset_rect(rr_addr, 1.0)
-                band = _merge_clamp_basic_info_value_rect(band, profile=profile)
+                # 先钳到取值列竖线右缘，再内缩，避免字段框偏左时压表格线
+                band = _merge_clamp_basic_info_value_rect(rr_addr, profile=profile)
+                band = _merge_inset_rect(band, 1.5)
                 _merge_overlay_erase_transparent(page, band, pad=0.12)
                 _merge_apply_redactions_overlay(page)
                 _merge_overlay_write_text_html_style(
@@ -6910,68 +7862,82 @@ def merge_report_pdfs_header_toc_sections(
             _draw_merged_toc_title_mu_lu(page, geom, font_main)
 
             y = float(geom["first_entry_baseline"])
+            chapter_i = 0
             for i, (pth, a, b) in enumerate(section_specs):
                 raw_title = titles[i] if i < len(titles) else ""
-                level1 = (raw_title or "").strip() or toc_chapter_title_from_report_pdf(pth)
-                major = _cn_ordinal_major(i)
-                left_main = f"{major}、{level1}"
-                dest_0 = nh + 1 + sum(section_page_counts[:i])
-                p_main_display = _report_body_page_from_physical_1based(
-                    section_start_physical_1based[i]
-                )
-                rect_m = _draw_toc_row_leader_rightnum(
-                    page,
-                    y,
-                    w,
-                    lm,
-                    rm,
-                    left_main,
-                    p_main_display,
-                    font_main,
-                    fs,
-                    num_right_x=num_rx_f,
-                )
-                link_plan.append((rect_m, dest_0))
-                y += line_step
-
-                minor_entries = _collect_merged_section_toc_minor_entries(
+                preferred = (raw_title or "").strip() or toc_chapter_title_from_report_pdf(pth)
+                dest_section_0 = nh + 1 + sum(section_page_counts[:i])
+                device_chapters = _collect_merged_section_device_chapters_for_toc(
                     pth,
                     a,
                     b,
-                    i + 1,
                     section_start_physical_1based[i],
+                    preferred_title=preferred,
                 )
-                if not minor_entries and (b - a) >= 2:
-                    minor_entries = [
-                        (
-                            f"{i + 1}.1  质量控制检测项目及结果",
-                            _report_body_page_from_physical_1based(
-                                section_start_physical_1based[i] + 1
-                            ),
-                            1,
-                        )
-                    ]
+                if not device_chapters:
+                    device_chapters = [(preferred or "检测设备", 0, [])]
                 sub_lm = float(geom.get("sub_left_x") or (lm + 22.0))
-                for sub_left, p_sub_display, page_offset in minor_entries:
+                for level1, off0, minors_raw in device_chapters:
                     if y > h - 72:
                         break
-                    if p_sub_display <= 0:
-                        continue
-                    dest_sub_0 = dest_0 + page_offset
-                    rect_s = _draw_toc_row_leader_rightnum(
+                    major = _cn_ordinal_major(chapter_i)
+                    left_main = f"{major}、{(level1 or preferred or '检测设备').strip()}"
+                    dest_0 = dest_section_0 + int(off0)
+                    p_main_display = _report_body_page_from_physical_1based(
+                        section_start_physical_1based[i] + int(off0)
+                    )
+                    rect_m = _draw_toc_row_leader_rightnum(
                         page,
                         y,
                         w,
-                        sub_lm,
+                        lm,
                         rm,
-                        sub_left,
-                        p_sub_display,
+                        left_main,
+                        p_main_display,
                         font_main,
                         fs,
                         num_right_x=num_rx_f,
                     )
-                    link_plan.append((rect_s, dest_sub_0))
+                    link_plan.append((rect_m, dest_0))
                     y += line_step
+
+                    n_ord = chapter_i + 1
+                    minor_entries: List[Tuple[str, int, int]] = [
+                        (f"{n_ord}.{mino}  {rest}", rp, off)
+                        for mino, rest, rp, off in minors_raw
+                    ]
+                    if not minor_entries and (b - a) >= 2:
+                        minor_entries = [
+                            (
+                                f"{n_ord}.1  质量控制检测项目及结果",
+                                _report_body_page_from_physical_1based(
+                                    section_start_physical_1based[i] + int(off0) + 1
+                                ),
+                                int(off0) + 1,
+                            )
+                        ]
+                    for sub_left, p_sub_display, page_offset in minor_entries:
+                        if y > h - 72:
+                            break
+                        if p_sub_display <= 0:
+                            continue
+                        dest_sub_0 = dest_section_0 + page_offset
+                        rect_s = _draw_toc_row_leader_rightnum(
+                            page,
+                            y,
+                            w,
+                            sub_lm,
+                            rm,
+                            sub_left,
+                            p_sub_display,
+                            font_main,
+                            fs,
+                            num_right_x=num_rx_f,
+                        )
+                        link_plan.append((rect_s, dest_sub_0))
+                        y += line_step
+
+                    chapter_i += 1
 
                 if y > h - 72:
                     break

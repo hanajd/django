@@ -1,0 +1,618 @@
+{
+  "schema": "f1_common_text_templates/v1",
+  "title": "常用文本模板",
+  "description": "管理预评价报告表中可复用的固定/分类文本模板（评价依据、评价目标、设备原理、工作流程等）",
+  "groups": [
+    {
+      "id": "evaluation_basis",
+      "title": "主要评价依据",
+      "path": "evaluation_basis",
+      "assemble": "evaluation_basis/assemble.json",
+      "items": [
+        {
+          "id": "01_section_header",
+          "title": "1.法律、法规、规章及规范性文件（标题）",
+          "path": "evaluation_basis/01_section_header.md"
+        },
+        {
+          "id": "02_laws",
+          "title": "1.1法律",
+          "path": "evaluation_basis/02_laws.md"
+        },
+        {
+          "id": "03_regulations",
+          "title": "1.2法规",
+          "path": "evaluation_basis/03_regulations.md"
+        },
+        {
+          "id": "04_rules",
+          "title": "1.3规章",
+          "path": "evaluation_basis/04_rules.md"
+        },
+        {
+          "id": "05_normative_docs",
+          "title": "1.4规范性文件",
+          "path": "evaluation_basis/05_normative_docs.md"
+        },
+        {
+          "id": "06_standards",
+          "title": "2.主要标准",
+          "path": "evaluation_basis/06_standards.md"
+        },
+        {
+          "id": "07_basic_materials",
+          "title": "3.基础资料",
+          "path": "evaluation_basis/07_basic_materials.md"
+        },
+        {
+          "id": "08_references",
+          "title": "4.参考资料",
+          "path": "evaluation_basis/08_references.md"
+        }
+      ]
+    },
+    {
+      "id": "evaluation_objective",
+      "title": "评价目标",
+      "path": "evaluation_objective",
+      "assemble": "evaluation_objective/assemble.json",
+      "items": [
+        {
+          "id": "01_principles",
+          "title": "①放射防护基本原则",
+          "path": "evaluation_objective/01_principles.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "table2",
+          "title": "表2 剂量限值（接①后）",
+          "path": "evaluation_objective/table2_dose_limits.json",
+          "kind": "fixed_table"
+        },
+        {
+          "id": "02_shielding",
+          "title": "②工作场所辐射屏蔽防护要求（固定）",
+          "path": "evaluation_objective/02_shielding.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "02_project_summary",
+          "title": "②综上（机房-剂量，可编辑；信息表自动生成）",
+          "path": "evaluation_objective/02_project_summary.md",
+          "kind": "from_info_sheet"
+        },
+        {
+          "id": "02_ws76",
+          "title": "②WS76透视防护区（可编辑；信息表自动生成）",
+          "path": "evaluation_objective/02_ws76.md",
+          "kind": "from_info_sheet"
+        },
+        {
+          "id": "room_dose_map",
+          "title": "②机房-剂量对应表（表格维护）",
+          "path": "evaluation_objective/room_dose_map.json",
+          "kind": "room_dose_map"
+        },
+        {
+          "id": "03_dose_target_intro",
+          "title": "③剂量管理目标值（固定文字）",
+          "path": "evaluation_objective/03_dose_target_intro.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "table3_default",
+          "title": "表3 管理目标值（接③后；正式取自信息表）",
+          "path": "evaluation_objective/table3_dose_targets.default.json",
+          "kind": "table_from_info_sheet"
+        },
+        {
+          "id": "04_safety_management",
+          "title": "④放射防护安全措施和放射防护管理",
+          "path": "evaluation_objective/04_safety_management.md",
+          "kind": "fixed"
+        }
+      ]
+    },
+    {
+      "id": "hazard_analysis",
+      "title": "职业病危害因素分析（组稿）",
+      "path": "hazard_analysis",
+      "assemble": "hazard_analysis/assemble.json",
+      "items": [
+        {
+          "id": "01_header",
+          "title": "1.正常运行（标题）",
+          "path": "hazard_analysis/01_header.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "01_1_header",
+          "title": "1.1工作原理（标题）",
+          "path": "hazard_analysis/01_1_header.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "01_2_header",
+          "title": "1.2工作流程（标题）",
+          "path": "hazard_analysis/01_2_header.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "workflow_room_separated_lead",
+          "title": "隔室操作流程引导句（可编辑；信息表填空）",
+          "path": "hazard_analysis/workflow_room_separated_lead.md",
+          "kind": "from_info_sheet"
+        },
+        {
+          "id": "workflow_dsa_lead",
+          "title": "DSA流程引导句（可编辑；信息表填空）",
+          "path": "hazard_analysis/workflow_dsa_lead.md",
+          "kind": "from_info_sheet"
+        },
+        {
+          "id": "workflow_ercp_lead",
+          "title": "ERCP流程引导句（可编辑；信息表填空）",
+          "path": "hazard_analysis/workflow_ercp_lead.md",
+          "kind": "from_info_sheet"
+        },
+        {
+          "id": "01_summary",
+          "title": "综上所述（可编辑；信息表填空）",
+          "path": "hazard_analysis/01_summary.md",
+          "kind": "from_info_sheet"
+        },
+        {
+          "id": "02_abnormal",
+          "title": "2.异常或事故状态（固定）",
+          "path": "hazard_analysis/02_abnormal.md",
+          "kind": "fixed"
+        }
+      ]
+    },
+    {
+      "id": "device_principles",
+      "title": "设备工作原理（库）",
+      "path": "device_principles",
+      "kind": "library",
+      "items": [
+        {
+          "id": "ct",
+          "title": "CT",
+          "path": "device_principles/ct.md",
+          "kind": "device_principle"
+        },
+        {
+          "id": "dr",
+          "title": "DR",
+          "path": "device_principles/dr.md",
+          "kind": "device_principle"
+        },
+        {
+          "id": "bmd",
+          "title": "全身骨密度仪",
+          "path": "device_principles/bmd.md",
+          "kind": "device_principle"
+        },
+        {
+          "id": "mammo_dr",
+          "title": "乳腺DR",
+          "path": "device_principles/mammo_dr.md",
+          "kind": "device_principle"
+        },
+        {
+          "id": "gi",
+          "title": "数字胃肠机",
+          "path": "device_principles/gi.md",
+          "kind": "device_principle"
+        },
+        {
+          "id": "ercp",
+          "title": "ERCP设备",
+          "path": "device_principles/ercp.md",
+          "kind": "device_principle"
+        },
+        {
+          "id": "dsa",
+          "title": "DSA",
+          "path": "device_principles/dsa.md",
+          "kind": "device_principle"
+        },
+        {
+          "id": "c_arm",
+          "title": "C形臂",
+          "path": "device_principles/c_arm.md",
+          "kind": "device_principle"
+        },
+        {
+          "id": "vehicle_dr",
+          "title": "车载DR",
+          "path": "device_principles/vehicle_dr.md",
+          "kind": "device_principle"
+        },
+        {
+          "id": "vehicle_ct",
+          "title": "车载CT",
+          "path": "device_principles/vehicle_ct.md",
+          "kind": "device_principle"
+        },
+        {
+          "id": "g_arm",
+          "title": "G形臂",
+          "path": "device_principles/g_arm.md",
+          "kind": "device_principle"
+        },
+        {
+          "id": "oral_cbct_combo",
+          "title": "口腔CBCT（四合一）",
+          "path": "device_principles/oral_cbct_combo.md",
+          "kind": "device_principle"
+        },
+        {
+          "id": "oral_cbct",
+          "title": "口腔CBCT",
+          "path": "device_principles/oral_cbct.md",
+          "kind": "device_principle"
+        },
+        {
+          "id": "intraoral",
+          "title": "口内牙片机",
+          "path": "device_principles/intraoral.md",
+          "kind": "device_principle"
+        },
+        {
+          "id": "dental_panorama",
+          "title": "牙科全景机",
+          "path": "device_principles/dental_panorama.md",
+          "kind": "device_principle"
+        },
+        {
+          "id": "mobile_dr",
+          "title": "移动DR",
+          "path": "device_principles/mobile_dr.md",
+          "kind": "device_principle"
+        },
+        {
+          "id": "dynamic_dr",
+          "title": "动态DR",
+          "path": "device_principles/dynamic_dr.md",
+          "kind": "device_principle"
+        }
+      ]
+    },
+    {
+      "id": "workflows",
+      "title": "设备工作流程（库·图题）",
+      "path": "workflows",
+      "kind": "library",
+      "items_glob": "workflows/*.md"
+    },
+    {
+      "id": "workplace_layout",
+      "title": "工作场所布局（组稿）",
+      "path": "workplace_layout",
+      "assemble": "workplace_layout/assemble.json",
+      "items": [
+        {
+          "id": "group_paragraph",
+          "title": "区位机房段落模板（信息表分组填空）",
+          "path": "workplace_layout/group_paragraph.md",
+          "kind": "from_info_sheet"
+        },
+        {
+          "id": "door_room",
+          "title": "机房防护门默认形式",
+          "path": "workplace_layout/door_room_default.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "door_control",
+          "title": "控制室防护门默认形式",
+          "path": "workplace_layout/door_control_default.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "beam",
+          "title": "有用线束朝向（默认占位，建议按机房改）",
+          "path": "workplace_layout/beam_default.md",
+          "kind": "from_info_sheet"
+        },
+        {
+          "id": "summary",
+          "title": "布局符合性总结（固定）",
+          "path": "workplace_layout/summary.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "room_size_limits",
+          "title": "机房面积/单边限值（GBZ130表2，表格维护）",
+          "path": "workplace_layout/room_size_limits.json",
+          "kind": "room_size_limits"
+        }
+      ]
+    },
+    {
+      "id": "protection_measures",
+      "title": "防护设施和措施",
+      "path": "protection_measures",
+      "assemble": "protection_measures/assemble.json",
+      "items": [
+        {
+          "id": "zoning_intro",
+          "title": "放射防护分区 · 导语（固定，见表6）",
+          "path": "protection_measures/zoning_intro.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "table6",
+          "title": "表6 本项目放射防护分级设计情况及评价",
+          "path": "protection_measures/table6.json",
+          "kind": "report_table",
+          "tables_key": "protection_zoning_tables",
+          "table_index": 0
+        },
+        {
+          "id": "shielding_intro",
+          "title": "屏蔽设施 · 导语（固定，见表7）",
+          "path": "protection_measures/shielding_intro.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "table7",
+          "title": "表7 本项目X射线设备机房屏蔽设计情况及评价",
+          "path": "protection_measures/table7.json",
+          "kind": "report_table",
+          "tables_key": "shielding_tables",
+          "table_index": 0
+        },
+        {
+          "id": "shielding_standards",
+          "title": "表7标准要求（GBZ130铅当量，按设备类型）",
+          "path": "protection_measures/shielding_standards.json",
+          "kind": "shielding_standards"
+        },
+        {
+          "id": "shielding_after",
+          "title": "屏蔽设施 · 表后总结/建议/要求（固定）",
+          "path": "protection_measures/shielding_after.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "safety_intro",
+          "title": "安全防护措施 · 导语（固定，见表8）",
+          "path": "protection_measures/safety_intro.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "table8",
+          "title": "表8 本项目X射线设备机房安全防护措施设计情况评价",
+          "path": "protection_measures/table8.json",
+          "kind": "report_table",
+          "tables_key": "safety_protection_tables",
+          "table_index": 0
+        },
+        {
+          "id": "style_warning_sign",
+          "title": "图13 电离辐射警告标志（样式）",
+          "path": "protection_measures/style_figures/style_warning_sign.png",
+          "kind": "style_figure"
+        },
+        {
+          "id": "style_lightbox_warning",
+          "title": "图14 灯箱处可视警示语句（样式）",
+          "path": "protection_measures/style_figures/style_lightbox_warning.png",
+          "kind": "style_figure"
+        },
+        {
+          "id": "style_notice_board",
+          "title": "图15 放射防护注意事项告知栏（样式）",
+          "path": "protection_measures/style_figures/style_notice_board.png",
+          "kind": "style_figure"
+        },
+        {
+          "id": "ppe_intro",
+          "title": "个人防护用品 · 导语（固定，见表9/表10）",
+          "path": "protection_measures/ppe_intro.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "table9",
+          "title": "表9 个人防护用品和辅助设施配置要求",
+          "path": "protection_measures/table9.json",
+          "kind": "report_table",
+          "tables_key": "personal_protective_equipment_tables",
+          "table_index": 0
+        },
+        {
+          "id": "table10",
+          "title": "表10 本项目个人防护用品和辅助设施配置计划",
+          "path": "protection_measures/table10.json",
+          "kind": "table_from_info_sheet",
+          "tables_key": "personal_protective_equipment_tables",
+          "table_index": 1
+        },
+        {
+          "id": "ppe_after",
+          "title": "个人防护用品 · 表后总结（固定）",
+          "path": "protection_measures/ppe_after.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "waste_disposal",
+          "title": "放射性废物处置（固定）",
+          "path": "protection_measures/waste_disposal.md",
+          "kind": "fixed"
+        }
+      ]
+    },
+    {
+      "id": "health_impact",
+      "title": "健康影响评价",
+      "path": "health_impact",
+      "assemble": "health_impact/assemble.json",
+      "items": [
+        {
+          "id": "imaging_intro",
+          "title": "正常情况 ·（1）X射线影像诊断导语",
+          "path": "health_impact/imaging_intro.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "table11",
+          "title": "表11 本项目13台设备（X射线影像诊断）预期工作量",
+          "path": "health_impact/table11.json",
+          "kind": "report_table",
+          "tables_key": "normal_condition_tables",
+          "table_index": 0
+        },
+        {
+          "id": "table12",
+          "title": "表12 本项目X射线影像诊断工作人员及公众年受照剂量估算情况",
+          "path": "health_impact/table12.json",
+          "kind": "report_table",
+          "tables_key": "normal_condition_tables",
+          "table_index": 1
+        },
+        {
+          "id": "imaging_after",
+          "title": "正常情况 ·（1）影像诊断小结",
+          "path": "health_impact/imaging_after.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "interventional_intro",
+          "title": "正常情况 ·（2）介入放射学导语",
+          "path": "health_impact/interventional_intro.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "table13",
+          "title": "表13 本项目3台介入设备（介入放射学）预期工作量",
+          "path": "health_impact/table13.json",
+          "kind": "report_table",
+          "tables_key": "normal_condition_tables",
+          "table_index": 2
+        },
+        {
+          "id": "table14",
+          "title": "表14 本项目透视防护区工作人员年有效剂量估算结果一览表",
+          "path": "health_impact/table14.json",
+          "kind": "report_table",
+          "tables_key": "normal_condition_tables",
+          "table_index": 3
+        },
+        {
+          "id": "table15",
+          "title": "表15 本项目ERCP机房外和DSA机房外人员年有效剂量估算结果表",
+          "path": "health_impact/table15.json",
+          "kind": "report_table",
+          "tables_key": "normal_condition_tables",
+          "table_index": 4
+        },
+        {
+          "id": "interventional_after",
+          "title": "正常情况 ·（2）介入结论",
+          "path": "health_impact/interventional_after.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "abnormal",
+          "title": "异常情况下（固定）",
+          "path": "health_impact/abnormal.md",
+          "kind": "fixed"
+        }
+      ]
+    },
+    {
+      "id": "radiation_management",
+      "title": "放射防护管理",
+      "path": "radiation_management",
+      "assemble": "radiation_management/assemble.json",
+      "items": [
+        {
+          "id": "organization",
+          "title": "组织机构（固定）",
+          "path": "radiation_management/organization.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "management_intro",
+          "title": "管理制度及措施 · 导语",
+          "path": "radiation_management/management_intro.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "table16",
+          "title": "表16 本项目放射防护管理制度设置计划及评价",
+          "path": "radiation_management/table16.json",
+          "kind": "report_table",
+          "tables_key": "management_system_tables",
+          "table_index": 0
+        },
+        {
+          "id": "management_after",
+          "title": "管理制度及措施 · 表后建议",
+          "path": "radiation_management/management_after.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "staff_intro",
+          "title": "放射工作人员配置 · 导语（人数可替换）",
+          "path": "radiation_management/staff_intro.md",
+          "kind": "from_info_sheet"
+        },
+        {
+          "id": "table17",
+          "title": "表17 本项目放射工作人员结构配备计划及评价",
+          "path": "radiation_management/table17.json",
+          "kind": "table_from_info_sheet",
+          "tables_key": "staff_management_tables",
+          "table_index": 0
+        },
+        {
+          "id": "staff_after",
+          "title": "放射工作人员配置 · 表后结论",
+          "path": "radiation_management/staff_after.md",
+          "kind": "fixed"
+        },
+        {
+          "id": "table18",
+          "title": "表18 个人剂量管理计划情况及评价",
+          "path": "radiation_management/table18.json",
+          "kind": "report_table",
+          "tables_key": "personal_monitoring_tables",
+          "table_index": 0
+        },
+        {
+          "id": "table19",
+          "title": "表19 职业健康管理计划情况及评价",
+          "path": "radiation_management/table19.json",
+          "kind": "report_table",
+          "tables_key": "health_surveillance_tables",
+          "table_index": 0
+        },
+        {
+          "id": "table20",
+          "title": "表20 放射防护培训计划情况及评价",
+          "path": "radiation_management/table20.json",
+          "kind": "report_table",
+          "tables_key": "radiation_training_tables",
+          "table_index": 0
+        },
+        {
+          "id": "table21",
+          "title": "表21 档案管理计划情况及评价",
+          "path": "radiation_management/table21.json",
+          "kind": "report_table",
+          "tables_key": "archive_management_tables",
+          "table_index": 0
+        },
+        {
+          "id": "conclusion",
+          "title": "结论与建议（信息表组稿）",
+          "path": "radiation_management/conclusion.md",
+          "kind": "from_info_sheet"
+        }
+      ]
+    }
+  ]
+}

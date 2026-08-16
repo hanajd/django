@@ -1,0 +1,570 @@
+{
+  "schema": "embedded_generic_table/v1",
+  "title": "表17 本项目放射工作人员结构配备计划及评价",
+  "source": "radiation_management",
+  "from_info_sheet": false,
+  "column_count": 5,
+  "column_fractions": [
+    0.0,
+    0.28,
+    0.52,
+    0.62,
+    0.9,
+    1.0
+  ],
+  "band_count": 20,
+  "row_min_height_pt": 16.0,
+  "repeat_header_on_new_page": true,
+  "header_band_count": 2,
+  "staff_count": 59,
+  "rows": [
+    {
+      "band": 0,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "开展工作类型（设备类型）",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 2,
+          "text": "拟配备的人员情况",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "《放射诊疗管理规定》相关要求",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "评价",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 1,
+      "cells": [
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "工作类别",
+          "align": "center"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "人数",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 2,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 3,
+          "col_span": 1,
+          "text": "X射线影像诊断【CT、DR、数字胃肠机、全身骨密度仪、乳腺DR】",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "大学本科以上学历或中级以上的放射影像医师",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4人",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 3,
+          "col_span": 1,
+          "text": "第七条（四）开展X射线影像诊断的，应具有专业的放射影像医师。",
+          "align": "left"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 3,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 3,
+      "cells": [
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "其他学历和职称放射影像医师",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "6人",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 4,
+      "cells": [
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射影像技师",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "16人",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 5,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 5,
+          "col_span": 1,
+          "text": "X射线影像诊断\n【C形臂】",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射影像医师",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "影像中心人员兼职",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 5,
+          "col_span": 1,
+          "text": "第七条（四）开展X射线影像诊断的，应具有专业的放射影像医师。",
+          "align": "left"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 5,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 6,
+      "cells": [
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射影像技师",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2人",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 7,
+      "cells": [
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "骨外科医师",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4人",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 8,
+      "cells": [
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "麻醉医师",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2人",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 9,
+      "cells": [
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "护理人员",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2人",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 10,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 4,
+          "col_span": 1,
+          "text": "介入放射学\n【ERCP】",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "大学本科以上学历或中级以上的放射影像医师",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "影像中心人员兼职",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 4,
+          "col_span": 1,
+          "text": "第七条（三）开展介入放射学工作的，应当具有：\n大学本科以上学历或中级以上专业技术职务任职资格的放射影像医师；\n放射影像技师；\n相关内、外科的专业技术人员。",
+          "align": "left"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 4,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 11,
+      "cells": [
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射影像技师",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2人",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 12,
+      "cells": [
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "内科医师",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4人",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 13,
+      "cells": [
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "护理人员",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4人",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 14,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 5,
+          "col_span": 1,
+          "text": "介入放射学\n【DSA】",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "大学本科以上学历或中级以上的放射影像医师",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "影像中心人员兼职",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 5,
+          "col_span": 1,
+          "text": "第七条（三）开展介入放射学工作的，应当具有：\n大学本科以上学历或中级以上专业技术职务任职资格的放射影像医师；\n放射影像技师；\n相关内、外科的专业技术人员。",
+          "align": "left"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 5,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 15,
+      "cells": [
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射影像技师",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2人",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 16,
+      "cells": [
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "外科医师",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4人",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 17,
+      "cells": [
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "内科医师",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4人",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 18,
+      "cells": [
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "护理人员",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3人",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 19,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 2,
+          "text": "共计",
+          "align": "center"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "59人",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "/",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "/",
+          "align": "center"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "schema": "f1_room_dose_map/v1",
+  "description": "机房类型与周围剂量当量率限值对应；用于自动生成「综上」段。可在常用模板中编辑。",
+  "labels": {
+    "ct": "CT机房",
+    "bmd": "全身骨密度仪机房",
+    "mammo_dr": "乳腺DR机房",
+    "gi": "数字胃肠机房",
+    "ercp": "ERCP机房",
+    "c_arm": "C形臂机房",
+    "dsa": "DSA机房",
+    "dr": "DR机房",
+    "g_arm": "G形臂机房",
+    "oral_cbct": "口腔CBCT机房",
+    "intraoral": "口内牙片机房",
+    "dental_panorama": "牙科全景机房",
+    "vehicle_ct": "车载CT机房",
+    "vehicle_dr": "车载DR机房",
+    "mobile_dr": "移动DR机房",
+    "dynamic_dr": "动态DR机房"
+  },
+  "dose_25_keys": ["dr", "mobile_dr", "vehicle_dr", "dynamic_dr"],
+  "dual_mode_fluoro": ["gi", "ercp"],
+  "dual_mode_photo": ["gi", "ercp"],
+  "ws76_keys": ["dsa", "ercp"],
+  "order_2_5": ["ct", "bmd", "mammo_dr", "gi", "ercp", "c_arm", "dsa", "g_arm", "oral_cbct", "intraoral", "dental_panorama", "vehicle_ct"],
+  "order_25": ["dr", "gi", "ercp", "mobile_dr", "vehicle_dr", "dynamic_dr"],
+  "notes": {
+    "2.5μSv/h": "GBZ 130-2020 §6.3.1 a/b：透视类及 CT/乳腺/牙科/骨密度等",
+    "25μSv/h": "GBZ 130-2020 §6.3.1 c：短时高剂量率摄影（DR/CR/屏片等）",
+    "dual_mode": "数字胃肠、ERCP 等同时具备透视/摄影时，两类限值各写一条并标注模式",
+    "ws76": "DSA、ERCP 等计入透视防护区 ≤400μSv/h",
+    "编辑说明": "请在「常用模板」中以表格维护：是/否、排序、增删行；磁盘仍保存为本 JSON"
+  }
+}

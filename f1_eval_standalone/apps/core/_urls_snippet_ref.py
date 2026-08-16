@@ -1,0 +1,152 @@
+﻿"""
+Web 路由配置
+前后端不分离的页面路由
+"""
+from django.urls import path
+from apps.core import views
+from apps.core import f1_eval_views
+
+urlpatterns = [
+    path('static/preview/<str:name>', views.pipeline_preview_static, name='pipeline_preview_static'),
+    # 认证路由
+    path('login/', views.login_view, name='login'),
+    path('logout/', views.logout_view, name='logout'),
+    
+    # 主页和仪表盘
+    path('', views.dashboard, name='dashboard'),
+    path('help/usage/<slug:page>/', views.backend_usage_guide, name='backend_usage_guide_page'),
+    path('help/usage/', views.backend_usage_guide, name='backend_usage_guide'),
+    path('help/usage/tour/start/', views.usage_workflow_tour_start, name='usage_workflow_tour_start'),
+    path('help/usage/tour/finish/', views.usage_workflow_tour_finish, name='usage_workflow_tour_finish'),
+    path('help/coordinator/<slug:page>/', views.coordinator_usage_guide, name='coordinator_usage_guide_page'),
+    path('help/coordinator/', views.coordinator_usage_guide, name='coordinator_usage_guide'),
+    
+    # 用户管理路由
+    path('database/devices/', views.database_device_list, name='database_device_list'),
+    path('database/devices/checkout-options/', views.database_device_checkout_options, name='database_device_checkout_options'),
+    path('users/', views.user_list, name='user_list'),
+    path('users/create/', views.user_create, name='user_create'),
+    path('users/invite/create/', views.user_invite_create, name='user_invite_create'),
+    path('users/invite/revoke/', views.user_invite_revoke, name='user_invite_revoke'),
+    path('users/invite/<str:token>/', views.user_invite_register, name='user_invite_register'),
+    path('users/<int:user_id>/edit/', views.user_edit, name='user_edit'),
+    path('users/<int:user_id>/delete/', views.user_delete, name='user_delete'),
+    path('account/profile/', views.account_profile, name='account_profile'),
+    path('account/signatures/', views.signature_manage, name='signature_manage'),
+    path('users/<int:user_id>/signatures/', views.signature_manage, name='user_signature_manage'),
+    
+    # 角色管理路由
+    path('roles/', views.role_list, name='role_list'),
+    path('roles/create/', views.role_create, name='role_create'),
+    path('roles/<int:role_id>/edit/', views.role_edit, name='role_edit'),
+    path('roles/<int:role_id>/delete/', views.role_delete, name='role_delete'),
+    
+    # 菜单管理路由
+    path('menus/', views.menu_list, name='menu_list'),
+    path('menus/create/', views.menu_create, name='menu_create'),
+    path('menus/<int:menu_id>/edit/', views.menu_edit, name='menu_edit'),
+    path('menus/<int:menu_id>/delete/', views.menu_delete, name='menu_delete'),
+
+    # 超级管理员调试设置（PDF 回填着色等）
+    path('settings/debug/', views.system_debug_settings, name='system_debug_settings'),
+    path('settings/app-ota/', views.app_ota_settings, name='app_ota_settings'),
+
+    # 文件库与处理流程
+    path('files/', views.file_library, name='file_library'),
+    path('files/projects/', views.library_projects, name='library_projects'),
+    path(
+        'files/projects/create-wizard-options/',
+        views.library_project_create_wizard_options,
+        name='library_project_create_wizard_options',
+    ),
+    path(
+        'files/projects/mock-inspection-submit/',
+        views.library_project_mock_inspection_submit,
+        name='library_project_mock_inspection_submit',
+    ),
+    path('files/commission-manage/', views.commission_manage, name='commission_manage'),
+    path('files/hub/site-records/', views.workflow_hub_site_records, name='workflow_hub_site_records'),
+    path('files/hub/report-generate/', views.workflow_hub_report_generate, name='workflow_hub_report_generate'),
+    path('files/hub/review-sign/', views.workflow_hub_review_sign, name='workflow_hub_review_sign'),
+    path('files/hub/report-download/', views.workflow_hub_report_download, name='workflow_hub_report_download'),
+    path('files/hospital-info/', views.hospital_info_manage, name='hospital_info_manage'),
+    path(
+        'files/biz-operation-logs/',
+        views.biz_operation_logs_api,
+        name='biz_operation_logs_api',
+    ),
+    path(
+        'files/hospital-info/api/equipment/',
+        views.hospital_info_equipment_api,
+        name='hospital_info_equipment_api',
+    ),
+    path(
+        'files/hospital-info/api/equipment/history/',
+        views.hospital_info_equipment_history_api,
+        name='hospital_info_equipment_history_api',
+    ),
+    path('files/task-management/', views.library_task_management, name='library_task_management'),
+    path('files/library-tasks/', views.redirect_to_task_management),
+    path('files/tasks/', views.redirect_to_task_management),
+    path('files/<int:pk>/delete/', views.file_library_delete, name='file_library_delete'),
+    path('files/batch-delete/', views.file_library_batch_delete, name='file_library_batch_delete'),
+    path('files/<int:pk>/preview/', views.file_preview, name='file_preview'),
+    path(
+        'files/<int:pk>/retained-photos/',
+        views.site_record_retained_photos,
+        name='site_record_retained_photos',
+    ),
+    path('files/<int:pk>/raw/', views.file_library_raw, name='file_library_raw'),
+    path('files/<int:pk>/download/', views.file_library_download, name='file_library_download'),
+    path('files/process/', views.process_pipeline, name='process_pipeline'),
+    path('files/htmlpdf/', views.htmlpdf_editor, name='htmlpdf_editor'),
+    path('files/htmlpdf/editor/<int:pk>/', views.htmlpdf_editor_open, name='htmlpdf_editor_open'),
+    path('files/htmlpdf/template/<int:pk>/', views.htmlpdf_template_file, name='htmlpdf_template_file'),
+    path('files/htmlpdf/api/template-pdfs/', views.htmlpdf_api_template_pdfs, name='htmlpdf_api_template_pdfs'),
+    path('files/htmlpdf/api/template-jsons/', views.htmlpdf_api_template_jsons, name='htmlpdf_api_template_jsons'),
+    path('files/htmlpdf/api/import-json-from-library/', views.htmlpdf_api_import_json_from_library, name='htmlpdf_api_import_json_from_library'),
+    path('files/htmlpdf/api/use-template-pdf/', views.htmlpdf_api_use_template_pdf, name='htmlpdf_api_use_template_pdf'),
+    path('files/htmlpdf/api/upload-pdf/', views.htmlpdf_api_upload_pdf, name='htmlpdf_api_upload_pdf'),
+    path('files/htmlpdf/api/import-json/', views.htmlpdf_api_import_json, name='htmlpdf_api_import_json'),
+    path('files/htmlpdf/api/export-json/', views.htmlpdf_api_export_json, name='htmlpdf_api_export_json'),
+    path('files/htmlpdf/api/export-matrix-json/', views.htmlpdf_api_export_matrix_json, name='htmlpdf_api_export_matrix_json'),
+    path('files/htmlpdf/api/export-frontend-json/', views.htmlpdf_api_export_frontend_json, name='htmlpdf_api_export_frontend_json'),
+    path('files/htmlpdf/api/save-pdf/', views.htmlpdf_api_save_pdf, name='htmlpdf_api_save_pdf'),
+    path('files/htmlpdf/api/table-cell-at-point/', views.htmlpdf_api_table_cell_at_point, name='htmlpdf_api_table_cell_at_point'),
+    path('files/htmlpdf/api/auto-red-text-boxes/', views.htmlpdf_api_auto_red_text_boxes, name='htmlpdf_api_auto_red_text_boxes'),
+    path('files/htmlpdf/api/assign-template-sections/', views.htmlpdf_api_assign_template_sections, name='htmlpdf_api_assign_template_sections'),
+    path('files/htmlpdf/api/report-task-context/', views.htmlpdf_api_report_task_context, name='htmlpdf_api_report_task_context'),
+    path('files/htmlpdf/api/site-template-bundle/', views.htmlpdf_api_site_template_bundle, name='htmlpdf_api_site_template_bundle'),
+    path('files/temp/<str:batch_id>/', views.file_temp_batch, name='file_temp_batch'),
+
+    # F.1 预评价报告表制作
+    path('files/f1-eval/', f1_eval_views.f1_eval_workbench, name='f1_eval_workbench'),
+    path('files/f1-eval/api/section/', f1_eval_views.f1_eval_api_section, name='f1_eval_api_section'),
+    path('files/f1-eval/api/save-section/', f1_eval_views.f1_eval_api_save_section, name='f1_eval_api_save_section'),
+    path('files/f1-eval/api/table/', f1_eval_views.f1_eval_api_table, name='f1_eval_api_table'),
+    path('files/f1-eval/api/save-table/', f1_eval_views.f1_eval_api_save_table, name='f1_eval_api_save_table'),
+    path('files/f1-eval/api/table-op/', f1_eval_views.f1_eval_api_table_op, name='f1_eval_api_table_op'),
+    path('files/f1-eval/api/add-table/', f1_eval_views.f1_eval_api_add_table, name='f1_eval_api_add_table'),
+    path('files/f1-eval/api/delete-table/', f1_eval_views.f1_eval_api_delete_table, name='f1_eval_api_delete_table'),
+    path('files/f1-eval/api/import-excel/', f1_eval_views.f1_eval_api_import_excel, name='f1_eval_api_import_excel'),
+    path('files/f1-eval/api/export-excel/', f1_eval_views.f1_eval_api_export_excel, name='f1_eval_api_export_excel'),
+    path('files/f1-eval/api/upload-figure/', f1_eval_views.f1_eval_api_upload_figure, name='f1_eval_api_upload_figure'),
+    path('files/f1-eval/api/save-figure-caption/', f1_eval_views.f1_eval_api_save_figure_caption, name='f1_eval_api_save_figure_caption'),
+    path('files/f1-eval/api/delete-figure/', f1_eval_views.f1_eval_api_delete_figure, name='f1_eval_api_delete_figure'),
+    path('files/f1-eval/api/file/', f1_eval_views.f1_eval_api_file, name='f1_eval_api_file'),
+    path('files/f1-eval/api/save-file/', f1_eval_views.f1_eval_api_save_file, name='f1_eval_api_save_file'),
+    path('files/f1-eval/api/common-templates/', f1_eval_views.f1_eval_api_common_templates, name='f1_eval_api_common_templates'),
+    path('files/f1-eval/api/reset-common-template/', f1_eval_views.f1_eval_api_reset_common_template, name='f1_eval_api_reset_common_template'),
+    path('files/f1-eval/api/save-format/', f1_eval_views.f1_eval_api_save_format_fields, name='f1_eval_api_save_format_fields'),
+    path('files/f1-eval/api/preview-format/', f1_eval_views.f1_eval_api_preview_format, name='f1_eval_api_preview_format'),
+    path('files/f1-eval/api/table-grid/', f1_eval_views.f1_eval_api_table_grid, name='f1_eval_api_table_grid'),
+    path('files/f1-eval/api/upload-info-sheet/', f1_eval_views.f1_eval_api_upload_info_sheet, name='f1_eval_api_upload_info_sheet'),
+    path('files/f1-eval/api/upload-attachments/', f1_eval_views.f1_eval_api_upload_attachments, name='f1_eval_api_upload_attachments'),
+    path('files/f1-eval/api/update-attachment/', f1_eval_views.f1_eval_api_update_attachment, name='f1_eval_api_update_attachment'),
+    path('files/f1-eval/api/delete-attachment/', f1_eval_views.f1_eval_api_delete_attachment, name='f1_eval_api_delete_attachment'),
+    path('files/f1-eval/api/generate/', f1_eval_views.f1_eval_api_generate, name='f1_eval_api_generate'),
+    path('files/f1-eval/media/attachments/<str:filename>', f1_eval_views.f1_eval_attachment_media, name='f1_eval_attachment_media'),
+    path('files/f1-eval/media/assets/<str:filename>', f1_eval_views.f1_eval_asset_media, name='f1_eval_asset_media'),
+    path('files/f1-eval/download/<str:kind>/', f1_eval_views.f1_eval_download, name='f1_eval_download'),
+]
+

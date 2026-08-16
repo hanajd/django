@@ -15,6 +15,7 @@ from apps.core.hospital_info_service import (
     collect_library_tasks_for_project_equipments,
     equipment_display_status,
     equipment_has_report_template_config,
+    equipment_project_bind_template_groups,
     equipment_project_bind_type_options,
     equipments_for_org_view,
     library_tasks_for_equipment_binding,
@@ -319,7 +320,7 @@ def available_equipments_for_project(
     scope_org: CommissionOrganization | None = None,
     fl_path: str = "",
 ) -> QuerySet[CommissionOrgEquipment]:
-    """当前工作台组织范围内、尚未加入本项目的设备（上级含下级科室/院区）。"""
+    """当前工作台组织范围内可选设备（上级含下级科室/院区；已加入的仍可再次加入）。"""
     scope = resolve_workbench_equipment_scope_org(
         project, scope_org=scope_org, fl_path=fl_path
     )
@@ -376,50 +377,80 @@ def preview_equipment_rows_for_org(org: CommissionOrganization) -> list[dict]:
     return rows
 
 
+def _project_bound_report_task_ids(project: LibraryProject) -> set[int]:
+    """本次委托已挂载的报告模板 id（全局去重，避免同模板冲突）。"""
+    return {
+        int(tid)
+        for tid in LibraryProjectEquipment.objects.filter(
+            project=project, report_task_id__isnull=False
+        ).values_list("report_task_id", flat=True)
+        if tid
+    }
+
+
+def _filter_template_groups_excluding_bound(
+    groups: list[dict], bound_task_ids: set[int]
+) -> list[dict]:
+    """去掉已挂载的报告模板；某检测类型下无剩余模板则整组省略。"""
+    out: list[dict] = []
+    for g in groups:
+        templates = [
+            t
+            for t in (g.get("templates") or [])
+            if int(t.get("report_task_id") or 0) not in bound_task_ids
+        ]
+        if not templates:
+            continue
+        out.append(
+            {
+                "inspection_type": g["inspection_type"],
+                "templates": templates,
+            }
+        )
+    return out
+
+
 def available_equipment_rows_for_project(
     project: LibraryProject,
     *,
     scope_org: CommissionOrganization | None = None,
     fl_path: str = "",
 ) -> list[dict]:
-    """可加入本次委托的设备行（含尚未加入的检测类型选项）。"""
-    bound_pairs = {
-        (eid, (itype or "").strip())
-        for eid, itype in LibraryProjectEquipment.objects.filter(project=project).values_list(
-            "equipment_id", "inspection_type"
-        )
-    }
+    """可加入本次委托的设备行（含各检测类型下尚未挂载的报告模板）。"""
+    import json
+
+    bound_task_ids = _project_bound_report_task_ids(project)
     rows: list[dict] = []
     for eq in available_equipments_for_project(
         project, scope_org=scope_org, fl_path=fl_path
     ):
         if not equipment_has_report_template_config(eq):
             continue
-        type_options = [
-            o
-            for o in equipment_project_bind_type_options(eq)
-            if (eq.pk, o["inspection_type"]) not in bound_pairs
-        ]
-        if not type_options:
+        groups = _filter_template_groups_excluding_bound(
+            equipment_project_bind_template_groups(eq), bound_task_ids
+        )
+        if not groups:
             continue
+        type_options = [
+            {
+                "inspection_type": g["inspection_type"],
+                "report_task_id": g["templates"][0]["report_task_id"],
+                "task_label": g["templates"][0]["task_label"],
+                "templates": g["templates"],
+            }
+            for g in groups
+        ]
         rows.append(
             {
                 "equipment": eq,
+                "template_groups": groups,
+                "template_groups_json": json.dumps(groups, ensure_ascii=False),
                 "type_options": type_options,
-                "default_inspection_type": type_options[0]["inspection_type"],
+                "default_inspection_type": groups[0]["inspection_type"],
+                "device_type_label": (eq.device_type or "").strip(),
             }
         )
     return rows
-
-
-def _project_equipment_link_exists(
-    project: LibraryProject, equipment_id: int, inspection_type: str
-) -> bool:
-    return LibraryProjectEquipment.objects.filter(
-        project=project,
-        equipment_id=equipment_id,
-        inspection_type=inspection_type,
-    ).exists()
 
 
 def bind_equipments_to_project(
@@ -428,10 +459,15 @@ def bind_equipments_to_project(
     user: User,
     *,
     equipment_inspection_types: dict[int, str] | None = None,
+    equipment_report_task_ids: dict[int, list[int]] | None = None,
     scope_org: CommissionOrganization | None = None,
     fl_path: str = "",
 ) -> tuple[int, list[str]]:
-    """将设备加入项目委托，并同步关联任务模板链到项目。"""
+    """将设备加入项目委托，并同步关联任务模板链到项目。
+
+    同一设备可挂多个检测类型/模板；同一报告模板在本项目内不可重复挂载
+    （避免现场任务链冲突）。
+    """
     if not equipment_ids:
         return 0, ["请至少选择一台设备"]
     hospital = hospital_for_project(project)
@@ -452,6 +488,8 @@ def bind_equipments_to_project(
     }
     allowed_ids = set(allowed_rows.keys())
     type_map = equipment_inspection_types or {}
+    task_map = equipment_report_task_ids or {}
+    bound_task_ids = _project_bound_report_task_ids(project)
     errors: list[str] = []
     added = 0
     for eid in equipment_ids:
@@ -460,51 +498,85 @@ def bind_equipments_to_project(
         ).first()
         label = eq.name if eq else str(eid)
         if eid not in allowed_ids:
-            itype_try = (type_map.get(eid) or "").strip()
-            if eq and itype_try and _project_equipment_link_exists(project, eid, itype_try):
-                errors.append(f"「{label}」（{itype_try}）已在本次委托中")
-            else:
-                errors.append(
-                    f"设备「{label}」不可加入（不在{scope_hint}范围内，或该检测类型已加入）"
-                )
+            errors.append(
+                f"设备「{label}」不可加入（不在{scope_hint}范围内，或可选模板均已挂载）"
+            )
             continue
         if eq is None:
             continue
+        # 以「去掉已挂载」后的分组为准，避免重复挂模板
+        groups = allowed_rows[eid].get("template_groups") or _filter_template_groups_excluding_bound(
+            equipment_project_bind_template_groups(eq), bound_task_ids
+        )
+        valid_types = {g["inspection_type"] for g in groups}
+        templates_by_type = {
+            g["inspection_type"]: {
+                int(t["report_task_id"]): t for t in (g.get("templates") or [])
+            }
+            for g in groups
+        }
         itype = (type_map.get(eid) or "").strip()
-        type_options = equipment_project_bind_type_options(eq)
-        valid_types = {o["inspection_type"] for o in type_options}
-        if not itype and len(type_options) == 1:
-            itype = type_options[0]["inspection_type"]
+        if not itype and len(groups) == 1:
+            itype = groups[0]["inspection_type"]
         if not itype:
             errors.append(f"「{eq.name}」请选择本次检测类型")
             continue
         if valid_types and itype not in valid_types:
-            errors.append(f"「{eq.name}」未配置「{itype}」对应的报告模板")
+            errors.append(f"「{eq.name}」在「{itype}」下没有可挂载的报告模板（或已全部挂载）")
             continue
-        if _project_equipment_link_exists(project, eid, itype):
-            errors.append(f"「{eq.name}」（{itype}）已在本次委托中")
-            continue
-        task = resolve_equipment_report_task(eq, inspection_type=itype)
-        if task is None:
-            errors.append(f"「{eq.name}」未绑定「{itype}」对应的报告任务模板")
-            continue
-        link = LibraryProjectEquipment.objects.create(
-            project=project,
-            equipment=eq,
-            inspection_type=itype,
-            report_task=task,
-        )
-        if not eq.report_task_id:
-            eq.report_task = task
-            eq.save(update_fields=["report_task_id", "updated_at"])
-        _, err = bind_equipment_tasks_to_project(
-            eq, project, user, inspection_type=itype
-        )
-        if err:
-            link.delete()
-            errors.append(f"「{eq.name}」（{itype}）：{err}")
-        else:
-            added += 1
+
+        allowed_templates = templates_by_type.get(itype) or {}
+        raw_task_ids = [int(x) for x in (task_map.get(eid) or []) if int(x) > 0]
+        seen_tid: set[int] = set()
+        task_ids: list[int] = []
+        for tid in raw_task_ids:
+            if tid in seen_tid:
+                continue
+            seen_tid.add(tid)
+            task_ids.append(tid)
+
+        if not task_ids:
+            # 兼容新建项目向导等未传模板的入口：取该类型下尚未挂载的第一个
+            if allowed_templates:
+                task_ids = [next(iter(allowed_templates.keys()))]
+            else:
+                legacy = resolve_equipment_report_task(eq, inspection_type=itype)
+                if legacy is None or legacy.pk in bound_task_ids:
+                    errors.append(f"「{eq.name}」请至少选择一个尚未挂载的报告模板")
+                    continue
+                task_ids = [legacy.pk]
+
+        for tid in task_ids:
+            if tid in bound_task_ids:
+                errors.append(f"「{eq.name}」所选报告模板已在本次委托中挂载，已跳过")
+                continue
+            if allowed_templates and tid not in allowed_templates:
+                errors.append(f"「{eq.name}」所选报告模板不属于「{itype}」或已挂载")
+                continue
+            task = LibraryTask.objects.filter(
+                pk=tid, output_target=LibraryTask.OUTPUT_REPORT
+            ).first()
+            if task is None:
+                errors.append(f"「{eq.name}」报告模板 #{tid} 不存在")
+                continue
+            link = LibraryProjectEquipment.objects.create(
+                project=project,
+                equipment=eq,
+                inspection_type=itype,
+                report_task=task,
+            )
+            if not eq.report_task_id:
+                eq.report_task = task
+                eq.save(update_fields=["report_task_id", "updated_at"])
+            _, err = bind_equipment_tasks_to_project(
+                eq, project, user, inspection_type=itype
+            )
+            if err:
+                link.delete()
+                errors.append(f"「{eq.name}」（{itype} / {task.code or task.pk}）：{err}")
+            else:
+                bound_task_ids.add(tid)
+                added += 1
     return added, errors
 
 
@@ -601,6 +673,12 @@ def update_project_equipment_report_task(
     )
     if task is None:
         return "报告模板无效，请选择报告层级的任务"
+    if (
+        LibraryProjectEquipment.objects.filter(project=project, report_task_id=task.pk)
+        .exclude(pk=link.pk)
+        .exists()
+    ):
+        return "该报告模板已在本次委托中挂载，请选择其他模板以免冲突"
     link.report_task = task
     link.save(update_fields=["report_task"])
     eq = link.equipment

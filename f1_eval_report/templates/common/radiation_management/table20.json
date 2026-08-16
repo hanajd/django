@@ -1,0 +1,204 @@
+{
+  "schema": "embedded_generic_table/v1",
+  "title": "表20 放射防护培训计划情况及评价",
+  "source": "radiation_management",
+  "column_count": 4,
+  "column_fractions": [
+    0.0,
+    0.18,
+    0.42,
+    0.72,
+    1.0
+  ],
+  "band_count": 5,
+  "row_min_height_pt": 18.0,
+  "repeat_header_on_new_page": true,
+  "header_band_count": 1,
+  "rows": [
+    {
+      "band": 0,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "项目",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "计划情况",
+          "align": "center"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "法规/标准要求",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "评价/建议",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 1,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "教育培训对象",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "计划对本项目放射工作人员进行上岗前的放射防护培训",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "①定期放射工作人员接受放射防护和有关法律知识培训\n②放射工作人员上岗前应当接受放射防护和有关法律知识培训",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "评价：符合；\n建议：本项目工作人员在上岗前进行放射防护培训，上岗前培训结果应符合国家要求",
+          "align": "left"
+        }
+      ]
+    },
+    {
+      "band": 2,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "承担培训单位",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "由符合省级卫生健康行政部门规定的单位承担",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        }
+      ]
+    },
+    {
+      "band": 3,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "培训周期",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "上岗前和在岗期间（放射工作人员两次培训时间的间隔不超过2年）",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        }
+      ]
+    },
+    {
+      "band": 4,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "培训结果",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "培训结果应合格",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        }
+      ]
+    }
+  ]
+}

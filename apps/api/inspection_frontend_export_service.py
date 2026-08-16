@@ -274,6 +274,18 @@ def build_runtime_frontend_for_inspection_export(
     except Exception as exc:
         raise InspectionFrontendExportError(f"读取任务模板失败: {exc}") from exc
 
+    if not isinstance(template_obj, dict):
+        raise InspectionFrontendExportError("任务模板 JSON 格式无效")
+
+    # 导出命名与空白 PDF 引用以任务模板库当前挂载为准
+    from apps.core.library_task_template_binding_service import (
+        apply_task_library_mount_to_template_obj,
+    )
+
+    apply_task_library_mount_to_template_obj(
+        template_obj, task_obj, json_lf=template_json_lf
+    )
+
     pdf_block = template_obj.get("pdf") if isinstance(template_obj.get("pdf"), dict) else {}
     if not isinstance(pdf_block, dict):
         pdf_block = {}

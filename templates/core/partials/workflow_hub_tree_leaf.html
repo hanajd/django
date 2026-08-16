@@ -13,19 +13,33 @@
                 <a href="{{ leaf.preview_url }}" target="_blank" rel="noopener"
                    class="text-sm {% if hub_name == 'report_generate' and tab == 'preview' %}font-medium text-indigo-700 hover:text-indigo-900{% else %}text-slate-800 hover:text-indigo-700{% endif %} hover:underline break-all"
                    title="单击预览">{{ leaf.display_name|default:leaf.file.original_name }}</a>
+                {% if leaf.report_export_variant == 'front' %}
+                <span class="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">无防护结果</span>
+                {% elif leaf.report_export_variant == 'rp' %}
+                <span class="rounded-full bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-800">仅防护结果</span>
+                {% elif leaf.report_export_variant == 'full' and hub_name == 'report_generate' and tab == 'preview' %}
+                <span class="rounded-full bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-800">全本</span>
+                {% endif %}
                 {% if leaf.is_latest %}
                 <span class="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800">最新</span>
                 {% elif leaf.is_latest == False %}
                 <span class="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">历史</span>
                 {% endif %}
+                {% if leaf.stage_label %}
+                <span class="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">{{ leaf.stage_label }}</span>
+                {% endif %}
             </div>
+            {% if leaf.progress_bar %}
+            <div class="mt-1.5 max-w-md">
+                {% include "core/partials/issuance_progress_bar.html" with progress_bar=leaf.progress_bar show_step_labels=True %}
+            </div>
+            {% endif %}
             {% if leaf.template_name %}
             <p class="text-[11px] text-slate-500 mt-0.5 break-all" title="任务模板名称">{{ leaf.template_name }}</p>
             {% endif %}
             <p class="text-[11px] text-slate-400 mt-0.5">{{ leaf.file.created_at|date:"Y-m-d H:i" }} · {{ leaf.file.size|filesizeformat }}</p>
         </div>
     </div>
-    {% if not hub_name or hub_name != 'report_generate' or tab != 'preview' %}
     <div class="flex flex-wrap gap-1.5 shrink-0">
         {% if hub_name == 'site_records' and leaf.photos_url %}
         <a href="{{ leaf.photos_url }}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
@@ -39,23 +53,65 @@
             <i class="ri-download-line"></i> 下载
         </a>
     </div>
-    {% endif %}
     {% else %}
-    <div class="min-w-0">
+    <div class="min-w-0 flex-1">
         <div class="flex flex-wrap items-center gap-2">
             <span class="text-sm font-medium text-slate-900 break-all">{{ leaf.display_title|default:leaf.task_label|default:leaf.task_no|default:"任务" }}</span>
+            {% if leaf.report_variant_label %}
+            <span class="rounded-full bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-800">{{ leaf.report_variant_label }}</span>
+            {% endif %}
             {% if leaf.hub_section == 'audit' %}
             <span class="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-800">审核</span>
             {% elif leaf.hub_section == 'sign' %}
             <span class="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">签发</span>
             {% endif %}
+            {% if hub_name == 'report_generate' %}
+                {% if leaf.compile_status == 'author_signed' or leaf.author_signed %}
+                <span class="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-800">已提交编制人签名</span>
+                {% elif leaf.has_exported_report %}
+                <span class="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800">已编制</span>
+                {% else %}
+                <span class="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">待编制</span>
+                {% if not leaf.can_export_report %}
+                <span class="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500" title="该任务下尚无现场记录 PDF 或检测提交 JSON">无现场记录</span>
+                {% endif %}
+                {% endif %}
+            {% endif %}
             <span class="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">{{ leaf.stage_label|default:"—" }}</span>
         </div>
+        {% if leaf.progress_bar %}
+        <div class="mt-1.5 max-w-md">
+            {% include "core/partials/issuance_progress_bar.html" with progress_bar=leaf.progress_bar show_step_labels=True %}
+        </div>
+        {% endif %}
+        {% if hub_name == 'report_generate' and leaf.has_exported_report and leaf.report_signature.report_file_name %}
+        <p class="text-[11px] text-slate-400 mt-0.5 break-all" title="已导出报告">{{ leaf.report_signature.report_file_name }}</p>
+        {% endif %}
     </div>
     <div class="flex flex-col items-stretch sm:items-end gap-1.5 shrink-0">
-        {% if hub_name == 'report_generate' and tab == 'generate' and can_export_report and leaf.can_export_report %}
-        <form method="post" class="inline" data-report-busy="export"
-              onsubmit="return confirm('确认导出该任务报告？生成 PDF 可能需要数十秒，请勿关闭或刷新页面。');">
+        {% if hub_name == 'site_records' and leaf.preview_url %}
+        <div class="flex flex-wrap gap-1.5 justify-end">
+            {% if leaf.photos_url %}
+            <a href="{{ leaf.photos_url }}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                <i class="ri-image-line"></i> 留存照片
+            </a>
+            {% endif %}
+            <a href="{{ leaf.preview_url }}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-slate-800">
+                <i class="ri-eye-line"></i> 预览
+            </a>
+            {% if leaf.download_url %}
+            <a href="{{ leaf.download_url }}" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                <i class="ri-download-line"></i> 下载
+            </a>
+            {% endif %}
+        </div>
+        {% if leaf.site_record_name %}
+        <p class="text-[11px] text-slate-400 max-w-xs text-right break-all" title="现场记录文件">{{ leaf.site_record_name }}</p>
+        {% endif %}
+        {% elif hub_name == 'report_generate' and tab == 'generate' and can_export_report and leaf.can_export_report and leaf.show_hub_export != False %}
+        <div class="inline-flex flex-col items-end gap-1.5">
+        <form method="post" class="inline-flex flex-col items-end gap-1.5" data-report-busy="export"
+              onsubmit="var boxes=this.querySelectorAll('input[name=export_variant]:checked'); if(this.querySelector('input[name=export_variant]') && !boxes.length){alert('请至少勾选一种导出类型'); return false;} return confirm('{% if leaf.compile_status == 'author_signed' or leaf.author_signed %}确认重新导出？将覆盖已含编制人签名的报告，需重新签字。{% elif leaf.has_exported_report %}确认重新导出并覆盖该任务报告？{% else %}确认导出该任务报告？{% endif %}生成 PDF 可能需要数十秒，请勿关闭或刷新页面。');">
             {% csrf_token %}
             <input type="hidden" name="action" value="hub_export_report">
             <input type="hidden" name="project_id" value="{{ leaf.project_id|default:project_id }}">
@@ -63,18 +119,63 @@
             <input type="hidden" name="site_library_task_id" value="{{ leaf.site_library_task_id|default:0 }}">
             <input type="hidden" name="filter_project_id" value="{{ leaf.project_id|default:project_id }}">
             <input type="hidden" name="filter_task_no" value="">
-            <input type="hidden" name="filter_tab" value="preview">
+            <input type="hidden" name="filter_tab" value="generate">
             <input type="hidden" name="filter_view" value="{{ view_mode|default:'hospital' }}">
-            <button type="submit" class="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-70">
-                <i class="ri-file-pdf-line"></i> 导出报告
+            {% if leaf.supports_radiation_export_variants %}
+            <div class="flex flex-col items-end gap-0.5 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px] text-slate-600 max-w-[14rem]">
+                <span class="font-medium text-slate-700">导出类型（可多选）</span>
+                <label class="inline-flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" name="export_variant" value="full" checked class="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500">
+                    <span>全本报告</span>
+                </label>
+                <label class="inline-flex items-center gap-1.5 cursor-pointer" title="仅前四章与质控结果，不含工作场所放射防护检测结果">
+                    <input type="checkbox" name="export_variant" value="front" class="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500">
+                    <span>无防护结果</span>
+                </label>
+                <label class="inline-flex items-center gap-1.5 cursor-pointer" title="封面至检测结果首页，再接工作场所放射防护检测结果与平面布局（小节从 1.1 起编）">
+                    <input type="checkbox" name="export_variant" value="rp" class="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500">
+                    <span>仅防护结果</span>
+                </label>
+            </div>
+            {% endif %}
+            <button type="submit" class="inline-flex items-center justify-center gap-1 rounded-lg {% if leaf.compile_status == 'author_signed' or leaf.author_signed %}border border-indigo-200 bg-indigo-50 text-indigo-900 hover:bg-indigo-100{% elif leaf.has_exported_report %}border border-emerald-200 bg-emerald-50 text-emerald-900 hover:bg-emerald-100{% else %}bg-emerald-600 text-white hover:bg-emerald-700{% endif %} px-2.5 py-1.5 text-xs font-medium disabled:cursor-wait disabled:opacity-70">
+                <i class="ri-file-pdf-line"></i> {% if leaf.has_exported_report %}重新导出{% else %}导出报告{% endif %}
             </button>
         </form>
+        {% if leaf.report_preview_url %}
+        <a href="{{ leaf.report_preview_url }}" target="_blank" rel="noopener"
+           class="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+           title="预览本版本报告 PDF">
+            <i class="ri-eye-line"></i> 预览{% if leaf.report_variant_label %}（{{ leaf.report_variant_label }}）{% endif %}
+        </a>
+        {% endif %}
+        </div>
+        {% elif hub_name == 'report_generate' and tab == 'generate' and leaf.report_preview_url %}
+        <a href="{{ leaf.report_preview_url }}" target="_blank" rel="noopener"
+           class="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+           title="预览本版本报告 PDF">
+            <i class="ri-eye-line"></i> 预览{% if leaf.report_variant_label %}（{{ leaf.report_variant_label }}）{% endif %}
+        </a>
         {% elif hub_name == 'review_sign' %}
-        <a href="{{ leaf.report_library_url }}" class="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+        {% if leaf.report_preview_url %}
+        <a href="{{ leaf.report_preview_url }}" target="_blank" rel="noopener"
+           class="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+           title="预览报告 PDF">
+            <i class="ri-eye-line"></i> 查看报告{% if leaf.report_variant_label %}（{{ leaf.report_variant_label }}）{% endif %}
+        </a>
+        {% else %}
+        <a href="{{ leaf.report_library_url }}" target="_blank" rel="noopener"
+           class="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+           title="打开文件库报告分类">
             <i class="ri-folder-2-line"></i> 查看报告
         </a>
         {% endif %}
-        {% if leaf.primary_action %}
+        {% endif %}
+        {% if hub_name == 'review_sign' and leaf.advance_actions %}
+            {% for act in leaf.advance_actions %}
+            {% include "core/partials/workflow_hub_advance_form.html" with row=leaf act=act project_id=project_id task_no=task_no tab=tab %}
+            {% endfor %}
+        {% elif hub_name == 'report_generate' and leaf.primary_action %}
         {% include "core/partials/workflow_hub_advance_form.html" with row=leaf project_id=project_id task_no=task_no tab=tab %}
         {% endif %}
     </div>

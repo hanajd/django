@@ -95,7 +95,7 @@ LEGACY_WORKFLOW_GLOBAL_ROLE_CODES: FrozenSet[str] = frozenset(
 
 INVITE_DEFAULT_TTL_DAYS = 7
 
-# 角色默认权限（低权员工；主管带用户管理与派单）
+# 角色默认权限（低权员工；主任带用户管理与派单）
 _ORG_STAFF_PERMS: Dict[str, bool] = {
     "perm_manage_users": False,
     "perm_manage_roles": False,
@@ -112,8 +112,10 @@ _ORG_STAFF_PERMS: Dict[str, bool] = {
     "perm_assign_tasks": False,
     "perm_create_library_project": False,
     "perm_biz_registry": False,
+    "perm_f1_eval": False,
 }
 
+# 检测部主任：派工 + 业务登记 + 用户管理
 _ORG_DIRECTOR_PERMS: Dict[str, bool] = {
     **_ORG_STAFF_PERMS,
     "perm_manage_users": True,
@@ -124,6 +126,27 @@ _ORG_DIRECTOR_PERMS: Dict[str, bool] = {
     "perm_assign_tasks": True,
     "perm_create_library_project": False,
     "perm_biz_registry": True,
+    "perm_f1_eval": False,
+}
+
+# 评价部主任：本部门用户 + 评价报告表；医院信息只读；不开检测派工/仪器台账/建项
+_ORG_EVAL_DIRECTOR_PERMS: Dict[str, bool] = {
+    **_ORG_STAFF_PERMS,
+    "perm_manage_users": True,
+    "perm_file_upload": True,
+    "perm_file_upload_attachment": True,
+    "perm_file_delete": True,
+    "perm_file_scope_own_only": False,
+    "perm_assign_tasks": False,
+    "perm_create_library_project": False,
+    "perm_biz_registry": False,
+    "perm_f1_eval": True,
+}
+
+# 评价部员工：低权 + 评价报告表
+_ORG_EVAL_STAFF_PERMS: Dict[str, bool] = {
+    **_ORG_STAFF_PERMS,
+    "perm_f1_eval": True,
 }
 
 _ORG_ADMIN_PERMS: Dict[str, bool] = {
@@ -136,6 +159,7 @@ _ORG_ADMIN_PERMS: Dict[str, bool] = {
     "perm_assign_tasks": False,
     "perm_create_library_project": True,
     "perm_biz_registry": True,
+    "perm_f1_eval": False,
 }
 
 ORG_ROLE_SEED: Dict[str, Dict[str, Any]] = {
@@ -146,28 +170,28 @@ ORG_ROLE_SEED: Dict[str, Dict[str, Any]] = {
         "perms": _ORG_ADMIN_PERMS,
     },
     ROLE_DEPT_DIRECTOR_INSPECTION: {
-        "name": "检测部主管",
-        "description": "检测部接单、管本部门员工、人员派工（新轨候选人池）。",
+        "name": "检测部主任",
+        "description": "检测部接单、管本部门员工、人员派工；医院信息只读。",
         "org_unit": ORG_UNIT_INSPECTION,
         "perms": _ORG_DIRECTOR_PERMS,
     },
     ROLE_DEPT_STAFF_INSPECTION: {
         "name": "检测部员工",
-        "description": "默认低权；仅在项目挂流程岗后具备对应权限。",
+        "description": "默认低权；医院信息只读；仅在项目挂流程岗后具备对应权限。",
         "org_unit": ORG_UNIT_INSPECTION,
         "perms": _ORG_STAFF_PERMS,
     },
     ROLE_DEPT_DIRECTOR_EVALUATION: {
-        "name": "评价部主管",
-        "description": "评价部队列（预留）；管本部门员工。",
+        "name": "评价部主任",
+        "description": "评价报告表/书看板（委托管理与项目工作台）；管本部门员工；医院信息只读；不进入检测派工与仪器台账。",
         "org_unit": ORG_UNIT_EVALUATION,
-        "perms": _ORG_DIRECTOR_PERMS,
+        "perms": _ORG_EVAL_DIRECTOR_PERMS,
     },
     ROLE_DEPT_STAFF_EVALUATION: {
         "name": "评价部员工",
-        "description": "默认低权；后期项目挂岗再生效。",
+        "description": "可使用评价报告表；委托管理与项目工作台展示评价项目；医院信息只读。",
         "org_unit": ORG_UNIT_EVALUATION,
-        "perms": _ORG_STAFF_PERMS,
+        "perms": _ORG_EVAL_STAFF_PERMS,
     },
 }
 
@@ -216,6 +240,26 @@ def user_is_dept_staff(user) -> bool:
     return _role_code(user) in DEPT_STAFF_ROLE_CODES
 
 
+def user_is_evaluation_org(user) -> bool:
+    """评价部主任或员工（含 org_unit=evaluation 的新轨账号）。"""
+    code = _role_code(user)
+    if code in (ROLE_DEPT_DIRECTOR_EVALUATION, ROLE_DEPT_STAFF_EVALUATION):
+        return True
+    return user_org_unit(user) == ORG_UNIT_EVALUATION and code in ORG_ROLE_CODES
+
+
+def user_is_inspection_org(user) -> bool:
+    """检测部主任或员工。"""
+    code = _role_code(user)
+    if code in (ROLE_DEPT_DIRECTOR_INSPECTION, ROLE_DEPT_STAFF_INSPECTION):
+        return True
+    return user_org_unit(user) == ORG_UNIT_INSPECTION and code in ORG_ROLE_CODES
+
+
+def user_is_inspection_director(user) -> bool:
+    return _role_code(user) == ROLE_DEPT_DIRECTOR_INSPECTION
+
+
 def user_org_unit(user) -> str:
     """优先资料字段；否则从角色推断。"""
     ou = _profile_org_unit(user)
@@ -260,16 +304,93 @@ def ensure_org_roles_seeded() -> List[str]:
 
 
 def library_user_may_manage_org_staff(actor) -> bool:
-    """部门主管可管理本部门员工。"""
+    """部门主任可管理本部门员工；超管/普通管理员亦可。员工不可。"""
     if not getattr(actor, "is_authenticated", False):
+        return False
+    if user_is_dept_staff(actor):
         return False
     if getattr(actor, "is_superuser", False) or _role_code(actor) in ("super_admin", "admin"):
         return True
     return user_is_dept_director(actor)
 
 
+def library_user_may_create_invite(actor) -> bool:
+    """可生成注册邀请链接：超管/管理员、部门主任；员工不可。"""
+    return library_user_may_manage_org_staff(actor)
+
+
+def user_is_system_admin(actor) -> bool:
+    return bool(getattr(actor, "is_superuser", False)) or _role_code(actor) in (
+        "super_admin",
+        "admin",
+    )
+
+
+# 超管邀请可选角色（不含超级管理员 / 普通管理员，避免通过链接抬权）
+INVITE_EXCLUDED_ROLE_CODES: FrozenSet[str] = frozenset({"super_admin", "admin"})
+
+
+def invite_roles_for_user(actor) -> List[Any]:
+    """
+    生成邀请链接时可选择的角色列表。
+    - 超管/管理员：除超管与普通管理员外的全部角色
+    - 部门主任：仅本部门员工角色（固定一项）
+    - 其他：空
+    """
+    from apps.core.models import Role
+
+    if not library_user_may_create_invite(actor):
+        return []
+    if user_is_system_admin(actor):
+        return list(
+            Role.objects.exclude(code__in=INVITE_EXCLUDED_ROLE_CODES).order_by("name", "id")
+        )
+    if user_is_dept_director(actor):
+        staff_code = staff_role_code_for_director(actor)
+        if not staff_code:
+            return []
+        return list(Role.objects.filter(code=staff_code).order_by("name", "id"))
+    return []
+
+
+def resolve_invite_role_and_org_unit(
+    *,
+    created_by,
+    role_code: str | None = None,
+) -> tuple[str, str]:
+    """
+    解析邀请目标角色与 org_unit。
+    主任忽略传入 role_code，强制本部门员工；超管必须指定合法角色。
+    """
+    if user_is_dept_staff(created_by):
+        raise PermissionError("员工无权生成邀请链接")
+    if not library_user_may_create_invite(created_by):
+        raise PermissionError("无权创建邀请链接")
+
+    if user_is_dept_director(created_by) and not user_is_system_admin(created_by):
+        staff_code = staff_role_code_for_director(created_by)
+        ou = user_org_unit(created_by)
+        if not staff_code or not ou:
+            raise PermissionError("当前账号无法确定部门员工角色")
+        return staff_code, ou
+
+    if not user_is_system_admin(created_by):
+        raise PermissionError("无权创建邀请链接")
+
+    code = (role_code or "").strip()
+    if not code:
+        raise PermissionError("请选择注册角色")
+    if code in INVITE_EXCLUDED_ROLE_CODES:
+        raise PermissionError("不可通过邀请链接注册该角色")
+    from apps.core.models import Role
+
+    if not Role.objects.filter(code=code).exists():
+        raise PermissionError("所选角色无效")
+    return code, ROLE_TO_ORG_UNIT.get(code, "")
+
+
 def org_staff_queryset_for_director(actor) -> QuerySet:
-    """主管可见/可管的本部门员工列表。"""
+    """主任可见/可管的本部门员工列表。"""
     from apps.core.models import User as _  # noqa: F401 — keep import path clear
 
     qs = User.objects.select_related("profile", "profile__role").filter(is_active=True)
@@ -287,14 +408,19 @@ def org_staff_queryset_for_director(actor) -> QuerySet:
 
 def org_dispatch_candidate_queryset(actor) -> QuerySet:
     """
-    新轨派工候选人：仅本部门员工角色。
+    新轨派工候选人：仅检测部主任可派本部门员工。
+    评价部不参与检测流程派工。
     排除旧轨全局五岗 / 统筹 / 行政。
     """
+    if user_is_evaluation_org(actor) and not user_is_system_admin(actor):
+        return User.objects.none()
     return org_staff_queryset_for_director(actor)
 
 
 def user_may_be_dispatched_by_org_director(actor, target) -> bool:
     if target is None or not getattr(target, "is_active", False):
+        return False
+    if user_is_evaluation_org(actor) and not user_is_system_admin(actor):
         return False
     code = _role_code(target)
     if code in LEGACY_WORKFLOW_GLOBAL_ROLE_CODES or code == ROLE_ADMIN_OFFICE:
@@ -323,35 +449,36 @@ def create_invite_token(
     *,
     created_by,
     ttl_days: int = INVITE_DEFAULT_TTL_DAYS,
+    role_code: str | None = None,
 ) -> Any:
-    """主管创建邀请令牌；写入目标 org_unit 与员工角色。"""
+    """创建一次性注册邀请令牌。"""
     from apps.core.models import UserInviteToken
 
-    if not library_user_may_manage_org_staff(created_by) and not (
-        getattr(created_by, "is_superuser", False)
-        or _role_code(created_by) in ("super_admin", "admin")
-    ):
-        raise PermissionError("无权创建邀请链接")
-
-    staff_code = staff_role_code_for_director(created_by)
-    ou = user_org_unit(created_by)
-    if not staff_code or not ou:
-        if _role_code(created_by) in ("super_admin", "admin"):
-            # 超管默认发检测部员工邀请
-            staff_code = ROLE_DEPT_STAFF_INSPECTION
-            ou = ORG_UNIT_INSPECTION
-        else:
-            raise PermissionError("当前账号无法确定部门员工角色")
-
+    staff_code, ou = resolve_invite_role_and_org_unit(
+        created_by=created_by, role_code=role_code
+    )
     token = secrets.token_urlsafe(32)
     return UserInviteToken.objects.create(
         token=token,
         created_by=created_by,
-        org_unit=ou,
+        org_unit=ou or "",
         staff_role_code=staff_code,
         expires_at=timezone.now() + timedelta(days=max(1, int(ttl_days))),
         is_active=True,
+        use_count=0,
     )
+
+
+def pending_invite_tokens_for_user(actor) -> QuerySet:
+    """当前用户发出的、尚未使用且未过期的邀请。"""
+    from apps.core.models import UserInviteToken
+
+    return UserInviteToken.objects.filter(
+        created_by=actor,
+        is_active=True,
+        use_count=0,
+        expires_at__gt=timezone.now(),
+    ).order_by("-created_at")
 
 
 def resolve_invite_token(raw_token: str) -> Any:

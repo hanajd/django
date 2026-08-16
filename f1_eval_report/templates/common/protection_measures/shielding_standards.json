@@ -1,0 +1,75 @@
+{
+  "schema": "f1_shielding_standards/v1",
+  "description": "GBZ 130-2020 机房屏蔽铅当量标准要求（供表7「标准要求」列按设备类型预填；可在常用模板表格中维护）",
+  "order": [
+    "ct",
+    "dr",
+    "gastro",
+    "bmd",
+    "mammo",
+    "dsa",
+    "ercp",
+    "carm",
+    "other"
+  ],
+  "items": {
+    "ct": {
+      "label": "CT机房",
+      "eq_key": "ct",
+      "standard_text": "CT机房：2.5mmPb",
+      "note": "GBZ 130-2020"
+    },
+    "dr": {
+      "label": "125kV以上的摄影机房（含DR）",
+      "eq_key": "dr",
+      "standard_text": "125kV以上的摄影机房：\n有用线束方向铅当量3.0mmPb\n非有用线束方向铅当量2.0mmPb",
+      "note": "GBZ 130-2020；有用/非有用线束方向分别控制"
+    },
+    "gastro": {
+      "label": "数字胃肠等透视机房",
+      "eq_key": "dr",
+      "standard_text": "125kV以上的摄影机房：\n有用线束方向铅当量3.0mmPb\n非有用线束方向铅当量2.0mmPb",
+      "note": "按125kV以上摄影机房要求对照；可按项目改"
+    },
+    "bmd": {
+      "label": "骨密度仪机房",
+      "eq_key": "bmd",
+      "standard_text": "骨密度仪机房：有用线束方向铅当量1.0mmPb；非有用线束方向铅当量1.0mmPb",
+      "note": "GBZ 130-2020"
+    },
+    "mammo": {
+      "label": "乳腺摄影机房",
+      "eq_key": "mammo",
+      "standard_text": "乳腺摄影机房：有用线束方向铅当量1.0mmPb；非有用线束方向铅当量1.0mmPb",
+      "note": "GBZ 130-2020"
+    },
+    "dsa": {
+      "label": "DSA（C形臂）机房",
+      "eq_key": "dsa",
+      "standard_text": "C形臂X射线设备机房要求：\n有用线束方向：2.0mmPb\n非有用线束方向：2.0mmPb",
+      "note": "GBZ 130-2020"
+    },
+    "ercp": {
+      "label": "ERCP（C形臂）机房",
+      "eq_key": "dsa",
+      "standard_text": "C形臂X射线设备机房要求：\n有用线束方向：2.0mmPb\n非有用线束方向：2.0mmPb",
+      "note": "按C形臂X射线设备机房"
+    },
+    "carm": {
+      "label": "C形臂X射线设备机房",
+      "eq_key": "dsa",
+      "standard_text": "C形臂X射线设备机房要求：\n有用线束方向：2.0mmPb\n非有用线束方向：2.0mmPb",
+      "note": "GBZ 130-2020"
+    },
+    "other": {
+      "label": "其他机房",
+      "eq_key": "dr",
+      "standard_text": "按GBZ 130-2020相应机房要求",
+      "note": "未识别设备类型时的兜底文案"
+    }
+  },
+  "notes": {
+    "source": "GBZ 130-2020《放射诊断放射防护要求》",
+    "编辑说明": "类型键须与表7设备归类一致（ct/dr/gastro/bmd/mammo/dsa/ercp/carm/other）；标准要求文案写入表7「标准要求」列；eq_key 用于材料铅当量换算表。"
+  }
+}

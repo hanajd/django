@@ -1194,32 +1194,53 @@ def user_list(request):
         'is_coordinator_user_list': library_user_is_commission_coordinator(request.user),
         'is_dept_director_user_list': False,
         'can_create_invite_link': False,
-        'active_invite_url': '',
-        'active_invite_expires': None,
+        'invite_can_pick_role': False,
+        'invite_role_choices': [],
+        'invite_fixed_role_name': '',
+        'pending_invites': [],
     }
     try:
-        from apps.core.org_roles import library_user_may_manage_org_staff, user_is_dept_director
-        from apps.core.models import UserInviteToken
+        from apps.core.models import Role
+        from apps.core.org_roles import (
+            invite_roles_for_user,
+            library_user_may_create_invite,
+            pending_invite_tokens_for_user,
+            user_is_dept_director,
+            user_is_system_admin,
+        )
 
         context["is_dept_director_user_list"] = user_is_dept_director(request.user)
-        context["can_create_invite_link"] = library_user_may_manage_org_staff(request.user)
+        context["can_create_invite_link"] = library_user_may_create_invite(request.user)
         if context["can_create_invite_link"]:
-            from django.utils import timezone
-
-            invite = (
-                UserInviteToken.objects.filter(
-                    created_by=request.user,
-                    is_active=True,
-                    expires_at__gt=timezone.now(),
+            roles = invite_roles_for_user(request.user)
+            context["invite_role_choices"] = roles
+            context["invite_can_pick_role"] = user_is_system_admin(request.user)
+            if not context["invite_can_pick_role"] and roles:
+                context["invite_fixed_role_name"] = roles[0].name
+            pending_qs = list(pending_invite_tokens_for_user(request.user)[:20])
+            role_name_by_code = {
+                r.code: r.name
+                for r in Role.objects.filter(
+                    code__in={inv.staff_role_code for inv in pending_qs if inv.staff_role_code}
                 )
-                .order_by("-created_at")
-                .first()
-            )
-            if invite:
-                context["active_invite_url"] = request.build_absolute_uri(
-                    reverse("user_invite_register", kwargs={"token": invite.token})
+            }
+            pending_rows = []
+            for inv in pending_qs:
+                pending_rows.append(
+                    {
+                        "id": inv.pk,
+                        "url": request.build_absolute_uri(
+                            reverse("user_invite_register", kwargs={"token": inv.token})
+                        ),
+                        "role_code": inv.staff_role_code,
+                        "role_name": role_name_by_code.get(
+                            inv.staff_role_code, inv.staff_role_code
+                        ),
+                        "expires_at": inv.expires_at,
+                        "created_at": inv.created_at,
+                    }
                 )
-                context["active_invite_expires"] = invite.expires_at
+            context["pending_invites"] = pending_rows
     except Exception:
         pass
     return render(request, 'core/user_list.html', context)
@@ -1433,14 +1454,14 @@ def user_delete(request, user_id):
 
 @login_required
 def user_invite_create(request):
-    """部门主管生成员工自助注册邀请链接。"""
+    """生成一次性自助注册邀请链接（超管可选角色；主任固定本部门员工）。"""
     r = _require_perm(request, "perm_manage_users")
     if r:
         return r
-    from apps.core.org_roles import create_invite_token, library_user_may_manage_org_staff
+    from apps.core.org_roles import create_invite_token, library_user_may_create_invite
 
-    if not library_user_may_manage_org_staff(request.user):
-        messages.error(request, "仅部门主管可生成邀请链接")
+    if not library_user_may_create_invite(request.user):
+        messages.error(request, "无权生成邀请链接")
         return redirect("user_list")
     if request.method != "POST":
         return redirect("user_list")
@@ -1448,8 +1469,11 @@ def user_invite_create(request):
         ttl = int(request.POST.get("ttl_days") or 7)
     except (TypeError, ValueError):
         ttl = 7
+    role_code = (request.POST.get("role_code") or "").strip() or None
     try:
-        invite = create_invite_token(created_by=request.user, ttl_days=ttl)
+        invite = create_invite_token(
+            created_by=request.user, ttl_days=ttl, role_code=role_code
+        )
     except PermissionError as exc:
         messages.error(request, str(exc))
         return redirect("user_list")
@@ -1458,34 +1482,41 @@ def user_invite_create(request):
     )
     messages.success(
         request,
-        f"邀请链接已生成（{ttl} 天内有效）：{url}",
+        f"已生成一次性邀请链接（{ttl} 天内有效，仅可注册 1 个账号）：{url}",
     )
     return redirect("user_list")
 
 
 @login_required
 def user_invite_revoke(request):
-    """作废当前主管发出的有效邀请链接。"""
+    """作废指定（或本人全部未使用）邀请链接。"""
     r = _require_perm(request, "perm_manage_users")
     if r:
         return r
     from apps.core.models import UserInviteToken
-    from apps.core.org_roles import library_user_may_manage_org_staff
+    from apps.core.org_roles import library_user_may_create_invite
 
-    if not library_user_may_manage_org_staff(request.user):
+    if not library_user_may_create_invite(request.user):
         messages.error(request, "无权操作邀请链接")
         return redirect("user_list")
     if request.method == "POST":
-        UserInviteToken.objects.filter(created_by=request.user, is_active=True).update(
-            is_active=False
-        )
-        messages.success(request, "已作废您发出的邀请链接")
+        invite_id = (request.POST.get("invite_id") or "").strip()
+        qs = UserInviteToken.objects.filter(created_by=request.user, is_active=True)
+        if invite_id.isdigit():
+            updated = qs.filter(pk=int(invite_id)).update(is_active=False)
+            if updated:
+                messages.success(request, "已作废该邀请链接")
+            else:
+                messages.error(request, "未找到可作废的邀请链接")
+        else:
+            n = qs.update(is_active=False)
+            messages.success(request, f"已作废您发出的 {n} 条邀请链接")
     return redirect("user_list")
 
 
 def user_invite_register(request, token: str):
     """
-    员工通过邀请链接自助注册。
+    通过邀请链接自助注册（每个链接仅可成功注册一次）。
     必填：用户名、密码；选填：手机号、邮箱、姓名、工号。
     """
     from django.utils import timezone
@@ -1498,8 +1529,11 @@ def user_invite_register(request, token: str):
         return render(
             request,
             "core/user_invite_register.html",
-            {"invalid": True, "error": "邀请链接无效或已过期，请联系主管重新获取。"},
+            {"invalid": True, "error": "邀请链接无效、已使用或已过期，请联系邀请人重新获取。"},
         )
+
+    role = Role.objects.filter(code=invite.staff_role_code).first()
+    role_name = role.name if role else invite.staff_role_code
 
     if request.user.is_authenticated:
         messages.info(request, "您已登录。如需注册新账号请先退出。")
@@ -1529,15 +1563,14 @@ def user_invite_register(request, token: str):
         elif User.objects.filter(username=username).exists():
             error = "用户名已存在，请换一个"
         else:
-            role = Role.objects.filter(code=invite.staff_role_code).first()
             if role is None:
                 error = "系统角色未配置，请联系管理员"
             else:
                 with transaction.atomic():
-                    # 再次校验令牌（防并发过期）
+                    # 再次校验令牌（防并发重复注册）
                     locked = UserInviteToken.objects.select_for_update().filter(pk=invite.pk).first()
                     if locked is None or not locked.is_usable():
-                        error = "邀请链接已失效"
+                        error = "邀请链接已失效或已被使用"
                     else:
                         user = User.objects.create_user(
                             username=username,
@@ -1556,7 +1589,8 @@ def user_invite_register(request, token: str):
                         profile.save()
                         locked.use_count = int(locked.use_count or 0) + 1
                         locked.last_used_at = timezone.now()
-                        locked.save(update_fields=["use_count", "last_used_at"])
+                        locked.is_active = False
+                        locked.save(update_fields=["use_count", "last_used_at", "is_active"])
                         messages.success(request, "账号创建成功，请登录")
                         return redirect("login")
 
@@ -1568,6 +1602,7 @@ def user_invite_register(request, token: str):
             "error": error,
             "token": token,
             "org_unit": invite.org_unit,
+            "role_name": role_name,
             "expires_at": invite.expires_at,
         },
     )
@@ -1757,7 +1792,7 @@ def _system_debug_settings_redirect(tab: str = "pdf"):
     from django.urls import reverse
 
     key = (tab or "pdf").strip().lower()
-    if key not in ("pdf", "precision", "llm", "prompt"):
+    if key not in ("pdf", "precision", "llm", "prompt", "fonts"):
         key = "pdf"
     return redirect(f"{reverse('system_debug_settings')}?tab={key}")
 
@@ -1765,7 +1800,7 @@ def _system_debug_settings_redirect(tab: str = "pdf"):
 @login_required
 def system_debug_settings(request):
     """
-    超级管理员调试页（分类页签）：PDF 回填 / 小数精度 / LLM API / OCR Prompt。
+    超级管理员调试页（分类页签）：PDF 回填 / 小数精度 / LLM API / OCR Prompt / PyMuPDF 字体。
     """
     denied = _require_super_admin_debug(request)
     if denied:
@@ -1970,6 +2005,85 @@ def system_debug_settings(request):
                 )
             return _system_debug_settings_redirect("precision")
 
+        if action in (
+            "upload_font",
+            "delete_font",
+            "rename_font",
+            "copy_font",
+            "download_font",
+        ):
+            from django.http import HttpResponse
+            from apps.core.pymupdf_font_debug_service import (
+                copy_font_across_dirs,
+                delete_font_file,
+                read_font_file_for_download,
+                rename_font_file,
+                save_uploaded_font,
+            )
+
+            dir_key = (request.POST.get("font_dir_key") or "").strip()
+            filename = (request.POST.get("font_filename") or "").strip()
+            try:
+                if action == "upload_font":
+                    upload = request.FILES.get("font_file")
+                    if upload is None:
+                        raise ValueError("请选择要上传的字体文件")
+                    target_name = (request.POST.get("font_target_name") or "").strip()
+                    overwrite = (request.POST.get("overwrite") or "1").strip() in (
+                        "1",
+                        "on",
+                        "true",
+                        "yes",
+                    )
+                    path = save_uploaded_font(
+                        dir_key=dir_key,
+                        upload=upload,
+                        target_name=target_name,
+                        overwrite=overwrite,
+                    )
+                    messages.success(
+                        request,
+                        f"已上传字体到 {dir_key}：{path.name}（{path.stat().st_size} 字节）",
+                    )
+                elif action == "delete_font":
+                    delete_font_file(dir_key=dir_key, filename=filename)
+                    messages.success(request, f"已删除字体：{filename}")
+                elif action == "rename_font":
+                    new_name = (request.POST.get("font_new_name") or "").strip()
+                    path = rename_font_file(
+                        dir_key=dir_key, filename=filename, new_name=new_name
+                    )
+                    messages.success(request, f"已重命名：{filename} → {path.name}")
+                elif action == "copy_font":
+                    target_dir = (request.POST.get("font_target_dir_key") or "").strip()
+                    overwrite = (request.POST.get("overwrite") or "1").strip() in (
+                        "1",
+                        "on",
+                        "true",
+                        "yes",
+                    )
+                    path = copy_font_across_dirs(
+                        source_dir_key=dir_key,
+                        filename=filename,
+                        target_dir_key=target_dir,
+                        overwrite=overwrite,
+                    )
+                    messages.success(
+                        request,
+                        f"已复制 {filename}：{dir_key} → {target_dir}（{path.name}）",
+                    )
+                elif action == "download_font":
+                    path, data = read_font_file_for_download(
+                        dir_key=dir_key, filename=filename
+                    )
+                    resp = HttpResponse(data, content_type="application/octet-stream")
+                    resp["Content-Disposition"] = f'attachment; filename="{path.name}"'
+                    resp["Content-Length"] = str(len(data))
+                    return resp
+            except Exception as e:
+                messages.error(request, f"字体操作失败：{e}")
+            return _system_debug_settings_redirect("fonts")
+
         # 默认：保存 PDF 回填
         mode = (request.POST.get("pdf_fill_mode") or "").strip().lower()
         font_fit = (request.POST.get("pdf_font_fit") or "").strip().lower()
@@ -2004,13 +2118,18 @@ def system_debug_settings(request):
         return _system_debug_settings_redirect("pdf")
 
     debug_tab = (request.GET.get("tab") or "pdf").strip().lower()
-    if debug_tab not in ("pdf", "precision", "llm", "prompt"):
+    if debug_tab not in ("pdf", "precision", "llm", "prompt", "fonts"):
         debug_tab = "pdf"
 
     pdf_cfg = get_pdf_fill_runtime_config(force_reload=True)
     llm_cfg = get_llm_runtime_config(force_reload=True)
     dec_cfg = get_decimal_precision_runtime_config(force_reload=True)
     api_key_set = bool((llm_cfg.api_key or "").strip())
+    font_catalog = None
+    if debug_tab == "fonts":
+        from apps.core.pymupdf_font_debug_service import build_font_debug_catalog
+
+        font_catalog = build_font_debug_catalog()
     return render(
         request,
         "core/system_debug_settings.html",
@@ -2047,12 +2166,14 @@ def system_debug_settings(request):
             "llm_json_mode": llm_cfg.json_mode,
             "llm_config_path": str(llm_runtime_config_path()),
             "devices_prompt": llm_cfg.devices_prompt,
+            "font_catalog": font_catalog,
             "debug_tab": debug_tab,
             "debug_tabs": (
                 ("pdf", "PDF 回填", "着色与字号"),
                 ("precision", "小数精度", "全局 / 第五章 / 回填"),
                 ("llm", "LLM API", "模型与接口"),
                 ("prompt", "OCR Prompt", "铭牌抽取模板"),
+                ("fonts", "PyMuPDF 字体", "字库目录与上传"),
             ),
         },
     )
@@ -2444,6 +2565,15 @@ def _safe_filename(name: str) -> str:
     return base[:240] if base else "unnamed"
 
 
+def _content_disposition_inline(filename: str) -> str:
+    """inline 预览：ASCII fallback + RFC 5987，避免中文文件名导致 iframe PDF 空白。"""
+    from urllib.parse import quote
+
+    safe = _safe_filename(filename)
+    ascii_name = "".join(ch if 32 <= ord(ch) < 127 and ch not in '"\\' else "_" for ch in safe) or "file.bin"
+    return f"inline; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(safe, safe='')}"
+
+
 def _gen_project_code() -> str:
     from apps.core.project_numbering import allocate_library_project_code
 
@@ -2604,6 +2734,39 @@ def library_projects(request):
     gx = _require_perm(request, "perm_file_library")
     if gx:
         return gx
+    from apps.core.library_access import library_user_may_access_project_workbench
+
+    if not library_user_may_access_project_workbench(request.user):
+        messages.error(request, "当前角色无权访问项目工作台。")
+        return redirect(reverse("dashboard"))
+
+    # 评价部：展示评价报告表 / 评价报告书看板（不含检测任务）
+    try:
+        from apps.core.org_roles import user_is_evaluation_org
+
+        if user_is_evaluation_org(request.user):
+            from apps.core.evaluation_workbench_service import (
+                build_evaluation_workbench_context,
+                handle_evaluation_workbench_post,
+            )
+
+            if request.method == "POST":
+                redir = handle_evaluation_workbench_post(request)
+                if redir is not None:
+                    return redir
+
+            selected_eval_project = (request.GET.get("project") or "").strip()
+            return render(
+                request,
+                "core/library_projects_evaluation.html",
+                build_evaluation_workbench_context(
+                    request.user,
+                    selected_project_id=selected_eval_project,
+                ),
+            )
+    except Exception:
+        pass
+
     commission_org_raw = request.GET.get("commission_org", "").strip()
     selected_commission_org = _commission_org_from_url_slug(commission_org_raw) if commission_org_raw else ""
     selected_raw = request.GET.get("project_id", "").strip()
@@ -2993,15 +3156,27 @@ def library_projects(request):
                 else:
                     scope_org = resolve_workbench_equipment_scope_org(proj, fl_path=post_fl)
                     inspection_map: dict[int, str] = {}
+                    report_task_map: dict[int, list[int]] = {}
                     for eid in raw_ids:
                         itype = (request.POST.get(f"inspection_type_{eid}") or "").strip()
                         if itype:
                             inspection_map[eid] = itype
+                        tids: list[int] = []
+                        for raw_tid in request.POST.getlist(f"report_task_ids_{eid}"):
+                            try:
+                                tid = int(raw_tid)
+                            except (TypeError, ValueError):
+                                continue
+                            if tid > 0:
+                                tids.append(tid)
+                        if tids:
+                            report_task_map[eid] = tids
                     added, errs = bind_equipments_to_project(
                         proj,
                         raw_ids,
                         request.user,
                         equipment_inspection_types=inspection_map,
+                        equipment_report_task_ids=report_task_map,
                         scope_org=scope_org,
                         fl_path=post_fl,
                     )
@@ -3649,7 +3824,7 @@ def library_projects(request):
                             continue
                         role_code = u.profile.role.code
                         if actor_is_org_director:
-                            # 新轨主管：只能派本部门员工
+                            # 新轨主任：只能派本部门员工
                             if not user_may_be_dispatched_by_org_director(request.user, u):
                                 skipped += 1
                                 continue
@@ -3870,6 +4045,7 @@ def library_projects(request):
                     "status": s.status,
                     "status_display": s.get_status_display(),
                     "workflow_stage_display": wf_bar["stage_label"],
+                    "progress_bar": wf_bar,
                     "case_no": s.case.case_no if s.case_id else "",
                     "updated_at": s.updated_at,
                     "submitted_at": s.submitted_at,
@@ -4484,10 +4660,17 @@ def workflow_hub_report_generate(request):
                 site_task_id = int(request.POST.get("site_library_task_id") or 0)
             except ValueError:
                 site_task_id = 0
+            export_variants = request.POST.getlist("export_variant") or request.POST.getlist(
+                "export_variants"
+            )
+            if not export_variants:
+                raw = (request.POST.get("export_variants") or request.POST.get("export_variant") or "").strip()
+                if raw:
+                    export_variants = [raw]
             hub_back = reverse(redir_name) + build_hub_query(
                 project_id=project_id or filter_pid,
                 task_no="",
-                tab="preview",
+                tab="generate",
                 view=view,
             )
             return _workflow_hub_export_report(
@@ -4496,6 +4679,7 @@ def workflow_hub_report_generate(request):
                 task_no=task_no,
                 site_task_id=site_task_id,
                 redirect_url=hub_back,
+                export_variants=export_variants,
             )
 
         if action == "hub_merge_reports":
@@ -4551,6 +4735,7 @@ def _workflow_hub_export_report(
     task_no: str,
     site_task_id: int,
     redirect_url: str,
+    export_variants: list | None = None,
 ):
     """报告生成页：按项目 + 现场任务导出报告，完成后回到枢纽预览 Tab。"""
     from apps.api.inspection_pdf_service import (
@@ -4559,7 +4744,9 @@ def _workflow_hub_export_report(
     )
     from apps.api.inspection_report_make import _resolve_report_task_for_case
     from apps.core.models import LibraryTask
+    from radiation_detection_report.report_pdf_integrator import normalize_report_export_variants
 
+    variants = normalize_report_export_variants(export_variants)
     if not project_id:
         messages.error(request, "未指定项目，无法导出报告")
         return redirect(redirect_url)
@@ -4587,28 +4774,30 @@ def _workflow_hub_export_report(
         messages.error(request, "该现场记录任务未关联到当前项目")
         return redirect(redirect_url)
 
-    report_task = None
-    # 优先：以本现场任务为数据源的报告任务
-    report_task = (
-        project.library_tasks.filter(
-            output_target=LibraryTask.OUTPUT_REPORT,
-            report_source_tasks=site_task,
-        )
-        .order_by("code", "id")
-        .first()
-    )
-    if report_task is None and task_no:
-        from apps.core.models import InspectionCase
-
-        case = InspectionCase.objects.filter(case_no=task_no, library_project=project).first()
-        if case is not None:
-            report_task = _resolve_report_task_for_case(task_no, project)
-    if report_task is None:
-        report_task = (
-            project.library_tasks.filter(output_target=LibraryTask.OUTPUT_REPORT)
+    def _pick_report_task(st: LibraryTask):
+        rt = (
+            project.library_tasks.filter(
+                output_target=LibraryTask.OUTPUT_REPORT,
+                report_source_tasks=st,
+            )
             .order_by("code", "id")
             .first()
         )
+        if rt is None and task_no:
+            from apps.core.models import InspectionCase
+
+            case = InspectionCase.objects.filter(case_no=task_no, library_project=project).first()
+            if case is not None:
+                rt = _resolve_report_task_for_case(task_no, project)
+        if rt is None:
+            rt = (
+                project.library_tasks.filter(output_target=LibraryTask.OUTPUT_REPORT)
+                .order_by("code", "id")
+                .first()
+            )
+        return rt
+
+    report_task = _pick_report_task(site_task)
     if report_task is None:
         messages.error(request, "该项目下未找到报告任务，无法导出报告")
         return redirect(redirect_url)
@@ -4617,12 +4806,17 @@ def _workflow_hub_export_report(
         project, site_task, request.user, tab="inspection_submit"
     )
     if not rows_ok:
-        # 回退：现场记录 PDF 源
         rows_ok, info_notes, errors = collect_latest_submit_rows_for_site_folder(
             project, site_task, request.user, tab="site_record"
         )
+
     if errors and not rows_ok:
-        messages.error(request, "现场记录缺少可用数据，未能导出报告。")
+        detail = "；".join(str(e) for e in errors[:2] if e)
+        messages.error(
+            request,
+            "现场记录缺少可用数据，未能导出报告。"
+            + (f" {detail}" if detail else ""),
+        )
         return redirect(redirect_url)
 
     scope_hint = f"报告生成枢纽 · {site_task.name or site_task.code} 最新提交"
@@ -4636,6 +4830,9 @@ def _workflow_hub_export_report(
         prep_notes=info_notes,
         redirect_url=redirect_url,
         success_for_hub_preview=True,
+        preferred_task_no=task_no,
+        replace_prior_case_reports=True,
+        export_variants=variants,
     )
 
 
@@ -4937,6 +5134,7 @@ def _workflow_hub_handle_advance_post(request, *, redirect_name: str) -> None:
             project=project,
             submission=sub,
             target_stage=target_stage,
+            export_variant=(request.POST.get("export_variant") or "").strip() or None,
         )
         if ok:
             messages.success(request, msg)
@@ -4972,6 +5170,25 @@ def commission_manage(request):
     if not library_user_may_access_commission_manage(request.user):
         messages.error(request, "当前账号无权使用委托管理")
         return redirect(reverse("dashboard"))
+
+    # 评价部：按医院汇总评价报告表（预留评价报告书），不展示检测任务
+    try:
+        from apps.core.org_roles import user_is_evaluation_org
+
+        if user_is_evaluation_org(request.user):
+            from apps.core.evaluation_workbench_service import build_evaluation_workbench_context
+
+            selected_eval_project = (request.GET.get("project") or "").strip()
+            return render(
+                request,
+                "core/commission_manage_evaluation.html",
+                build_evaluation_workbench_context(
+                    request.user,
+                    selected_project_id=selected_eval_project,
+                ),
+            )
+    except Exception:
+        pass
 
     subject_user: User | None = None
     subject_raw = (request.GET.get("user_id") or request.POST.get("user_id") or "").strip()
@@ -5178,6 +5395,7 @@ def commission_manage(request):
                     project=project,
                     submission=sub,
                     target_stage=target_stage,
+                    export_variant=(request.POST.get("export_variant") or "").strip() or None,
                 )
                 if ok:
                     messages.success(request, msg)
@@ -5825,12 +6043,17 @@ def _annotate_file_library_display(user, files: list) -> None:
         f.file_library_may_select = library_user_may_select_library_file_for_batch(user, f)
 
 
+def _lf_activity_ts(lf) -> float:
+    """文件活动时间：优先 updated_at（覆盖更新），否则 created_at。"""
+    ts = getattr(lf, "updated_at", None) or getattr(lf, "created_at", None)
+    return ts.timestamp() if ts else 0.0
+
+
 def _leaf_latest_ts(file_list: list) -> float:
-    latest = None
+    best = 0.0
     for lf in file_list:
-        if lf.created_at and (latest is None or lf.created_at > latest):
-            latest = lf.created_at
-    return latest.timestamp() if latest else 0.0
+        best = max(best, _lf_activity_ts(lf))
+    return best
 
 
 def _nest_file_library_by_project_report(files: list) -> list[dict]:
@@ -5849,12 +6072,11 @@ def _nest_file_library_by_project_report(files: list) -> list[dict]:
         report_heading[(pk, rk)] = getattr(f, "file_library_report_heading", "报告")
 
     def _project_latest_ts(pkey: str) -> float:
-        latest = None
+        best = 0.0
         for _rk, flist in tree[pkey].items():
             for lf in flist:
-                if lf.created_at and (latest is None or lf.created_at > latest):
-                    latest = lf.created_at
-        return latest.timestamp() if latest else 0.0
+                best = max(best, _lf_activity_ts(lf))
+        return best
 
     sorted_pkeys = sorted(tree.keys(), key=lambda k: (-_project_latest_ts(k), project_heading.get(k, "")))
 
@@ -5868,7 +6090,7 @@ def _nest_file_library_by_project_report(files: list) -> list[dict]:
             flist = rmap[rkey]
             flist.sort(
                 key=lambda lf: (
-                    -(lf.created_at.timestamp() if lf.created_at else 0),
+                    -_lf_activity_ts(lf),
                     -lf.pk,
                 )
             )
@@ -5943,19 +6165,17 @@ def _nest_file_library_by_project_report_site(files: list) -> list[dict]:
         site_heading[(pk, rk, sk)] = getattr(f, "file_library_site_record_heading", "现场记录")
 
     def _project_latest_ts(pkey: str) -> float:
-        latest = None
+        best = 0.0
         for _rk, smap in tree.get(pkey, {}).items():
             for _sk, flist in smap.items():
                 for lf in flist:
-                    if lf.created_at and (latest is None or lf.created_at > latest):
-                        latest = lf.created_at
+                    best = max(best, _lf_activity_ts(lf))
         for (_pk, _rk), flist in report_files.items():
             if _pk != pkey:
                 continue
             for lf in flist:
-                if lf.created_at and (latest is None or lf.created_at > latest):
-                    latest = lf.created_at
-        return latest.timestamp() if latest else 0.0
+                best = max(best, _lf_activity_ts(lf))
+        return best
 
     all_pkeys = set(tree.keys()) | {pk for (pk, _rk) in report_files.keys()}
     sorted_pkeys = sorted(all_pkeys, key=lambda k: (-_project_latest_ts(k), project_heading.get(k, "")))
@@ -5993,7 +6213,7 @@ def _nest_file_library_by_project_report_site(files: list) -> list[dict]:
                 flist = smap[skey]
                 flist.sort(
                     key=lambda lf: (
-                        -(lf.created_at.timestamp() if lf.created_at else 0),
+                        -_lf_activity_ts(lf),
                         -lf.pk,
                     )
                 )
@@ -6013,7 +6233,7 @@ def _nest_file_library_by_project_report_site(files: list) -> list[dict]:
             rpt_flist = list(report_files.get((pkey, rkey), []))
             rpt_flist.sort(
                 key=lambda lf: (
-                    -(lf.created_at.timestamp() if lf.created_at else 0),
+                    -_lf_activity_ts(lf),
                     -lf.pk,
                 )
             )
@@ -6058,16 +6278,15 @@ def _nest_file_library_by_library_task(files: list) -> list[dict]:
         output_by_task[tk] = getattr(f, "file_library_task_output_target", None) or "none"
 
     def _group_latest_ts(tkey: str) -> float:
-        latest = None
+        best = 0.0
         for lf in by_task[tkey]:
-            if lf.created_at and (latest is None or lf.created_at > latest):
-                latest = lf.created_at
-        return latest.timestamp() if latest else 0.0
+            best = max(best, _lf_activity_ts(lf))
+        return best
 
     def _sort_files(flist: list) -> list:
         flist.sort(
             key=lambda lf: (
-                -(lf.created_at.timestamp() if lf.created_at else 0),
+                -_lf_activity_ts(lf),
                 -lf.pk,
             )
         )
@@ -6225,18 +6444,32 @@ def _log_file_library_export_detail(user, action: str, lines=None) -> None:
 
 
 def _merged_report_export_user_success_message(
-    project, report_task, library_file=None, *, for_hub_preview: bool = False
+    project,
+    report_task,
+    library_file=None,
+    *,
+    for_hub_preview: bool = False,
+    extra_note: str = "",
 ) -> str:
     code = str(getattr(project, "code", "") or "").strip() or "—"
     label = (getattr(report_task, "name", None) or getattr(report_task, "code", None) or "报告").strip()
     fname = (getattr(library_file, "original_name", None) or "").strip() if library_file is not None else ""
+    extra = (extra_note or "").strip()
     if for_hub_preview:
         if fname:
-            return f"项目 {code}「{label}」报告已生成：{fname}，已打开报告预览。"
-        return f"项目 {code}「{label}」报告已生成，请在「报告预览」中查看。"
+            msg = f"项目 {code}「{label}」报告已生成：{fname}。该任务已标记为「已编制」，可再次「重新导出」覆盖。"
+        else:
+            msg = f"项目 {code}「{label}」报告已生成。该任务已标记为「已编制」，可在「报告预览」中查看。"
+        if extra:
+            msg = f"{msg} {extra}"
+        return msg
     if fname:
-        return f"项目 {code}「{label}」报告已生成：{fname}"
-    return f"项目 {code}「{label}」报告已生成，请在文件库「报告」分类查看。"
+        msg = f"项目 {code}「{label}」报告已生成：{fname}"
+    else:
+        msg = f"项目 {code}「{label}」报告已生成，请在文件库「报告」分类查看。"
+    if extra:
+        msg = f"{msg} {extra}"
+    return msg
 
 
 def _run_merged_report_export_from_submit_rows(
@@ -6250,6 +6483,9 @@ def _run_merged_report_export_from_submit_rows(
     prep_notes: list | None = None,
     redirect_url: str | None = None,
     success_for_hub_preview: bool = False,
+    preferred_task_no: str = "",
+    replace_prior_case_reports: bool = False,
+    export_variants: list | None = None,
 ) -> HttpResponse:
     from apps.api.inspection_pdf_service import (
         accumulate_inspection_payloads_ordered_merge,
@@ -6285,7 +6521,34 @@ def _run_merged_report_export_from_submit_rows(
         cases_for_load.append(c)
 
     project = cases_for_load[0].library_project
-    persist_case = min(cases_for_load, key=lambda x: (x.case_no or ""))
+    preferred = (preferred_task_no or "").strip()
+    persist_case = None
+    if preferred:
+        # 枢纽按叶子 task_no 导出时：报告必须挂到该任务对应案件，否则编制页仍显示「待编制」
+        preferred_case = (
+            InspectionCase.objects.filter(case_no=preferred, library_project=project).first()
+            or InspectionCase.objects.filter(
+                library_project=project,
+                submissions__task_no=preferred,
+            )
+            .distinct()
+            .order_by("-id")
+            .first()
+        )
+        if preferred_case is not None:
+            persist_case = preferred_case
+        if persist_case is None:
+            for c in cases_for_load:
+                if (c.case_no or "").strip() == preferred:
+                    persist_case = c
+                    break
+        if persist_case is None:
+            for _lf, c, payload in rows_ok:
+                if str((payload or {}).get("taskNo") or "").strip() == preferred:
+                    persist_case = c
+                    break
+    if persist_case is None:
+        persist_case = min(cases_for_load, key=lambda x: (x.case_no or ""))
     report_task = report_task_override
     if report_task is None:
         report_task = _resolve_report_task_for_case(persist_case.case_no, project)
@@ -6305,7 +6568,11 @@ def _run_merged_report_export_from_submit_rows(
         messages.error(request, merge_note or "报告数据汇总失败")
         return redirect(redir)
 
-    task_no_for_fill = str(merged_submit.get("taskNo") or "").strip() or str(persist_case.case_no or "").strip()
+    task_no_for_fill = (
+        preferred
+        or str(merged_submit.get("taskNo") or "").strip()
+        or str(persist_case.case_no or "").strip()
+    )
     distinct_case_n = len(cases_for_load)
     n_site_tasks = site_record_task_count_for_project(project)
     manual_device_count = resolve_merged_report_device_count(
@@ -6335,6 +6602,49 @@ def _run_merged_report_export_from_submit_rows(
         )
         return redirect(redir)
 
+    overwrite_lf = None
+    if replace_prior_case_reports and persist_case is not None:
+        from apps.core.report_signature_service import find_latest_report_library_file
+        from radiation_detection_report.report_pdf_integrator import (
+            REPORT_EXPORT_VARIANT_FULL,
+            normalize_report_export_variants,
+            report_export_variant_from_filename,
+        )
+
+        variants_norm = normalize_report_export_variants(export_variants)
+        # 仅「单独导出全本」时尝试覆盖旧全本；多截面或其它截面一律新建文件
+        if variants_norm == [REPORT_EXPORT_VARIANT_FULL]:
+            cand = find_latest_report_library_file(
+                case=persist_case,
+                project=project,
+                task_no=task_no_for_fill,
+            )
+            # 勿把「无防护/仅防护」误当作全本去覆盖
+            if cand is not None and report_export_variant_from_filename(
+                cand.original_name or ""
+            ) == REPORT_EXPORT_VARIANT_FULL:
+                overwrite_lf = cand
+            else:
+                # 在同案报告中再找一份全本
+                from apps.core.models import LibraryFile as _LF
+                from apps.core.report_signature_service import is_issued_report_snapshot_file
+
+                for f in (
+                    _LF.objects.filter(
+                        category=_LF.CATEGORY_REPORT,
+                        link_entity=_LF.LINK_ENTITY_INSPECTION_CASE,
+                        link_object_id=persist_case.pk,
+                        projects=project,
+                        deleted_at__isnull=True,
+                    )
+                    .order_by("-created_at", "-id")[:40]
+                ):
+                    if is_issued_report_snapshot_file(f):
+                        continue
+                    if report_export_variant_from_filename(f.original_name or "") == REPORT_EXPORT_VARIANT_FULL:
+                        overwrite_lf = f
+                        break
+
     ok, pdf_reason, pdf_lf = _persist_filled_pdf_from_submit(
         request.user,
         task_no_for_fill,
@@ -6346,13 +6656,64 @@ def _run_merged_report_export_from_submit_rows(
         task_obj=report_task,
         source_payload=source_payload,
         manual_device_count=manual_device_count,
+        overwrite_file=overwrite_lf,
+        export_variants=export_variants,
     )
+    pdf_lfs = pdf_lf if isinstance(pdf_lf, list) else ([pdf_lf] if pdf_lf is not None else [])
+    primary_lf = None
+    for cand in pdf_lfs:
+        if cand is None:
+            continue
+        name = str(getattr(cand, "original_name", "") or "")
+        if "仅防护结果" not in name and "无防护结果" not in name:
+            primary_lf = cand
+            break
+    if primary_lf is None and pdf_lfs:
+        primary_lf = pdf_lfs[0]
     if not ok:
         messages.error(
             request,
             f"{report_task.code}({report_task.output_target}): {pdf_reason or '报告导出失败'}",
         )
     else:
+        if replace_prior_case_reports and pdf_lfs and persist_case is not None:
+            from apps.core.library_file_service import soft_delete_library_file
+            from apps.core.report_signature_service import reset_report_workflow_after_reexport
+            from radiation_detection_report.report_pdf_integrator import (
+                normalize_report_export_variants,
+                report_export_variant_from_filename,
+            )
+
+            keep_pks = {int(x.pk) for x in pdf_lfs if getattr(x, "pk", None)}
+            # 只替换「本次导出的截面」对应旧文件；全本/无防护/仅防护彼此独立
+            replaced_variants = {
+                report_export_variant_from_filename(getattr(x, "original_name", "") or "")
+                for x in pdf_lfs
+                if x is not None
+            }
+            if not replaced_variants:
+                replaced_variants = set(normalize_report_export_variants(export_variants))
+            priors = (
+                LibraryFile.objects.filter(
+                    category=LibraryFile.CATEGORY_REPORT,
+                    link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
+                    link_object_id=persist_case.pk,
+                    projects=project,
+                    deleted_at__isnull=True,
+                )
+                .exclude(pk__in=keep_pks)
+                .order_by("-created_at", "-id")
+            )
+            for old in priors:
+                old_v = report_export_variant_from_filename(old.original_name or "")
+                if old_v in replaced_variants:
+                    soft_delete_library_file(old)
+            reset_report_workflow_after_reexport(
+                case=persist_case,
+                user=request.user,
+                task_no=task_no_for_fill,
+                export_variants=replaced_variants,
+            )
         n_files = len(rows_ok)
         case_nos = ", ".join(sorted({c.case_no for c in cases_for_load}))
         source_names = ", ".join(
@@ -6374,22 +6735,27 @@ def _run_merged_report_export_from_submit_rows(
                 f"data_sources={n_files} files={source_names}",
                 f"device_count={manual_device_count}",
                 f"task_no_for_fill={task_no_for_fill}",
+                f"export_variants={export_variants or ['full']}",
             ]
         )
         if pdf_reason:
             log_lines.append(pdf_reason)
-        if pdf_lf is not None:
-            log_lines.append(f"saved_file={pdf_lf.original_name} pk={pdf_lf.pk}")
+        for saved in pdf_lfs:
+            log_lines.append(f"saved_file={saved.original_name} pk={saved.pk}")
         _log_file_library_export_detail(request.user, "merged_report_from_site_records", log_lines)
         messages.success(
             request,
             _merged_report_export_user_success_message(
                 project,
                 report_task,
-                pdf_lf,
+                primary_lf,
                 for_hub_preview=success_for_hub_preview,
+                extra_note=pdf_reason if len(pdf_lfs) > 1 else "",
             ),
         )
+        # 枢纽导出成功：直接进入主报告（全本优先）预览页
+        if success_for_hub_preview and primary_lf is not None and getattr(primary_lf, "pk", None):
+            return redirect(reverse("file_preview", kwargs={"pk": int(primary_lf.pk)}))
     return redirect(redir)
 
 
@@ -8013,7 +8379,9 @@ def file_library_raw(request, pk):
     elif ext in (".md", ".markdown"):
         ctype = "text/markdown; charset=utf-8"
     resp = FileResponse(path.open("rb"), content_type=ctype)
-    resp["Content-Disposition"] = f'inline; filename="{_safe_filename(lf.original_name)}"'
+    resp["Content-Disposition"] = _content_disposition_inline(lf.original_name or path.name)
+    # 再次声明，防止中间件覆盖后 iframe 被 DENY
+    resp["X-Frame-Options"] = "SAMEORIGIN"
     return resp
 
 
@@ -8731,6 +9099,22 @@ def htmlpdf_api_export_json(request):
         except Exception:
             source_meta = {}
     binding_meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+    lib_task_for_save = _resolve_library_task_for_htmlpdf_frontend_export(
+        request, data, binding_meta
+    )
+    if lib_task_for_save is not None:
+        try:
+            from apps.core.library_task_template_binding_service import get_task_template_pair
+
+            bound_pdf, _bound_json = get_task_template_pair(lib_task_for_save)
+            if bound_pdf is not None:
+                source_meta = {
+                    "source_type": "template",
+                    "template_file_id": int(bound_pdf.pk),
+                    "template_file_name": bound_pdf.original_name or "",
+                }
+        except Exception:
+            pass
     is_report_tpl = _htmlpdf_is_report_template_context(request, data, binding_meta)
     normalized_fields = _normalize_pdf_fields_for_unified_template(fields, form_schema, bindings)
     _assign_htmlpdf_template_sections_to_fields(
@@ -8796,6 +9180,15 @@ def htmlpdf_api_export_json(request):
         form_schema_extras=schema_extras,
     )
     payload = _sanitize_json_payload_text(payload)
+    if lib_task_for_save is not None:
+        try:
+            from apps.core.library_task_template_binding_service import (
+                apply_task_library_mount_to_template_obj,
+            )
+
+            apply_task_library_mount_to_template_obj(payload, lib_task_for_save)
+        except Exception:
+            pass
     try:
         raw = json_std.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     except UnicodeEncodeError:
@@ -8803,9 +9196,6 @@ def htmlpdf_api_export_json(request):
         raw = json_std.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
     wrapped = type("UploadLike", (), {"read": lambda self: raw, "name": name})()
     binding_meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
-    lib_task_for_save = _resolve_library_task_for_htmlpdf_frontend_export(
-        request, data, binding_meta
-    )
     created, skipped = save_library_binary_uploads(
         request.user,
         [wrapped],
@@ -10648,16 +11038,47 @@ def library_task_management(request):
                     )
                     bound = 0
                     if created:
-                        ids = [int(row["id"]) for row in created if row.get("id")]
-                        attach_files_to_tasks(ids, [task_obj.pk], request.user)
-                        bound = len(ids)
+                        from apps.core.library_task_template_binding_service import (
+                            infer_template_file_role,
+                            replace_task_template_file_binding,
+                        )
+
+                        for row in created:
+                            fid = int(row["id"]) if row.get("id") else 0
+                            if fid <= 0:
+                                continue
+                            lf = LibraryFile.objects.filter(pk=fid).first()
+                            if lf is None:
+                                continue
+                            role = infer_template_file_role(lf)
+                            if role in ("pdf", "json"):
+                                result = replace_task_template_file_binding(
+                                    task=task_obj,
+                                    new_file=lf,
+                                    user=request.user,
+                                    source="task_management_upload",
+                                )
+                                if result.get("ok"):
+                                    bound += 1
+                                else:
+                                    messages.warning(
+                                        request,
+                                        f"「{lf.original_name}」上传成功但绑定失败："
+                                        f"{result.get('error') or '未知错误'}",
+                                    )
+                            else:
+                                attach_files_to_tasks(
+                                    [lf.pk], [task_obj.pk], request.user
+                                )
+                                bound += 1
                     for s in skipped:
                         fn = s.get("filename") or "(无名)"
                         messages.warning(request, f"跳过 {fn}：{s.get('reason', '')}")
                     if bound:
                         messages.success(
                             request,
-                            f"已上传并绑定 {bound} 个文件到「{task_obj.code}」",
+                            f"已上传并绑定 {bound} 个文件到「{task_obj.code}」"
+                            "（同角色旧文件已移出 current）",
                         )
                     elif created:
                         messages.success(request, "文件已上传，请在下方向模板勾选绑定")

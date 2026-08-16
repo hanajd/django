@@ -1,0 +1,462 @@
+{
+  "schema": "embedded_generic_table/v1",
+  "title": "表14 本项目透视防护区工作人员年有效剂量估算结果一览表",
+  "source": "health_impact",
+  "from_info_sheet": false,
+  "column_count": 7,
+  "column_fractions": [
+    0.0,
+    0.12,
+    0.24,
+    0.4,
+    0.56,
+    0.7,
+    0.85,
+    1.0
+  ],
+  "band_count": 9,
+  "row_min_height_pt": 18.0,
+  "repeat_header_on_new_page": true,
+  "header_band_count": 2,
+  "dose_formula": "工作人员年有效剂量(mSv)=(0.79×穿戴防护用品后的剂量率(μSv/h)+0.051×未穿戴防护用品的剂量率(μSv/h))×年出束时间(h)/1000",
+  "note": "注：1.未穿戴防护用品时的剂量率：在确保铅屏风和床侧铅挂帘等防护设施正常使用的情况下，透视防护区工作人员位置周围剂量当量率取标准限值400μSv/h；\n2.穿戴防护用品后的剂量率：指工作人员正常使用铅悬挂防护屏和铅防护吊帘下，工作人员穿戴0.5mmPb防护用品，参考《放射诊断放射防护要求》（GBZ 130-2020）附录C.1.2的参数和计算公式，在125kV（散射）条件下，0.5mmPb的个人防护用品屏蔽效率约为93%，则穿防护用品后的剂量率为400×（1-93%）=28μSv/h；\n3.（1）未穿戴防护用品：工作人员年有效剂量（mSv）=未穿戴防护用品的剂量率（μSv/h）×年出束时间（h）/1000。\n（2）穿戴防护用品后：工作人员年有效剂量（mSv）=（0.79×穿戴防护用品后的剂量率（μSv/h）+0.051×未穿戴防护用品的剂量率（μSv/h））×年出束时间（h）/1000；依据GBZ 128-2019《职业性外照射个人监测规范》6.2.4。",
+  "rows": [
+    {
+      "band": 0,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "射线装置\n（备注）",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "受照位置",
+          "align": "center"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "未穿戴防护用品时的剂量率（μSv/h）",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "穿戴防护用品后的剂量率（μSv/h）",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "机房内单人年最大工作负荷（h）",
+          "align": "center"
+        },
+        {
+          "c0": 5,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 2,
+          "text": "年有效剂量（mSv）",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 1,
+      "cells": [
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "未穿戴防护用品",
+          "align": "center"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "穿戴防护用品后",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 2,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 3,
+          "col_span": 1,
+          "text": "ERCP设备",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "全身",
+          "align": "center"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "400",
+          "align": "center",
+          "cell_role": "rate_unprot",
+          "rate_usv_h": 400.0
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "28",
+          "align": "center",
+          "cell_role": "rate_prot",
+          "rate_usv_h": 28.0
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 3,
+          "col_span": 1,
+          "text": "50.0",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 50.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "20.00",
+          "align": "center",
+          "cell_role": "dose_unprot",
+          "formula": "工作人员年有效剂量(mSv)=未穿戴防护用品的剂量率(μSv/h)×年出束时间(h)/1000"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.13",
+          "align": "center",
+          "cell_role": "dose_prot",
+          "formula": "工作人员年有效剂量(mSv)=(0.79×穿戴防护用品后的剂量率(μSv/h)+0.051×未穿戴防护用品的剂量率(μSv/h))×年出束时间(h)/1000"
+        }
+      ]
+    },
+    {
+      "band": 3,
+      "cells": [
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "眼晶体",
+          "align": "center"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "400",
+          "align": "center",
+          "cell_role": "rate_unprot",
+          "rate_usv_h": 400.0
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "28",
+          "align": "center",
+          "cell_role": "rate_prot",
+          "rate_usv_h": 28.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "20.00",
+          "align": "center",
+          "cell_role": "dose_unprot",
+          "formula": "工作人员年有效剂量(mSv)=未穿戴防护用品的剂量率(μSv/h)×年出束时间(h)/1000"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.13",
+          "align": "center",
+          "cell_role": "dose_prot",
+          "formula": "工作人员年有效剂量(mSv)=(0.79×穿戴防护用品后的剂量率(μSv/h)+0.051×未穿戴防护用品的剂量率(μSv/h))×年出束时间(h)/1000"
+        }
+      ]
+    },
+    {
+      "band": 4,
+      "cells": [
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "四肢和皮肤",
+          "align": "center"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "400",
+          "align": "center",
+          "cell_role": "rate_unprot",
+          "rate_usv_h": 400.0
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "/",
+          "align": "center",
+          "cell_role": "rate_prot"
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "20.00",
+          "align": "center",
+          "cell_role": "dose_unprot",
+          "formula": "工作人员年有效剂量(mSv)=未穿戴防护用品的剂量率(μSv/h)×年出束时间(h)/1000"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "/",
+          "align": "center",
+          "cell_role": "dose_prot"
+        }
+      ]
+    },
+    {
+      "band": 5,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 3,
+          "col_span": 1,
+          "text": "DSA",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "全身",
+          "align": "center"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "400",
+          "align": "center",
+          "cell_role": "rate_unprot",
+          "rate_usv_h": 400.0
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "28",
+          "align": "center",
+          "cell_role": "rate_prot",
+          "rate_usv_h": 28.0
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 3,
+          "col_span": 1,
+          "text": "100",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 100.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "40.00",
+          "align": "center",
+          "cell_role": "dose_unprot",
+          "formula": "工作人员年有效剂量(mSv)=未穿戴防护用品的剂量率(μSv/h)×年出束时间(h)/1000"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.25",
+          "align": "center",
+          "cell_role": "dose_prot",
+          "formula": "工作人员年有效剂量(mSv)=(0.79×穿戴防护用品后的剂量率(μSv/h)+0.051×未穿戴防护用品的剂量率(μSv/h))×年出束时间(h)/1000"
+        }
+      ]
+    },
+    {
+      "band": 6,
+      "cells": [
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "眼晶体",
+          "align": "center"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "400",
+          "align": "center",
+          "cell_role": "rate_unprot",
+          "rate_usv_h": 400.0
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "28",
+          "align": "center",
+          "cell_role": "rate_prot",
+          "rate_usv_h": 28.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "40.00",
+          "align": "center",
+          "cell_role": "dose_unprot",
+          "formula": "工作人员年有效剂量(mSv)=未穿戴防护用品的剂量率(μSv/h)×年出束时间(h)/1000"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.25",
+          "align": "center",
+          "cell_role": "dose_prot",
+          "formula": "工作人员年有效剂量(mSv)=(0.79×穿戴防护用品后的剂量率(μSv/h)+0.051×未穿戴防护用品的剂量率(μSv/h))×年出束时间(h)/1000"
+        }
+      ]
+    },
+    {
+      "band": 7,
+      "cells": [
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "四肢和皮肤",
+          "align": "center"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "400",
+          "align": "center",
+          "cell_role": "rate_unprot",
+          "rate_usv_h": 400.0
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "/",
+          "align": "center",
+          "cell_role": "rate_prot"
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "40.00",
+          "align": "center",
+          "cell_role": "dose_unprot",
+          "formula": "工作人员年有效剂量(mSv)=未穿戴防护用品的剂量率(μSv/h)×年出束时间(h)/1000"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "/",
+          "align": "center",
+          "cell_role": "dose_prot"
+        }
+      ]
+    },
+    {
+      "band": 8,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 7,
+          "text": "注：1.未穿戴防护用品时的剂量率：在确保铅屏风和床侧铅挂帘等防护设施正常使用的情况下，透视防护区工作人员位置周围剂量当量率取标准限值400μSv/h；\n2.穿戴防护用品后的剂量率：指工作人员正常使用铅悬挂防护屏和铅防护吊帘下，工作人员穿戴0.5mmPb防护用品，参考《放射诊断放射防护要求》（GBZ 130-2020）附录C.1.2的参数和计算公式，在125kV（散射）条件下，0.5mmPb的个人防护用品屏蔽效率约为93%，则穿防护用品后的剂量率为400×（1-93%）=28μSv/h；\n3.（1）未穿戴防护用品：工作人员年有效剂量（mSv）=未穿戴防护用品的剂量率（μSv/h）×年出束时间（h）/1000。\n（2）穿戴防护用品后：工作人员年有效剂量（mSv）=（0.79×穿戴防护用品后的剂量率（μSv/h）+0.051×未穿戴防护用品的剂量率（μSv/h））×年出束时间（h）/1000；依据GBZ 128-2019《职业性外照射个人监测规范》6.2.4。",
+          "align": "left"
+        }
+      ]
+    }
+  ]
+}

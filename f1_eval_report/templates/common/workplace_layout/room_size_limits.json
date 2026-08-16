@@ -1,0 +1,159 @@
+{
+  "schema": "f1_room_size_limits/v1",
+  "description": "GBZ 130-2020 表2 机房最小有效使用面积与最小单边长度（供表4对照；可在常用模板表格中维护）",
+  "order": [
+    "dsa",
+    "dr",
+    "cr",
+    "ct",
+    "mobile_xray",
+    "oral_cbct_combo",
+    "vehicle_dr",
+    "vehicle_ct",
+    "mobile_ct",
+    "mobile_dr",
+    "dental_panorama",
+    "ercp",
+    "bmd",
+    "oral_cbct",
+    "intraoral",
+    "mammo_dr",
+    "mammo_cr",
+    "gi",
+    "mini_c_arm",
+    "c_arm",
+    "g_arm"
+  ],
+  "items": {
+    "dsa": {
+      "label": "数字减影血管造影设备（DSA）",
+      "min_area_m2": 20,
+      "min_side_m": 3.5,
+      "note": "按单管头X射线设备（含C形臂）；双管头同机房按30/4.5"
+    },
+    "dr": {
+      "label": "DR",
+      "min_area_m2": 20,
+      "min_side_m": 3.5,
+      "note": "单管头X射线设备"
+    },
+    "cr": {
+      "label": "CR",
+      "min_area_m2": 20,
+      "min_side_m": 3.5,
+      "note": "单管头X射线设备"
+    },
+    "ct": {
+      "label": "CT",
+      "min_area_m2": 30,
+      "min_side_m": 4.5,
+      "note": "不含头颅移动CT"
+    },
+    "mobile_xray": {
+      "label": "移动X光机",
+      "min_area_m2": "",
+      "min_side_m": "",
+      "note": "移动式使用时满足相应布局；床旁/急救车配备设备除外"
+    },
+    "oral_cbct_combo": {
+      "label": "多合一口腔CBCT",
+      "min_area_m2": 5,
+      "min_side_m": 2.0,
+      "note": "坐位/站位扫描按5/2.0；卧位扫描按15/3.0"
+    },
+    "vehicle_dr": {
+      "label": "车载DR",
+      "min_area_m2": "",
+      "min_side_m": "",
+      "note": "车载式诊断X射线设备：表2不适用"
+    },
+    "vehicle_ct": {
+      "label": "车载CT",
+      "min_area_m2": "",
+      "min_side_m": "",
+      "note": "车载式诊断X射线设备：表2不适用"
+    },
+    "mobile_ct": {
+      "label": "移动CT",
+      "min_area_m2": "",
+      "min_side_m": "",
+      "note": "头颅移动CT等按标准例外条款；固定机房使用时参照CT"
+    },
+    "mobile_dr": {
+      "label": "移动DR",
+      "min_area_m2": "",
+      "min_side_m": "",
+      "note": "移动式使用时满足相应布局要求"
+    },
+    "dental_panorama": {
+      "label": "口腔全景机",
+      "min_area_m2": 5,
+      "min_side_m": 2.0,
+      "note": "牙科全景机"
+    },
+    "ercp": {
+      "label": "ERCP",
+      "min_area_m2": 20,
+      "min_side_m": 3.5,
+      "note": "按单管头X射线设备（含C形臂）"
+    },
+    "bmd": {
+      "label": "全身骨密度仪",
+      "min_area_m2": 10,
+      "min_side_m": 2.5,
+      "note": "全身骨密度仪"
+    },
+    "oral_cbct": {
+      "label": "口腔CBCT",
+      "min_area_m2": 5,
+      "min_side_m": 2.0,
+      "note": "坐位/站位5/2.0；卧位15/3.0"
+    },
+    "intraoral": {
+      "label": "口内牙片机",
+      "min_area_m2": 3,
+      "min_side_m": 1.5,
+      "note": ""
+    },
+    "mammo_dr": {
+      "label": "乳腺DR",
+      "min_area_m2": 10,
+      "min_side_m": 2.5,
+      "note": "乳腺机"
+    },
+    "mammo_cr": {
+      "label": "乳腺CR",
+      "min_area_m2": 10,
+      "min_side_m": 2.5,
+      "note": "乳腺机"
+    },
+    "gi": {
+      "label": "数字胃肠机",
+      "min_area_m2": 20,
+      "min_side_m": 3.5,
+      "note": "单管头；若为透视专用机可按15/3.0"
+    },
+    "mini_c_arm": {
+      "label": "小C臂",
+      "min_area_m2": 20,
+      "min_side_m": 3.5,
+      "note": "单管头X射线设备（含C形臂）"
+    },
+    "c_arm": {
+      "label": "C形臂",
+      "min_area_m2": 20,
+      "min_side_m": 3.5,
+      "note": "单管头；双管头同机房按30/4.5"
+    },
+    "g_arm": {
+      "label": "G形臂",
+      "min_area_m2": 20,
+      "min_side_m": 3.5,
+      "note": "按单管头X射线设备（含C形臂）类推"
+    }
+  },
+  "notes": {
+    "source": "GBZ 130-2020 §6.1.5 表2",
+    "编辑说明": "在常用模板中以表格维护；表4设计列需按图纸手工填写"
+  }
+}

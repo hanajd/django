@@ -11,7 +11,10 @@
         <a href="{% url 'login' %}" class="mt-6 inline-flex rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white">返回登录</a>
         {% else %}
         <h1 class="text-xl font-semibold text-slate-900">加入团队</h1>
-        <p class="mt-2 text-sm text-slate-600">通过主管邀请链接创建账号。必填用户名与密码；手机号、邮箱、姓名、工号可选填。</p>
+        <p class="mt-2 text-sm text-slate-600">通过邀请链接创建账号（本链接仅可注册一次）。必填用户名与密码；手机号、邮箱、姓名、工号可选填。</p>
+        {% if role_name %}
+        <p class="mt-2 text-sm text-slate-700">注册角色：<span class="font-medium text-violet-800">{{ role_name }}</span></p>
+        {% endif %}
         {% if expires_at %}
         <p class="mt-1 text-xs text-slate-500">链接有效期至 {{ expires_at|date:"Y-m-d H:i" }}</p>
         {% endif %}

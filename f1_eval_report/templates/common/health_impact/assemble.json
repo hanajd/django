@@ -1,0 +1,12 @@
+{
+  "schema": "f1_common_assemble/v1",
+  "id": "health_impact",
+  "title": "健康影响评价",
+  "parts": [
+    {"id": "imaging_intro", "path": "health_impact/imaging_intro.md"},
+    {"id": "imaging_after", "path": "health_impact/imaging_after.md"},
+    {"id": "interventional_intro", "path": "health_impact/interventional_intro.md"},
+    {"id": "interventional_after", "path": "health_impact/interventional_after.md"},
+    {"id": "abnormal", "path": "health_impact/abnormal.md"}
+  ]
+}

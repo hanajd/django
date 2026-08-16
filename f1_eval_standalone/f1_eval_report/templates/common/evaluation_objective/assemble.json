@@ -1,0 +1,39 @@
+{
+  "schema": "f1_common_text_assemble/v1",
+  "id": "evaluation_objective",
+  "title": "评价目标",
+  "text_key": "evaluation_objective_intro",
+  "tables_key": "evaluation_objective_tables",
+  "source": "250075YP / GBZ 130-2020 §6.3.1 / WS 76-2020",
+  "parts": {
+    "principles": "01_principles.md",
+    "shielding": "02_shielding.md",
+    "project_summary": "02_project_summary.md",
+    "ws76": "02_ws76.md",
+    "dose_target_intro": "03_dose_target_intro.md",
+    "safety_management": "04_safety_management.md"
+  },
+  "shielding": {
+    "fixed": "02_shielding.md",
+    "from_info_sheet": [
+      "02_project_summary.md",
+      "02_ws76.md"
+    ],
+    "room_dose_map": "room_dose_map.json",
+    "generator": "f1_eval_report.templates.shielding_summary"
+  },
+  "tables": [
+    "table2_dose_limits.json",
+    "table3_dose_targets.default.json"
+  ],
+  "table_marks": {
+    "schema": "<<<F1_TABLE>>>",
+    "order": ["after_principles", "after_dose_target_intro"]
+  },
+  "notes": {
+    "1": "放射防护基本原则为固定内容；表2紧接其后",
+    "2": "屏蔽要求：02_shielding.md 固定；综上/WS76 按机房-剂量对应表由装置清单自动生成，模板可编辑",
+    "3": "文字固定；表3接在③文字后，内容优先来自评价信息表",
+    "4": "放射防护安全措施和放射防护管理为固定格式"
+  }
+}

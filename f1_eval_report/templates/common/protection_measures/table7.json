@@ -1,0 +1,3425 @@
+{
+  "schema": "embedded_generic_table/v1",
+  "title": "表7 本项目X射线设备机房屏蔽设计情况及评价",
+  "source": "shielding_facilities",
+  "from_info_sheet": true,
+  "room_count": 16,
+  "column_count": 5,
+  "column_fractions": [
+    0.0,
+    0.14,
+    0.42,
+    0.58,
+    0.78,
+    1.0
+  ],
+  "band_count": 99,
+  "row_min_height_pt": 18.0,
+  "repeat_header_on_new_page": true,
+  "note": "表7由信息表屏蔽设计组稿；同屏蔽同设备类机房已合并；①②为上标标记 ^①^",
+  "rows": [
+    {
+      "band": 0,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "屏蔽体",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 2,
+          "text": "屏蔽设计^①^",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "标准要求\n(GBZ130-2020)",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "评价",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 1,
+      "cells": [
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "屏蔽设施材料及厚度",
+          "align": "center"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "总等效铅当量厚度(mmPb)^②^",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 2,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 5,
+          "text": "一、门急诊楼一楼CT机房"
+        }
+      ]
+    },
+    {
+      "band": 3,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "四周墙体",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "370mm实心红砖及1.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.5",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 7,
+          "col_span": 1,
+          "text": "CT机房：2.5mmPb",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 4,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "观察窗",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 5,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "机房防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 6,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "控制室防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 7,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "其他防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 8,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "顶板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "120mm混凝土及2.5mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.7",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 9,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "地板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "180mm混凝土及2.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 10,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 5,
+          "text": "二、门急诊楼一楼DR机房"
+        }
+      ]
+    },
+    {
+      "band": 11,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "四周墙体",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "370mm实心红砖及1.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "5.1",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 6,
+          "col_span": 1,
+          "text": "125kV以上的摄影机房：\n有用线束方向铅当量3.0mmPb\n非有用线束方向铅当量2.0mmPb",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 12,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "观察窗",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 13,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "机房防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 14,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "控制室防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 15,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "顶板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "120mm混凝土及2.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.4",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 16,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "地板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "180mm混凝土及2.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.4",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 17,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 5,
+          "text": "三、医技楼一楼影像中心CT机房1和CT机房2"
+        }
+      ]
+    },
+    {
+      "band": 18,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "四周墙体",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "370mm实心红砖及1.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.5",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 6,
+          "col_span": 1,
+          "text": "CT机房：2.5mmPb",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 19,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "观察窗",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 20,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "机房防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 21,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "控制室防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 22,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "顶板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "180mm混凝土及2.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 23,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "地板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "180mm混凝土及2.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 24,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 5,
+          "text": "四、医技楼一楼影像中心DR机房1和DR机房2"
+        }
+      ]
+    },
+    {
+      "band": 25,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "四周墙体",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "370mm实心红砖及1.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "5.1",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 6,
+          "col_span": 1,
+          "text": "125kV以上的摄影机房：\n有用线束方向铅当量3.0mmPb\n非有用线束方向铅当量2.0mmPb",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 26,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "观察窗",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 27,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "机房防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 28,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "控制室防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 29,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "顶板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "180mm混凝土及2.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.4",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 30,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "地板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "180mm混凝土及2.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.4",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 31,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 5,
+          "text": "五、医技楼一楼影像中心全身骨密度仪机房"
+        }
+      ]
+    },
+    {
+      "band": 32,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "四周墙体",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "370mm实心红砖及1.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "5.1",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 6,
+          "col_span": 1,
+          "text": "骨密度仪机房：\n有用线束方向铅当量1.0mmPb\n非有用线束方向铅当量1.0mmPb",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 33,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "观察窗",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 34,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "机房防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 35,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "控制室防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 36,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "顶板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "180mm混凝土及1.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.4",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 37,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "地板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "180mm混凝土及1.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.4",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 38,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 5,
+          "text": "六、医技楼一楼影像中心乳腺DR机房"
+        }
+      ]
+    },
+    {
+      "band": 39,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "四周墙体",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "370mm实心红砖及1.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.8",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 6,
+          "col_span": 1,
+          "text": "乳腺摄影机房：\n有用线束方向铅当量1.0mmPb\n非有用线束方向铅当量1.0mmPb",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 40,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "观察窗",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 41,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "机房防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 42,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "控制室防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 43,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "顶板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "180mm混凝土及1.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.7",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 44,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "地板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "180mm混凝土及1.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.7",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 45,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 5,
+          "text": "七、医技楼一楼影像中心数字胃肠机房"
+        }
+      ]
+    },
+    {
+      "band": 46,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "四周墙体",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "370mm实心红砖及1.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "5.1",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 7,
+          "col_span": 1,
+          "text": "125kV以上的摄影机房：\n有用线束方向铅当量3.0mmPb\n非有用线束方向铅当量2.0mmPb",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 47,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "观察窗",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 48,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "机房防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 49,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "控制室防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 50,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "其他防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 51,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "顶板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "180mm混凝土及1.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.4",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 52,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "地板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "180mm混凝土及1.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.4",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 53,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 5,
+          "text": "八、医技楼二楼内镜中心ERCP机房"
+        }
+      ]
+    },
+    {
+      "band": 54,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "四周墙体",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "200mm空心砖及50*30*1.5镀锌方管及2.0mmPb铅板",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 7,
+          "col_span": 1,
+          "text": "C形臂X射线设备机房要求：\n有用线束方向：2.0mmPb\n非有用线束方向：2.0mmPb",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 55,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "观察窗",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 56,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "机房防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 57,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "控制室防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 58,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "其他防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 59,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "顶板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "120mm混凝土及50*30*1.5镀锌方管及2.0mmPb铅板",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.4",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 60,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "地板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "110mm混凝土及2.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.3",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 61,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 5,
+          "text": "九、医技楼二楼介入中心DSA机房1和DSA机房2"
+        }
+      ]
+    },
+    {
+      "band": 62,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "四周墙体",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "370mm实心红砖及50*30*1.5镀锌方管及3.0mmPb铅板",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "6.9",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 6,
+          "col_span": 1,
+          "text": "C形臂X射线设备机房要求：\n有用线束方向：2.0mmPb\n非有用线束方向：2.0mmPb",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 63,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "观察窗",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 64,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "机房防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 65,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "控制室防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 66,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "顶板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "120mm混凝土及50*30*1.5镀锌方管及3.0mmPb铅板",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.4",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 67,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "地板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "120mm混凝土及3.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.4",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 68,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 5,
+          "text": "十、医技楼四楼手术中心手术室7（C形臂机房1）"
+        }
+      ]
+    },
+    {
+      "band": 69,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "四周墙体",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "镀锌方管及2mmPb铅板",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 6,
+          "col_span": 1,
+          "text": "C形臂X射线设备机房要求：\n有用线束方向：2.0mmPb\n非有用线束方向：2.0mmPb",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 70,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "观察窗",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 71,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "机房防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 72,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "其他防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 73,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "顶板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "120mm混凝土及50*30*1.5镀锌方管及2.0mmPb铅板",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.4",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 74,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "地板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "120mm混凝土及1.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.4",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 75,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 5,
+          "text": "十一、医技楼四楼手术中心手术室8（C形臂机房2）"
+        }
+      ]
+    },
+    {
+      "band": 76,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "四周墙体",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "镀锌方管及2mmPb铅板",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 7,
+          "col_span": 1,
+          "text": "C形臂X射线设备机房要求：\n有用线束方向：2.0mmPb\n非有用线束方向：2.0mmPb",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 77,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "观察窗",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 78,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "机房防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 79,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "控制室防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 80,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "其他防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 81,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "顶板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "120mm混凝土及50*30*1.5镀锌方管及2.0mmPb铅板",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.4",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 82,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "地板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "120mm混凝土及1.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.4",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 83,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 5,
+          "text": "十二、发热门诊一楼CT机房"
+        }
+      ]
+    },
+    {
+      "band": 84,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "四周墙体",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "370mm实心红砖及1.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.5",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 7,
+          "col_span": 1,
+          "text": "CT机房：2.5mmPb",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 85,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "观察窗",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 86,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "机房防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 87,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "控制室防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 88,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "其他防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 89,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "顶板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "120mm混凝土及2.5mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.7",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 90,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "地板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "180mm混凝土及2.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 91,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 5,
+          "text": "十三、发热门诊一楼DR机房"
+        }
+      ]
+    },
+    {
+      "band": 92,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "四周墙体",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "370mm实心红砖及1.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "5.1",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 6,
+          "col_span": 1,
+          "text": "125kV以上的摄影机房：\n有用线束方向铅当量3.0mmPb\n非有用线束方向铅当量2.0mmPb",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 93,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "观察窗",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 94,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "机房防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 95,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "控制室防护门",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.0",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 96,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "顶板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "120mm混凝土及2.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "3.4",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 97,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "地板",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "180mm混凝土及2.0mmPb硫酸钡水泥防护涂层",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "4.4",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 98,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 5,
+          "text": "注：^①^根据建设单位提供的屏蔽材料信息：混凝土密度≥2.35g/cm^3^，实心红砖密度≥1.65g/cm^3^，铅密度≥11.30g/cm^3^。^②^140kV（CT）下：120mm混凝土等效铅当量约为1.2mmPb，180mm混凝土等效铅当量约为2.0mmPb，370mm实心红砖等效铅当量约为3.5mmPb。150kV（DR、数字胃肠机）下：有用线束方向：180mm混凝土等效铅当量约为1.9mmPb，370mm实心红砖等效铅当量约为3.4mmPb；非有用线束方向：120mm混凝土等效铅当量约为1.4mmPb，180mm混凝土等效铅当量约为2.4mmPb，370mm实心红砖等效铅当量约为4.1mmPb。150kV（全身骨密度仪）下：180mm混凝土等效铅当量约为2.4mmPb，370mm实心红砖等效铅当量约为4.1mmPb。50kV（乳腺DR）下：180mm混凝土等效铅当量约为1.7mmPb，370mm实心红砖等效铅当量约为2.8mmPb。125kV（DSA、C形臂、ERCP）下：110mm混凝土等效铅当量约为1.3mmPb，120mm混凝土等效铅当量约为1.4mmPb，370mm实心红砖等效铅当量约为3.9mmPb，空心砖、镀锌方管等效铅当量忽略不计。*参考《放射防护实用手册》；*依据GBZ130-2020《放射诊断放射防护要求》。",
+          "align": "left",
+          "first_indent": true
+        }
+      ]
+    }
+  ]
+}

@@ -167,6 +167,16 @@ def build_runtime_frontend_schema(
     pdf_block["fields"] = fields_work
     template_obj["pdf"] = pdf_block
 
+    if task_obj is not None:
+        try:
+            from apps.core.library_task_template_binding_service import (
+                apply_task_library_mount_to_template_obj,
+            )
+
+            apply_task_library_mount_to_template_obj(template_obj, task_obj)
+        except Exception as exc:
+            logger.debug("apply library template mount skipped: %s", exc)
+
     try:
         from utils.frontend_schema_rule_engine import build_frontend_schema_by_rules
 
@@ -258,6 +268,16 @@ def build_editor_saved_frontend_json(
     pdf_block = dict(pdf_block)
     pdf_block["fields"] = fields_work
     template_obj["pdf"] = pdf_block
+
+    if task_obj is not None:
+        try:
+            from apps.core.library_task_template_binding_service import (
+                apply_task_library_mount_to_template_obj,
+            )
+
+            apply_task_library_mount_to_template_obj(template_obj, task_obj)
+        except Exception as exc:
+            logger.debug("editor apply library template mount skipped: %s", exc)
 
     try:
         from utils.frontend_schema_rule_engine import build_frontend_schema_by_rules

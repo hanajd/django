@@ -14,7 +14,11 @@
                 <td class="px-4 py-3 align-top">
                     <div class="font-medium text-slate-900">{{ row.project_code }}</div>
                     <div class="text-xs text-slate-500">{{ row.project_name }}</div>
-                    <div class="text-xs text-slate-700 mt-1">{{ row.equipment_title|default:"—" }}</div>
+                    <div class="text-xs text-slate-700 mt-1">{{ row.equipment_title|default:"—" }}
+                        {% if row.report_variant_label %}
+                        <span class="ml-1 inline-flex rounded-full bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-800">{{ row.report_variant_label }}</span>
+                        {% endif %}
+                    </div>
                 </td>
                 <td class="px-4 py-3 align-top">
                     <span class="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">{{ row.stage_label|default:"—" }}</span>
@@ -22,9 +26,19 @@
                 <td class="px-4 py-3 align-top font-mono text-xs text-slate-600">{{ row.task_no|default:"—" }}</td>
                 <td class="px-4 py-3 align-top">
                     <div class="flex flex-col items-end gap-1.5">
-                        <a href="{{ row.report_library_url }}" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                        {% if row.report_preview_url %}
+                        <a href="{{ row.report_preview_url }}" target="_blank" rel="noopener"
+                           class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                           title="预览报告 PDF">
+                            <i class="ri-eye-line"></i> 查看报告
+                        </a>
+                        {% else %}
+                        <a href="{{ row.report_library_url }}" target="_blank" rel="noopener"
+                           class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                           title="打开文件库报告分类">
                             <i class="ri-folder-2-line"></i> 查看报告
                         </a>
+                        {% endif %}
                         {% include "core/partials/workflow_hub_advance_form.html" with row=row project_id=project_id task_no=task_no tab=tab %}
                     </div>
                 </td>

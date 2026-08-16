@@ -1,0 +1,73 @@
+{
+  "schema": "f1_eval_attachment_format/v1",
+  "description": "评价报告附件页版式：主标题在表外上方，次级标题与图片在表框内；支持多种页面/图片变换。",
+  "list_in_f1_table": {
+    "label": "附件",
+    "label_format": { "mode": "center" },
+    "field_key": "attachments_list",
+    "join_with": "\n",
+    "item_template": "{code} {title}"
+  },
+  "page": {
+    "margins_mm": {
+      "top": 26.0,
+      "bottom": 26.0,
+      "left": 28.0,
+      "right": 28.0
+    },
+    "outer_title_gap_pt": 6.0,
+    "inner_subtitle_gap_pt": 6.0,
+    "inner_pad_pt": 8.0,
+    "border_width_pt": 0.6,
+    "font_size_pt": 12.0,
+    "draw_page_number": true
+  },
+  "page_modes": {
+    "a4_portrait": {
+      "label": "A4竖版（默认）",
+      "width_pt": 595.3,
+      "height_pt": 841.9
+    },
+    "a4_landscape": {
+      "label": "A4横版（页面旋转90度）",
+      "width_pt": 841.9,
+      "height_pt": 595.3
+    },
+    "a3_portrait": {
+      "label": "A3竖版（A4放大为A3）",
+      "width_pt": 841.9,
+      "height_pt": 1190.55
+    },
+    "a3_landscape": {
+      "label": "A3横版（页面旋转90度且用A3）",
+      "width_pt": 1190.55,
+      "height_pt": 841.9
+    }
+  },
+  "image_rotate_options_deg": [0, 90, 180, 270],
+  "default_page_mode": "a4_portrait",
+  "default_image_rotate_deg": 0,
+  "naming": {
+    "primary_title_examples": ["附件一", "附件二", "附件三"],
+    "secondary_title_examples": ["附件 2-1", "附件 2-2", "附件 4-1"]
+  },
+  "fixed_attachment_titles": [
+    { "code": "附件一", "title": "建设项目放射性职业病危害评价委托单", "kind": "fixed" },
+    { "code": "附件二", "title": "《事业单位法人证书》《医疗机构执业许可证》", "kind": "fixed" },
+    { "code": "附件三", "title": "本项目基本信息", "kind": "fixed" },
+    { "code": "附件四", "title": "本项目相关图纸", "kind": "fixed" },
+    { "code": "附件五", "title": "本项目放射工作人员配备计划", "kind": "fixed" },
+    { "code": "附件六", "title": "应急预案", "kind": "fixed" },
+    { "code": "附件七", "title": "其他放射防护管理制度", "kind": "fixed" },
+    {
+      "code": "附件八",
+      "title": "关于《{项目全称}放射性职业病危害预评价报告表》的评审意见",
+      "kind": "review"
+    },
+    {
+      "code": "附件九",
+      "title": "关于《{项目全称}放射性职业病危害预评价报告表》的评审意见修改说明",
+      "kind": "review"
+    }
+  ]
+}

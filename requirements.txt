@@ -15,6 +15,7 @@ pypdf>=4.0.0
 PyPDF2>=3.0.0
 pdf2image>=1.17.0
 pymupdf>=1.24.0
+openpyxl>=3.1.0
 
 # Ollama model is configured by env var:
 # EQUIPMENT_MODEL_NAME=qwen3:14b-q4_K_M

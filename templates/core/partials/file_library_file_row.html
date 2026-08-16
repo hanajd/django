@@ -13,7 +13,7 @@
         {% include "core/file_library_file_cell.html" %}
     </td>
     <td class="px-3 py-3 align-top text-xs font-medium text-slate-800 break-words">{{ f.file_library_uploader_display }}</td>
-    <td class="whitespace-nowrap px-3 py-3 align-top text-xs tabular-nums text-slate-600">{{ f.created_at|date:"Y-m-d H:i" }}</td>
+    <td class="whitespace-nowrap px-3 py-3 align-top text-xs tabular-nums text-slate-600">{% if f.updated_at %}{{ f.updated_at|date:"Y-m-d H:i" }}{% else %}{{ f.created_at|date:"Y-m-d H:i" }}{% endif %}</td>
     <td class="px-3 py-3 align-top text-right">
         <div class="inline-flex flex-col items-end gap-1.5 sm:flex-row sm:flex-wrap sm:justify-end sm:gap-2">
             {% if role_perm.perm_file_download %}

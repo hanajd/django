@@ -8,7 +8,7 @@
         <div>
             <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">系统管理</p>
             <h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-900">用户列表</h1>
-            <p class="mt-1 text-sm text-slate-600">{% if is_coordinator_user_list %}创建与管理检测流程岗位账号{% elif is_dept_director_user_list %}管理本部门员工；可发邀请链接让员工自助注册{% else %}搜索、编辑账号与角色分配{% endif %}</p>
+            <p class="mt-1 text-sm text-slate-600">{% if is_coordinator_user_list %}创建与管理检测流程岗位账号{% elif is_dept_director_user_list %}管理本部门员工；可发一次性邀请链接让员工自助注册{% else %}搜索、编辑账号与角色分配；可按角色生成一次性注册链接{% endif %}</p>
         </div>
         <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
             <form method="get" class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
@@ -22,16 +22,6 @@
                     搜索
                 </button>
             </form>
-            {% if can_create_invite_link %}
-            <form method="post" action="{% url 'user_invite_create' %}" class="inline">
-                {% csrf_token %}
-                <input type="hidden" name="ttl_days" value="7">
-                <button type="submit" class="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-medium text-emerald-900 shadow-sm transition hover:bg-emerald-100">
-                    <i class="ri-link"></i>
-                    生成邀请链接
-                </button>
-            </form>
-            {% endif %}
             <a id="guide-user-create" href="{% url 'user_create' %}" class="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700">
                 <i class="ri-user-add-line"></i>
                 创建用户
@@ -39,22 +29,81 @@
         </div>
     </div>
 
-    {% if can_create_invite_link and active_invite_url %}
-    <div class="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 text-sm text-emerald-950">
+    {% if can_create_invite_link %}
+    <div class="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4 shadow-sm sm:p-5">
         <div class="flex flex-wrap items-start justify-between gap-3">
-            <div class="min-w-0 flex-1">
-                <p class="font-medium">当前有效邀请链接</p>
-                <p class="mt-1 break-all font-mono text-xs text-emerald-900/90">{{ active_invite_url }}</p>
-                {% if active_invite_expires %}
-                <p class="mt-1 text-xs text-emerald-800/80">有效期至 {{ active_invite_expires|date:"Y-m-d H:i" }}</p>
-                {% endif %}
+            <div>
+                <h2 class="text-sm font-semibold text-emerald-950">注册邀请链接</h2>
+                <p class="mt-1 text-xs text-emerald-900/80">每个链接仅可注册 <span class="font-semibold">1</span> 个账号；注册成功或作废后立即失效。</p>
             </div>
-            <form method="post" action="{% url 'user_invite_revoke' %}">
-                {% csrf_token %}
-                <button type="submit" class="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-red-700 ring-1 ring-red-200 hover:bg-red-50"
-                        onclick="return confirm('作废当前邀请链接？');">作废</button>
-            </form>
         </div>
+
+        <form method="post" action="{% url 'user_invite_create' %}" class="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+            {% csrf_token %}
+            {% if invite_can_pick_role %}
+            <div class="min-w-0 flex-1 sm:max-w-xs">
+                <label class="mb-1 block text-xs font-medium text-emerald-950">注册角色</label>
+                <select name="role_code" required
+                        class="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20">
+                    <option value="">请选择角色…</option>
+                    {% for role in invite_role_choices %}
+                    <option value="{{ role.code }}">{{ role.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% else %}
+            <div class="min-w-0 sm:max-w-xs">
+                <label class="mb-1 block text-xs font-medium text-emerald-950">注册角色</label>
+                <p class="rounded-xl border border-emerald-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-800">{{ invite_fixed_role_name|default:"本部门员工" }}</p>
+                <input type="hidden" name="role_code" value="{% if invite_role_choices %}{{ invite_role_choices.0.code }}{% endif %}">
+            </div>
+            {% endif %}
+            <div class="w-full sm:w-28">
+                <label class="mb-1 block text-xs font-medium text-emerald-950">有效天数</label>
+                <input type="number" name="ttl_days" value="7" min="1" max="90"
+                       class="w-full rounded-xl border border-emerald-200 bg-white px-3 py-2.5 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20">
+            </div>
+            <button type="submit" class="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-800">
+                <i class="ri-link"></i>
+                生成邀请链接
+            </button>
+        </form>
+
+        {% if pending_invites %}
+        <div class="mt-5 overflow-hidden rounded-xl border border-emerald-200/80 bg-white">
+            <div class="border-b border-emerald-100 bg-emerald-50/80 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-emerald-900">
+                待使用链接（{{ pending_invites|length }}）
+            </div>
+            <ul class="divide-y divide-emerald-100">
+                {% for inv in pending_invites %}
+                <li class="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div class="min-w-0 flex-1">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="inline-flex rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-medium text-violet-800">{{ inv.role_name }}</span>
+                            <span class="text-xs text-slate-500">有效至 {{ inv.expires_at|date:"Y-m-d H:i" }}</span>
+                        </div>
+                        <p class="mt-1 break-all font-mono text-xs text-slate-700" id="invite-url-{{ inv.id }}">{{ inv.url }}</p>
+                    </div>
+                    <div class="flex shrink-0 flex-wrap items-center gap-2">
+                        <button type="button"
+                                class="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200"
+                                onclick="navigator.clipboard.writeText(document.getElementById('invite-url-{{ inv.id }}').textContent.trim()); this.textContent='已复制'; setTimeout(() => this.textContent='复制', 1500);">
+                            复制
+                        </button>
+                        <form method="post" action="{% url 'user_invite_revoke' %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="invite_id" value="{{ inv.id }}">
+                            <button type="submit" class="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-red-700 ring-1 ring-red-200 hover:bg-red-50"
+                                    onclick="return confirm('作废该邀请链接？');">作废</button>
+                        </form>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% else %}
+        <p class="mt-4 text-xs text-emerald-900/70">暂无待使用的邀请链接。</p>
+        {% endif %}
     </div>
     {% endif %}
 

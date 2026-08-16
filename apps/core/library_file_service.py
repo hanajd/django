@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -220,10 +221,12 @@ def report_relative_path(
     project=None,
     library_task=None,
     created_at=None,
+    issued_snapshot: bool = False,
 ) -> str:
     """
-    报告 PDF 磁盘路径：reports/{委托编号}/{任务代码}/{年}/{月}/{日}/{HHMMSS}_{磁盘名}。
+    报告 PDF 磁盘路径：reports/{委托编号}/{任务代码}/[issued/]{年}/{月}/{日}/{HHMMSS}_{磁盘名}。
     便于在本地 media 目录按项目与时间浏览，与 inspection_submits 分层风格一致。
+    ``issued_snapshot=True`` 时写入 issued/ 子目录，展示名可与当前报告相同。
     """
     code = library_commission_code_for_project(project) if project is not None else "unknown"
     task_seg = ""
@@ -239,6 +242,8 @@ def report_relative_path(
     parts = ["reports", code]
     if task_seg:
         parts.append(task_seg)
+    if issued_snapshot:
+        parts.append("issued")
     parts.extend(day.split("/"))
     fname = f"{hm}_{safe_library_basename(disk_name)}"
     parts.append(fname)
@@ -333,11 +338,69 @@ def library_file_exists_on_disk(lf: LibraryFile) -> bool:
 
 
 def soft_delete_library_file(lf: LibraryFile) -> None:
-    """移入回收站（仅标记 deleted_at，不删磁盘）。"""
+    """移入回收站（仅标记 deleted_at，不删磁盘）。模板文件同时解除任务绑定并移出 current/。"""
     if lf.deleted_at is not None:
         return
+    if lf.category == LibraryFile.CATEGORY_TEMPLATE:
+        from apps.core.library_task_template_binding_service import (
+            release_template_file_from_bound_tasks,
+        )
+
+        release_template_file_from_bound_tasks(
+            lf, user=None, source="soft_delete"
+        )
     lf.deleted_at = timezone.now()
     lf.save(update_fields=["deleted_at"])
+
+
+def touch_library_parent_dirs(abs_file: Path) -> None:
+    """
+    覆盖写入文件不会改变父目录 mtime（Linux）；逐级 touch 到 FILE_LIBRARY_ROOT，
+    便于资源管理器/后台本地文件夹按修改时间看到更新。
+    """
+    try:
+        root = Path(settings.FILE_LIBRARY_ROOT).resolve()
+        cur = Path(abs_file).resolve().parent
+    except Exception:
+        return
+    now = time.time()
+    while True:
+        try:
+            if cur.is_dir():
+                os.utime(cur, (now, now))
+        except OSError:
+            break
+        if cur == root:
+            break
+        if root not in cur.parents:
+            break
+        parent = cur.parent
+        if parent == cur:
+            break
+        cur = parent
+
+
+def overwrite_library_file_bytes(
+    lf: LibraryFile,
+    data: bytes,
+    *,
+    original_name: str | None = None,
+) -> LibraryFile:
+    """原地覆盖磁盘内容并更新 size / content_sha256（可选改展示名）。"""
+    abs_p = pipeline_service.library_absolute_path(lf.relative_path)
+    abs_p.parent.mkdir(parents=True, exist_ok=True)
+    abs_p.write_bytes(data)
+    touch_library_parent_dirs(abs_p)
+    lf.size = len(data)
+    lf.content_sha256 = hashlib.sha256(data).hexdigest()
+    update_fields = ["size", "content_sha256", "updated_at"]
+    if original_name is not None:
+        name = (original_name or "").strip()
+        if name and name != lf.original_name:
+            lf.original_name = name[:255]
+            update_fields.append("original_name")
+    lf.save(update_fields=update_fields)
+    return lf
 
 
 def keep_library_files_on_disk(
@@ -570,6 +633,7 @@ def save_library_binary_uploads(
             abs_p = dest_dir / disk_name
         if not abs_p.exists():
             abs_p.write_bytes(raw)
+            touch_library_parent_dirs(abs_p)
         lf = LibraryFile.objects.create(
             original_name=display_name,
             relative_path=rel,
@@ -637,6 +701,17 @@ def rename_library_template_file(lf: LibraryFile, new_display_name: str) -> str 
         return "文件名须保留 .pdf 或 .json 扩展名"
     lf.original_name = name
     lf.save(update_fields=["original_name", "updated_at"])
+    # PDF 改名后，同步各任务主 JSON 内 source_pdf.template_file_name
+    if name.lower().endswith(".pdf"):
+        try:
+            from apps.core.library_task_template_binding_service import (
+                rewrite_task_bound_json_source_pdf_from_mount,
+            )
+
+            for task in lf.library_tasks.all():
+                rewrite_task_bound_json_source_pdf_from_mount(task)
+        except Exception:
+            pass
     return None
 
 

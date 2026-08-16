@@ -1,0 +1,354 @@
+{
+  "schema": "embedded_generic_table/v1",
+  "title": "表8 本项目X射线设备机房安全防护措施设计情况评价",
+  "source": "safety_protection",
+  "from_info_sheet": false,
+  "room_count": 16,
+  "column_count": 4,
+  "column_fractions": [
+    0.0,
+    0.18,
+    0.48,
+    0.82,
+    1.0
+  ],
+  "band_count": 9,
+  "row_min_height_pt": 22.0,
+  "repeat_header_on_new_page": true,
+  "note": "表8可在常用模板中编辑；样式图与通风管道图挂在安全防护措施栏目之后",
+  "rows": [
+    {
+      "band": 0,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "安全防护措施",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "设计情况",
+          "align": "center"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "标准要求\n(GBZ130-2020)",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "评价",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 1,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "观察窗或摄像监控装置",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "拟设置，便于观察受检者状态及防护门开闭情况",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "GBZ 130-2020 第6.4.1条：机房应设有观察窗或摄像监控装置，其设置的位置应便于观察到受检者状态及防护门开闭情况",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 2,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "电离辐射警告标志",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "拟在机房门外设置（样式见图）",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "GBZ 130-2020 第6.4.4条：机房门外应有电离辐射警告标志",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 3,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "工作状态指示灯及灯箱可视警示语句",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "拟在机房门上方设置，灯箱警示语为“射线有害，灯亮勿入”（样式见图）",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "GBZ 130-2020 第6.4.4条：机房门上方应有醒目的工作状态指示灯，灯箱上应设置如“射线有害、灯亮勿入”的可视警示语句",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 4,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射防护注意事项告知栏",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "拟在候诊区设置（样式见图）",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "GBZ 130-2020 第6.4.4条：候诊区应设置放射防护注意事项告知栏",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 5,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "机房门与工作状态指示灯联动",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "拟设置门—灯联动；推拉门拟落实曝光时关闭机房门的管理措施；平开门拟设自动闭门装置；电动推拉门拟设防夹装置",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "GBZ 130-2020 第6.4.5～6.4.6条：工作状态指示灯能与机房门有效关联；平开门应有自动闭门装置；电动推拉门宜设置防夹装置",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 6,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "候诊与陪检管理",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "拟落实：受检者不应在机房内候诊；非特殊情况检查过程中陪检者不应滞留机房内",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "GBZ 130-2020 第6.4.7条",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 7,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "地面警戒线",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "拟在机房入口等处设置地面警戒线",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "便于提示无关人员勿入控制区（按项目防护计划落实）",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 8,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "动力通风装置",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "拟按机房设置动力通风，通风管道布局见附图",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "机房应保持良好通风；通风管道布局示意图由信息表提取（A3横置）",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "符合",
+          "align": "center"
+        }
+      ]
+    }
+  ]
+}

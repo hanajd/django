@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+{# 极简 base.html（独立开发版）：仅供 f1_eval_workbench.html 继承。 #}
+{# 回嵌真实后台时不迁移本文件，workbench 直接继承真实后台的 base.html。 #}
+<html lang="zh-hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}评价报告表制作{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/remixicon@4.2.0/fonts/remixicon.css" rel="stylesheet">
+  <style>
+    body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800">
+  <div class="min-h-screen flex flex-col">
+    <nav class="shrink-0 bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-between">
+      <div class="flex items-center gap-2 text-sm font-semibold text-slate-700">
+        <i class="ri-file-text-line text-blue-600"></i>
+        {% block page_title %}评价报告表制作{% endblock %}
+        <span class="text-[11px] font-normal text-slate-400">独立开发版</span>
+      </div>
+      <div class="flex items-center gap-3 text-xs text-slate-500">
+        {% if user.is_authenticated %}
+          <span><i class="ri-user-line mr-0.5"></i>{{ user.username }}</span>
+          <form method="post" action="{% url 'logout' %}" class="inline">
+            {% csrf_token %}
+            <button type="submit" class="text-slate-500 hover:text-red-600">退出</button>
+          </form>
+        {% else %}
+          <a href="{% url 'login' %}" class="hover:text-blue-600">登录</a>
+        {% endif %}
+      </div>
+    </nav>
+
+    {% if messages %}
+    <div class="px-4 pt-2 space-y-1">
+      {% for message in messages %}
+      <div class="text-xs px-3 py-2 rounded-md border
+                  {% if message.tags == 'error' %}bg-red-50 border-red-200 text-red-700
+                  {% elif message.tags == 'success' %}bg-emerald-50 border-emerald-200 text-emerald-700
+                  {% else %}bg-blue-50 border-blue-200 text-blue-700{% endif %}">
+        {{ message }}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <main class="flex-1 min-h-0 px-2 pt-1">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>

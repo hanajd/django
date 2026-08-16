@@ -1,0 +1,455 @@
+{
+  "schema": "embedded_generic_table/v1",
+  "title": "表15 本项目ERCP机房外和DSA机房外人员年有效剂量估算结果表",
+  "source": "health_impact",
+  "from_info_sheet": false,
+  "column_count": 7,
+  "column_fractions": [
+    0.0,
+    0.12,
+    0.22,
+    0.42,
+    0.58,
+    0.72,
+    0.84,
+    1.0
+  ],
+  "band_count": 8,
+  "row_min_height_pt": 18.0,
+  "repeat_header_on_new_page": true,
+  "header_band_count": 1,
+  "dose_formula": "年有效剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000",
+  "note": "注：年有效剂量（mSv）=机房外周围剂量当量率（取机房外周围剂量当量率限值2.5μSv/h）×年工作负荷（摄影模式+透视模式）（h）×居留因子/1000。出于保守估算考虑，工作人员居留因子保守取1，公众居留因子取1/4。",
+  "rows": [
+    {
+      "band": 0,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "射线装置\n（备注）",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "受照位置",
+          "align": "center"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射工作人员",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "机房外周围剂量当量率",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "机房外年工作负荷",
+          "align": "center"
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "居留因子",
+          "align": "center"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "年有效剂量",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 1,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 3,
+          "col_span": 1,
+          "text": "ERCP设备",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 3,
+          "col_span": 1,
+          "text": "全身",
+          "align": "center"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "介入手术医师",
+          "align": "left",
+          "cell_role": "person"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "50h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 50.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 1.0
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.125mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年有效剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 2,
+      "cells": [
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "影像医师、技师、护士",
+          "align": "left",
+          "cell_role": "person"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "55h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 55.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 1.0
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.138mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年有效剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 3,
+      "cells": [
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "公众",
+          "align": "left",
+          "cell_role": "person"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "55h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 55.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1/4",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 0.25
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.034mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年有效剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 4,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 3,
+          "col_span": 1,
+          "text": "DSA",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 3,
+          "col_span": 1,
+          "text": "全身",
+          "align": "center"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "介入手术医师",
+          "align": "left",
+          "cell_role": "person"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "100h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 100.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 1.0
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.25mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年有效剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 5,
+      "cells": [
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "影像医师、技师、护士",
+          "align": "left",
+          "cell_role": "person"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "105h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 105.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 1.0
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.263mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年有效剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 6,
+      "cells": [
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "公众",
+          "align": "left",
+          "cell_role": "person"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "105h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 105.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1/4",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 0.25
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.066mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年有效剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 7,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 7,
+          "text": "注：年有效剂量（mSv）=机房外周围剂量当量率（取机房外周围剂量当量率限值2.5μSv/h）×年工作负荷（摄影模式+透视模式）（h）×居留因子/1000。出于保守估算考虑，工作人员居留因子保守取1，公众居留因子取1/4。",
+          "align": "left"
+        }
+      ]
+    }
+  ]
+}

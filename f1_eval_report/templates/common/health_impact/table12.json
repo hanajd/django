@@ -1,0 +1,1825 @@
+{
+  "schema": "embedded_generic_table/v1",
+  "title": "表12 本项目X射线影像诊断工作人员及公众年受照剂量估算情况",
+  "source": "health_impact",
+  "from_info_sheet": false,
+  "column_count": 8,
+  "column_fractions": [
+    0.0,
+    0.06,
+    0.18,
+    0.34,
+    0.46,
+    0.62,
+    0.74,
+    0.84,
+    1.0
+  ],
+  "band_count": 28,
+  "row_min_height_pt": 18.0,
+  "repeat_header_on_new_page": true,
+  "header_band_count": 1,
+  "dose_formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000",
+  "note": "注①各机房外周围剂量当量率取标准限值，数字胃肠机和C形臂透视模式和摄影模式机房外周围剂量当量率均按2.5μSv/h估算。\n注②年有效剂量（mSv）=机房外周围剂量当量率（μSv/h）×年工作负荷（h）×居留因子/1000。\n注③工作人员居留因子保守取1，公众居留因子取1/4。",
+  "device_count": 13,
+  "rows": [
+    {
+      "band": 0,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "序号",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "机房名称",
+          "align": "center"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "所在楼层",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "人员",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "机房外周围剂量当量率",
+          "align": "center"
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "年工作负荷",
+          "align": "center"
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "居留因子",
+          "align": "center"
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "年受照剂量",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 1,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "1",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "CT机房",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "门急诊楼一楼",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射工作人员",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "250.0h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 250.0
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 1.0
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.625mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 2,
+      "cells": [
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "公众",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "250.0h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 250.0
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1/4",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 0.25
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.156mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 3,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "2",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "DR机房",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射工作人员",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 2.5
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 1.0
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.006mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 4,
+      "cells": [
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "公众",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 2.5
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1/4",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 0.25
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.002mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 5,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "3",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "CT机房1",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "医技楼一楼影像中心",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射工作人员",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "250.0h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 250.0
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 1.0
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.625mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 6,
+      "cells": [
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "公众",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "250.0h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 250.0
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1/4",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 0.25
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.156mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 7,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "4",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "CT机房2",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射工作人员",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "250.0h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 250.0
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 1.0
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.625mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 8,
+      "cells": [
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "公众",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "250.0h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 250.0
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1/4",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 0.25
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.156mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 9,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "5",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "DR机房1",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射工作人员",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "25μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 25.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1.1h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 1.1
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 1.0
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.028mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 10,
+      "cells": [
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "公众",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "25μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 25.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1.1h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 1.1
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1/4",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 0.25
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.007mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 11,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "6",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "DR机房2",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射工作人员",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "25μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 25.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1.1h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 1.1
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 1.0
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.028mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 12,
+      "cells": [
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "公众",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "25μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 25.0
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1.1h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 1.1
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1/4",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 0.25
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.007mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 13,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "7",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "全身骨密度仪机房",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射工作人员",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "208.3h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 208.3
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 1.0
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.521mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 14,
+      "cells": [
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "公众",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "208.3h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 208.3
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1/4",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 0.25
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.13mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 15,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "8",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "乳腺DR机房",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射工作人员",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.1h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 2.1
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 1.0
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.005mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 16,
+      "cells": [
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "公众",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.1h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 2.1
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1/4",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 0.25
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.001mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 17,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "9",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "数字胃肠机房",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射工作人员",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "350.0h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 350.0
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 1.0
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.875mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 18,
+      "cells": [
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "公众",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "350.0h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 350.0
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1/4",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 0.25
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.219mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 19,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "10",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "C形臂机房1",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "医技楼四楼手术中心",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射工作人员",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "175.0h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 175.0
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 1.0
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.438mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 20,
+      "cells": [
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "公众",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "175.0h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 175.0
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1/4",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 0.25
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.109mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 21,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "11",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "C形臂机房2",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射工作人员",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "175.0h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 175.0
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 1.0
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.438mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 22,
+      "cells": [
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "公众",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "175.0h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 175.0
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1/4",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 0.25
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.109mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 23,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "12",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "CT机房",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "发热门诊楼一楼",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射工作人员",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "138.9h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 138.9
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 1.0
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.347mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 24,
+      "cells": [
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "公众",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "138.9h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 138.9
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1/4",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 0.25
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.087mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 25,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "13",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "DR机房",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射工作人员",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1.1h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 1.1
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 1.0
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.003mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 26,
+      "cells": [
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "公众",
+          "align": "center",
+          "cell_role": "person"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "2.5μSv/h",
+          "align": "center",
+          "cell_role": "dose_rate",
+          "rate_usv_h": 2.5
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1.1h",
+          "align": "center",
+          "cell_role": "workload",
+          "workload_h": 1.1
+        },
+        {
+          "c0": 6,
+          "c1": 7,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "1/4",
+          "align": "center",
+          "cell_role": "occupancy",
+          "occupancy": 0.25
+        },
+        {
+          "c0": 7,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "0.001mSv",
+          "align": "center",
+          "cell_role": "annual_dose",
+          "formula": "年受照剂量(mSv)=机房外周围剂量当量率(μSv/h)×年工作负荷(h)×居留因子/1000"
+        }
+      ]
+    },
+    {
+      "band": 27,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 8,
+          "row_span": 1,
+          "col_span": 8,
+          "text": "注①各机房外周围剂量当量率取标准限值，数字胃肠机和C形臂透视模式和摄影模式机房外周围剂量当量率均按2.5μSv/h估算。\n注②年有效剂量（mSv）=机房外周围剂量当量率（μSv/h）×年工作负荷（h）×居留因子/1000。\n注③工作人员居留因子保守取1，公众居留因子取1/4。",
+          "align": "left"
+        }
+      ]
+    }
+  ]
+}

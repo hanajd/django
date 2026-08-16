@@ -171,7 +171,8 @@ CTC_ACCEPT_REPORT_PROFILE = ReportTemplateProfile(
     evaluation_text_indent=True,
     evaluation_text_only_clear=True,
     evaluation_write_y_offset=3.0,
-    htmlpdf_basic_info_pdf_field_ids=("f2", "f3", "f4", "f5"),
+    htmlpdf_basic_info_pdf_field_ids=("f3", "f4", "f5", "f6", "f7", "f8", "f9"),
+    contact_pdf_field_ids=("f6", "f7"),
     f1_slot="report_no",
 )
 
@@ -307,6 +308,31 @@ DR2_ACCEPT_REPORT_PROFILE = ReportTemplateProfile(
     evaluation_text_only_clear=True,
     evaluation_write_y_offset=3.0,
     htmlpdf_basic_info_pdf_field_ids=("f1", "f2", "f3"),
+    f1_slot="commission_no",
+)
+
+# 002-状态检测 / 06动态DR / dr-4（当前空白 PDF 取值列竖线 x≈180.95；旧版字段框 175.3 会压线）
+DR4_STATUS_REPORT_PROFILE = ReportTemplateProfile(
+    code="dr-4",
+    basic_info_value_x0=180.95,
+    basic_info_table_x1=519.34,
+    basic_info_project_name_x0=180.95,
+    basic_info_project_name_write_y_offset=-8.0,
+    basic_info_project_name_split_at_and=False,
+    page_header_left_x0=70.65,
+    page_header_right_x1=519.34,
+    summary_page_header_right_x1=519.34,
+    cover_project_name_erase_above_pt=18.0,
+    cover_modality_residue_texts=("放射诊疗设备",),
+    cover_project_name_write_below_label=True,
+    cover_project_name_line2_above_underline_pt=11.0,
+    evaluation_clear_x0=78.5,
+    evaluation_write_x0=78.5,
+    evaluation_text_indent=True,
+    evaluation_text_only_clear=True,
+    evaluation_write_y_offset=3.0,
+    htmlpdf_basic_info_pdf_field_ids=("f1", "f2", "f3", "f4", "f5", "f6", "f7"),
+    contact_pdf_field_ids=("f4", "f5"),
     f1_slot="commission_no",
 )
 
@@ -485,6 +511,7 @@ REPORT_TEMPLATE_PROFILES: dict[str, ReportTemplateProfile] = {
     DR6_ACCEPT_REPORT_PROFILE.code: DR6_ACCEPT_REPORT_PROFILE,
     DSA_STATUS_REPORT_PROFILE.code: DSA_STATUS_REPORT_PROFILE,
     DR2_ACCEPT_REPORT_PROFILE.code: DR2_ACCEPT_REPORT_PROFILE,
+    DR4_STATUS_REPORT_PROFILE.code: DR4_STATUS_REPORT_PROFILE,
     TASK1_ACCEPT_REPORT_PROFILE.code: TASK1_ACCEPT_REPORT_PROFILE,
     TASK_STATUS_REPORT_PROFILE.code: TASK_STATUS_REPORT_PROFILE,
     PANORAMA_STATUS_REPORT_PROFILE.code: PANORAMA_STATUS_REPORT_PROFILE,

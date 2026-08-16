@@ -1,5 +1,5 @@
 """
-幂等创建三个组织「主任/主管」演示账号：行政、检测部主管、评价部主管。
+幂等创建三个组织主任演示账号：行政、检测部主任、评价部主任。
 
 示例::
 
@@ -40,18 +40,18 @@ DEFAULT_DIRECTORS = (
         "role_code": ROLE_DEPT_DIRECTOR_INSPECTION,
         "org_unit": ORG_UNIT_INSPECTION,
         "last_name": "检测部",
-        "first_name": "主管",
+        "first_name": "主任",
         "department": "检测部",
-        "position": "主管",
+        "position": "主任",
     },
     {
         "username": "evaluation_director",
         "role_code": ROLE_DEPT_DIRECTOR_EVALUATION,
         "org_unit": ORG_UNIT_EVALUATION,
         "last_name": "评价部",
-        "first_name": "主管",
+        "first_name": "主任",
         "department": "评价部",
-        "position": "主管",
+        "position": "主任",
     },
 )
 
@@ -59,7 +59,7 @@ DEFAULT_PASSWORD = "Director@2026"
 
 
 class Command(BaseCommand):
-    help = "创建/更新行政、检测部主管、评价部主管三个组织账号"
+    help = "创建/更新行政、检测部主任、评价部主任三个组织账号"
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -75,12 +75,12 @@ class Command(BaseCommand):
         parser.add_argument(
             "--inspection-username",
             default="inspection_director",
-            help="检测部主管用户名",
+            help="检测部主任用户名",
         )
         parser.add_argument(
             "--evaluation-username",
             default="evaluation_director",
-            help="评价部主管用户名",
+            help="评价部主任用户名",
         )
 
     def handle(self, *args, **options):
@@ -137,7 +137,7 @@ class Command(BaseCommand):
             rows.append((username, role.name, org_unit, spec["department"]))
 
         self.stdout.write("")
-        self.stdout.write(self.style.SUCCESS("组织主任/主管账号就绪："))
+        self.stdout.write(self.style.SUCCESS("组织主任账号就绪："))
         for username, role_name, org_unit, dept in rows:
             self.stdout.write(f"  · {dept} / {role_name}: {username}")
         self.stdout.write(f"  初始密码: {password}")

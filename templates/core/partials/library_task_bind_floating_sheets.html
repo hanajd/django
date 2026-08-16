@@ -15,7 +15,7 @@
         </div>
         <div class="flex-1 overflow-y-auto px-5 py-5">
             {% include "core/partials/library_task_template_upload_panel.html" %}
-            <p class="text-xs text-slate-500 mt-4 leading-relaxed">上传后会自动绑定到当前模板。解除绑定请在主页面「已绑定的模板文件」中分别操作「解除 PDF 绑定」或「解除 JSON 绑定」。</p>
+            <p class="text-xs text-slate-500 mt-4 leading-relaxed">上传 PDF/JSON 后会写入本任务 <code class="text-[11px] bg-slate-50 px-1 rounded">current/</code> 并自动绑定；同角色旧文件移入 <code class="text-[11px] bg-slate-50 px-1 rounded">history/</code>。解除绑定请在主页面分别操作「解除 PDF 绑定」或「解除 JSON 绑定」（会同步移出 current）。</p>
         </div>
     </div>
 </div>

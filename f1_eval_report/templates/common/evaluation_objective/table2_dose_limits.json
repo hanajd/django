@@ -1,0 +1,135 @@
+{
+  "schema": "embedded_generic_table/v1",
+  "source": "common/evaluation_objective/table2_dose_limits.json",
+  "table_bbox": [
+    84.48,
+    272.12,
+    510.82,
+    383.31
+  ],
+  "column_fractions": [
+    0.0,
+    0.105127,
+    0.309542,
+    0.649411,
+    1.0
+  ],
+  "column_count": 4,
+  "band_count": 4,
+  "row_min_height_pt": 17.5,
+  "repeat_header_on_new_page": false,
+  "rows": [
+    {
+      "band": 0,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 2,
+          "text": "剂量"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "职业照射剂量限值"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "公众照射剂量限值"
+        }
+      ]
+    },
+    {
+      "band": 1,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 2,
+          "text": "年有效剂量"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "连续5年的年平均有效剂量不大于20mSv；任何一年中的有效剂量不大于50mSv"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "连续5 年的年平均有效剂量不大于1mSv；任何一年中的有效剂量不大于5mSv"
+        }
+      ]
+    },
+    {
+      "band": 2,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 2,
+          "col_span": 1,
+          "text": "年当量剂量"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "四肢（手和足）"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "不大于500mSv"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "未推荐"
+        }
+      ]
+    },
+    {
+      "band": 3,
+      "cells": [
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "皮肤"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "不大于500mSv"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "不大于50mSv"
+        }
+      ]
+    }
+  ],
+  "title": "表2 剂量限值"
+}

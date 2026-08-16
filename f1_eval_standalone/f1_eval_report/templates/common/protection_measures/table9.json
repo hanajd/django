@@ -1,0 +1,306 @@
+{
+  "schema": "embedded_generic_table/v1",
+  "title": "表9 个人防护用品和辅助设施配置要求",
+  "source": "personal_protective_equipment",
+  "from_info_sheet": false,
+  "column_count": 6,
+  "column_fractions": [
+    0.0,
+    0.16,
+    0.36,
+    0.52,
+    0.72,
+    0.86,
+    1.0
+  ],
+  "band_count": 7,
+  "row_min_height_pt": 20.0,
+  "repeat_header_on_new_page": true,
+  "header_band_count": 3,
+  "note": "表9为 GBZ 130-2020 表4 配置要求，可在常用模板中编辑",
+  "rows": [
+    {
+      "band": 0,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射检查类型",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 5,
+          "text": "标准要求（GBZ 130-2020）6.5",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 1,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 2,
+          "text": "工作人员",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 2,
+          "text": "受检者",
+          "align": "center"
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "陪检者",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 2,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "",
+          "align": "center"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "个人防护用品",
+          "align": "center"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "辅助防护设施",
+          "align": "center"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "个人防护用品",
+          "align": "center"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "辅助防护设施",
+          "align": "center"
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "个人防护用品",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "band": 3,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "放射诊断学用X射线设备隔室透视、摄影",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "—（隔室操作，工作人员可不配备）\n注：工作人员、受检者的个人防护用品和辅助设施任选其一即可。",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "—",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "铅橡胶性腺防护围裙（方形）或方巾、铅橡胶颈套\n选配：铅橡胶帽子\n儿童：保护相应组织和器官的防护用品铅当量应不小于0.5mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "可调节防护窗口的立位防护屏；\n选配：固定特殊受检者体位的各种设备",
+          "align": "left"
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "对陪检者应至少配备铅橡胶防护衣（不小于0.25mmPb）",
+          "align": "left"
+        }
+      ]
+    },
+    {
+      "band": 4,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "CT体层扫描（隔室）",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "—（隔室操作，工作人员可不配备）",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "—",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "铅橡胶性腺防护围裙（方形）或方巾、铅橡胶颈套\n选配：铅橡胶帽子",
+          "align": "left"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "—",
+          "align": "left"
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "对陪检者应至少配备铅橡胶防护衣（不小于0.25mmPb）",
+          "align": "left"
+        }
+      ]
+    },
+    {
+      "band": 5,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 1,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "介入放射学操作",
+          "align": "left"
+        },
+        {
+          "c0": 1,
+          "c1": 2,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "铅橡胶围裙（不小于0.5mmPb）、铅橡胶颈套（不小于0.5mmPb）、铅防护眼镜（不小于0.25mmPb）、介入防护手套（不小于0.025mmPb）\n选配：铅橡胶帽子（不小于0.25mmPb）",
+          "align": "left"
+        },
+        {
+          "c0": 2,
+          "c1": 3,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "铅悬挂防护屏/铅防护吊帘、床侧防护帘/床侧防护屏\n选配：移动铅防护屏风",
+          "align": "left"
+        },
+        {
+          "c0": 3,
+          "c1": 4,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "成人：铅橡胶性腺防护围裙（方形）或方巾、铅橡胶颈套\n选配：铅橡胶帽子（不小于0.25mmPb）\n儿童：应为儿童的X射线检查配备保护相应组织和器官的防护用品，防护用品和辅助防护设施的铅当量应不小于0.5mmPb",
+          "align": "left"
+        },
+        {
+          "c0": 4,
+          "c1": 5,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "—",
+          "align": "left"
+        },
+        {
+          "c0": 5,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 1,
+          "text": "对陪检者应至少配备铅橡胶防护衣（不小于0.25mmPb）",
+          "align": "left"
+        }
+      ]
+    },
+    {
+      "band": 6,
+      "cells": [
+        {
+          "c0": 0,
+          "c1": 6,
+          "row_span": 1,
+          "col_span": 6,
+          "text": "注：①“—”表示相关标准对此不作要求；②工作人员、受检者的个人防护用品和辅助设施任选其一即可；③除介入防护手套外，防护用品和辅助防护设施铅当量应不小于0.25mmPb；介入防护手套不小于0.025mmPb；甲状腺、性腺防护用品不小于0.5mmPb；移动铅防护屏风不小于2mmPb（GBZ 130-2020 第6.5条）。",
+          "align": "left"
+        }
+      ]
+    }
+  ]
+}

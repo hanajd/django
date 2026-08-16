@@ -3,7 +3,7 @@ Web 路由配置
 前后端不分离的页面路由
 """
 from django.urls import path
-from apps.core import product_catalog_views, views
+from apps.core import f1_eval_views, product_catalog_views, views
 
 urlpatterns = [
     path('static/preview/<str:name>', views.pipeline_preview_static, name='pipeline_preview_static'),
@@ -122,4 +122,53 @@ urlpatterns = [
     path('files/htmlpdf/api/report-task-context/', views.htmlpdf_api_report_task_context, name='htmlpdf_api_report_task_context'),
     path('files/htmlpdf/api/site-template-bundle/', views.htmlpdf_api_site_template_bundle, name='htmlpdf_api_site_template_bundle'),
     path('files/temp/<str:batch_id>/', views.file_temp_batch, name='file_temp_batch'),
+
+    # F.1 预评价报告表制作（数据仅落 MEDIA_ROOT/f1_eval/，不写业务库）
+    path('files/f1-eval/', f1_eval_views.f1_eval_workbench, name='f1_eval_workbench'),
+    path('files/f1-eval/api/section/', f1_eval_views.f1_eval_api_section, name='f1_eval_api_section'),
+    path('files/f1-eval/api/save-section/', f1_eval_views.f1_eval_api_save_section, name='f1_eval_api_save_section'),
+    path('files/f1-eval/api/table/', f1_eval_views.f1_eval_api_table, name='f1_eval_api_table'),
+    path('files/f1-eval/api/save-table/', f1_eval_views.f1_eval_api_save_table, name='f1_eval_api_save_table'),
+    path('files/f1-eval/api/table-op/', f1_eval_views.f1_eval_api_table_op, name='f1_eval_api_table_op'),
+    path('files/f1-eval/api/add-table/', f1_eval_views.f1_eval_api_add_table, name='f1_eval_api_add_table'),
+    path('files/f1-eval/api/delete-table/', f1_eval_views.f1_eval_api_delete_table, name='f1_eval_api_delete_table'),
+    path('files/f1-eval/api/import-excel/', f1_eval_views.f1_eval_api_import_excel, name='f1_eval_api_import_excel'),
+    path('files/f1-eval/api/export-excel/', f1_eval_views.f1_eval_api_export_excel, name='f1_eval_api_export_excel'),
+    path('files/f1-eval/api/upload-figure/', f1_eval_views.f1_eval_api_upload_figure, name='f1_eval_api_upload_figure'),
+    path('files/f1-eval/api/save-figure-caption/', f1_eval_views.f1_eval_api_save_figure_caption, name='f1_eval_api_save_figure_caption'),
+    path('files/f1-eval/api/delete-figure/', f1_eval_views.f1_eval_api_delete_figure, name='f1_eval_api_delete_figure'),
+    path('files/f1-eval/api/file/', f1_eval_views.f1_eval_api_file, name='f1_eval_api_file'),
+    path('files/f1-eval/api/save-file/', f1_eval_views.f1_eval_api_save_file, name='f1_eval_api_save_file'),
+    path('files/f1-eval/api/common-templates/', f1_eval_views.f1_eval_api_common_templates, name='f1_eval_api_common_templates'),
+    path('files/f1-eval/api/reset-common-template/', f1_eval_views.f1_eval_api_reset_common_template, name='f1_eval_api_reset_common_template'),
+    path('files/f1-eval/api/upload-common-template/', f1_eval_views.f1_eval_api_upload_common_template, name='f1_eval_api_upload_common_template'),
+    path('files/f1-eval/media/common-template/', f1_eval_views.f1_eval_common_template_media, name='f1_eval_common_template_media'),
+    path('files/f1-eval/api/save-format/', f1_eval_views.f1_eval_api_save_format_fields, name='f1_eval_api_save_format_fields'),
+    path('files/f1-eval/api/preview-format/', f1_eval_views.f1_eval_api_preview_format, name='f1_eval_api_preview_format'),
+    path('files/f1-eval/api/format-templates/', f1_eval_views.f1_eval_api_format_templates, name='f1_eval_api_format_templates'),
+    path('files/f1-eval/api/apply-format-template/', f1_eval_views.f1_eval_api_apply_format_template, name='f1_eval_api_apply_format_template'),
+    path('files/f1-eval/api/rename-format-template/', f1_eval_views.f1_eval_api_rename_format_template, name='f1_eval_api_rename_format_template'),
+    path('files/f1-eval/api/save-format-preset/', f1_eval_views.f1_eval_api_save_format_preset, name='f1_eval_api_save_format_preset'),
+    path('files/f1-eval/api/table-grid/', f1_eval_views.f1_eval_api_table_grid, name='f1_eval_api_table_grid'),
+    path('files/f1-eval/api/upload-info-sheet/', f1_eval_views.f1_eval_api_upload_info_sheet, name='f1_eval_api_upload_info_sheet'),
+    path('files/f1-eval/api/cover-meta/', f1_eval_views.f1_eval_api_cover_meta, name='f1_eval_api_cover_meta'),
+    path('files/f1-eval/api/save-cover-meta/', f1_eval_views.f1_eval_api_save_cover_meta, name='f1_eval_api_save_cover_meta'),
+    path('files/f1-eval/api/upload-cover-certificate/', f1_eval_views.f1_eval_api_upload_cover_certificate, name='f1_eval_api_upload_cover_certificate'),
+    path('files/f1-eval/api/upload-attachments/', f1_eval_views.f1_eval_api_upload_attachments, name='f1_eval_api_upload_attachments'),
+    path('files/f1-eval/api/attachment-album/', f1_eval_views.f1_eval_api_attachment_album, name='f1_eval_api_attachment_album'),
+    path('files/f1-eval/api/update-attachment/', f1_eval_views.f1_eval_api_update_attachment, name='f1_eval_api_update_attachment'),
+    path('files/f1-eval/api/delete-attachment/', f1_eval_views.f1_eval_api_delete_attachment, name='f1_eval_api_delete_attachment'),
+    path('files/f1-eval/api/generate/', f1_eval_views.f1_eval_api_generate, name='f1_eval_api_generate'),
+    path('files/f1-eval/api/projects/', f1_eval_views.f1_eval_api_project_list, name='f1_eval_api_project_list'),
+    path('files/f1-eval/api/hospitals/', f1_eval_views.f1_eval_api_hospitals, name='f1_eval_api_hospitals'),
+    path('files/f1-eval/api/assignable-users/', f1_eval_views.f1_eval_api_assignable_users, name='f1_eval_api_assignable_users'),
+    path('files/f1-eval/api/projects/create/', f1_eval_views.f1_eval_api_project_create, name='f1_eval_api_project_create'),
+    path('files/f1-eval/api/projects/save/', f1_eval_views.f1_eval_api_project_save, name='f1_eval_api_project_save'),
+    path('files/f1-eval/api/projects/open/', f1_eval_views.f1_eval_api_project_open, name='f1_eval_api_project_open'),
+    path('files/f1-eval/api/projects/delete/', f1_eval_views.f1_eval_api_project_delete, name='f1_eval_api_project_delete'),
+    path('files/f1-eval/api/projects/assign/', f1_eval_views.f1_eval_api_project_assign, name='f1_eval_api_project_assign'),
+    path('files/f1-eval/api/projects/set-hospital/', f1_eval_views.f1_eval_api_project_set_hospital, name='f1_eval_api_project_set_hospital'),
+    path('files/f1-eval/media/attachments/<str:filename>', f1_eval_views.f1_eval_attachment_media, name='f1_eval_attachment_media'),
+    path('files/f1-eval/media/assets/<str:filename>', f1_eval_views.f1_eval_asset_media, name='f1_eval_asset_media'),
+    path('files/f1-eval/download/<str:kind>/', f1_eval_views.f1_eval_download, name='f1_eval_download'),
 ]

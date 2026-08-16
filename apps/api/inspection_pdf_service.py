@@ -696,6 +696,137 @@ def collect_latest_submit_rows_for_site_folder(
     )
 
 
+def exportable_site_task_keys(user, projects) -> set[tuple[int, int]]:
+    """
+    当前用户在各项目下具备导出源数据的现场任务：(project_id, site_task_id)。
+
+    与 collect / 报告导出一致：现场记录 PDF 或检测提交 JSON，
+    案件属于该项目，且文件已关联到该项目。
+    """
+    from apps.core.library_access import library_file_access_allowed
+
+    keys: set[tuple[int, int]] = set()
+    projects = [p for p in (projects or []) if p is not None]
+    if not projects:
+        return keys
+    projects_by_id = {int(p.pk): p for p in projects}
+    pids = set(projects_by_id)
+    case_cache: dict[int, InspectionCase | None] = {}
+
+    for category, ext in (
+        (LibraryFile.CATEGORY_SITE_RECORD, ".pdf"),
+        (LibraryFile.CATEGORY_INSPECTION_SUBMIT, ".json"),
+    ):
+        qs = (
+            LibraryFile.objects.filter(projects__in=pids, category=category)
+            .filter(link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE)
+            .select_related("created_by")
+            .prefetch_related("library_tasks", "projects")
+            .distinct()
+        )
+        for lf in qs.iterator(chunk_size=200):
+            on = (lf.original_name or "").lower()
+            if not on.endswith(ext):
+                continue
+            if not library_file_access_allowed(user, lf):
+                continue
+            try:
+                case_id = int(lf.link_object_id)
+            except (TypeError, ValueError):
+                continue
+            if case_id not in case_cache:
+                case_cache[case_id] = InspectionCase.objects.filter(pk=case_id).first()
+            case = case_cache[case_id]
+            if case is None:
+                continue
+            pid = int(case.library_project_id or 0)
+            proj = projects_by_id.get(pid)
+            if proj is None:
+                continue
+            try:
+                if not any(int(p.pk) == pid for p in lf.projects.all()):
+                    continue
+            except Exception:
+                continue
+            st = resolve_site_record_library_task_for_file(lf, case, proj)
+            if st is None or getattr(st, "output_target", None) != LibraryTask.OUTPUT_SITE_RECORD:
+                continue
+            keys.add((pid, int(st.pk)))
+    return keys
+
+
+def realign_site_task_from_case_linked_pdf(
+    project: LibraryProject,
+    site_task: LibraryTask | None,
+    task_no: str,
+    user,
+) -> tuple[LibraryTask | None, list[str]]:
+    """
+    进度序号 / site_library_task_id 与现场记录 PDF 实际绑定任务不一致时，以 PDF 为准。
+
+    典型场景：案件 case_no=30 落在 DR 现场任务，但案件下 PDF 的 M2M 绑的是胃肠机现场任务。
+    """
+    notes: list[str] = []
+    if project is None:
+        return site_task, notes
+    raw = str(task_no or "").strip()
+    if not raw:
+        return site_task, notes
+
+    from apps.core.library_access import library_file_access_allowed
+
+    case_nos: list[str] = [raw]
+    if raw.isdigit():
+        case_nos.append(f"{int(raw):02d}")
+        case_nos.append(str(int(raw)))
+    case_nos = list(dict.fromkeys(case_nos))
+
+    case = (
+        InspectionCase.objects.filter(library_project=project, case_no__in=case_nos)
+        .order_by("-id")
+        .first()
+    )
+    if case is None:
+        return site_task, notes
+
+    cand = (
+        LibraryFile.objects.filter(
+            projects=project,
+            category=LibraryFile.CATEGORY_SITE_RECORD,
+            link_entity=LibraryFile.LINK_ENTITY_INSPECTION_CASE,
+            link_object_id=case.pk,
+        )
+        .prefetch_related("library_tasks")
+        .order_by("-created_at", "-id")
+    )
+    winner = None
+    for lf in cand:
+        on = (lf.original_name or "").lower()
+        if not on.endswith(".pdf"):
+            continue
+        if not library_file_access_allowed(user, lf):
+            continue
+        winner = lf
+        break
+    if winner is None:
+        return site_task, notes
+
+    actual = resolve_site_record_library_task_for_file(winner, case, project)
+    if actual is None or getattr(actual, "output_target", None) != LibraryTask.OUTPUT_SITE_RECORD:
+        return site_task, notes
+    if not project.library_tasks.filter(pk=actual.pk).exists():
+        return site_task, notes
+    if site_task is not None and int(site_task.pk) == int(actual.pk):
+        return site_task, notes
+
+    notes.append(
+        f"现场记录 PDF「{winner.original_name or winner.pk}」绑定任务为 "
+        f"{actual.code}，已按 PDF 校正导出任务"
+        + (f"（原进度任务 {site_task.code}）" if site_task is not None else "")
+    )
+    return actual, notes
+
+
 def _display_task_no(task_no: str, project=None) -> str:
     raw = str(task_no or "").strip()
     if raw and raw.isdigit() and len(raw) <= 2:

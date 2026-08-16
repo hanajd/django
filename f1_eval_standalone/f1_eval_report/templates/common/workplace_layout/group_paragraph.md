@@ -1,0 +1,1 @@
+如图{fig}所示，建设单位拟在{zone}设置{room_counts}，拟各自设置单独的机房，并设置共用的控制室，且拟与机房分开设置。{room_names}拟设置机房防护门（为{door_room}）、控制室防护门（为{door_control}）和便于观察受检者状态及防护门开启状态的观察窗{extra_rooms}。{beam_text}{room_names}最小有效使用面积和最小单边长度见表{table4}、毗邻情况见表{table5}。{room_names}选址位置已充分考虑邻室（含楼上和楼下）及周围场所的人员防护与安全。

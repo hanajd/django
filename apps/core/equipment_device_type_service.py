@@ -100,14 +100,65 @@ def find_device_type_folder(
 
 
 def pick_report_task_for_device_folder(device_folder: LibraryTaskFolder) -> LibraryTask | None:
-    return (
-        LibraryTask.objects.filter(
-            task_folder=device_folder,
-            output_target=LibraryTask.OUTPUT_REPORT,
-        )
-        .order_by("code", "id")
-        .first()
+    tasks = list_report_tasks_under_device_folder(device_folder)
+    return tasks[0] if tasks else None
+
+
+def list_report_tasks_under_device_folder(device_folder: LibraryTaskFolder) -> list[LibraryTask]:
+    """设备类型文件夹及其启用子文件夹下的全部报告模板。"""
+    if device_folder is None:
+        return []
+    folder_ids: list[int] = [device_folder.pk]
+    queue = list(
+        device_folder.children.filter(is_active=True).order_by("sort_order", "name", "id")
     )
+    while queue:
+        child = queue.pop(0)
+        folder_ids.append(child.pk)
+        queue.extend(
+            list(child.children.filter(is_active=True).order_by("sort_order", "name", "id"))
+        )
+    return list(
+        LibraryTask.objects.filter(
+            task_folder_id__in=folder_ids,
+            output_target=LibraryTask.OUTPUT_REPORT,
+        ).order_by("code", "id")
+    )
+
+
+def inspection_template_groups_for_device_type(device_type: str) -> list[dict]:
+    """
+    按设备类型列出各检测类型下可选的全部报告模板。
+    返回 [{inspection_type, templates: [{report_task_id, task_code, task_name, task_label}]}]
+    """
+    dt = normalize_device_type(device_type)
+    if dt is None:
+        return []
+    groups: list[dict] = []
+    for spec in INSPECTION_TYPE_FOLDER_SPECS:
+        itype = spec["inspection_type"]
+        det = find_inspection_type_root_folder(spec)
+        if det is None:
+            continue
+        dev_folder = find_device_type_folder(det, dt)
+        if dev_folder is None:
+            continue
+        templates: list[dict] = []
+        for task in list_report_tasks_under_device_folder(dev_folder):
+            code = (task.code or "").strip()
+            name = (task.name or "").strip()
+            label = f"{code} · {name}" if code else (name or f"模板 #{task.pk}")
+            templates.append(
+                {
+                    "report_task_id": task.pk,
+                    "task_code": code,
+                    "task_name": name,
+                    "task_label": label,
+                }
+            )
+        if templates:
+            groups.append({"inspection_type": itype, "templates": templates})
+    return groups
 
 
 def auto_report_task_bindings_for_device_type(

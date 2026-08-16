@@ -251,7 +251,7 @@ _SUBMIT_BUCKET_ORDER = {
 # visibleWhen 与 Flutter FieldDef / ExpressionEngine 对齐（与「勾选控件配置」不是同一概念）：
 # - type==boolean：Checkbox 存 true/false；被其控制的字段写 controllerId == true / == false（字面量无引号）。
 #   普通勾选仅作输入时不要在勾选字段上写 visibleWhen；只有要「控制别的字段显隐」时，才在「被控字段」上写。
-# - type==radio + enum（如 yesNo、commissionOrgMode）：存枚举 value 字符串；被控字段写 == 'yes'、== 'customCommission' 等。
+# - type==radio 已弃用，一律按 boolean 处理（历史模板由 _coerce_radio_fields_to_boolean 转换）。
 # - 勿用 == 1 / == 0 代替 boolean（与 BooleanFieldWidget 的 bool 值不一致）。
 _VISIBLE_WHEN_KERMA_MAX_HIGH_SECTION = "hasAec == true"
 _VISIBLE_WHEN_KERMA_MAX_HIGH_FIELD = "hasHighDoseMode == true"
@@ -285,10 +285,10 @@ def _basic_info_commission_visibility_controllers(
     basic_step: Dict[str, Any],
 ) -> Tuple[bool, str]:
     """
-    返回 (是否存在 commissionOrgMode radio, 同受检单位 boolean 的字段 id)。
-    合并 radio 后通常仅有前者；未合并模板可能仍有后者。
+    返回 (是否存在 commissionOrgMode 字段, 同受检单位 boolean 的字段 id)。
+    radio 已弃用后多为 boolean；旧模板可能仍短暂残留 radio。
     """
-    has_radio = False
+    has_mode = False
     same_inspection_bool_id = ""
     for sec in basic_step.get("sections", []):
         if not isinstance(sec, dict):
@@ -298,8 +298,8 @@ def _basic_info_commission_visibility_controllers(
                 continue
             fid = str(f.get("id") or "")
             ft = str(f.get("type") or "").lower()
-            if fid == "commissionOrgMode" and ft == "radio":
-                has_radio = True
+            if fid == "commissionOrgMode" and ft in {"radio", "boolean", "select"}:
+                has_mode = True
             if ft == "boolean":
                 src = f.get("source") if isinstance(f.get("source"), dict) else {}
                 hk = str(src.get("hierarchyKey") or "")
@@ -308,7 +308,7 @@ def _basic_info_commission_visibility_controllers(
                     same_inspection_bool_id = fid
                 elif lb == "同受检单位" and "委托单位" in fid:
                     same_inspection_bool_id = fid
-    return has_radio, same_inspection_bool_id
+    return has_mode, same_inspection_bool_id
 
 
 def _apply_commission_organization_name_visibility(steps: List[Dict[str, Any]]) -> None:
@@ -316,11 +316,11 @@ def _apply_commission_organization_name_visibility(steps: List[Dict[str, Any]]) 
     basic = next((s for s in steps if isinstance(s, dict) and str(s.get("id") or "") == "step_basic_info"), None)
     if not isinstance(basic, dict):
         return
-    has_radio, same_bool_id = _basic_info_commission_visibility_controllers(basic)
-    if not has_radio and not same_bool_id:
+    has_mode, same_bool_id = _basic_info_commission_visibility_controllers(basic)
+    if not has_mode and not same_bool_id:
         return
     expr = ""
-    if has_radio:
+    if has_mode:
         expr = _VISIBLE_WHEN_COMMISSION_ORG_NAME
     elif same_bool_id:
         # boolean：勾选「同受检单位」为 true 时隐藏名称 → 名称在 false 时显示
@@ -3144,161 +3144,60 @@ def _field_order_tuple(f: Dict[str, Any]) -> Tuple[int, float, float, int]:
 def _merge_dose_rate_unit_checkbox_pairs_to_radio(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     将带 source.checkboxPair（pairKind=dose_rate_unit、同 pairId）的布尔勾选合并为单选。
-    在整步（step）内按 pairId 聚合：避免互斥单位勾被拆到不同 section 后无法成组、残留单独 mGy/min。
-    """
-    steps = payload.get("steps")
-    if not isinstance(steps, list):
-        return payload
 
-    for step in steps:
+    前端已弃用 type=radio，保留各 boolean 勾选独立提交。
+    """
+    return payload
+
+
+def _coerce_radio_fields_to_boolean(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """将残留的 type=radio 统一改为 boolean（去掉 enumRef / 枚举默认值）。"""
+
+    def _fix(field: Dict[str, Any]) -> None:
+        if not isinstance(field, dict):
+            return
+        if str(field.get("type") or "").lower() == "table":
+            for col in field.get("columns") or []:
+                if isinstance(col, dict):
+                    _fix(col)
+            cells = field.get("cells")
+            if isinstance(cells, list):
+                for row in cells:
+                    if isinstance(row, list):
+                        for cell in row:
+                            if isinstance(cell, dict):
+                                _fix(cell)
+                    elif isinstance(row, dict):
+                        _fix(row)
+            return
+        if str(field.get("type") or "").lower() != "radio":
+            return
+        field["type"] = "boolean"
+        field.pop("enumRef", None)
+        field.pop("options", None)
+        field.pop("enum", None)
+        dv = field.get("defaultValue")
+        if isinstance(dv, str):
+            field.pop("defaultValue", None)
+        elif isinstance(dv, bool):
+            pass
+        elif dv is None:
+            pass
+        else:
+            try:
+                field["defaultValue"] = bool(dv)
+            except Exception:
+                field.pop("defaultValue", None)
+
+    for step in payload.get("steps") or []:
         if not isinstance(step, dict):
             continue
-        sections = step.get("sections")
-        if not isinstance(sections, list) or not sections:
-            continue
-
-        groups: Dict[str, List[Tuple[Dict[str, Any], Dict[str, Any]]]] = {}
-        for section in sections:
+        for section in step.get("sections") or []:
             if not isinstance(section, dict):
                 continue
-            fields = section.get("fields")
-            if not isinstance(fields, list):
-                continue
-            for f in fields:
-                if not isinstance(f, dict):
-                    continue
-                if str(f.get("type") or "").lower() != "boolean":
-                    continue
-                src = f.get("source") if isinstance(f.get("source"), dict) else {}
-                if str(src.get("anchorType") or "").lower() != "check":
-                    continue
-                cp = src.get("checkboxPair")
-                if not isinstance(cp, dict):
-                    continue
-                if str(cp.get("pairKind") or "") != "dose_rate_unit":
-                    continue
-                if str(cp.get("mode") or "") != "mutually_exclusive":
-                    continue
-                pid = str(cp.get("pairId") or "").strip()
-                if not pid:
-                    continue
-                groups.setdefault(pid, []).append((section, f))
-
-        for pid, members in groups.items():
-            if len(members) < 2:
-                continue
-
-            members.sort(key=lambda t: _field_order_tuple(t[1]))
-            first_sec, first = members[0]
-            src0 = first.get("source") if isinstance(first.get("source"), dict) else {}
-
-            label_to_slug: Dict[str, str] = {}
-            for _sec, ff in members:
-                sc = ff.get("source") if isinstance(ff.get("source"), dict) else {}
-                cp2 = sc.get("checkboxPair")
-                if not isinstance(cp2, dict):
-                    continue
-                opt_raw = str(cp2.get("option") or "").strip()
-                lb = str(ff.get("label") or "").strip()
-                slug = _dose_rate_unit_slug_from_checkbox_option(opt_raw, lb)
-                if not slug:
-                    continue
-                display_key = opt_raw or lb
-                if display_key:
-                    label_to_slug[display_key] = slug
-
-            if len(set(label_to_slug.values())) < 2:
-                continue
-
-            radio_id = _dose_rate_unit_radio_id_from_pair_id(pid)
-            fl = str(first.get("label") or first.get("id") or "")
-            exp0 = src0.get("checkboxPair")
-            exp_list: List[str] = []
-            if isinstance(exp0, dict):
-                raw_exp = exp0.get("expected")
-                if isinstance(raw_exp, list):
-                    exp_list = [str(x).strip() for x in raw_exp if str(x).strip()]
-            radio_label = _radio_label_without_trailing_unit(fl, list(label_to_slug.keys()) or exp_list)
-
-            picked_default = ""
-            for _sec, ff in members:
-                if not bool(ff.get("defaultValue")):
-                    continue
-                sc = ff.get("source") if isinstance(ff.get("source"), dict) else {}
-                cp2 = sc.get("checkboxPair")
-                if not isinstance(cp2, dict):
-                    continue
-                opt_raw = str(cp2.get("option") or "").strip()
-                lb = str(ff.get("label") or "").strip()
-                slug = _dose_rate_unit_slug_from_checkbox_option(opt_raw, lb)
-                if slug:
-                    picked_default = slug
-                    break
-            if not picked_default:
-                for disp, sl in label_to_slug.items():
-                    if "mgy" in disp.lower() and "min" in disp.lower():
-                        picked_default = sl
-                        break
-            if not picked_default:
-                picked_default = next(iter(label_to_slug.values()), "")
-
-            current_bucket = str(src0.get("submitBucket") or "").strip() or "testResult"
-            submit_path = _replace_submit_path_leaf(
-                str(src0.get("submitPath") or f"{current_bucket}.{radio_id}"),
-                radio_id,
-            )
-            try:
-                page = int(src0.get("page") or 1)
-            except (TypeError, ValueError):
-                page = 1
-            pdf_field_id = str(src0.get("pdfFieldId") or "")
-
-            target_sec = first_sec
-            sid_t = str(target_sec.get("id") or "")
-            radio_field: Dict[str, Any] = {
-                "id": radio_id,
-                "type": "radio",
-                "label": radio_label,
-                "enumRef": "doseRateUnit",
-                "required": bool(first.get("required", False)),
-                "defaultValue": picked_default,
-                "width": "half",
-                "source": {
-                    "pdfFieldId": pdf_field_id,
-                    "page": page,
-                    "anchorType": "check",
-                    "submitBucket": current_bucket,
-                    "submitPath": submit_path,
-                    "key": f"{step.get('id')}.{sid_t}.{radio_id}",
-                    "doseRateUnitPairId": pid,
-                },
-                "__order": first.get("__order", (999, 999999, 999999, 999999)),
-                "__bbox": first.get("__bbox", (0.0, 0.0, 0.0, 0.0)),
-            }
-
-            member_set = {id(ff) for _s, ff in members}
-            for section in sections:
-                if not isinstance(section, dict):
-                    continue
-                flist = section.get("fields")
-                if not isinstance(flist, list):
-                    continue
-                section["fields"] = [x for x in flist if not (isinstance(x, dict) and id(x) in member_set)]
-
-            tgt_fields = target_sec.get("fields")
-            if not isinstance(tgt_fields, list):
-                tgt_fields = []
-                target_sec["fields"] = tgt_fields
-            ro = _field_order_tuple(radio_field)
-            ins_pos = len(tgt_fields)
-            for i, tf in enumerate(tgt_fields):
-                if not isinstance(tf, dict):
-                    continue
-                if _field_order_tuple(tf) > ro:
-                    ins_pos = i
-                    break
-            tgt_fields.insert(ins_pos, radio_field)
-
+            for field in section.get("fields") or []:
+                if isinstance(field, dict):
+                    _fix(field)
     return payload
 
 
@@ -4824,6 +4723,7 @@ def _finalize_frontend_schema_result(result: Dict[str, Any], *, merge_split_date
     result = _sort_fields_by_coordinate_order(result)
     result = _merge_dose_rate_unit_checkbox_pairs_to_radio(result)
     result = _collapse_mutually_exclusive_checks_to_radio(result)
+    result = _coerce_radio_fields_to_boolean(result)
     result = _remove_boolean_duplicates_after_radio(result)
     result = _relocate_equipment_fields_to_basic_info(result)
     result = _normalize_basic_info_sections(result)
@@ -5349,8 +5249,20 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
             field_obj.pop("precision", None)
             field_obj.pop("unit", None)
         if field_obj.get("type") in {"radio", "select"}:
-            field_obj["enumRef"] = "testType" if ("验收" in item["label"] or "状态" in item["label"]) else "yesNo"
-            field_obj["defaultValue"] = "status" if field_obj["enumRef"] == "testType" else "no"
+            # radio 已弃用：勾选类保持 boolean；select 仍可带枚举
+            if field_obj.get("type") == "radio":
+                field_obj["type"] = "boolean"
+                field_obj["defaultValue"] = bool(field_obj.get("defaultValue", False))
+                field_obj.pop("enumRef", None)
+            else:
+                field_obj["enumRef"] = (
+                    "testType"
+                    if ("验收" in item["label"] or "状态" in item["label"])
+                    else "yesNo"
+                )
+                field_obj["defaultValue"] = (
+                    "status" if field_obj["enumRef"] == "testType" else "no"
+                )
         if field_obj.get("type") == "textarea":
             field_obj["minLines"] = 3
             field_obj["maxLines"] = 8
@@ -5491,11 +5403,9 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
                 0,
                 {
                     "id": "testType",
-                    "type": "radio",
+                    "type": "boolean",
                     "label": "检测类型",
                     "required": True,
-                    "enumRef": "testType",
-                    "defaultValue": "status",
                     "width": "half",
                     "source": {
                         "pdfFieldId": found_test_type_checks.get("状态检测") or found_test_type_checks.get("验收检测") or "",

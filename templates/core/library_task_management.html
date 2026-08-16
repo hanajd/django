@@ -345,7 +345,7 @@
                                             {% if task_edit_mode %}
                                             {% if pair.pdf %}
                                             <form method="post" class="mt-1"
-                                                  onsubmit="return confirm('仅解除 PDF「{{ pair.pdf.name }}」与本模板的绑定，JSON 模板（若有）仍保持绑定。文件仍保留在文件库。');">
+                                                  onsubmit="return confirm('仅解除 PDF「{{ pair.pdf.name }}」与本模板的绑定，JSON 模板（若有）仍保持绑定。文件保留在文件库，并将从本任务 current 移至 history。');">
                                                 {% csrf_token %}
                                                 <input type="hidden" name="action" value="unbind_task_template_file">
                                                 <input type="hidden" name="manage_task_id" value="{{ manage_task.id }}">
@@ -359,7 +359,7 @@
                                             {% endif %}
                                             {% if pair.json %}
                                             <form method="post" class="mt-1"
-                                                  onsubmit="return confirm('仅解除{% if pair.json.id in task_auxiliary_json_ids %}辅助 {% endif %}JSON「{{ pair.json.name }}」与本模板的绑定，PDF（若有）仍保持绑定。文件仍保留在文件库。');">
+                                                  onsubmit="return confirm('仅解除{% if pair.json.id in task_auxiliary_json_ids %}辅助 {% endif %}JSON「{{ pair.json.name }}」与本模板的绑定，PDF（若有）仍保持绑定。{% if pair.json.id not in task_auxiliary_json_ids %}文件保留在文件库，并将从本任务 current 移至 history。{% else %}文件仍保留在文件库。{% endif %}');">
                                                 {% csrf_token %}
                                                 <input type="hidden" name="action" value="unbind_task_template_file">
                                                 <input type="hidden" name="manage_task_id" value="{{ manage_task.id }}">

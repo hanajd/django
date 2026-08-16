@@ -645,6 +645,9 @@ def _is_plausible_inspected_unit_address(text: str) -> bool:
         return False
     if re.match(r"^\d{4}-\d{2}-\d{2}", s) or re.search(r"\d{4}-\d{2}-\d{2}T", s):
         return False
+    # 纯数字（如委托编号/任务号 260312）不是地址
+    if re.fullmatch(r"\d{4,12}", s):
+        return False
     # 含地址常见字样优先判定为地址（避免被下方「像单位名称」启发式误杀）
     if any(ch in s for ch in "路街巷号村镇区市县省园楼室栋层"):
         return True
@@ -838,6 +841,21 @@ _REPORT_BASIC_INFO_SLOT_SEMANTICS: dict[str, tuple[str, ...]] = {
     "f7": ("委托单位名称", "委托单位", "commissionOrganization"),
     "f26": ("委托单位名称", "commissionOrganization"),
 }
+# CT/CBCT/胃肠机等验收报告：基本情况 f 号与 DSA 默认表不同（见 ctc-1 模板 pdf.fields）
+_CTC_LIKE_REPORT_BASIC_INFO_SLOT_SEMANTICS: dict[str, tuple[str, ...]] = {
+    "f3": ("委托编号", "commissionNo"),
+    "f4": ("受检单位名称", "受检单位"),
+    "f5": ("受检单位地址", "单位地址", "地址"),
+    "f6": ("联系人",),
+    "f7": ("联系电话", "联系人电话"),
+    "f8": ("主要检测人员", "testman"),
+    "f9": ("委托单位名称", "委托单位", "commissionOrganization"),
+}
+_CTC_LIKE_PROFILE_CODES = frozenset(
+    {
+        "ctc-1",
+    }
+)
 _DSA_REPORT_BASIC_INFO_SLOT_SEMANTICS: dict[str, tuple[str, ...]] = {
     "f5": ("委托编号", "commissionNo"),
     "f6": ("受检单位名称", "受检单位"),
@@ -910,6 +928,8 @@ def _basic_info_slot_semantics_for_task(task_obj) -> dict[str, tuple[str, ...]]:
     prof = get_report_template_profile(task_obj)
     if prof.code == "dr-1":
         return dict(_DR1_REPORT_BASIC_INFO_SLOT_SEMANTICS)
+    if prof.code in _CTC_LIKE_PROFILE_CODES:
+        return dict(_CTC_LIKE_REPORT_BASIC_INFO_SLOT_SEMANTICS)
     if prof.contact_pdf_field_ids == ("f8", "f9"):
         return dict(_DSA_REPORT_BASIC_INFO_SLOT_SEMANTICS)
     if prof.contact_pdf_field_ids == ("f9", "f10") and prof.code != "dr-1":
@@ -1029,11 +1049,12 @@ def _reconcile_report_basic_info_value_mapping(
         if pid in contact_pids:
             continue
         val = _semantic_text_from_value_mapping(value_mapping, sem_keys)
+        is_address_slot = any("地址" in str(k) for k in sem_keys)
         if not val:
-            if pid in _REPORT_BASIC_INFO_ADDRESS_PIDS:
+            if is_address_slot or pid in _REPORT_BASIC_INFO_ADDRESS_PIDS:
                 value_mapping.pop(pid, None)
             continue
-        if pid in _REPORT_BASIC_INFO_ADDRESS_PIDS:
+        if is_address_slot or pid in _REPORT_BASIC_INFO_ADDRESS_PIDS:
             if not _is_plausible_inspected_unit_address(val):
                 value_mapping.pop(pid, None)
                 continue
@@ -10853,7 +10874,9 @@ def _apply_pdf_render_marks_to_pdf_bytes(pdf_bytes: bytes, marks: list[dict] | N
                 continue
         if not drew:
             return pdf_bytes
-        return doc.tobytes()
+        from utils.pdf_compress import pdf_document_to_compressed_bytes
+
+        return pdf_document_to_compressed_bytes(doc, subset_fonts=False)
     finally:
         doc.close()
 
@@ -10873,6 +10896,8 @@ def _persist_filled_pdf_from_submit(
     site_record_batch=None,
     source_submit_relative_path: str | None = None,
     ordered_submit_payloads: Sequence[dict] | None = None,
+    overwrite_file=None,
+    export_variants: Sequence[str] | None = None,
 ):
     from apps.api.inspection_pdf_service import _resolve_library_task_for_task_no
 
@@ -10950,6 +10975,7 @@ def _persist_filled_pdf_from_submit(
         )
         if render_marks:
             pdf_bytes = _apply_pdf_render_marks_to_pdf_bytes(pdf_bytes, render_marks)
+        variant_pdfs: list[tuple[str, bytes]] = []
         if (
             task_obj is not None
             and task_obj.output_target == LibraryTask.OUTPUT_REPORT
@@ -10957,10 +10983,13 @@ def _persist_filled_pdf_from_submit(
             and source_payload
         ):
             from radiation_detection_report.report_pdf_integrator import (
-                try_enrich_report_pdf_with_radiation_table,
+                REPORT_EXPORT_VARIANT_RP,
+                normalize_report_export_variants,
+                try_enrich_report_pdf_variants,
             )
 
-            pdf_bytes = try_enrich_report_pdf_with_radiation_table(
+            variants = normalize_report_export_variants(export_variants)
+            variant_pdfs = try_enrich_report_pdf_variants(
                 pdf_bytes,
                 source_payload=source_payload,
                 project=project,
@@ -10969,11 +10998,35 @@ def _persist_filled_pdf_from_submit(
                 task_no=task_no,
                 manual_device_count=manual_device_count,
                 ordered_submit_payloads=ordered_submit_payloads,
+                export_variants=variants,
             )
+            if not variant_pdfs:
+                if REPORT_EXPORT_VARIANT_RP in variants and len(variants) == 1:
+                    return (
+                        False,
+                        "现场记录无工作场所放射防护检测数据，无法导出「仅防护结果」",
+                        None,
+                    )
+                return False, "所选导出类型未能生成报告 PDF", None
+        else:
+            variant_pdfs = [("full", pdf_bytes)]
+
+        from utils.pdf_compress import compress_pdf_bytes
+
+        variant_pdfs = [
+            (v, compress_pdf_bytes(b, subset_fonts=True)) for v, b in variant_pdfs if b
+        ]
+        if not variant_pdfs:
+            return False, "PDF 压缩后为空", None
     except Exception as exc:
         return False, f"PDF 渲染失败: {exc}", None
-    output_category = LibraryFile.CATEGORY_REPORT if task_obj.output_target == LibraryTask.OUTPUT_REPORT else LibraryFile.CATEGORY_SITE_RECORD
-    filename = build_exported_inspection_pdf_original_name(
+
+    output_category = (
+        LibraryFile.CATEGORY_REPORT
+        if task_obj.output_target == LibraryTask.OUTPUT_REPORT
+        else LibraryFile.CATEGORY_SITE_RECORD
+    )
+    base_filename = build_exported_inspection_pdf_original_name(
         project,
         task_obj,
         task_no,
@@ -10981,39 +11034,110 @@ def _persist_filled_pdf_from_submit(
         source_payload=source_payload,
         case=case,
     )
-    wrapped = type("UploadLike", (), {"read": lambda self: pdf_bytes, "name": filename})()
-    save_kwargs: dict = {
-        "link_entity": LibraryFile.LINK_ENTITY_INSPECTION_CASE,
-        "link_object_id": case.pk,
-        "project_ids": [project.pk],
-        "enforce_storage_quota": False,
-    }
-    if output_category == LibraryFile.CATEGORY_REPORT:
-        save_kwargs["report_project"] = project
-        save_kwargs["report_library_task"] = task_obj
-    else:
-        from apps.core.library_file_service import (
-            resolve_site_record_batch_storage,
+
+    def _name_with_variant(base: str, variant: str) -> str:
+        from radiation_detection_report.report_pdf_integrator import (
+            report_export_variant_filename_suffix,
         )
 
-        save_kwargs["site_record_batch"] = site_record_batch or resolve_site_record_batch_storage(
-            project=project,
-            case=case,
-            task_no=task_no,
-            source_payload=source_payload,
-            source_submit_relative_path=source_submit_relative_path,
-        )
-    created, _ = save_library_binary_uploads(
-        user, [wrapped], output_category,
-        **save_kwargs,
-    )
-    if not created:
-        return False, "PDF 保存失败（save_library_binary_uploads 未创建记录）", None
-    new_lf = LibraryFile.objects.filter(pk=created[0]["id"]).first()
-    if new_lf is not None and task_obj is not None:
-        from apps.core.library_file_service import attach_files_to_tasks
+        suf = report_export_variant_filename_suffix(variant)
+        if not suf:
+            return base
+        if base.lower().endswith(".pdf"):
+            return f"{base[:-4]}{suf}.pdf"
+        return f"{base}{suf}.pdf"
 
-        attach_files_to_tasks([new_lf.pk], [int(task_obj.pk)], user=user)
+    from apps.core.library_file_service import attach_files_to_tasks, overwrite_library_file_bytes
+
+    created_lfs: list = []
+    notes: list[str] = []
+    for idx, (variant, v_bytes) in enumerate(variant_pdfs):
+        filename = _name_with_variant(base_filename, variant)
+        use_overwrite = (
+            overwrite_file is not None
+            and getattr(overwrite_file, "pk", None)
+            and output_category == LibraryFile.CATEGORY_REPORT
+            and len(variant_pdfs) == 1
+            and variant == "full"
+        )
+        if use_overwrite:
+            try:
+                new_lf = overwrite_library_file_bytes(
+                    overwrite_file, v_bytes, original_name=filename
+                )
+            except Exception as exc:
+                return False, f"PDF 覆盖保存失败: {exc}", None
+            if task_obj is not None:
+                attach_files_to_tasks([new_lf.pk], [int(task_obj.pk)], user=user)
+            created_lfs.append(new_lf)
+            continue
+
+        wrapped = type(
+            "UploadLike",
+            (),
+            {"read": lambda self, b=v_bytes: b, "name": filename},
+        )()
+        save_kwargs: dict = {
+            "link_entity": LibraryFile.LINK_ENTITY_INSPECTION_CASE,
+            "link_object_id": case.pk,
+            "project_ids": [project.pk],
+            "enforce_storage_quota": False,
+        }
+        if output_category == LibraryFile.CATEGORY_REPORT:
+            save_kwargs["report_project"] = project
+            save_kwargs["report_library_task"] = task_obj
+        else:
+            from apps.core.library_file_service import resolve_site_record_batch_storage
+
+            save_kwargs["site_record_batch"] = site_record_batch or resolve_site_record_batch_storage(
+                project=project,
+                case=case,
+                task_no=task_no,
+                source_payload=source_payload,
+                source_submit_relative_path=source_submit_relative_path,
+            )
+        created, _ = save_library_binary_uploads(
+            user,
+            [wrapped],
+            output_category,
+            **save_kwargs,
+        )
+        if not created:
+            return False, "PDF 保存失败（save_library_binary_uploads 未创建记录）", None
+        new_lf = LibraryFile.objects.filter(pk=created[0]["id"]).first()
+        if new_lf is not None and task_obj is not None:
+            attach_files_to_tasks([new_lf.pk], [int(task_obj.pk)], user=user)
+        if new_lf is not None:
+            created_lfs.append(new_lf)
+            from radiation_detection_report.report_pdf_integrator import (
+                report_export_variant_label,
+            )
+
+            notes.append(f"{report_export_variant_label(variant)}→{new_lf.original_name}")
+
+    if not created_lfs:
+        return False, "PDF 保存失败", None
+
+    msg_parts: list[str] = []
     if skipped_fields:
-        return True, f"导出成功，但已跳过 {skipped_fields} 个不合法模板字段", new_lf
-    return True, "", new_lf
+        msg_parts.append(f"已跳过 {skipped_fields} 个不合法模板字段")
+    if len(created_lfs) > 1:
+        msg_parts.append("已导出：" + "；".join(notes))
+    msg = "，".join(msg_parts)
+
+    if len(created_lfs) == 1:
+        single = created_lfs[0]
+        if (
+            overwrite_file is not None
+            and getattr(overwrite_file, "pk", None)
+            and single.pk == getattr(overwrite_file, "pk", None)
+        ):
+            if skipped_fields:
+                return (
+                    True,
+                    f"导出成功（已覆盖当前报告），但已跳过 {skipped_fields} 个不合法模板字段",
+                    single,
+                )
+            return True, "已覆盖当前报告", single
+        return True, msg, single
+    return True, msg, created_lfs

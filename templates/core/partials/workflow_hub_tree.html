@@ -3,19 +3,20 @@
 <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
     <div class="px-4 py-3 border-b border-slate-100 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div class="inline-flex rounded-xl bg-slate-100 p-1 text-sm">
-            <a href="?view=hospital{% if project_search %}&q={{ project_search|urlencode }}{% endif %}{% if tab %}&tab={{ tab }}{% endif %}"
+            <a href="?view=hospital{% if project_id %}&project_id={{ project_id }}{% endif %}{% if project_search %}&q={{ project_search|urlencode }}{% endif %}{% if tab %}&tab={{ tab }}{% endif %}"
                class="rounded-lg px-3 py-1.5 font-medium {% if vm == 'hospital' %}bg-white text-slate-900 shadow-sm{% else %}text-slate-600 hover:text-slate-900{% endif %}">按医院</a>
-            <a href="?view=time{% if project_search %}&q={{ project_search|urlencode }}{% endif %}{% if tab %}&tab={{ tab }}{% endif %}"
+            <a href="?view=time{% if project_id %}&project_id={{ project_id }}{% endif %}{% if project_search %}&q={{ project_search|urlencode }}{% endif %}{% if tab %}&tab={{ tab }}{% endif %}"
                class="rounded-lg px-3 py-1.5 font-medium {% if vm == 'time' %}bg-white text-slate-900 shadow-sm{% else %}text-slate-600 hover:text-slate-900{% endif %}">按时间</a>
         </div>
         <form method="get" class="flex gap-2 w-full lg:w-auto">
             <input type="hidden" name="view" value="{{ vm }}">
             {% if tab %}<input type="hidden" name="tab" value="{{ tab }}">{% endif %}
+            {% if project_id %}<input type="hidden" name="project_id" value="{{ project_id }}">{% endif %}
             <input type="search" name="q" value="{{ project_search|default:'' }}" placeholder="搜索医院 / 委托 / 设备"
                    class="w-full lg:w-72 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100">
             <button type="submit" class="shrink-0 rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800">搜索</button>
             {% if project_search %}
-            <a href="?view={{ vm }}{% if tab %}&tab={{ tab }}{% endif %}" class="shrink-0 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50">清除</a>
+            <a href="?view={{ vm }}{% if project_id %}&project_id={{ project_id }}{% endif %}{% if tab %}&tab={{ tab }}{% endif %}" class="shrink-0 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50">清除</a>
             {% endif %}
         </form>
     </div>

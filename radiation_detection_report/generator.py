@@ -26,7 +26,12 @@ LATIN_RE = re.compile(r"[A-Za-z0-9]")
 SYMBOL_RE = re.compile(r"[≤≥μ％°\u03bc]")
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
-FONTS_DIR = os.path.join(PACKAGE_DIR, "fonts")
+try:
+    from utils.pymupdf_fonts import project_fonts_dir
+
+    FONTS_DIR = str(project_fonts_dir())
+except Exception:
+    FONTS_DIR = os.path.join(PACKAGE_DIR, "fonts")
 DEFAULT_LAYOUT_PATH = os.path.join(PACKAGE_DIR, "layout", "default_layout.json")
 
 
@@ -270,31 +275,44 @@ class FontResources:
     """page 字体名用于绘制；metric 字体对象用于测宽（嵌入名无法 get_text_length）。"""
 
     song: str = "china-s"
+    song_bold: str = "china-s"
     times: str = "Times-Roman"
+    times_bold: str = "Times-Bold"
     symbol: str = "china-s"
     song_path: Optional[str] = None
+    song_bold_path: Optional[str] = None
     times_path: Optional[str] = None
     symbol_path: Optional[str] = None
     song_metric: Optional[fitz.Font] = None
+    song_bold_metric: Optional[fitz.Font] = None
     times_metric: Optional[fitz.Font] = None
+    times_bold_metric: Optional[fitz.Font] = None
     symbol_metric: Optional[fitz.Font] = None
 
-    def page_font(self, char: str) -> str:
+    def page_font(self, char: str, *, bold: bool = False) -> str:
         if HAS_CJK_RE.search(char):
-            return self.song
+            return self.song_bold if bold else self.song
         if LATIN_RE.search(char):
-            return self.times
+            return self.times_bold if bold else self.times
         if SYMBOL_RE.search(char) and self.symbol != self.song:
             return self.symbol
-        return self.song
+        return self.song_bold if bold else self.song
 
-    def metric_font(self, char: str) -> fitz.Font:
-        if HAS_CJK_RE.search(char) and self.song_metric:
-            return self.song_metric
-        if LATIN_RE.search(char) and self.times_metric:
-            return self.times_metric
+    def metric_font(self, char: str, *, bold: bool = False) -> fitz.Font:
+        if HAS_CJK_RE.search(char):
+            if bold and self.song_bold_metric:
+                return self.song_bold_metric
+            if self.song_metric:
+                return self.song_metric
+        if LATIN_RE.search(char):
+            if bold and self.times_bold_metric:
+                return self.times_bold_metric
+            if self.times_metric:
+                return self.times_metric
         if SYMBOL_RE.search(char) and self.symbol_metric:
             return self.symbol_metric
+        if bold and self.song_bold_metric:
+            return self.song_bold_metric
         if self.song_metric:
             return self.song_metric
         if self.times_metric:
@@ -304,14 +322,29 @@ class FontResources:
 
 def _load_font_resources() -> FontResources:
     res = FontResources()
-    song_path = _first_existing(
-        [
-            os.path.join(FONTS_DIR, "SIMSUN.TTC"),
-            os.path.join(FONTS_DIR, "simsun.ttc"),
-            os.path.join(FONTS_DIR, "SIMSUN.TTF"),
-            r"C:\Windows\Fonts\simsun.ttc",
-        ]
-    )
+    song_path = None
+    song_bold_path = None
+    try:
+        from utils.pymupdf_fonts import song_font_path
+
+        sp = song_font_path(bold=False)
+        sb = song_font_path(bold=True)
+        if sp is not None and sp.is_file():
+            song_path = str(sp)
+        if sb is not None and sb.is_file():
+            song_bold_path = str(sb)
+    except Exception:
+        pass
+    if not song_path:
+        song_path = _first_existing(
+            [
+                os.path.join(FONTS_DIR, "SIMSUN.TTC"),
+                os.path.join(FONTS_DIR, "simsun.ttc"),
+                os.path.join(FONTS_DIR, "SIMSUN.TTF"),
+                os.path.join(FONTS_DIR, "SourceHanSerifSC-VF.ttf"),
+                r"C:\Windows\Fonts\simsun.ttc",
+            ]
+        )
     times_path = _first_existing(
         [
             os.path.join(FONTS_DIR, "TIMES.TTF"),
@@ -325,14 +358,26 @@ def _load_font_resources() -> FontResources:
     res.song_path = song_path
     res.times_path = times_path
     res.symbol_path = symbol_path
+    res.song_bold_path = song_bold_path
     if song_path:
         try:
             res.song_metric = fitz.Font(fontfile=song_path)
+            if song_bold_path:
+                try:
+                    res.song_bold_metric = fitz.Font(fontfile=song_bold_path)
+                except Exception:
+                    res.song_bold_metric = res.song_metric
+            else:
+                res.song_bold_metric = res.song_metric
         except Exception:
             pass
     if times_path:
         try:
             res.times_metric = fitz.Font(fontfile=times_path)
+            try:
+                res.times_bold_metric = fitz.Font("tibo")
+            except Exception:
+                res.times_bold_metric = res.times_metric
         except Exception:
             pass
     if symbol_path:
@@ -347,34 +392,51 @@ def _register_fonts(page: fitz.Page, base: FontResources) -> FontResources:
     """把 fonts/ 字体嵌入当前页，返回带 page 字体名的资源。"""
     res = FontResources(
         song=base.song,
+        song_bold=getattr(base, "song_bold", base.song),
         times=base.times,
+        times_bold=getattr(base, "times_bold", "Times-Bold"),
         symbol=base.symbol,
         song_path=base.song_path,
+        song_bold_path=getattr(base, "song_bold_path", None),
         times_path=base.times_path,
         symbol_path=base.symbol_path,
         song_metric=base.song_metric,
+        song_bold_metric=getattr(base, "song_bold_metric", base.song_metric),
         times_metric=base.times_metric,
+        times_bold_metric=getattr(base, "times_bold_metric", base.times_metric),
         symbol_metric=base.symbol_metric,
     )
     if base.song_path and _insert_font(page, "F_SONG", base.song_path):
         res.song = "F_SONG"
+    # 无粗体文件时与常规宋体共用同一嵌入名
+    if getattr(base, "song_bold_path", None) and _insert_font(
+        page, "F_SONG_BOLD", base.song_bold_path
+    ):
+        res.song_bold = "F_SONG_BOLD"
+    else:
+        res.song_bold = res.song
     if base.times_path and _insert_font(page, "F_TIMES", base.times_path):
         res.times = "F_TIMES"
+    res.times_bold = "tibo"
     if base.symbol_path and _insert_font(page, "F_SYMBOL", base.symbol_path):
         res.symbol = "F_SYMBOL"
     return res
 
 
-def _char_width(char: str, fonts: FontResources, fontsize: float) -> float:
-    mf = fonts.metric_font(char)
+def _char_width(
+    char: str, fonts: FontResources, fontsize: float, *, bold: bool = False
+) -> float:
+    mf = fonts.metric_font(char, bold=bold)
     try:
         return float(mf.text_length(char, fontsize=fontsize))
     except Exception:
         return fontsize * (0.5 if LATIN_RE.search(char) else 1.0)
 
 
-def _measure_text(text: str, fonts: FontResources, fontsize: float) -> float:
-    return sum(_char_width(ch, fonts, fontsize) for ch in text)
+def _measure_text(
+    text: str, fonts: FontResources, fontsize: float, *, bold: bool = False
+) -> float:
+    return sum(_char_width(ch, fonts, fontsize, bold=bold) for ch in text)
 
 
 def _protect_unit_tokens_for_wrap(text: str) -> str:
@@ -388,7 +450,14 @@ def _protect_unit_tokens_for_wrap(text: str) -> str:
     )
 
 
-def _wrap_text_lines(text: str, max_width: float, fonts: FontResources, fontsize: float) -> List[str]:
+def _wrap_text_lines(
+    text: str,
+    max_width: float,
+    fonts: FontResources,
+    fontsize: float,
+    *,
+    bold: bool = False,
+) -> List[str]:
     if not text:
         return [""]
     lines: List[str] = []
@@ -398,7 +467,7 @@ def _wrap_text_lines(text: str, max_width: float, fonts: FontResources, fontsize
             current += ch
             continue
         trial = current + ch
-        if current and _measure_text(trial, fonts, fontsize) > max_width:
+        if current and _measure_text(trial, fonts, fontsize, bold=bold) > max_width:
             lines.append(current.replace("\u2060", ""))
             current = ch
         else:
@@ -416,17 +485,29 @@ def _text_ascent(fontsize: float) -> float:
     return fontsize * 0.85
 
 
-def _cell_lines(text: str, max_width: float, fonts: FontResources, fontsize: float) -> List[str]:
-    return [ln for ln, _ in _paragraph_line_entries(text, max_width, fonts, fontsize)]
+def _cell_lines(
+    text: str,
+    max_width: float,
+    fonts: FontResources,
+    fontsize: float,
+    *,
+    bold: bool = False,
+) -> List[str]:
+    return [ln for ln, _ in _paragraph_line_entries(text, max_width, fonts, fontsize, bold=bold)]
 
 
 def _paragraph_line_entries(
-    text: str, max_width: float, fonts: FontResources, fontsize: float
+    text: str,
+    max_width: float,
+    fonts: FontResources,
+    fontsize: float,
+    *,
+    bold: bool = False,
 ) -> List[Tuple[str, bool]]:
     """返回 (行文本, 是否段落末行)。末行按 Word 规则左对齐。"""
     entries: List[Tuple[str, bool]] = []
     for para in text.split("\n"):
-        wrapped = _wrap_text_lines(para, max_width, fonts, fontsize)
+        wrapped = _wrap_text_lines(para, max_width, fonts, fontsize, bold=bold)
         for i, line in enumerate(wrapped):
             entries.append((line, i == len(wrapped) - 1))
     return entries or [("", True)]
@@ -553,18 +634,21 @@ def _draw_line(
     fontsize: float,
     align: str,
     letter_gap: Optional[float] = None,
+    color: Tuple[float, float, float] = (0, 0, 0),
+    *,
+    bold: bool = False,
 ) -> None:
     max_w = max(8.0, inner.width)
-    line_w = _measure_text(line, fonts, fontsize)
+    line_w = _measure_text(line, fonts, fontsize, bold=bold)
     extra_gap = letter_gap
     if extra_gap is None and align == "justify" and line_w < max_w and len(line) > 1:
         extra_gap = (max_w - line_w) / (len(line) - 1)
     if extra_gap is not None and extra_gap > 0:
         x = inner.x0
         for i, ch in enumerate(line):
-            fn = fonts.page_font(ch)
-            page.insert_text((x, baseline), ch, fontname=fn, fontsize=fontsize, color=(0, 0, 0))
-            x += _char_width(ch, fonts, fontsize)
+            fn = fonts.page_font(ch, bold=bold)
+            page.insert_text((x, baseline), ch, fontname=fn, fontsize=fontsize, color=color)
+            x += _char_width(ch, fonts, fontsize, bold=bold)
             if i < len(line) - 1:
                 x += extra_gap
         return
@@ -573,9 +657,9 @@ def _draw_line(
     else:
         x = inner.x0 + max(0.0, (inner.width - line_w) / 2.0)
     for ch in line:
-        fn = fonts.page_font(ch)
-        page.insert_text((x, baseline), ch, fontname=fn, fontsize=fontsize, color=(0, 0, 0))
-        x += _char_width(ch, fonts, fontsize)
+        fn = fonts.page_font(ch, bold=bold)
+        page.insert_text((x, baseline), ch, fontname=fn, fontsize=fontsize, color=color)
+        x += _char_width(ch, fonts, fontsize, bold=bold)
 
 
 def _evaluation_text_color(text: str) -> Tuple[float, float, float]:
@@ -598,26 +682,103 @@ def _draw_cell_content(
     fonts: FontResources,
     fontsize: float,
     align: str = "center",
+    color: Optional[Tuple[float, float, float]] = None,
     *,
     text_color: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+    bold: bool = False,
+    first_indent: bool = False,
+    para_indents: Optional[Sequence[bool]] = None,
 ) -> None:
     if not text:
         return
+    draw_color = text_color if color is None else color
     inner = _inner_rect(rect)
     max_w = max(8.0, inner.width)
-    if align == "word_justify":
-        entries = _paragraph_line_entries(text, max_w, fonts, fontsize)
-    else:
-        entries = [(ln, False) for ln in _cell_lines(text, max_w, fonts, fontsize)]
+
+    # 按段折行：支持 F.1 的 bold / 首行缩进参数
+    entries: List[Tuple[str, bool, bool, float]] = []  # line, is_para_last, is_para_first, indent_w
+    paras = str(text).split("\n")
+    for pi, para in enumerate(paras):
+        want = first_indent
+        if para_indents is not None and pi < len(para_indents):
+            want = bool(para_indents[pi])
+        indent_w = (2.0 * fontsize) if want else 0.0
+        first_w = max(8.0, max_w - indent_w) if want else max_w
+        if not para:
+            entries.append(("", True, True, indent_w))
+            continue
+        if not want:
+            for i, (ln, last) in enumerate(
+                _paragraph_line_entries(para, max_w, fonts, fontsize, bold=bold)
+            ):
+                entries.append((ln, last, i == 0, 0.0))
+            continue
+        # 首行缩进：首行按缩进后宽度折，后续按全宽
+        atoms = list(para)
+        lines_chars: List[str] = []
+        cur = ""
+        cur_w = 0.0
+        line_i = 0
+        for ch in atoms:
+            w = _char_width(ch, fonts, fontsize, bold=bold)
+            limit = first_w if line_i == 0 else max_w
+            if cur and cur_w + w > limit:
+                lines_chars.append(cur)
+                cur = ch
+                cur_w = w
+                line_i += 1
+            else:
+                cur += ch
+                cur_w += w
+        if cur or not lines_chars:
+            lines_chars.append(cur)
+        for i, ln in enumerate(lines_chars):
+            entries.append((ln, i == len(lines_chars) - 1, i == 0, indent_w))
+
     leading = _line_leading(fontsize)
-    base_y = _first_baseline_y(inner, len(entries), fontsize)
-    for li, (line, is_last_in_para) in enumerate(entries):
+    block_h = _text_block_height(len(entries), fontsize)
+    if block_h > inner.height:
+        base_y = inner.y0 + _text_ascent(fontsize)
+    else:
+        base_y = _first_baseline_y(inner, len(entries), fontsize)
+    for li, (line, is_last_in_para, is_first_in_para, indent_w) in enumerate(entries):
         baseline = base_y + li * leading
+        if baseline > inner.y1 + fontsize * 0.1:
+            break
+        draw_inner = inner
+        if is_first_in_para and indent_w > 0:
+            draw_inner = fitz.Rect(inner.x0 + indent_w, inner.y0, inner.x1, inner.y1)
         if align == "word_justify":
-            extra = None if is_last_in_para else _word_justify_extra_gap(line, max_w, fonts, fontsize)
-            _draw_line_colored(page, line, baseline, inner, fonts, fontsize, "left", text_color, letter_gap=extra)
+            extra = (
+                None
+                if is_last_in_para
+                else _word_justify_extra_gap(line, max(8.0, draw_inner.width), fonts, fontsize)
+            )
+            _draw_line_colored(
+                page,
+                line,
+                baseline,
+                draw_inner,
+                fonts,
+                fontsize,
+                "left",
+                draw_color,
+                letter_gap=extra,
+                bold=bold,
+            )
         else:
-            _draw_line_colored(page, line, baseline, inner, fonts, fontsize, align, text_color)
+            use_align = "left" if (is_first_in_para and indent_w > 0) else align
+            _draw_line_colored(
+                page,
+                line,
+                baseline,
+                draw_inner,
+                fonts,
+                fontsize,
+                use_align,
+                draw_color,
+                bold=bold,
+            )
 
 
 def _draw_line_colored(
@@ -630,18 +791,20 @@ def _draw_line_colored(
     align: str,
     text_color: Tuple[float, float, float],
     letter_gap: Optional[float] = None,
+    *,
+    bold: bool = False,
 ) -> None:
     max_w = max(8.0, inner.width)
-    line_w = _measure_text(line, fonts, fontsize)
+    line_w = _measure_text(line, fonts, fontsize, bold=bold)
     extra_gap = letter_gap
     if extra_gap is None and align == "justify" and line_w < max_w and len(line) > 1:
         extra_gap = (max_w - line_w) / (len(line) - 1)
     if extra_gap is not None and extra_gap > 0:
         x = inner.x0
         for i, ch in enumerate(line):
-            fn = fonts.page_font(ch)
+            fn = fonts.page_font(ch, bold=bold)
             page.insert_text((x, baseline), ch, fontname=fn, fontsize=fontsize, color=text_color)
-            x += _char_width(ch, fonts, fontsize)
+            x += _char_width(ch, fonts, fontsize, bold=bold)
             if i < len(line) - 1:
                 x += extra_gap
         return
@@ -650,9 +813,9 @@ def _draw_line_colored(
     else:
         x = inner.x0 + max(0.0, (inner.width - line_w) / 2.0)
     for ch in line:
-        fn = fonts.page_font(ch)
+        fn = fonts.page_font(ch, bold=bold)
         page.insert_text((x, baseline), ch, fontname=fn, fontsize=fontsize, color=text_color)
-        x += _char_width(ch, fonts, fontsize)
+        x += _char_width(ch, fonts, fontsize, bold=bold)
 
 
 class RadiationTableBuilder:

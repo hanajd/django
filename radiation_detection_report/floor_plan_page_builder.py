@@ -295,6 +295,15 @@ def build_floor_plan_page_pdf_bytes(
 
         img_rect = fitz.Rect(x_left, margin_top, x_left + img_w, margin_top + img_h)
         try:
+            from utils.pdf_compress import compress_image_bytes_for_pdf
+
+            image_bytes = compress_image_bytes_for_pdf(
+                image_bytes,
+                box_width_pt=float(img_w),
+                box_height_pt=float(img_h),
+                target_dpi=150.0,
+                max_edge_px=1600,
+            )
             page.insert_image(img_rect, stream=image_bytes, keep_proportion=True)
         except Exception as exc:
             logger.warning("insert floor plan image failed: %s", exc)
@@ -309,6 +318,8 @@ def build_floor_plan_page_pdf_bytes(
         _draw_line(page, caption, cap_baseline, cap_inner, fonts, FONT_SIZE_WU_HAO, "center")
 
     try:
-        return doc.tobytes(deflate=True, garbage=4, clean=True)
+        from utils.pdf_compress import pdf_document_to_compressed_bytes
+
+        return pdf_document_to_compressed_bytes(doc, subset_fonts=True)
     finally:
         doc.close()

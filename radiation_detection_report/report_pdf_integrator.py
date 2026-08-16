@@ -20,6 +20,26 @@ from radiation_detection_report.report_data_builder import (
 
 logger = logging.getLogger(__name__)
 
+# 报告导出截面（可多选）：全本 / 无防护结果（前四章） / 仅防护结果
+REPORT_EXPORT_VARIANT_FULL = "full"
+REPORT_EXPORT_VARIANT_FRONT = "front"
+REPORT_EXPORT_VARIANT_RP = "rp"
+REPORT_EXPORT_VARIANTS = (
+    REPORT_EXPORT_VARIANT_FULL,
+    REPORT_EXPORT_VARIANT_FRONT,
+    REPORT_EXPORT_VARIANT_RP,
+)
+_REPORT_EXPORT_VARIANT_LABELS = {
+    REPORT_EXPORT_VARIANT_FULL: "全本报告",
+    REPORT_EXPORT_VARIANT_FRONT: "无防护结果",
+    REPORT_EXPORT_VARIANT_RP: "仅防护结果",
+}
+_REPORT_EXPORT_VARIANT_FILENAME_SUFFIX = {
+    REPORT_EXPORT_VARIANT_FULL: "",
+    REPORT_EXPORT_VARIANT_FRONT: "（无防护结果）",
+    REPORT_EXPORT_VARIANT_RP: "（仅防护结果）",
+}
+
 _QC_SUBSECTION_RE = re.compile(
     r"(\d{1,2})\s*[.．]\s*(\d+)\s*.*?质量控制",
     re.I,
@@ -695,6 +715,184 @@ def _insert_radiation_table_at(
         table_doc.close()
 
 
+def _page_looks_like_toc_compact(compact: str) -> bool:
+    if "目录" not in compact:
+        return False
+    if "受检编号" in compact and ("质量控制" in compact or "检测点" in compact):
+        return False
+    return "一、项目基本情况" in compact or "三、检测结果" in compact
+
+
+def _find_first_results_body_page(doc: fitz.Document) -> Optional[int]:
+    """封面/声明/基本情况/目录之后，首个「三、检测结果」正文页（0-based）。"""
+    for pi in range(doc.page_count):
+        text = doc[pi].get_text("text") or ""
+        compact = _norm_compact(text)
+        if _page_looks_like_toc_compact(compact):
+            continue
+        if _page_enters_results_section(compact):
+            return pi
+    return None
+
+
+def _redact_qc_subsection_titles_before(doc: fitz.Document, before_page_0: int) -> None:
+    """
+    「仅防护结果」保留检测结果首页时，擦除其上质控小节标题，
+    避免与后插的 1.1 防护表小节号冲突；首页其它内容保留。
+    """
+    if before_page_0 <= 0:
+        return
+    for pi in range(min(before_page_0, doc.page_count)):
+        page = doc[pi]
+        try:
+            blocks = page.get_text("dict").get("blocks") or []
+        except Exception:
+            continue
+        touched = False
+        for block in blocks:
+            for line in block.get("lines") or []:
+                spans = line.get("spans") or []
+                if not spans:
+                    continue
+                text = "".join(str(s.get("text") or "") for s in spans)
+                compact = _norm_compact(text)
+                if not compact:
+                    continue
+                is_qc_title = bool(_QC_SUBSECTION_RE.search(compact)) or bool(
+                    _QC_PLAIN_SECTION_RE.search(compact)
+                )
+                if not is_qc_title and not (
+                    "质量控制" in compact and ("检测项目" in compact or "检测结果" in compact)
+                ):
+                    continue
+                xs = [float(s["bbox"][0]) for s in spans if s.get("bbox")]
+                ys = [float(s["bbox"][1]) for s in spans if s.get("bbox")]
+                xe = [float(s["bbox"][2]) for s in spans if s.get("bbox")]
+                ye = [float(s["bbox"][3]) for s in spans if s.get("bbox")]
+                if not xs:
+                    continue
+                rect = fitz.Rect(min(xs), min(ys), max(xe), max(ye))
+                page.add_redact_annot(rect + fitz.Rect(-1, -1, 2, 2), fill=(1, 1, 1))
+                touched = True
+        if touched:
+            try:
+                img_none = getattr(fitz, "PDF_REDACT_IMAGE_NONE", None)
+                if img_none is not None:
+                    page.apply_redactions(images=img_none)
+                else:
+                    page.apply_redactions()
+            except Exception:
+                try:
+                    page.apply_redactions()
+                except Exception as exc:
+                    logger.debug("redact qc titles on page %s: %s", pi, exc)
+
+
+def enrich_report_pdf_radiation_only_with_front_matter(
+    pdf_bytes: bytes,
+    *,
+    report_data: Optional[Mapping[str, Any]] = None,
+    source_payload: Optional[Mapping[str, Any]] = None,
+    site_template_parsed: Optional[dict] = None,
+    ordered_submit_payloads: Optional[Sequence[Mapping[str, Any]]] = None,
+    task_no: str = "",
+    project=None,
+    report_task=None,
+) -> bytes:
+    """
+    「仅防护结果」专用：保留封面～检测结果第一页，再插入防护表/平面布局。
+    小节号固定从 1.1（防护）、1.2（平面）起编，不沿用全本中的 1.4 等序号。
+    """
+    if not pdf_bytes:
+        return pdf_bytes
+
+    from radiation_detection_report.floor_plan_page_builder import (
+        build_floor_plan_page_pdf_bytes,
+        count_existing_figure_numbers,
+        extract_floor_plan_image_bytes,
+        resolve_equipment_venue,
+    )
+
+    has_radiation = report_data_has_radiation_points(report_data)
+    if isinstance(source_payload, dict):
+        has_radiation = resolve_has_radiation_protection_from_submit(
+            source_payload,
+            report_data if has_radiation else None,
+        )
+    if not has_radiation:
+        return b""
+
+    out = _strip_template_rp_and_floor_from_pdf_bytes(pdf_bytes)
+    doc = fitz.open(stream=out, filetype="pdf")
+    try:
+        r0 = _find_first_results_body_page(doc)
+        if r0 is None:
+            # 常见版式：0 封面 1 声明 2 基本情况 3 目录 → 第 5 页起为检测结果
+            r0 = min(4, max(0, doc.page_count - 1))
+        for pi in range(doc.page_count - 1, r0, -1):
+            doc.delete_page(pi)
+
+        # 擦除首页质控小节标题，防护/平面从 1.1、1.2 起编
+        _redact_qc_subsection_titles_before(doc, r0 + 1)
+
+        insert_at = r0 + 1
+        device_major = 1
+        rp_minor = 1
+        cursor, floor_minor = _insert_radiation_table_at(
+            doc,
+            insert_at=insert_at,
+            device_major=device_major,
+            minor=rp_minor,
+            report_data=report_data,
+            source_payload=source_payload,
+            ordered_submit_payloads=ordered_submit_payloads,
+            site_template_parsed=site_template_parsed,
+            task_no=task_no,
+            project=project,
+            report_task=report_task,
+        )
+        if cursor is None:
+            cursor = insert_at
+            floor_minor = rp_minor + 1
+        else:
+            floor_minor = rp_minor + 1
+
+        image_bytes = extract_floor_plan_image_bytes(
+            _select_submit_payload_for_device_section(
+                source_payload, ordered_submit_payloads, device_major
+            )
+            or source_payload,
+            site_template_parsed=site_template_parsed,
+        )
+        fig_no = count_existing_figure_numbers(doc) + 1
+        venue = resolve_equipment_venue(source_payload)
+        floor_bytes = build_floor_plan_page_pdf_bytes(
+            image_bytes,
+            section_major=device_major,
+            section_minor=floor_minor,
+            venue=venue,
+            figure_no=fig_no,
+        )
+        if floor_bytes:
+            floor_doc = fitz.open(stream=floor_bytes, filetype="pdf")
+            try:
+                doc.insert_pdf(
+                    floor_doc,
+                    start_at=cursor,
+                    from_page=0,
+                    to_page=floor_doc.page_count - 1,
+                )
+            finally:
+                floor_doc.close()
+
+        return doc.tobytes(deflate=True, garbage=4, clean=True)
+    except Exception as exc:
+        logger.warning("radiation-only report with front matter failed: %s", exc)
+        return b""
+    finally:
+        doc.close()
+
+
 def enrich_report_pdf_with_qc_followups(
     pdf_bytes: bytes,
     *,
@@ -854,6 +1052,125 @@ def enrich_report_pdf_with_radiation_table(
     )
 
 
+def normalize_report_export_variants(
+    raw: Optional[Sequence[str] | str] = None,
+    *,
+    default_full: bool = True,
+) -> list[str]:
+    """解析导出截面；非法值忽略；空则默认仅全本。"""
+    items: list[str] = []
+    if isinstance(raw, str):
+        parts = re.split(r"[,;\s]+", raw.strip()) if raw.strip() else []
+        items.extend(parts)
+    elif raw:
+        for x in raw:
+            s = str(x or "").strip().lower()
+            if not s:
+                continue
+            if "," in s or ";" in s:
+                items.extend(re.split(r"[,;\s]+", s))
+            else:
+                items.append(s)
+    out: list[str] = []
+    for s in items:
+        key = str(s or "").strip().lower()
+        if key in ("all", "complete", "全文", "全本"):
+            key = REPORT_EXPORT_VARIANT_FULL
+        elif key in ("front", "front4", "no_rp", "without_rp", "前四章", "无防护"):
+            key = REPORT_EXPORT_VARIANT_FRONT
+        elif key in ("rp", "radiation", "protection", "防护", "仅防护"):
+            key = REPORT_EXPORT_VARIANT_RP
+        if key in REPORT_EXPORT_VARIANTS and key not in out:
+            out.append(key)
+    if not out and default_full:
+        out = [REPORT_EXPORT_VARIANT_FULL]
+    return out
+
+
+def report_export_variant_label(variant: str) -> str:
+    return _REPORT_EXPORT_VARIANT_LABELS.get(str(variant or "").strip().lower(), "报告")
+
+
+def report_export_variant_filename_suffix(variant: str) -> str:
+    return _REPORT_EXPORT_VARIANT_FILENAME_SUFFIX.get(str(variant or "").strip().lower(), "")
+
+
+def report_export_variant_from_filename(name: str) -> str:
+    """从报告文件名识别导出截面：全本 / 无防护结果 / 仅防护结果。"""
+    n = str(name or "")
+    if "（仅防护结果）" in n or "(仅防护结果)" in n:
+        return REPORT_EXPORT_VARIANT_RP
+    if "（无防护结果）" in n or "(无防护结果)" in n:
+        return REPORT_EXPORT_VARIANT_FRONT
+    return REPORT_EXPORT_VARIANT_FULL
+
+
+def _collect_rp_and_floor_page_indices(doc: fitz.Document) -> set[int]:
+    """全文中所有「工作场所放射防护检测结果」及紧随的「平面布局」页下标。"""
+    out: set[int] = set()
+    seen_keys: set[tuple[int, int]] = set()
+    for pi in range(doc.page_count):
+        compact = _norm_compact(doc[pi].get_text("text"))
+        for maj, minor in _iter_rp_subsections(compact):
+            key = (int(maj), int(minor))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            start, end = _find_device_rp_page_span(doc, maj, minor)
+            if start is not None and end is not None:
+                out.update(range(start, end))
+            fp_start, fp_end = _find_device_floor_plan_page_span(doc, maj, minor + 1)
+            if fp_start is not None and fp_end is not None:
+                out.update(range(fp_start, fp_end))
+        if "工作场所放射防护检测结果" in compact:
+            out.add(pi)
+        if "平面布局及检测点方位图" in compact or (
+            "平面布局" in compact and "检测点方位" in compact
+        ):
+            out.add(pi)
+    return out
+
+
+def _pdf_bytes_keep_pages(pdf_bytes: bytes, keep: set[int]) -> bytes:
+    if not pdf_bytes or not keep:
+        return b""
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        drop = [i for i in range(doc.page_count) if i not in keep]
+        for i in sorted(drop, reverse=True):
+            doc.delete_page(i)
+        if doc.page_count <= 0:
+            return b""
+        return doc.tobytes(deflate=True, garbage=4, clean=True)
+    finally:
+        doc.close()
+
+
+def _strip_template_rp_and_floor_from_pdf_bytes(pdf_bytes: bytes) -> bytes:
+    """去掉模板预印防护表/平面布局页（各设备 major）。"""
+    if not pdf_bytes:
+        return pdf_bytes
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        majors: set[int] = set()
+        for pi in range(doc.page_count):
+            compact = _norm_compact(doc[pi].get_text("text"))
+            for maj, _minor in _iter_rp_subsections(compact):
+                majors.add(int(maj))
+            for maj, _minor in _iter_floor_subsections(compact):
+                majors.add(int(maj))
+        if not majors:
+            majors.add(1)
+        for maj in sorted(majors):
+            _remove_template_device_rp_and_floor_plan_pages(doc, maj)
+        return doc.tobytes(deflate=True, garbage=4, clean=True)
+    except Exception as exc:
+        logger.warning("strip template rp/floor pages failed: %s", exc)
+        return pdf_bytes
+    finally:
+        doc.close()
+
+
 def probe_has_radiation_protection_from_submit(
     source_payload: Optional[Mapping[str, Any]],
     *,
@@ -888,10 +1205,22 @@ def try_enrich_report_pdf_with_radiation_table(
     task_no: str = "",
     manual_device_count: int | None = None,
     ordered_submit_payloads: Optional[Sequence[Mapping[str, Any]]] = None,
+    export_variant: str = REPORT_EXPORT_VARIANT_FULL,
 ) -> bytes:
-    """插入放射防护表（若有第五章数据），并完成封面/目录/页眉等终稿后处理。"""
+    """
+    插入放射防护表（若有第五章数据），并完成封面/目录/页眉等终稿后处理。
+
+    export_variant:
+      - full：全本（默认）
+      - front：无防护结果（保留前四章/质控，去掉防护表与平面布局）
+      - rp：仅防护结果——保留封面至检测结果首页，再接防护表/平面（小节从 1.1 起）
+    """
     if not pdf_bytes:
         return pdf_bytes
+
+    variant = str(export_variant or REPORT_EXPORT_VARIANT_FULL).strip().lower()
+    if variant not in REPORT_EXPORT_VARIANTS:
+        variant = REPORT_EXPORT_VARIANT_FULL
 
     out = pdf_bytes
     has_radiation_protection = False
@@ -909,9 +1238,55 @@ def try_enrich_report_pdf_with_radiation_table(
             source_payload,
             report_data,
         )
+
+    from radiation_detection_report.report_pdf_postprocess import finalize_single_report_pdf
+
+    if variant == REPORT_EXPORT_VARIANT_FRONT:
+        out = _strip_template_rp_and_floor_from_pdf_bytes(out)
+        return finalize_single_report_pdf(
+            out,
+            source_payload=source_payload if isinstance(source_payload, dict) else None,
+            project=project,
+            case=case,
+            report_task=report_task,
+            task_no=task_no,
+            manual_device_count=manual_device_count,
+            has_radiation_protection=False,
+            include_qc_content=True,
+        )
+
+    if variant == REPORT_EXPORT_VARIANT_RP:
+        if not has_radiation_protection:
+            return b""
+        out = enrich_report_pdf_radiation_only_with_front_matter(
+            out,
+            report_data=report_data,
+            source_payload=source_payload,
+            site_template_parsed=site_template,
+            ordered_submit_payloads=ordered_submit_payloads,
+            task_no=task_no,
+            project=project,
+            report_task=report_task,
+        )
+        if not out:
+            return b""
+        return finalize_single_report_pdf(
+            out,
+            source_payload=source_payload if isinstance(source_payload, dict) else None,
+            project=project,
+            case=case,
+            report_task=report_task,
+            task_no=task_no,
+            manual_device_count=manual_device_count,
+            has_radiation_protection=True,
+            toc_skip_qc_minors=True,
+            include_qc_content=False,
+        )
+
+    if has_radiation_protection and isinstance(source_payload, dict) and source_payload:
         enriched = enrich_report_pdf_with_qc_followups(
             out,
-            report_data=report_data if has_radiation_protection else None,
+            report_data=report_data,
             source_payload=source_payload,
             site_template_parsed=site_template,
             ordered_submit_payloads=ordered_submit_payloads,
@@ -921,8 +1296,8 @@ def try_enrich_report_pdf_with_radiation_table(
         )
         if enriched != out:
             out = enriched
-
-    from radiation_detection_report.report_pdf_postprocess import finalize_single_report_pdf
+    else:
+        out = _strip_template_rp_and_floor_from_pdf_bytes(out)
 
     return finalize_single_report_pdf(
         out,
@@ -934,3 +1309,35 @@ def try_enrich_report_pdf_with_radiation_table(
         manual_device_count=manual_device_count,
         has_radiation_protection=has_radiation_protection,
     )
+
+
+def try_enrich_report_pdf_variants(
+    pdf_bytes: bytes,
+    *,
+    source_payload: Optional[Mapping[str, Any]] = None,
+    project=None,
+    case=None,
+    report_task=None,
+    task_no: str = "",
+    manual_device_count: int | None = None,
+    ordered_submit_payloads: Optional[Sequence[Mapping[str, Any]]] = None,
+    export_variants: Optional[Sequence[str]] = None,
+) -> list[tuple[str, bytes]]:
+    """按所选截面分别生成 PDF；返回 [(variant, pdf_bytes), ...]。"""
+    variants = normalize_report_export_variants(export_variants)
+    out: list[tuple[str, bytes]] = []
+    for variant in variants:
+        raw = try_enrich_report_pdf_with_radiation_table(
+            pdf_bytes,
+            source_payload=source_payload,
+            project=project,
+            case=case,
+            report_task=report_task,
+            task_no=task_no,
+            manual_device_count=manual_device_count,
+            ordered_submit_payloads=ordered_submit_payloads,
+            export_variant=variant,
+        )
+        if raw:
+            out.append((variant, raw))
+    return out

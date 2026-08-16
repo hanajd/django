@@ -22,9 +22,9 @@ class Role(models.Model):
         ('template_tester', _('模板编辑器（测试）')),
         ('commission_coordinator', _('委托统筹')),
         ('admin_office', _('行政')),
-        ('dept_director_inspection', _('检测部主管')),
+        ('dept_director_inspection', _('检测部主任')),
         ('dept_staff_inspection', _('检测部员工')),
-        ('dept_director_evaluation', _('评价部主管')),
+        ('dept_director_evaluation', _('评价部主任')),
         ('dept_staff_evaluation', _('评价部员工')),
     )
     
@@ -82,6 +82,11 @@ class Role(models.Model):
         default=False,
         verbose_name=_('业务登记'),
         help_text=_('维护受检单位/设备/联系人及案件、原始记录、报告与文件联动'),
+    )
+    perm_f1_eval = models.BooleanField(
+        default=False,
+        verbose_name=_('评价报告表'),
+        help_text=_('使用侧栏「评价报告表」制作预评价报告（独立工作区，不写业务库）'),
     )
     created_at = models.DateTimeField(
         auto_now_add=True,
@@ -200,7 +205,7 @@ class UserProfile(models.Model):
 
 
 class UserInviteToken(models.Model):
-    """部门主管发出的员工自助注册邀请链接。"""
+    """用户自助注册邀请链接（默认一次性：成功注册后即失效）。"""
 
     token = models.CharField(max_length=64, unique=True, db_index=True, verbose_name=_("令牌"))
     created_by = models.ForeignKey(
@@ -209,12 +214,12 @@ class UserInviteToken(models.Model):
         related_name="user_invite_tokens_created",
         verbose_name=_("邀请人"),
     )
-    org_unit = models.CharField(max_length=32, db_index=True, verbose_name=_("组织部门"))
+    org_unit = models.CharField(max_length=32, blank=True, default="", db_index=True, verbose_name=_("组织部门"))
     staff_role_code = models.CharField(
         max_length=50,
         db_index=True,
         verbose_name=_("注册后角色代码"),
-        help_text=_("一般为 dept_staff_inspection / dept_staff_evaluation"),
+        help_text=_("注册成功后写入用户资料的角色 code"),
     )
     expires_at = models.DateTimeField(db_index=True, verbose_name=_("过期时间"))
     is_active = models.BooleanField(default=True, db_index=True, verbose_name=_("有效"))
@@ -231,6 +236,8 @@ class UserInviteToken(models.Model):
         from django.utils import timezone
 
         if not self.is_active:
+            return False
+        if int(self.use_count or 0) >= 1:
             return False
         if self.expires_at and self.expires_at <= timezone.now():
             return False
@@ -373,6 +380,7 @@ class LibraryFile(models.Model):
         verbose_name=_('创建者'),
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('创建时间'))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_('更新时间'))
     deleted_at = models.DateTimeField(
         null=True,
         blank=True,
@@ -972,8 +980,8 @@ class LibraryProjectEquipment(models.Model):
         default="",
         verbose_name=_("本次检测类型"),
         help_text=_(
-            "本次委托该设备执行的检测类型（如验收检测、状态检测），"
-            "对应设备主数据 report_task_bindings"
+            "本次委托该设备执行的检测类型（如验收检测、状态检测）。"
+            "同一项目内允许同一设备多次加入同类型（对应不同报告模板行）。"
         ),
     )
     report_task = models.ForeignKey(
@@ -992,10 +1000,10 @@ class LibraryProjectEquipment(models.Model):
         verbose_name = _("项目委托设备")
         verbose_name_plural = verbose_name
         ordering = ["sort_order", "id"]
-        constraints = [
-            models.UniqueConstraint(
+        indexes = [
+            models.Index(
                 fields=["project", "equipment", "inspection_type"],
-                name="uniq_project_equipment_inspection_type",
+                name="idx_proj_eq_insp_type",
             ),
         ]
 
@@ -1805,7 +1813,10 @@ REPORT_SIGNATURE_SLOT_CHOICES = (
 
 
 class CaseReportSignatureRecord(models.Model):
-    """报告环节电子签字记录：每次叠印生成新版本报告并留痕。"""
+    """报告环节电子签字记录：叠印写入同一份「当前报告」，本表做轻量留痕。
+
+    重新导出报告时可将记录标记 voided_at，作废未完成/已完成的签字链。
+    """
 
     SLOT_REPORT_AUTHOR = "reportAuthor"
     SLOT_REPORT_AUDITOR = "reportAuditor"
@@ -1834,6 +1845,14 @@ class CaseReportSignatureRecord(models.Model):
         verbose_name=_("检测提交"),
     )
     task_no = models.CharField(max_length=64, blank=True, default="", db_index=True, verbose_name=_("任务编号"))
+    export_variant = models.CharField(
+        max_length=16,
+        blank=True,
+        default="full",
+        db_index=True,
+        verbose_name=_("报告导出版本"),
+        help_text=_("full=全本 / front=无防护结果 / rp=仅防护结果；各版本单独签字。"),
+    )
     workflow_stage = models.CharField(
         max_length=32,
         blank=True,
@@ -1865,6 +1884,7 @@ class CaseReportSignatureRecord(models.Model):
         on_delete=models.SET_NULL,
         related_name="report_signature_records",
         verbose_name=_("叠印后报告"),
+        help_text=_("指向任务的当前报告（原地覆盖）；签发定稿为另存快照，不挂在此字段。"),
     )
     report_sha256_before = models.CharField(max_length=64, blank=True, default="", verbose_name=_("叠印前报告哈希"))
     report_sha256_after = models.CharField(max_length=64, blank=True, default="", verbose_name=_("叠印后报告哈希"))
@@ -1872,6 +1892,13 @@ class CaseReportSignatureRecord(models.Model):
     overlay_rect = models.JSONField(default=list, blank=True, verbose_name=_("叠印区域"))
     sign_version = models.PositiveIntegerField(default=1, verbose_name=_("签字序号"))
     signed_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name=_("签字时间"))
+    voided_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name=_("作废时间"),
+        help_text=_("重新导出等场景作废签字链；非空表示本条不再计入有效签字状态。"),
+    )
 
     class Meta:
         verbose_name = _("报告签字记录")
@@ -1879,11 +1906,13 @@ class CaseReportSignatureRecord(models.Model):
         ordering = ["case_id", "task_no", "sign_version", "id"]
         indexes = [
             models.Index(fields=["case", "task_no", "-signed_at"]),
+            models.Index(fields=["case", "task_no", "export_variant", "slot"]),
             models.Index(fields=["project", "-signed_at"]),
         ]
 
     def __str__(self):
-        return f"case={self.case_id} {self.slot} v{self.sign_version}"
+        voided = " voided" if self.voided_at else ""
+        return f"case={self.case_id} {self.export_variant}/{self.slot} v{self.sign_version}{voided}"
 
     @property
     def slot_label(self) -> str:

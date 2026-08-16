@@ -1,0 +1,33 @@
+{
+  "schema": "f1_common_text_assemble/v1",
+  "id": "hazard_analysis",
+  "title": "职业病危害因素分析（设备工作原理与流程）",
+  "text_key": "hazard_analysis",
+  "source": "评价信息表装置清单 + 设备原理库 + 工作流程库",
+  "parts": {
+    "normal_header": "01_header.md",
+    "principles_header": "01_1_header.md",
+    "workflow_header": "01_2_header.md",
+    "summary": "01_summary.md",
+    "abnormal": "02_abnormal.md",
+    "workflow_room_separated_lead": "workflow_room_separated_lead.md",
+    "workflow_dsa_lead": "workflow_dsa_lead.md",
+    "workflow_ercp_lead": "workflow_ercp_lead.md"
+  },
+  "from_info_sheet": [
+    "装置台数与介入/影像诊断分类引言",
+    "按装置种类出现顺序展开设备工作原理",
+    "按装置种类出现顺序插入对应工作流程图占位"
+  ],
+  "libraries": {
+    "device_principles": "device_principles/*.md",
+    "workflows": "workflows/*.md"
+  },
+  "generator": "f1_eval_report.templates.hazard_analysis.assemble_hazard_analysis",
+  "notes": {
+    "结构": "1 → 1.1原理 → 1.2流程（按设备种类顺序插图）→ 综上 → 2异常",
+    "原理": "固定文案可在「设备工作原理」库中维护",
+    "流程": "每种设备一类一图；引导句/图题可按设备维护，流程图在报告中手动插入",
+    "规则": "种类与顺序均来自信息表射线装置清单"
+  }
+}

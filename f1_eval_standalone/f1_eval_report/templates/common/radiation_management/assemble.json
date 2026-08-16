@@ -1,0 +1,27 @@
+{
+  "schema": "f1_common_assemble/v1",
+  "id": "radiation_management",
+  "title": "放射防护管理",
+  "parts": [
+    {
+      "id": "organization",
+      "path": "radiation_management/organization.md"
+    },
+    {
+      "id": "management_intro",
+      "path": "radiation_management/management_intro.md"
+    },
+    {
+      "id": "management_after",
+      "path": "radiation_management/management_after.md"
+    },
+    {
+      "id": "staff_intro",
+      "path": "radiation_management/staff_intro.md"
+    },
+    {
+      "id": "staff_after",
+      "path": "radiation_management/staff_after.md"
+    }
+  ]
+}

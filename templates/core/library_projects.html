@@ -263,8 +263,11 @@
                                             {% endif %}
                                         </td>
                                         <td class="px-4 py-2 text-slate-800">{{ row.detection_label }}</td>
-                                        <td class="px-4 py-2">
-                                            <span class="text-xs font-medium text-indigo-800">{{ row.workflow_stage_display }}</span>
+                                        <td class="px-4 py-2 min-w-[12rem]">
+                                            {% if row.progress_bar %}
+                                            {% include "core/partials/issuance_progress_bar.html" with progress_bar=row.progress_bar show_step_labels=True %}
+                                            {% endif %}
+                                            <p class="mt-1 text-xs font-medium text-indigo-800">{{ row.workflow_stage_display }}</p>
                                         </td>
                                         <td class="px-4 py-2">
                                             <span class="text-xs px-2 py-0.5 rounded-full {% if row.status == 'submitted' %}bg-emerald-100 text-emerald-800{% elif row.status == 'pending' %}bg-amber-100 text-amber-900{% else %}bg-slate-100 text-slate-600{% endif %}">{{ row.status_display }}</span>

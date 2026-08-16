@@ -1,0 +1,26 @@
+{
+  "schema": "f1_common_text_assemble/v1",
+  "id": "workplace_layout",
+  "title": "工作场所布局",
+  "text_key": "workplace_layout_intro",
+  "tables_key": "workplace_layout_tables",
+  "source": "GBZ 130-2020 §6.1 / 评价信息表机房清单",
+  "parts": {
+    "group_paragraph": "group_paragraph.md",
+    "door_room": "door_room_default.md",
+    "door_control": "door_control_default.md",
+    "beam": "beam_default.md",
+    "summary": "summary.md",
+    "room_size_limits": "room_size_limits.json"
+  },
+  "tables": [
+    "table4_area（自动预填机房名与标准限值；设计列手工）",
+    "table5_adjacency（自动预填机房名；毗邻列手工）"
+  ],
+  "generator": "f1_eval_report.templates.workplace_layout.assemble_workplace_layout",
+  "notes": {
+    "正文": "按信息表场所区位分组；描述门、控制室、线束、面积表/毗邻表引用、选址",
+    "表4表5": "需手工填写设计值与毗邻；标准限值来自 room_size_limits.json",
+    "附图": "信息表机房平面布局页整页渲染，按序挂栏目末尾（A3横置）；不含通道走向图"
+  }
+}

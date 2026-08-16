@@ -1,21 +1,24 @@
 {# 枢纽页：流程推进按钮（签名/手动），与委托管理共用同一 action 语义 #}
-{% if row.primary_action %}
-{% with act=row.primary_action %}
-<form method="post" class="inline">
+{# 可传 act=... 覆盖 row.primary_action（用于审核页展示全部可操作项） #}
+{% with act=act|default:row.primary_action %}
+{% if act %}
+<form method="post" class="inline"
+      {% if act.requires_report_signature %}onsubmit="return confirm('{% if act.is_resign %}确认重新提交签名并覆盖上次叠印结果？{% else %}确认使用您的个人签名叠印到报告并推进流程？{% endif %}');"{% endif %}>
     {% csrf_token %}
     <input type="hidden" name="action" value="{{ act.action|default:'advance_workflow' }}">
     <input type="hidden" name="project_id" value="{{ row.project_id }}">
     <input type="hidden" name="task_no" value="{{ row.task_no }}">
     <input type="hidden" name="target_stage" value="{{ act.target_stage }}">
+    {% if act.export_variant %}<input type="hidden" name="export_variant" value="{{ act.export_variant }}">{% endif %}
     {% if project_id %}<input type="hidden" name="filter_project_id" value="{{ project_id }}">{% endif %}
     {% if task_no %}<input type="hidden" name="filter_task_no" value="{{ task_no }}">{% endif %}
     {% if tab %}<input type="hidden" name="filter_tab" value="{{ tab }}">{% endif %}
     {% if view_mode %}<input type="hidden" name="filter_view" value="{{ view_mode }}">{% endif %}
     <button type="submit"
-            class="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-white whitespace-nowrap {% if act.requires_report_signature %}bg-amber-600 hover:bg-amber-700{% else %}bg-indigo-600 hover:bg-indigo-700{% endif %}">
+            class="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-white whitespace-nowrap {% if act.is_resign %}bg-violet-600 hover:bg-violet-700{% elif act.requires_report_signature %}bg-amber-600 hover:bg-amber-700{% else %}bg-indigo-600 hover:bg-indigo-700{% endif %}">
         <i class="{% if act.requires_report_signature %}ri-quill-pen-line{% else %}ri-skip-forward-line{% endif %}"></i>
         {{ act.label }}
     </button>
 </form>
-{% endwith %}
 {% endif %}
+{% endwith %}

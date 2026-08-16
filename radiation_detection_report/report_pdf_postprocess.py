@@ -154,10 +154,14 @@ def build_single_report_overlay_from_payload(
     inspection_case=None,
     manual_device_count: int | None = None,
     has_radiation_protection: bool = False,
+    include_qc_content: bool = True,
 ) -> Dict[str, str]:
     """
     从现场记录/提交数据构建封面与基本情况叠印字段。
     单份报告：封面项目名称为两行（受检单位 + 报告名称），非合并报告的多设备命名。
+
+    include_qc_content=False：仅防护结果册——项目名称/评价不含「质量控制检测」。
+    has_radiation_protection=False：无防护结果册——不含「工作场所放射防护检测」。
     """
     if not isinstance(payload, dict):
         return {}
@@ -256,8 +260,8 @@ def build_single_report_overlay_from_payload(
 
     title_for_abbr = device_type_label or device or model or report_template_name
     ab = extract_modality_abbr_from_title(title_for_abbr) or device_type_label or (device or model or "设备")
-    qc_task = report_task_is_qc_performance_overlay(report_task)
-    qc_with_rp = has_radiation_protection and qc_task
+    qc_task = bool(include_qc_content) and report_task_is_qc_performance_overlay(report_task)
+    qc_with_rp = bool(has_radiation_protection) and qc_task
     cover_title = build_single_report_cover_title_line(
         ab,
         has_radiation_protection=has_radiation_protection,
@@ -343,14 +347,33 @@ def build_single_report_overlay_from_payload(
             ab = extract_modality_abbr_from_title(title) or (eq.name or eq.model or "设备").strip()
             abbrs.append(ab or "设备")
     if device_count > 1 and abbrs:
-        ok_tail = "所检设备的质量控制相关参数均符合相关标准要求。"
-        fail_tail = "存在参数不符合相关标准。"
-        tail = fail_tail if has_fail else ok_tail
-        dev_eval = merged_device_phrase_for_evaluation(abbrs, len(abbrs))
-        qc_phrase = format_qc_detection_for_evaluation(report_type)
-        evaluation_body = (
-            f"应委托方要求，依据相关检测标准，对{org}{dev_eval}进行了{qc_phrase}，结果表明：\n{tail}"
-        )
+        if has_radiation_protection and not include_qc_content:
+            evaluation_body = build_single_report_evaluation_body(
+                org,
+                ab,
+                has_radiation_protection=True,
+                qc_with_radiation_protection=False,
+                has_fail=has_fail,
+                inspection_type=report_type,
+            )
+        elif has_radiation_protection and include_qc_content:
+            evaluation_body = build_single_report_evaluation_body(
+                org,
+                ab,
+                has_radiation_protection=True,
+                qc_with_radiation_protection=qc_with_rp,
+                has_fail=has_fail,
+                inspection_type=report_type,
+            )
+        else:
+            ok_tail = "所检设备的质量控制相关参数均符合相关标准要求。"
+            fail_tail = "存在参数不符合相关标准。"
+            tail = fail_tail if has_fail else ok_tail
+            dev_eval = merged_device_phrase_for_evaluation(abbrs, len(abbrs))
+            qc_phrase = format_qc_detection_for_evaluation(report_type)
+            evaluation_body = (
+                f"应委托方要求，依据相关检测标准，对{org}{dev_eval}进行了{qc_phrase}，结果表明：\n{tail}"
+            )
     else:
         evaluation_body = build_single_report_evaluation_body(
             org,
@@ -403,11 +426,15 @@ def finalize_single_report_pdf(
     task_no: str = "",
     manual_device_count: int | None = None,
     has_radiation_protection: bool = False,
+    toc_skip_qc_minors: bool = False,
+    include_qc_content: bool = True,
 ) -> bytes:
     """
     在 HTMLPDF 回填及（可选）放射防护表插入之后执行：
     封面/基本情况叠印、目录重绘、页眉页码统一。
     编制人/审核人/授权签字人/签发日期保持模板 PDF 原样，不做清空或叠印。
+
+    include_qc_content=False：仅防护结果导出——项目名称/评价不含质控措辞。
     """
     if not pdf_bytes:
         return pdf_bytes
@@ -424,6 +451,7 @@ def finalize_single_report_pdf(
             inspection_case=case,
             manual_device_count=manual_device_count,
             has_radiation_protection=has_radiation_protection,
+            include_qc_content=include_qc_content,
         )
         from utils.pdf_merge import (
             apply_merged_report_merge_overlay,
@@ -472,6 +500,7 @@ def finalize_single_report_pdf(
                 or (overlay or {}).get("cover_report_title")
             ),
             profile=profile,
+            skip_qc_minors=toc_skip_qc_minors,
         )
         toc_idx = _find_toc_page_index(doc)
         rewrite_merged_report_page_headers(

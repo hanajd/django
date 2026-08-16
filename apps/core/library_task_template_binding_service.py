@@ -19,6 +19,7 @@ from apps.core.library_file_service import (
 )
 from apps.core.models import (
     LibraryFile,
+    LibraryFileTask,
     LibraryTask,
     LibraryTaskTemplateBindingHistory,
 )
@@ -26,6 +27,214 @@ from apps.core import pipeline_service
 
 
 _AUXILIARY_JSON_NAME_SUFFIXES = ("_frontend.json", "_matrix.json")
+
+
+def _task_storage_slot_prefix(task: LibraryTask, slot: str) -> str:
+    from apps.core.template_storage_service import task_storage_base_segments
+
+    return "/".join(["templates", *task_storage_base_segments(task), slot]) + "/"
+
+
+def _normalize_library_rel(path: str) -> str:
+    return (path or "").replace("\\", "/").lstrip("/")
+
+
+def library_file_under_task_slot(lf: LibraryFile, task: LibraryTask, slot: str) -> bool:
+    rel = _normalize_library_rel(lf.relative_path)
+    return rel.startswith(_task_storage_slot_prefix(task, slot))
+
+
+def collect_task_template_files_for_role_replace(
+    task: LibraryTask,
+    role: str,
+    *,
+    exclude_id: int | None = None,
+) -> list[LibraryFile]:
+    """
+    收集将被新绑定替换的同角色文件：已绑定（含回收站）、以及仍落在任务 current/ 的残留。
+    """
+    out: list[LibraryFile] = []
+    seen: set[int] = set()
+
+    def _add(lf: LibraryFile | None) -> None:
+        if lf is None:
+            return
+        pk = int(lf.pk)
+        if exclude_id is not None and pk == int(exclude_id):
+            return
+        if pk in seen:
+            return
+        if infer_template_file_role(lf) != role:
+            return
+        if role == LibraryTaskTemplateBindingHistory.ROLE_JSON and is_auxiliary_template_json_file(
+            lf
+        ):
+            return
+        seen.add(pk)
+        out.append(lf)
+
+    for lf in list_task_template_files_by_role(task, role):
+        _add(lf)
+
+    for lf in (
+        LibraryFile.all_objects.filter(
+            category=LibraryFile.CATEGORY_TEMPLATE,
+            library_tasks=task,
+            deleted_at__isnull=False,
+        )
+        .order_by("-created_at", "-id")
+        .iterator()
+    ):
+        _add(lf)
+
+    if role == LibraryTaskTemplateBindingHistory.ROLE_JSON:
+        prefix = _task_storage_slot_prefix(task, "current")
+        for lf in (
+            LibraryFile.all_objects.filter(
+                category=LibraryFile.CATEGORY_TEMPLATE,
+                relative_path__startswith=prefix,
+            )
+            .order_by("-created_at", "-id")
+            .iterator()
+        ):
+            name = (lf.original_name or "").lower()
+            if not name.endswith(".json"):
+                continue
+            _add(lf)
+    elif role == LibraryTaskTemplateBindingHistory.ROLE_PDF:
+        prefix = _task_storage_slot_prefix(task, "current")
+        for lf in (
+            LibraryFile.all_objects.filter(
+                category=LibraryFile.CATEGORY_TEMPLATE,
+                relative_path__startswith=prefix,
+            )
+            .order_by("-created_at", "-id")
+            .iterator()
+        ):
+            name = (lf.original_name or "").lower()
+            if not name.endswith(".pdf"):
+                continue
+            _add(lf)
+
+    return out
+
+
+def sync_template_file_disk_after_task_detach(
+    lf: LibraryFile,
+    *,
+    former_task: LibraryTask,
+    user=None,
+    source: str = "unbind",
+    record_history: bool = True,
+) -> None:
+    """
+    任务解除绑定后同步磁盘：无其它任务时移入该任务 history/；仍绑其它任务则迁到主任务目录。
+    """
+    if lf.category != LibraryFile.CATEGORY_TEMPLATE:
+        return
+    role = infer_template_file_role(lf)
+    if (
+        record_history
+        and role
+        in (
+            LibraryTaskTemplateBindingHistory.ROLE_PDF,
+            LibraryTaskTemplateBindingHistory.ROLE_JSON,
+        )
+        and not is_auxiliary_template_json_file(lf)
+    ):
+        LibraryTaskTemplateBindingHistory.objects.create(
+            library_task=former_task,
+            library_file=lf,
+            file_id_snapshot=int(lf.pk),
+            original_name_snapshot=lf.original_name or "",
+            file_role=role,
+            replaced_by=user if getattr(user, "is_authenticated", False) else None,
+            replaced_by_file=None,
+            source=(source or "unbind").strip()[:64],
+        )
+
+    from apps.core.template_storage_service import (
+        archive_template_file_for_task,
+        pick_primary_task_for_template_file,
+        relocate_library_template_file,
+    )
+
+    if LibraryFileTask.objects.filter(library_file_id=lf.pk).exists():
+        other = pick_primary_task_for_template_file(lf)
+        if other is not None:
+            relocate_library_template_file(
+                lf, task=other, slot="current", write_manifest=True
+            )
+        return
+
+    # 主 PDF/JSON：归档到 former_task/history，避免继续占 current/
+    if role in (
+        LibraryTaskTemplateBindingHistory.ROLE_PDF,
+        LibraryTaskTemplateBindingHistory.ROLE_JSON,
+    ) and not is_auxiliary_template_json_file(lf):
+        if library_file_under_task_slot(lf, former_task, "current") or library_file_under_task_slot(
+            lf, former_task, "history"
+        ):
+            archive_template_file_for_task(lf, former_task)
+        elif library_file_exists_on_disk(lf):
+            archive_template_file_for_task(lf, former_task)
+        return
+
+    relocate_library_template_file(lf, task=None, slot="current", write_manifest=False)
+
+
+def release_template_file_from_bound_tasks(
+    lf: LibraryFile,
+    *,
+    user=None,
+    source: str = "soft_delete",
+) -> list[int]:
+    """软删等场景：解除全部任务绑定，并把文件移出各任务 current/。"""
+    if lf.category != LibraryFile.CATEGORY_TEMPLATE:
+        return []
+    links = list(
+        LibraryFileTask.objects.filter(library_file_id=lf.pk).select_related("library_task")
+    )
+    if not links:
+        return []
+    tasks = [row.library_task for row in links]
+    task_ids = [int(t.pk) for t in tasks]
+    detach_files_from_tasks([int(lf.pk)], task_ids)
+    project_ids: list[int] = []
+    for t in tasks:
+        project_ids.extend(list(t.projects.values_list("id", flat=True)))
+    if project_ids:
+        detach_files_from_projects([int(lf.pk)], sorted(set(project_ids)))
+
+    # 优先归档到文件当前所在任务目录；否则取第一个关联任务
+    former = next(
+        (t for t in tasks if library_file_under_task_slot(lf, t, "current")),
+        tasks[0],
+    )
+    for t in tasks:
+        role = infer_template_file_role(lf)
+        if role in (
+            LibraryTaskTemplateBindingHistory.ROLE_PDF,
+            LibraryTaskTemplateBindingHistory.ROLE_JSON,
+        ) and not is_auxiliary_template_json_file(lf):
+            LibraryTaskTemplateBindingHistory.objects.create(
+                library_task=t,
+                library_file=lf,
+                file_id_snapshot=int(lf.pk),
+                original_name_snapshot=lf.original_name or "",
+                file_role=role,
+                replaced_by=user if getattr(user, "is_authenticated", False) else None,
+                replaced_by_file=None,
+                source=(source or "soft_delete").strip()[:64],
+            )
+    sync_template_file_disk_after_task_detach(
+        lf,
+        former_task=former,
+        user=user,
+        source=source,
+        record_history=False,
+    )
+    return task_ids
 
 
 def is_auxiliary_template_json_filename(name: str) -> bool:
@@ -117,6 +326,124 @@ def infer_template_file_role(lf: LibraryFile) -> str | None:
     if name.endswith(".json"):
         return LibraryTaskTemplateBindingHistory.ROLE_JSON
     return None
+
+
+def template_identity_from_library_file(lf: LibraryFile | None) -> tuple[str, str]:
+    """
+    以任务模板库文件名为准生成 templateId / templateName。
+
+    - templateName：库内 ``original_name``（无 .json 后缀则补上）
+    - templateId：去掉 ``.json`` 后的名称
+    """
+    if lf is None:
+        return "", ""
+    name = (getattr(lf, "original_name", None) or "").strip()
+    if not name:
+        return "", ""
+    if name.lower().endswith(".json"):
+        return name[:-5], name
+    return name, f"{name}.json"
+
+
+def apply_library_file_name_to_template_identity(
+    template_obj: dict | None, lf: LibraryFile | None
+) -> None:
+    """就地覆盖统一模板 / 导出 JSON 的 templateId、templateName。"""
+    if not isinstance(template_obj, dict):
+        return
+    tid, tname = template_identity_from_library_file(lf)
+    if tid:
+        template_obj["templateId"] = tid
+    if tname:
+        template_obj["templateName"] = tname
+
+
+def apply_bound_pdf_to_template_source_pdf(
+    template_obj: dict | None, pdf_lf: LibraryFile | None
+) -> None:
+    """
+    就地覆盖 ``pdf.source_pdf``，与任务模板库当前挂载的 PDF 一致。
+
+    写入 ``template_file_id`` / ``template_file_name``（及默认 ``source_type=template``）。
+    """
+    if not isinstance(template_obj, dict) or pdf_lf is None:
+        return
+    name = (getattr(pdf_lf, "original_name", None) or "").strip()
+    if not name:
+        return
+    pdf_block = template_obj.get("pdf") if isinstance(template_obj.get("pdf"), dict) else {}
+    pdf_block = dict(pdf_block)
+    src = pdf_block.get("source_pdf") if isinstance(pdf_block.get("source_pdf"), dict) else {}
+    src = dict(src)
+    src["source_type"] = str(src.get("source_type") or "template").strip() or "template"
+    src["template_file_id"] = int(pdf_lf.pk)
+    src["template_file_name"] = name
+    pdf_block["source_pdf"] = src
+    template_obj["pdf"] = pdf_block
+
+
+def apply_task_library_mount_to_template_obj(
+    template_obj: dict | None,
+    task: LibraryTask | None,
+    *,
+    json_lf: LibraryFile | None = None,
+    pdf_lf: LibraryFile | None = None,
+) -> None:
+    """按任务当前挂载覆盖 templateId/templateName 与 pdf.source_pdf。"""
+    if not isinstance(template_obj, dict) or task is None:
+        return
+    bound_pdf, bound_json = get_task_template_pair(task)
+    apply_library_file_name_to_template_identity(template_obj, json_lf or bound_json)
+    apply_bound_pdf_to_template_source_pdf(template_obj, pdf_lf or bound_pdf)
+
+
+def rewrite_task_bound_json_source_pdf_from_mount(task: LibraryTask) -> bool:
+    """
+    将任务当前主 JSON 磁盘内容中的 ``pdf.source_pdf`` 同步为当前挂载 PDF。
+    无 PDF/JSON 配对或无需变更时返回 False。
+    """
+    import hashlib
+
+    pdf_lf, json_lf = get_task_template_pair(task)
+    if pdf_lf is None or json_lf is None:
+        return False
+    if is_auxiliary_template_json_file(json_lf):
+        return False
+    try:
+        path = pipeline_service.library_absolute_path(json_lf.relative_path)
+        if not path.is_file():
+            return False
+        obj = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return False
+    if not isinstance(obj, dict):
+        return False
+
+    pdf_block = obj.get("pdf") if isinstance(obj.get("pdf"), dict) else {}
+    old_src = pdf_block.get("source_pdf") if isinstance(pdf_block.get("source_pdf"), dict) else {}
+    old_id = old_src.get("template_file_id")
+    old_name = str(old_src.get("template_file_name") or "").strip()
+    try:
+        old_id_int = int(old_id) if old_id not in (None, "") else None
+    except (TypeError, ValueError):
+        old_id_int = None
+    if old_id_int == int(pdf_lf.pk) and old_name == (pdf_lf.original_name or "").strip():
+        return False
+
+    apply_bound_pdf_to_template_source_pdf(obj, pdf_lf)
+    apply_library_file_name_to_template_identity(obj, json_lf)
+    try:
+        raw = json.dumps(obj, ensure_ascii=False, indent=2).encode("utf-8")
+        path.write_bytes(raw)
+    except Exception:
+        return False
+    json_lf.content_sha256 = hashlib.sha256(raw).hexdigest()
+    json_lf.size = len(raw)
+    update_fields = ["content_sha256", "size"]
+    if hasattr(json_lf, "updated_at"):
+        update_fields.append("updated_at")
+    json_lf.save(update_fields=update_fields)
+    return True
 
 
 def get_task_template_pair(task: LibraryTask) -> tuple[LibraryFile | None, LibraryFile | None]:
@@ -300,17 +627,12 @@ def replace_task_template_file_binding(
     if not library_user_may_edit_library_task(user, task):
         return {"ok": False, "error": "无权维护该任务模板绑定"}
 
-    old_files = list_task_template_files_by_role(task, role)
-    if role == LibraryTaskTemplateBindingHistory.ROLE_JSON:
-        seen_ids = {int(f.pk) for f in old_files}
-        for lf in list_task_storage_current_json_files(task):
-            if int(lf.pk) == int(new_file.pk) or int(lf.pk) in seen_ids:
-                continue
-            old_files.append(lf)
-            seen_ids.add(int(lf.pk))
+    old_files = collect_task_template_files_for_role_replace(
+        task, role, exclude_id=int(new_file.pk)
+    )
     replaced_ids: list[int] = []
     for old in old_files:
-        if old.pk == new_file.pk:
+        if int(old.pk) == int(new_file.pk):
             continue
         LibraryTaskTemplateBindingHistory.objects.create(
             library_task=task,
@@ -326,13 +648,21 @@ def replace_task_template_file_binding(
         project_ids = list(task.projects.values_list("id", flat=True))
         if project_ids:
             detach_files_from_projects([old.pk], project_ids)
-        replaced_ids.append(old.pk)
-        if not old.library_tasks.exists():
-            from apps.core.template_storage_service import archive_template_file_for_task
-
-            archive_template_file_for_task(old, task)
+        replaced_ids.append(int(old.pk))
+        sync_template_file_disk_after_task_detach(
+            old,
+            former_task=task,
+            user=user,
+            source=source or "replace",
+            record_history=False,
+        )
 
     from apps.core.template_storage_service import relocate_library_template_file, _write_manifest_for_task
+
+    # 若新文件曾在回收站，恢复后再挂到 current/
+    if new_file.deleted_at is not None:
+        new_file.deleted_at = None
+        new_file.save(update_fields=["deleted_at"])
 
     relocate_library_template_file(new_file, task=task, slot="current", write_manifest=False)
     attach_files_to_tasks([new_file.pk], [task.pk], user)
@@ -340,6 +670,12 @@ def replace_task_template_file_binding(
     project_ids = list(task.projects.values_list("id", flat=True))
     if project_ids:
         attach_files_to_projects([new_file.pk], project_ids, user)
+
+    # PDF/JSON 任一侧轮换后，主 JSON 内 source_pdf 与当前挂载 PDF 对齐
+    try:
+        rewrite_task_bound_json_source_pdf_from_mount(task)
+    except Exception:
+        pass
 
     return {
         "ok": True,
@@ -400,7 +736,10 @@ def unbind_template_files_from_task(
     user,
     include_paired: bool = False,
 ) -> dict[str, Any]:
-    """从任务模板解除文件绑定（不删除文件库中的文件）。默认仅解除指定文件；include_paired=True 时连带同名 stem 的配对文件。"""
+    """
+    从任务模板解除文件绑定（不删除文件库记录）。
+    同步将文件移出任务 current/（无其它任务绑定时归档到 history/）。
+    """
     if not library_user_may_edit_library_task(user, task):
         return {"ok": False, "error": "无权维护该任务模板"}
     ids, stem = collect_task_template_unbind_ids(
@@ -418,18 +757,37 @@ def unbind_template_files_from_task(
     if project_ids:
         detach_files_from_projects(ids, project_ids)
 
+    for fid in ids:
+        lf = LibraryFile.all_objects.filter(pk=fid).first()
+        if lf is None:
+            continue
+        sync_template_file_disk_after_task_detach(
+            lf,
+            former_task=task,
+            user=user,
+            source="unbind",
+            record_history=True,
+        )
+
+    from apps.core.template_storage_service import _write_manifest_for_task
+
+    _write_manifest_for_task(task)
+
     if len(ids) > 1:
-        msg = f"已解除绑定「{stem}」下的 {len(ids)} 个文件（{'、'.join(names)}）"
+        msg = (
+            f"已解除绑定「{stem}」下的 {len(ids)} 个文件（{'、'.join(names)}），"
+            "并已从任务 current 目录移出"
+        )
     elif target_lf is not None:
         role = infer_template_file_role(target_lf)
         label = names[0] if names else stem
         if role == LibraryTaskTemplateBindingHistory.ROLE_PDF:
-            msg = f"已解除 PDF 绑定：{label}"
+            msg = f"已解除 PDF 绑定并移出 current：{label}"
         elif role == LibraryTaskTemplateBindingHistory.ROLE_JSON:
             if is_auxiliary_template_json_file(target_lf):
                 msg = f"已解除辅助 JSON 绑定：{label}"
             else:
-                msg = f"已解除 JSON 绑定：{label}"
+                msg = f"已解除 JSON 绑定并移出 current：{label}"
         else:
             msg = f"已解除绑定：{label}"
     else:

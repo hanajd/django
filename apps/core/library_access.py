@@ -72,6 +72,12 @@ ROLE_PERMISSION_MATRIX: List[Tuple[str, str, str, str]] = [
         "维护受检单位、设备、联系人及案件、原始记录、报告与文件库联动",
         "workflow",
     ),
+    (
+        "perm_f1_eval",
+        "评价报告表",
+        "使用侧栏「评价报告表」制作预评价报告（独立工作区，不写业务库）",
+        "workflow",
+    ),
 ]
 
 # 仅通过 UserProfile.perm_overrides 生效、Role 模型无对应字段的补充键（须纳入 role_has 白名单）
@@ -242,6 +248,7 @@ ROLE_DEFAULT_PERMS_BY_CODE: Dict[str, Dict[str, bool]] = {
         "perm_assign_tasks": False,
         "perm_create_library_project": True,
         "perm_biz_registry": True,
+        "perm_f1_eval": False,
     },
     "template_tester": {
         "perm_manage_users": False,
@@ -259,6 +266,7 @@ ROLE_DEFAULT_PERMS_BY_CODE: Dict[str, Dict[str, bool]] = {
         "perm_assign_tasks": False,
         "perm_create_library_project": True,
         "perm_biz_registry": False,
+        "perm_f1_eval": True,
     },
     "template_editor": {
         "perm_manage_users": False,
@@ -276,6 +284,7 @@ ROLE_DEFAULT_PERMS_BY_CODE: Dict[str, Dict[str, bool]] = {
         "perm_assign_tasks": True,
         "perm_create_library_project": True,
         "perm_biz_registry": False,
+        "perm_f1_eval": False,
     },
 }
 # 与 app_user 同级的文件库/登记默认，后续可在「编辑角色」中细调
@@ -311,6 +320,7 @@ ROLE_DEFAULT_PERMS_BY_CODE[COMMISSION_COORDINATOR_ROLE_CODE] = {
     "perm_assign_tasks": True,
     "perm_create_library_project": True,
     "perm_biz_registry": True,
+    "perm_f1_eval": False,
 }
 
 # 新业务线组织角色默认权限（与 org_roles.ORG_ROLE_SEED 对齐；迁移/ensure 时写入 Role 表）
@@ -409,7 +419,7 @@ def roles_assignable_by_user(actor) -> list:
             for r in Role.objects.filter(code__in=COMMISSION_COORDINATOR_WORKFLOW_ROLE_CODES)
         }
         return [roles_by_code[c] for c in ROLE_CODE_ORDER if c in roles_by_code]
-    # 仅新轨部门主管收窄可分配角色
+    # 仅新轨部门主任收窄可分配角色
     try:
         from apps.core.org_roles import (
             staff_role_code_for_director,
@@ -430,14 +440,14 @@ def roles_assignable_by_user(actor) -> list:
 
 
 def library_user_may_manage_target_user(actor, target) -> bool:
-    """委托统筹仅可维护本人创建的检测流程岗位账号；新轨主管可管本部门员工。"""
+    """委托统筹仅可维护本人创建的检测流程岗位账号；新轨主任可管本部门员工。"""
     if actor is None or target is None:
         return False
     if getattr(actor, "is_superuser", False) or _role_code(actor) in ("super_admin", "admin"):
         return True
     if not role_has(actor, "perm_manage_users"):
         return False
-    # 新轨主管专用规则；旧轨不进入此分支
+    # 新轨主任专用规则；旧轨不进入此分支
     try:
         from apps.core.org_roles import (
             DEPT_STAFF_ROLE_CODES,
@@ -482,7 +492,7 @@ def library_user_may_manage_target_user(actor, target) -> bool:
 
 
 def library_coordinator_managed_users_queryset(actor):
-    """用户列表：委托统筹仅本人创建的流程岗；新轨主管为本部门员工；其余旧轨不变。"""
+    """用户列表：委托统筹仅本人创建的流程岗；新轨主任为本部门员工；其余旧轨不变。"""
     from django.contrib.auth.models import User
 
     qs = User.objects.select_related("profile", "profile__role").order_by("username", "id")
@@ -580,6 +590,13 @@ def library_user_may_edit_instrument_database(user) -> bool:
     """
     if not getattr(user, "is_authenticated", False):
         return False
+    try:
+        from apps.core.org_roles import user_is_evaluation_org
+
+        if user_is_evaluation_org(user):
+            return False
+    except Exception:
+        pass
     if role_has(user, "perm_manage_users"):
         return True
     if library_user_is_test_peer(user):
@@ -594,6 +611,13 @@ def library_user_may_edit_instrument_database(user) -> bool:
     ):
         return True
     return False
+
+
+def library_user_may_access_project_workbench(user) -> bool:
+    """项目工作台入口（检测部为检测委托；评价部为评价报告表/书看板）。"""
+    if not getattr(user, "is_authenticated", False):
+        return False
+    return role_has(user, "perm_file_library")
 
 
 def library_user_has_party_a_demo_restrictions(user) -> bool:
@@ -651,6 +675,86 @@ def library_user_may_mock_inspection_submit(user) -> bool:
 def role_has_htmlpdf(user) -> bool:
     """是否可使用模板编辑器：独立权限，或与 OCR 处理一并开启（兼容旧角色）。"""
     return role_has(user, "perm_htmlpdf") or role_has(user, "perm_process_pipeline")
+
+
+def library_user_may_access_f1_eval(user) -> bool:
+    """
+    评价报告表（F.1）：不写业务库表，仅文件工作区。
+
+    - 角色权限 ``perm_f1_eval``（评价部主任/员工默认开启）；
+    - test / party_a_demo / test-N 同组演示账号可用；
+    - template_tester 可用；
+    - 系统超管 / super_admin / admin 可用（运维）。
+    """
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+    code = _role_code(user)
+    if code in ("super_admin", "admin"):
+        return True
+    if role_has(user, "perm_f1_eval"):
+        return True
+    if library_user_is_test_peer(user):
+        return True
+    if code == "template_tester":
+        return True
+    # 兼容未跑种子前的评价部角色
+    if code in ("dept_director_evaluation", "dept_staff_evaluation"):
+        return True
+    return False
+
+
+def library_user_may_manage_f1_eval_projects(user) -> bool:
+    """新建 / 删除评价报告表项目：test 组、评价部主任、超管；评价部员工不可。"""
+    if not library_user_may_access_f1_eval(user):
+        return False
+    if getattr(user, "is_superuser", False) or _role_code(user) in ("super_admin", "admin"):
+        return True
+    if library_user_is_test_peer(user):
+        return True
+    if _role_code(user) == "dept_director_evaluation":
+        return True
+    if _role_code(user) == "template_tester":
+        return True
+    return False
+
+
+def library_user_may_assign_f1_eval_projects(user) -> bool:
+    """项目指派：test 组与评价部主任（及超管）。"""
+    if not library_user_may_access_f1_eval(user):
+        return False
+    if getattr(user, "is_superuser", False) or _role_code(user) in ("super_admin", "admin"):
+        return True
+    if library_user_is_test_peer(user):
+        return True
+    if _role_code(user) == "dept_director_evaluation":
+        return True
+    return False
+
+
+def library_user_is_f1_eval_dept_staff(user) -> bool:
+    return _role_code(user) == "dept_staff_evaluation"
+
+
+def f1_eval_assignable_users_for(actor):
+    """
+    可被指派的用户：仅评价部**员工**。
+    评价部主任 / test / 超管本身已有项目管理权，无需也不应出现在指派列表。
+    """
+    from django.contrib.auth.models import User
+
+    if not library_user_may_assign_f1_eval_projects(actor):
+        return User.objects.none()
+    return (
+        User.objects.filter(
+            is_active=True,
+            profile__role__code="dept_staff_evaluation",
+        )
+        .select_related("profile", "profile__role")
+        .order_by("username", "id")
+        .distinct()
+    )
 
 
 def library_user_may_filled_pdf_toolchain(user) -> bool:
@@ -790,7 +894,7 @@ def library_user_may_access_task_template_library_nav(user) -> bool:
     含：分配文件库任务、覆盖项 ``perm_library_task_templates_write``（如甲方演示自建模板）、
     或已被分配检测任务且具备模板填 PDF 链路的参与人。
     不包含 ``perm_file_library``；展示入口的模板仍需自备文件库可见性判断。
-    委托统筹与新轨组织角色（行政 / 检测·评价主管与员工）可在工作台选用标准任务，
+    委托统筹与新轨组织角色（行政 / 检测·评价主任与员工）可在工作台选用标准任务，
     但不展示「任务模板库」入口（与 coordinator 一致）。
     """
     if library_user_is_commission_coordinator(user):
@@ -815,12 +919,21 @@ def library_user_may_access_task_template_library_nav(user) -> bool:
 
 
 def library_user_may_access_hospital_info_nav(user) -> bool:
-    """医院信息管理：需文件库权限且具备委托单位维护能力。"""
+    """医院信息管理入口：可写账号，或检测/评价部只读浏览。"""
     if not getattr(user, "is_authenticated", False):
         return False
     if not role_has(user, "perm_file_library"):
         return False
-    return library_user_may_edit_hospital_info(user)
+    if library_user_may_edit_hospital_info(user):
+        return True
+    try:
+        from apps.core.org_roles import user_is_evaluation_org, user_is_inspection_org
+
+        if user_is_inspection_org(user) or user_is_evaluation_org(user):
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def library_user_may_edit_hospital_info(user) -> bool:
@@ -1361,6 +1474,8 @@ def role_ui_context(user) -> Dict[str, Any]:
         "ui_sidebar_show_project_management": False,
         "ui_sidebar_show_commission_manage": False,
         "ui_sidebar_show_user_management": False,
+        "ui_sidebar_show_f1_eval": False,
+        "ui_sidebar_show_detection_workflow_hubs": False,
         "ui_dashboard_hide_json_tile": False,
         "ui_dashboard_site_record_focus": False,
         "ui_dashboard_hide_file_stats_row": False,
@@ -1375,16 +1490,24 @@ def role_ui_context(user) -> Dict[str, Any]:
     is_admin = code == "admin"
     is_coordinator = code == COMMISSION_COORDINATOR_ROLE_CODE
     is_dept_director = False
+    is_evaluation_org = False
     try:
-        from apps.core.org_roles import user_is_dept_director as _is_dept_director
+        from apps.core.org_roles import (
+            user_is_dept_director as _is_dept_director,
+            user_is_evaluation_org as _is_eval_org,
+        )
 
         is_dept_director = bool(_is_dept_director(user))
+        is_evaluation_org = bool(_is_eval_org(user))
     except Exception:
         is_dept_director = False
+        is_evaluation_org = False
     has_assign = library_user_can_assign_tasks_to_participants(user)
 
-    # 侧栏「项目管理」：委托统筹创建的流程岗位可查看已分配项目；其他现场两岗不进入配置页
-    if is_super or is_admin or has_assign or is_coordinator:
+    # 侧栏「项目工作台 / 委托管理」：评价部与检测部均可进（内容按部门分支）
+    if is_evaluation_org:
+        show_pm = role_has(user, "perm_file_library") and library_user_may_access_f1_eval(user)
+    elif is_super or is_admin or has_assign or is_coordinator:
         show_pm = role_has(user, "perm_file_library")
     elif library_user_is_coordinator_managed_workflow_user(user):
         show_pm = role_has(user, "perm_file_library")
@@ -1398,7 +1521,7 @@ def role_ui_context(user) -> Dict[str, Any]:
     hide_json = site_focus or is_coordinator
     hide_file_row = not role_has(user, "perm_file_library")
 
-    # Django Admin 入口：仅系统管理类角色；委托统筹 / 部门主管走业务「用户管理」页
+    # Django Admin 入口：仅系统管理类角色；委托统筹 / 部门主任走业务「用户管理」页
     show_admin_tile = is_super or is_admin or (
         role_has(user, "perm_manage_users")
         and not is_coordinator
@@ -1407,9 +1530,14 @@ def role_ui_context(user) -> Dict[str, Any]:
 
     from apps.core.commission_management_service import library_user_may_access_commission_manage
 
-    # 侧栏用户管理：委托统筹 + 检测/评价部主管（本部门员工）
+    # 侧栏用户管理：超管/管理员 + 委托统筹 + 检测/评价部主任（本部门员工）
     show_user_mgmt = role_has(user, "perm_manage_users") and (
-        is_coordinator or is_dept_director
+        is_super or is_admin or is_coordinator or is_dept_director
+    )
+
+    # 检测报告链路入口：原始记录 / 报告生成 / 审核签发 / 报告下载
+    show_detection_hubs = bool(
+        role_has(user, "perm_file_library") and not is_evaluation_org
     )
 
     return {
@@ -1418,6 +1546,8 @@ def role_ui_context(user) -> Dict[str, Any]:
             show_pm and library_user_may_access_commission_manage(user)
         ),
         "ui_sidebar_show_user_management": bool(show_user_mgmt),
+        "ui_sidebar_show_f1_eval": bool(library_user_may_access_f1_eval(user)),
+        "ui_sidebar_show_detection_workflow_hubs": show_detection_hubs,
         "ui_dashboard_hide_json_tile": bool(hide_json),
         "ui_dashboard_site_record_focus": bool(site_focus),
         "ui_dashboard_hide_file_stats_row": bool(hide_file_row),

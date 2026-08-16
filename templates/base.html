@@ -131,12 +131,8 @@
                         <i class="ri-layout-grid-line text-lg"></i>
                         <span>项目工作台</span>
                     </a>
-                    {% elif role_perm.perm_file_library and not show_library_task_nav %}
-                    <a id="sidebar-link-project-workbench" href="{% url 'library_projects' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
-                        <i class="ri-layout-grid-line text-lg"></i>
-                        <span>项目工作台</span>
-                    </a>
                     {% endif %}
+                    {% if ui_sidebar_show_detection_workflow_hubs %}
                     <a id="sidebar-link-site-records-hub" href="{% url 'workflow_hub_site_records' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
                         <i class="ri-file-list-3-line text-lg"></i>
                         <span>原始记录查看</span>
@@ -153,6 +149,7 @@
                         <i class="ri-download-2-line text-lg"></i>
                         <span>报告导出及下载</span>
                     </a>
+                    {% endif %}
                     {% if show_library_task_nav %}
                     <a id="sidebar-link-task-templates" href="{% url 'library_task_management' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
                         <i class="ri-stack-line text-lg"></i>
@@ -171,6 +168,19 @@
                         <span>模板编辑器</span>
                     </a>
                     {% endif %}
+                    {% if ui_sidebar_show_f1_eval %}
+                    <a id="sidebar-link-f1-eval" href="{% url 'f1_eval_workbench' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
+                        <i class="ri-file-list-2-line text-lg"></i>
+                        <span>评价报告表</span>
+                    </a>
+                    {% endif %}
+                </div>
+                {% elif ui_sidebar_show_f1_eval %}
+                <div class="px-2 pb-3 mb-2 border-b border-slate-700/60 space-y-0.5">
+                    <a id="sidebar-link-f1-eval" href="{% url 'f1_eval_workbench' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
+                        <i class="ri-file-list-2-line text-lg"></i>
+                        <span>评价报告表</span>
+                    </a>
                 </div>
                 {% endif %}
                 <div class="px-2 pb-3 mb-2 border-b border-slate-700/60 space-y-0.5">

@@ -3,7 +3,7 @@
     <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
             <p class="text-xs text-slate-600 leading-relaxed max-w-md">
-                选择 <strong>PDF</strong>（可选同名 <code class="text-[11px] bg-white px-1 rounded">.json</code>）上传后将<strong>自动绑定</strong>到本模板。批量导入请用页顶「批量导入模板文件夹」。
+                选择 <strong>PDF</strong>（可选同名 <code class="text-[11px] bg-white px-1 rounded">.json</code>）上传后将<strong>自动绑定</strong>到本模板，并写入任务 <code class="text-[11px] bg-white px-1 rounded">current/</code>；同角色旧文件会移入 <code class="text-[11px] bg-white px-1 rounded">history/</code>。批量导入请用页顶「批量导入模板文件夹」。
             </p>
         </div>
         {% if manage_task %}
