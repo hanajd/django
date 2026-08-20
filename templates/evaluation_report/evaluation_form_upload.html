@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}上传评价信息表 | {{ report.title }}{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-4xl space-y-5">
+    <header class="flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+            <a href="{% url 'evaluation_report_detail' report.pk %}" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; 返回报告详情</a>
+            <h1 class="mt-2 text-2xl font-semibold text-slate-900">上传评价信息表</h1>
+            <p class="mt-1 text-sm text-slate-600">{{ report.title }} · {{ report.hospital.name }}</p>
+        </div>
+        <span class="inline-flex self-start rounded-md bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-800">流程 1 / 6</span>
+    </header>
+
+    <nav class="flex flex-wrap items-center gap-2 text-sm" aria-label="报告制作流程">
+        <span class="rounded-md bg-indigo-600 px-3 py-2 font-medium text-white">1. 评价信息表</span>
+        <span class="text-slate-300">&rarr;</span>
+        {% if row.uploaded %}
+        <a href="{% url 'evaluation_report_upload_preview' report.pk row.slot.slot_key %}?view=markdown"
+           class="rounded-md bg-slate-100 px-3 py-2 text-slate-700 hover:bg-slate-200">2. 生成基础报告</a>
+        {% else %}
+        <span class="rounded-md bg-slate-100 px-3 py-2 text-slate-500">2. 生成基础报告</span>
+        {% endif %}
+        <span class="text-slate-300">&rarr;</span>
+        <a href="{% url 'evaluation_report_structured_edit' report.pk %}"
+           class="rounded-md bg-indigo-50 px-3 py-2 text-indigo-900 hover:bg-indigo-100">3. 正文编辑</a>
+        <span class="text-slate-300">&rarr;</span>
+        <a href="{% url 'evaluation_report_attachments' report.pk %}"
+           class="rounded-md bg-slate-100 px-3 py-2 text-slate-700 hover:bg-slate-200">4. 附件管理</a>
+    </nav>
+
+    <section class="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div class="border-b border-slate-100 bg-slate-50 px-5 py-4">
+            <h2 class="text-sm font-semibold text-slate-900">{{ row.slot.label }}</h2>
+            <p class="mt-1 text-xs text-slate-500">PDF 将在本地直接提取文字和表格，DOCX 保留原有转换；提取字段会自动填入模板对应位置。也可跳过本步直接编辑。</p>
+        </div>
+        <div class="space-y-5 p-5">
+            {% if row.uploaded %}
+            <div class="flex flex-col gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                    <p class="text-sm font-medium text-emerald-900">当前评价信息表</p>
+                    {% for f in row.files %}
+                    <p class="mt-1 text-xs text-emerald-800">{{ f.filename }}</p>
+                    {% endfor %}
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <a href="{% url 'evaluation_report_upload_preview' report.pk row.slot.slot_key %}?view=raw"
+                       class="rounded-md border border-emerald-300 bg-white px-3 py-2 text-sm text-emerald-900 hover:bg-emerald-100">查看原文件</a>
+                    <a href="{% url 'evaluation_report_upload_preview' report.pk row.slot.slot_key %}?view=markdown"
+                       class="rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-800">进入转换预览</a>
+                </div>
+            </div>
+            {% else %}
+            <div class="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-600">
+                尚未上传评价信息表。可在下方上传，或点击「跳过，直接进入正文编辑」使用空白模板开始编辑。
+            </div>
+            {% endif %}
+
+            <form method="post" enctype="multipart/form-data"
+                  action="{% url 'evaluation_report_upload' report.pk row.slot.slot_key %}"
+                  class="eval-form-upload flex flex-col gap-3 sm:flex-row sm:items-center">
+                {% csrf_token %}
+                <input id="evaluation-form-file" type="file" name="file" required
+                       accept=".docx,.pdf,.md,.txt"
+                       class="block min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm file:mr-3 file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-medium">
+                <button type="submit"
+                        class="inline-flex items-center justify-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">
+                    <i class="ri-upload-2-line"></i>
+                    {% if row.uploaded %}替换并重新转换{% else %}上传并转换{% endif %}
+                </button>
+            </form>
+        </div>
+    </section>
+
+    <div class="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
+        <a href="{% url 'evaluation_report_structured_edit' report.pk %}"
+           class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm text-slate-800 hover:bg-slate-50">
+            {% if row.uploaded and base_report_ready %}继续正文编辑{% else %}跳过，直接进入正文编辑{% endif %}
+        </a>
+        {% if row.uploaded %}
+        <a href="{% url 'evaluation_report_upload_preview' report.pk row.slot.slot_key %}?view=markdown"
+           class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">下一步：检查并生成基础报告</a>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

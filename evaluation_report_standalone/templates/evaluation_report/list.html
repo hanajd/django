@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}评价报告{% endblock %}
+{% block page_title %}评价报告{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-7xl space-y-6">
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">放射性职业病危害评价</p>
+            <h1 class="mt-1 text-2xl font-semibold text-slate-900">评价报告</h1>
+            <p class="mt-1 max-w-3xl text-sm text-slate-600">
+                按医院与报告类型建立模板实例，上传评价信息表与附件后生成 PDF（结构仿照 YP250420 等 LaTeX 模板）。
+            </p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+        <a href="{% url 'evaluation_latex_template_edit_picker' %}"
+           class="inline-flex items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-4 py-2.5 text-sm font-medium text-teal-900 hover:bg-teal-100">
+            模板编辑
+        </a>
+        <a href="{% url 'evaluation_latex_template_list' %}"
+           class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+            LaTeX 模板库
+        </a>
+        <a href="{% url 'evaluation_keyword_schema_list' %}"
+           class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+            通用关键词映射
+        </a>
+        <a href="{% url 'evaluation_report_create' %}"
+           class="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700">
+            <i class="ri-add-line text-lg"></i>
+            新建评价报告
+        </a>
+        </div>
+    </div>
+
+    <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <table class="min-w-full divide-y divide-slate-100 text-left text-sm">
+            <thead class="bg-slate-50">
+                <tr>
+                    <th class="px-5 py-3 text-xs font-semibold uppercase text-slate-500">标题</th>
+                    <th class="px-5 py-3 text-xs font-semibold uppercase text-slate-500">医院</th>
+                    <th class="px-5 py-3 text-xs font-semibold uppercase text-slate-500">类型</th>
+                    <th class="px-5 py-3 text-xs font-semibold uppercase text-slate-500">模板</th>
+                    <th class="px-5 py-3 text-xs font-semibold uppercase text-slate-500">状态</th>
+                    <th class="px-5 py-3 text-xs font-semibold uppercase text-slate-500">材料</th>
+                    <th class="px-5 py-3 text-right text-xs font-semibold uppercase text-slate-500">操作</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                {% for report in reports %}
+                <tr class="hover:bg-slate-50/80">
+                    <td class="px-5 py-4 font-medium text-slate-900">{{ report.title }}</td>
+                    <td class="px-5 py-4 text-slate-600">{{ report.hospital.name }}</td>
+                    <td class="px-5 py-4 text-slate-600">{{ report.report_subtype_label }}</td>
+                    <td class="px-5 py-4 text-slate-500">{{ report.template_label }}</td>
+                    <td class="px-5 py-4">
+                        <span class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium
+                            {% if report.status == 'compiled' %}bg-emerald-100 text-emerald-800
+                            {% elif report.status == 'failed' %}bg-red-100 text-red-800
+                            {% else %}bg-slate-100 text-slate-700{% endif %}">
+                            {{ report.get_status_display }}
+                        </span>
+                    </td>
+                    <td class="px-5 py-4 text-slate-600">{{ report.upload_progress.done }}/{{ report.upload_progress.total }}</td>
+                    <td class="px-5 py-4 text-right space-x-2 whitespace-nowrap">
+                        <a href="{% url 'evaluation_report_structured_edit' report.pk %}" class="text-indigo-600 hover:text-indigo-800">编辑</a>
+                        {% if report.output_pdf %}
+                        <a href="{% url 'evaluation_report_pdf_view' report.pk %}?v={{ report.updated_at|date:'U' }}"
+                           target="_blank" rel="noopener"
+                           class="text-emerald-700 hover:text-emerald-900">预览 PDF</a>
+                        {% endif %}
+                        <a href="{% url 'evaluation_report_detail' report.pk %}" class="text-indigo-600 hover:text-indigo-800">管理</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="7" class="px-5 py-12 text-center text-slate-500">暂无评价报告，点击「新建评价报告」开始。</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

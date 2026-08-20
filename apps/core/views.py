@@ -431,6 +431,10 @@ def _sync_radiation_protection_chapter_state(
         apply_report_formulas_to_pdf_fields(normalized_fields, chapter=chapter)
         apply_annual_dose_formulas_to_pdf_fields(normalized_fields, chapter=chapter)
         apply_background_formulas_to_pdf_fields(normalized_fields, chapter=chapter)
+        from radiation_detection_report.chapter5_field_sync import (
+            clear_chapter_formulas_outside_table_in_payload,
+        )
+        clear_chapter_formulas_outside_table_in_payload(template_payload, chapter=chapter)
     except Exception:
         pass
     schema_extras[SCHEMA_KEY] = chapter
@@ -5660,6 +5664,7 @@ def _file_library_business_header(project, task_no: str) -> str:
     """
     from apps.api.inspection_pdf_service import _resolve_library_task_for_task_no
     from apps.api.inspection_report_make import _resolve_report_task_for_case
+    from apps.core.project_numbering import parent_report_task_for_site_task
 
     if project is None:
         return "未关联委托项目"
@@ -5680,22 +5685,10 @@ def _file_library_business_header(project, task_no: str) -> str:
         lt = _resolve_library_task_for_task_no(tn, project)
         if lt is not None and lt.output_target == LibraryTask.OUTPUT_SITE_RECORD:
             site_nm = (lt.name or "").strip()
-    if not report_nm:
-        rt0 = (
-            project.library_tasks.filter(output_target=LibraryTask.OUTPUT_REPORT)
-            .order_by("code", "id")
-            .first()
-        )
-        if rt0 is not None:
-            report_nm = (rt0.name or "").strip()
-    if not site_nm:
-        st0 = (
-            project.library_tasks.filter(output_target=LibraryTask.OUTPUT_SITE_RECORD)
-            .order_by("code", "id")
-            .first()
-        )
-        if st0 is not None:
-            site_nm = (st0.name or "").strip()
+            if not report_nm:
+                parent = parent_report_task_for_site_task(lt, project)
+                if parent is not None:
+                    report_nm = (parent.name or "").strip()
     if report_nm:
         parts.append(report_nm)
     if site_nm:
@@ -5988,7 +5981,13 @@ def _annotate_file_library_display(user, files: list) -> None:
                 else None
             )
             if report_task is None and project is not None:
-                report_task = _resolve_report_task_for_case(task_no, project)
+                # 仅当案件 taskNo 本身就是报告任务时归入该报告；
+                # 现场记录没有父报告时不得回退到项目里「第一份报告」。
+                lt_for_case = _resolve_library_task_for_task_no(task_no, project) if task_no else None
+                if lt_for_case is not None and lt_for_case.output_target == LibraryTask.OUTPUT_REPORT:
+                    report_task = lt_for_case
+                else:
+                    report_task = _resolve_report_task_for_case(task_no, project)
             if report_task is not None:
                 f.file_library_report_key = str(report_task.pk)
                 f.file_library_report_heading = f"{report_task.code} · {report_task.name}"

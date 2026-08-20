@@ -1,0 +1,316 @@
+% KP250420 后装治疗机 — 放射性职业病危害控制效果评价报告书模板
+\documentclass[12pt,a4paper]{report}
+\usepackage{ctex}
+\usepackage{geometry}
+\usepackage{setspace}
+\usepackage{graphicx}
+\usepackage{titletoc}
+\usepackage{lastpage}
+\usepackage{fancyhdr}
+\usepackage{calc}
+\usepackage{ragged2e}
+\usepackage{tabularx}
+\usepackage{amssymb}
+\usepackage{pifont}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{array}
+\usepackage{makecell}
+\usepackage{multirow}
+\usepackage{tikz}
+\usetikzlibrary{shapes, arrows.meta, positioning}
+\usepackage{etoolbox}
+\usepackage{longtable}
+\usepackage{iftex}
+
+% tabular 内读入 files/*.tex 须用 \\@@input，否则 \\input 会在表末多出幻影空行（竖线伸出底边）
+\makeatletter
+\newcommand{\erpTabInput}[1]{\@@input#1 }
+\makeatother
+
+% 单页横置 A3（仅影响夹在 \BeginAThreeLandscapePage … \EndAThreeLandscapePage 之间的内容）
+% 页边距与正文 A4 一致：上下 26mm、左右 28mm
+% 注意：geometry 的 \newgeometry 会忽略 paperwidth/paperheight，PDF 纸张用
+% \erpSetPDFPageSize 切换后，必须再显式把 \textwidth/\headwidth 拉到 A3 版心。
+\newcommand{\erpSetPDFPageSize}[2]{%
+  \setlength{\paperwidth}{#1}%
+  \setlength{\paperheight}{#2}%
+  \ifPDFTeX
+    \pdfpagewidth=#1\relax
+    \pdfpageheight=#2\relax
+  \fi
+  \ifXeTeX
+    \pdfpagewidth=#1\relax
+    \pdfpageheight=#2\relax
+  \fi
+  \ifLuaTeX
+    \pagewidth=#1\relax
+    \pageheight=#2\relax
+  \fi
+}
+\newcommand{\erpApplyAThreeLandscapeLayout}{%
+  % geometry 的 \newgeometry 不会改纸张宽度，版心会仍按 A4；此处强制 A3 横置版心
+  \setlength{\textwidth}{364mm}%
+  \setlength{\linewidth}{\textwidth}%
+  \setlength{\columnwidth}{\textwidth}%
+  \setlength{\hsize}{\textwidth}%
+  \setlength{\headwidth}{\textwidth}%
+  \setlength{\oddsidemargin}{\dimexpr 28mm-1in\relax}%
+  \setlength{\evensidemargin}{\oddsidemargin}%
+  % 高度与 A4 相同（297mm），沿用 newgeometry 的垂直参数即可
+  \fancyhfoffset{0pt}%
+}
+\newcommand{\BeginAThreeLandscapePage}{%
+  \clearpage
+  \erpSetPDFPageSize{420mm}{297mm}%
+  \newgeometry{%
+    top=26mm,%
+    bottom=26mm,%
+    left=28mm,%
+    right=28mm,%
+    headheight=15pt,%
+    includeheadfoot%
+  }%
+  \erpApplyAThreeLandscapeLayout
+  \thispagestyle{fancy}%
+}
+\newcommand{\EndAThreeLandscapePage}{%
+  \clearpage
+  \erpSetPDFPageSize{210mm}{297mm}%
+  \newgeometry{%
+    top=26mm,%
+    bottom=26mm,%
+    left=28mm,%
+    right=28mm,%
+    headheight=15pt,%
+    includeheadfoot%
+  }%
+  \setlength{\headwidth}{\textwidth}%
+  \fancyhfoffset{0pt}%
+}
+
+
+
+% 页面设置（GBZ/T 181—2024）
+\geometry{
+    top=26mm,
+    bottom=26mm,
+    left=28mm,
+    right=28mm,
+    headheight=15pt,
+    includeheadfoot
+}
+
+
+\renewcommand{\chaptername}{}
+\renewcommand{\thechapter}{\arabic{chapter}}
+
+% -------------------------- 图表标题自动编号 --------------------------
+\DeclareCaptionLabelFormat{tablelabel}{表~\thesection-\arabic{table}}
+\DeclareCaptionLabelFormat{figurelabel}{图~\thesection-\arabic{figure}}
+
+% 所有普通表格 tabular 默认五号字（声明页表格自行覆盖为四号）
+\AtBeginEnvironment{tabular}{\fontsize{10.5}{12.6}\selectfont}
+% 外层 table 环境也同步，确保不反弹
+\AtBeginEnvironment{table}{\fontsize{10.5}{12.6}\selectfont}
+
+% longtable 也统一五号字
+\AtBeginEnvironment{longtable}{\fontsize{10.5}{12.6}\selectfont}
+
+% 英文/数字默认 Times New Roman（汉字仍由 ctex/songti 控制）
+\IfFontExistsTF{Times New Roman}{%
+  \setmainfont{Times New Roman}[Ligatures=TeX]%
+}{}
+% Windows 宋体无独立 Bold 字重：为 \songti+\bfseries 启用伪粗体，封面加粗才可见
+\IfFontExistsTF{SimSun}{%
+  \setCJKfamilyfont{zhsong}{SimSun}[AutoFakeBold=3.2]%
+}{}
+
+
+
+\makeatletter
+\@addtoreset{table}{section}
+\@addtoreset{figure}{section}
+\makeatother
+
+% ------------------------- 公式自动编号 -----------------------------------
+% 按节编号：1.6-1 格式
+\usepackage{amsmath}
+\numberwithin{equation}{section}
+\renewcommand{\theequation}{\thesection-\arabic{equation}}
+
+% 全局显示为：公式 (1.6-1)，兼容所有文档类
+\makeatletter
+\renewcommand*{\tagform@}[1]{\hbox{{公式~}(#1)}}
+\makeatother
+
+% caption 宏包不能直接用 font=zihao{-4}，否则会在第 1 页左上角漏出一个逗号
+\DeclareCaptionFont{captionzihao}{\fontsize{12bp}{14bp}\selectfont}
+\captionsetup{
+    font=captionzihao,
+    labelfont=bf,
+    labelsep=space,
+}
+
+\captionsetup[table]{
+    labelformat=tablelabel,
+    position=above,
+    skip=6pt
+}
+
+\captionsetup[figure]{
+    labelformat=figurelabel,
+    position=below,
+    skip=6pt
+}
+
+% ====================== 标题格式 ======================
+\makeatletter
+\def\@makechapterhead#1{%
+  \vspace{0pt}%
+  {\parindent=0pt\raggedright\zihao{-2}\songti
+   \thechapter.\,#1\par}%
+  \vspace{0pt}}
+\def\@makeschapterhead#1{%
+  \vspace{0pt}%
+  {\parindent=0pt\raggedright\zihao{-2}\songti #1\par}%
+  \vspace{0pt}}
+
+\renewcommand\section{\@startsection{section}{1}{0pt}%
+  {0.5ex plus 0.2ex}%
+  {0.8ex plus 0.3ex}%
+  {\normalfont\zihao{-4}\heiti}}
+
+\renewcommand\subsection{\@startsection{subsection}{2}{0pt}%
+  {0.5ex plus 0.2ex}%
+  {0.8ex plus 0.3ex}%
+  {\normalfont\zihao{-4}\heiti}}
+
+\renewcommand\subsubsection{\@startsection{subsubsection}{3}{0pt}%
+  {0.5ex plus 0.2ex}%
+  {0.8ex plus 0.3ex}%
+  {\normalfont\zihao{-4}\heiti}}
+\makeatother
+
+
+% 章节编号：1.1、1.1.1 格式（不用 ctexset，避免与上方自定义 section 冲突）
+\renewcommand{\thesection}{\thechapter.\arabic{section}}
+\renewcommand{\thesubsection}{\thesection.\arabic{subsection}}
+\renewcommand{\thesubsubsection}{\thesubsection.\arabic{subsubsection}}
+\setcounter{secnumdepth}{3} 
+
+% titlepage 默认会在开头 \newpage，导致第 1 页空白、封面被挤到第 2 页
+\makeatletter
+\renewenvironment{titlepage}{%
+  \thispagestyle{empty}%
+}{%
+  \newpage
+}
+\makeatother
+
+% 前置页之间的纯空白页（无页眉页脚）
+\newcommand{\InsertBlankPage}{%
+  \clearpage
+  \thispagestyle{empty}%
+  \null
+  \clearpage
+}
+
+% ====================== 项目信息（个性化变量，由报告关键词写入） ======================
+% 模板只保留宏名与占位；具体取值保存在报告的「项目关键词」中，编译前写入工作区 main.tex。
+% <<PROJECT_VARS>>
+\newcommand{\company}{（评价单位）}
+\newcommand{\buildunit}{（建设单位）}
+\newcommand{\equipment}{（主要设备）}
+\newcommand{\projectscope}{（建设内容）}
+\newcommand{\project}{（建设项目名称）}
+\newcommand{\projectnamefull}{（建设项目全称）}
+\newcommand{\radiationhazard}{（报告类型上）}
+\newcommand{\reportkind}{控制效果评价报告书}
+\newcommand{\reporttype}{\radiationhazard\reportkind}
+\newcommand{\reportname}{\projectnamefull\reporttype}
+\newcommand{\reportno}{赣检测院KP250420}
+\newcommand{\reportver}{（B版）}
+\newcommand{\mitnote}{（文稿状态）}
+\newcommand{\printdate}{（封面日期）}
+\newcommand{\companyaddress}{（评价单位地址）}
+\newcommand{\companyzip}{（邮政编码）}
+\newcommand{\companyphone}{（联系电话）}
+\newcommand{\companyemail}{（电子邮箱）}
+\newcommand{\legalrep}{（法定代表人）}
+\newcommand{\projectleader}{（项目负责人）}
+\newcommand{\projectleadercert}{（证书编号）}
+\newcommand{\reportwriter}{（报告编写人）}
+\newcommand{\reportwritercert}{（证书编号）}
+\newcommand{\reportreviewer}{（报告审核人）}
+\newcommand{\reportreviewercert}{（证书编号）}
+\newcommand{\reportsignatory}{（报告签发人）}
+\newcommand{\reportsignatorycert}{（证书编号）}
+\newcommand{\signyear}{ }
+\newcommand{\signmonth}{ }
+\newcommand{\signday}{ }
+\newcommand{\buildaddress}{（建设地址）}
+\newcommand{\projectnature}{（项目性质）}
+\newcommand{\equipmentconfig}{（设备配置）}
+\newcommand{\totalinvestment}{（总投资）}
+\newcommand{\constructionscale}{（建设规模）}
+\newcommand{\developmentplan}{（发展规划）}
+\newcommand{\riskclassification}{（风险分类）}
+\newcommand{\radiationhazarddegree}{（危害程度）}
+\newcommand{\designunit}{（设计单位）}
+\newcommand{\buildunitlegalrep}{（建设单位法定代表人）}
+\newcommand{\buildunitcontact}{（建设单位联系人）}
+\newcommand{\buildunitphone}{（建设单位电话）}
+\newcommand{\reportdate}{（报告日期）}
+\newcommand{\sourcetype}{（辐射源类型）}
+\newcommand{\sourcedevice}{（辐射源设备）}
+\newcommand{\sourceremark}{（辐射源备注）}
+\newcommand{\sourcesummary}{（辐射源简述）}
+% <<END_PROJECT_VARS>>
+
+
+\begin{document}
+
+% 引入各章节
+\input{chapters/00-cover}
+\input{chapters/01-qualification}
+\input{chapters/02-declaration}
+\input{chapters/03-toc}
+
+\linespread{2.0}\selectfont
+\parindent=2em
+
+% 表格内部强制单倍行距，不影响全局
+\makeatletter
+\AtBeginEnvironment{tabular}{\def\baselinestretch{1.0}\normalsize}
+\AtBeginEnvironment{longtable}{\def\baselinestretch{1.0}\normalsize}
+% 枚举、列表保持正文双倍行距，不额外加空行
+\AtBeginEnvironment{enumerate}{\doublespacing}
+\AtBeginEnvironment{itemize}{\doublespacing}
+% 有序列表统一为（1）（2）…（节下正文规范）
+\renewcommand{\labelenumi}{(\arabic{enumi})}
+\renewcommand{\labelenumii}{(\arabic{enumii})}
+
+% 修复 enumerate 内部行距，只保留双倍，不叠加
+\makeatletter
+\def\@listi{\leftmargin\leftmargini
+            \parsep 0pt
+            \topsep 0pt
+            \itemsep 0pt}
+\let\@listii\@listi
+\let\@listiii\@listi
+\makeatother
+
+\input{chapters/04-chapter1}
+\input{chapters/05-chapter2}
+\input{chapters/06-chapter3}
+\input{chapters/07-chapter4}
+\input{chapters/08-chapter5}
+\input{chapters/09-chapter6}
+\input{chapters/10-chapter7}
+\input{chapters/11-chapter8}
+\input{chapters/12-chapter9}
+\input{chapters/13-appendix}
+
+
+\end{document}

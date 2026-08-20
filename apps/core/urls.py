@@ -2,7 +2,7 @@
 Web 路由配置
 前后端不分离的页面路由
 """
-from django.urls import path
+from django.urls import include, path
 from apps.core import f1_eval_views, product_catalog_views, views
 
 urlpatterns = [
@@ -171,4 +171,7 @@ urlpatterns = [
     path('files/f1-eval/media/attachments/<str:filename>', f1_eval_views.f1_eval_attachment_media, name='f1_eval_attachment_media'),
     path('files/f1-eval/media/assets/<str:filename>', f1_eval_views.f1_eval_asset_media, name='f1_eval_asset_media'),
     path('files/f1-eval/download/<str:kind>/', f1_eval_views.f1_eval_download, name='f1_eval_download'),
+
+    # 评价报告书（LaTeX，与评价报告表并列）
+    path('evaluation-reports/', include('apps.evaluation_report.urls')),
 ]

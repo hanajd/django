@@ -1,0 +1,1221 @@
+{% extends "base.html" %}
+{% block title %}模板预览 · {% if library_template %}{{ library_template.name }}{% else %}{{ report.title }}{% endif %}{% endblock %}
+{% block page_title %}LaTeX 模板预览{% endblock %}
+
+{% block extra_head %}
+<style>
+.eval-tex-layout {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 1rem;
+    min-height: calc(100vh - 14rem);
+}
+.eval-tex-files {
+    width: 15rem;
+    flex-shrink: 0;
+    border-radius: 1rem;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+    overflow: hidden;
+    max-height: calc(100vh - 8rem);
+    overflow-y: auto;
+    position: sticky;
+    top: 1rem;
+    align-self: flex-start;
+}
+.eval-tex-files-head {
+    border-bottom: 1px solid #f1f5f9;
+    background: #f8fafc;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #475569;
+}
+.eval-tex-files-nav { padding: 0.375rem 0.25rem 0.5rem; }
+.eval-tex-files-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #f1f5f9;
+    background: #fff;
+}
+.eval-tex-project-badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 9999px;
+    padding: 0.125rem 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+}
+.eval-tex-project-badge.is-blank {
+    background: #f1f5f9;
+    color: #64748b;
+}
+.eval-tex-project-badge.is-partial {
+    background: #fff7ed;
+    color: #c2410c;
+}
+.eval-tex-project-badge.is-complete {
+    background: #ecfdf5;
+    color: #047857;
+}
+.eval-tex-tree {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.eval-tex-tree-nested {
+    margin-left: 0.75rem;
+    padding-left: 0.25rem;
+    border-left: 1px solid #e8edf2;
+}
+.eval-tex-tree-item { margin: 0; }
+.eval-tex-tree-row {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    width: 100%;
+    border-radius: 0.375rem;
+    padding: 0.25rem 0.375rem;
+    font-size: 0.75rem;
+    line-height: 1.35;
+    color: #334155;
+    text-decoration: none;
+    box-sizing: border-box;
+}
+.eval-tex-tree-row--folder {
+    cursor: pointer;
+    user-select: none;
+    font-weight: 500;
+    color: #475569;
+}
+.eval-tex-tree-row--folder:hover { background: #f8fafc; }
+.eval-tex-tree-row--file:hover { background: #f8fafc; }
+.eval-tex-tree-row--file.is-active {
+    background: #eef2ff;
+    color: #312e81;
+    box-shadow: inset 0 0 0 1px #c7d2fe;
+}
+.eval-tex-tree-row--asset.is-active {
+    background: #eef2ff;
+    color: #312e81;
+    box-shadow: inset 0 0 0 1px #c7d2fe;
+}
+.eval-tex-tree-row--asset { color: #64748b; }
+.eval-tex-tree-row--asset:hover { background: #f8fafc; color: #334155; }
+.eval-tex-tree-row--asset.is-muted {
+    cursor: default;
+    opacity: 0.75;
+}
+.eval-tex-tree-chevron {
+    width: 1rem;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #94a3b8;
+    font-size: 0.875rem;
+    transition: transform 0.15s ease;
+}
+.eval-tex-tree-chevron--spacer { visibility: hidden; }
+.eval-tex-tree-item--folder.is-collapsed .eval-tex-tree-chevron {
+    transform: rotate(-90deg);
+}
+.eval-tex-tree-item--folder.is-collapsed .eval-tex-tree-children {
+    display: none;
+}
+.eval-tex-tree-icon {
+    width: 1rem;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #64748b;
+    font-size: 0.875rem;
+}
+.eval-tex-tree-row--file.is-active .eval-tex-tree-icon { color: #4f46e5; }
+.eval-tex-tree-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.eval-tex-code {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    border-radius: 1rem;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+    overflow: hidden;
+    min-height: calc(100vh - 16rem);
+}
+.eval-tex-code-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    border-bottom: 1px solid #f1f5f9;
+    background: #f8fafc;
+    padding: 0.625rem 1rem;
+    flex-shrink: 0;
+}
+.eval-tex-code-head-left {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    min-width: 0;
+    flex: 1;
+}
+.eval-tex-code-head h2 {
+    margin: 0;
+    font-size: 0.875rem;
+    font-weight: 600;
+    font-family: ui-monospace, monospace;
+    color: #0f172a;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.eval-tex-code-head-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+}
+.eval-tex-source-badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 9999px;
+    padding: 0.125rem 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+.eval-tex-source-badge.is-work {
+    background: #ecfdf5;
+    color: #047857;
+}
+.eval-tex-source-badge.is-template {
+    background: #f1f5f9;
+    color: #64748b;
+}
+.eval-tex-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: 0.5rem;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.25;
+    text-decoration: none;
+    border: 1px solid transparent;
+    cursor: pointer;
+    font-family: inherit;
+}
+.eval-tex-btn-primary { background: #4f46e5; color: #fff; }
+.eval-tex-btn-primary:hover { background: #4338ca; }
+.eval-tex-btn-secondary {
+    background: #fff;
+    color: #334155;
+    border-color: #e2e8f0;
+}
+.eval-tex-btn-secondary:hover { background: #f8fafc; }
+.eval-tex-btn-success { background: #059669; color: #fff; }
+.eval-tex-btn-success:hover { background: #047857; }
+
+/* 行号 + 代码区：Overleaf 风格 */
+.eval-tex-editor-wrap {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.eval-tex-edit-form {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.eval-tex-pane {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    background: #fafafa;
+    overflow: hidden;
+}
+.eval-tex-gutter {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 3rem;
+    z-index: 2;
+    overflow: hidden;
+    background: #ececec;
+    border-right: 1px solid #d8d8d8;
+    box-sizing: border-box;
+    pointer-events: none;
+    user-select: none;
+}
+.eval-tex-gutter-inner {
+    padding: 12px 8px 12px 0;
+    text-align: right;
+    font-family: Consolas, Monaco, "Courier New", ui-monospace, monospace;
+    font-size: 13px;
+    line-height: 21px;
+    color: #888;
+}
+.eval-tex-gutter-inner span {
+    display: block;
+    height: 21px;
+    line-height: 21px;
+}
+.eval-tex-codebody,
+.eval-tex-textarea {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    border: none;
+    outline: none;
+    resize: none;
+    overflow: auto;
+    padding: 12px 16px 12px calc(3rem + 12px);
+    font-family: Consolas, Monaco, "Courier New", ui-monospace, monospace;
+    font-size: 13px;
+    line-height: 21px;
+    color: #24292e;
+    background: #fafafa;
+    tab-size: 4;
+    -moz-tab-size: 4;
+}
+.eval-tex-codebody {
+    white-space: pre;
+    word-wrap: normal;
+    overflow-wrap: normal;
+}
+.eval-tex-edit-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding: 0.625rem 1rem;
+    border-top: 1px solid #f1f5f9;
+    background: #f8fafc;
+    flex-shrink: 0;
+}
+.eval-tex-code.is-loading {
+    opacity: 0.65;
+    pointer-events: none;
+}
+.eval-tex-code.is-loading .eval-tex-editor-wrap {
+    cursor: wait;
+}
+.eval-tex-view-panel {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.eval-tex-view-panel[hidden] {
+    display: none !important;
+}
+.eval-tex-code-subhead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.5rem 1rem;
+    border-bottom: 1px solid #f1f5f9;
+    background: #f8fafc;
+    flex-shrink: 0;
+}
+.eval-tex-code-subhead-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+}
+.eval-tex-asset-pane {
+    background: #64748b;
+    display: flex;
+    flex-direction: column;
+}
+.eval-asset-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #475569;
+    background: #334155;
+    flex-shrink: 0;
+}
+.eval-asset-toolbar[hidden] { display: none !important; }
+.eval-asset-toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+.eval-asset-toolbar-divider {
+    width: 1px;
+    height: 1.25rem;
+    background: #64748b;
+    margin: 0 0.25rem;
+}
+.eval-asset-tool-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border: 1px solid #64748b;
+    border-radius: 0.375rem;
+    background: #475569;
+    color: #f1f5f9;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+}
+.eval-asset-tool-btn:hover { background: #64748b; }
+.eval-asset-tool-btn.is-active {
+    background: #4f46e5;
+    border-color: #6366f1;
+}
+.eval-asset-meta {
+    margin-left: auto;
+    font-size: 0.6875rem;
+    color: #cbd5e1;
+    line-height: 1.4;
+    text-align: right;
+}
+.eval-a4-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 1.5rem;
+    box-sizing: border-box;
+}
+.eval-a4-sheet-wrap {
+    margin: 0 auto;
+    width: fit-content;
+}
+.eval-a4-sheet {
+    position: relative;
+    width: 210mm;
+    height: 297mm;
+    background: #fff;
+    box-shadow: 0 8px 32px rgba(15, 23, 42, 0.35);
+    box-sizing: border-box;
+    border: 1px solid #cbd5e1;
+}
+.eval-a4-sheet.is-landscape {
+    width: 297mm;
+    height: 210mm;
+}
+.eval-a4-sheet-label {
+    position: absolute;
+    top: 4mm;
+    left: 4mm;
+    font-size: 9px;
+    color: #94a3b8;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    pointer-events: none;
+    user-select: none;
+    z-index: 1;
+}
+.eval-a4-sheet-grid {
+    position: absolute;
+    inset: 10mm;
+    border: 1px dashed #e2e8f0;
+    pointer-events: none;
+}
+.eval-asset-img-stage {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+}
+.eval-asset-img-on-page {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform-origin: center center;
+    image-rendering: auto;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.15);
+}
+.eval-asset-pdf-wrap {
+    flex: 1;
+    min-height: 0;
+    padding: 1rem;
+    box-sizing: border-box;
+}
+.eval-asset-pdf-wrap[hidden] { display: none !important; }
+.eval-asset-pdf-wrap iframe {
+    width: 100%;
+    height: 100%;
+    min-height: calc(100vh - 16rem);
+    border: none;
+    background: #fff;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.12);
+    border-radius: 0.25rem;
+}
+.eval-a4-scroll[hidden] { display: none !important; }
+.eval-tex-edit-hint {
+    margin-right: auto;
+    font-size: 0.75rem;
+    color: #64748b;
+}
+@media (max-width: 640px) {
+    .eval-tex-layout { flex-direction: column; }
+    .eval-tex-files {
+        width: 100%;
+        max-height: 12rem;
+        position: static;
+    }
+    .eval-tex-code { min-height: 24rem; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-[1600px] space-y-4">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+            {% if library_template %}
+            <a href="{% url 'evaluation_latex_template_list' %}" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; 返回模板库</a>
+            <h1 class="mt-2 text-2xl font-semibold text-slate-900">{{ library_template.name }}</h1>
+            <p class="mt-1 text-sm text-slate-600">
+                模板库 <code class="rounded bg-slate-100 px-1">{{ library_template.key }}</code>
+                · {{ library_template.report_subtype_label }}
+                {% if not library_template.is_editable %} · <span class="text-amber-700">只读</span>{% endif %}
+            </p>
+            {% else %}
+            <a href="{% url 'evaluation_report_list' %}" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; 返回列表</a>
+            <h1 class="mt-2 text-2xl font-semibold text-slate-900">{{ report.title }}</h1>
+            <p class="mt-1 text-sm text-slate-600">
+                模板 · {{ report.template_label|default:latex_template_name }}
+                · {{ report.hospital.name }}{% if report.report_subtype %} · {{ report.report_subtype_label }}{% endif %}
+            </p>
+            {% endif %}
+            {% if template_info %}
+            <p class="mt-1 text-xs text-slate-500">{{ template_info.description }}</p>
+            {% endif %}
+        </div>
+        <div class="flex flex-wrap gap-2">
+            {% if library_template %}
+            <a href="{% url 'evaluation_latex_template_download' library_template.key %}"
+               class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                <i class="ri-download-line"></i>
+                下载 ZIP
+            </a>
+            <a href="{% url 'evaluation_latex_template_list' %}"
+               class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                模板库列表
+            </a>
+            {% else %}
+            <a href="{% url 'evaluation_report_detail' report.pk %}"
+               class="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700">
+                <i class="ri-upload-cloud-line"></i>
+                前往上传材料
+            </a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+        {% if library_template %}
+        当前为<strong>模板库</strong>中的 LaTeX 工程{% if not library_template.is_editable %}（只读）{% else %}，保存直接写入模板目录{% endif %}。
+        {% else %}
+        左侧以文件夹形式浏览 LaTeX 工程结构（<strong>标准化命名</strong>，如 <code class="rounded bg-white px-1">attachment_02_01.png</code>）；
+        悬停 appendix 图片可查看<strong>文件库原名</strong>。点击 <code class="rounded bg-white px-1">.tex</code> 可编辑；点击<strong>图片</strong> 按真实尺寸叠加 A4 参考页预览，可旋转/镜像；点击 <strong>PDF</strong> 内联预览。
+        {% if latex_project_kind == "blank" %}
+        当前为<strong>空白模板</strong>（<code class="rounded bg-white px-1">main.tex</code> + <code class="rounded bg-white px-1">chapters/</code>）。
+        上传附件与图片后将扩展为完整结构。
+        {% elif latex_project_kind == "partial" %}
+        当前<strong>进行中</strong>：已出现 <code class="rounded bg-white px-1">appendix/</code> 或 <code class="rounded bg-white px-1">images/</code>，待两者齐全后为完整模板。
+        {% else %}
+        当前为<strong>完整模板</strong>，包含 <code class="rounded bg-white px-1">appendix/</code> 与 <code class="rounded bg-white px-1">images/</code>。
+        {% endif %}
+        {% if latex_source == "work" %}
+        · 显示<strong>工作区副本</strong>。
+        {% else %}
+        · 显示<strong>源模板</strong>；首次保存时将复制到工作区。
+        {% endif %}
+        {% endif %}
+    </div>
+
+    <div class="eval-tex-layout">
+        <aside class="eval-tex-files">
+            <div class="eval-tex-files-head">项目文件</div>
+            <div class="eval-tex-files-meta">
+                <span class="eval-tex-project-badge is-{{ latex_project_kind }}">{{ latex_project_kind_label }}</span>
+                {% if latex_source == "work" %}
+                <span class="eval-tex-source-badge is-work">工作区</span>
+                {% elif latex_source == "library" %}
+                <span class="eval-tex-source-badge is-template">模板库</span>
+                {% else %}
+                <span class="eval-tex-source-badge is-template">源模板</span>
+                {% endif %}
+            </div>
+            <nav class="eval-tex-files-nav" id="tex-file-tree">
+                {% if file_tree %}
+                {% include "evaluation_report/_tex_file_tree.html" with nodes=file_tree report=report library_template=library_template selected_file=selected_file edit_mode=edit_mode latex_source=latex_source %}
+                {% else %}
+                <p class="px-2 py-3 text-xs text-slate-500">未找到 LaTeX 文件</p>
+                {% endif %}
+            </nav>
+        </aside>
+
+        <section class="eval-tex-code" id="tex-workspace"
+                 {% if library_template %}
+                 data-content-url="{% url 'evaluation_latex_template_preview_content' library_template.key %}"
+                 data-page-url="{% url 'evaluation_latex_template_preview' library_template.key %}"
+                 {% else %}
+                 data-content-url="{% url 'evaluation_report_template_content' report.pk %}"
+                 data-page-url="{% url 'evaluation_report_template' report.pk %}"
+                 {% endif %}
+                 data-edit-mode="{% if edit_mode %}1{% else %}0{% endif %}"
+                 data-initial-view="{{ initial_view }}"
+                 data-current-file="{{ selected_file }}"
+                 {% if preview_asset %}
+                 {% if library_template %}
+                 data-preview-url="{% url 'evaluation_latex_template_media' library_template.key preview_asset.media_relpath %}"
+                 {% else %}
+                 data-preview-url="{% url 'evaluation_report_work_media' report.pk preview_asset.media_relpath %}"
+                 {% endif %}
+                 data-preview-type="{{ preview_asset.preview_type }}"
+                 {% endif %}>
+            <div class="eval-tex-code-head">
+                <div class="eval-tex-code-head-left">
+                    <h2 id="tex-file-title" title="{{ selected_file }}">{{ selected_file }}</h2>
+                </div>
+            </div>
+
+            <div class="eval-tex-editor-wrap" id="tex-editor-wrap">
+                <div id="tex-view-code" class="eval-tex-view-panel"{% if initial_view == "asset" %} hidden{% endif %}>
+                <div class="eval-tex-code-subhead">
+                    <span class="text-xs text-slate-500" id="tex-char-count">{{ tex_content|length }} 字符</span>
+                    <div class="eval-tex-code-subhead-actions">
+                        {% if edit_mode %}
+                        <a href="{% if library_template %}{% url 'evaluation_latex_template_preview' library_template.key %}?file={{ selected_file|urlencode }}{% else %}{% url 'evaluation_report_template' report.pk %}?file={{ selected_file|urlencode }}{% endif %}"
+                           class="eval-tex-btn eval-tex-btn-secondary" id="tex-mode-toggle"
+                           {% if not show_tex_edit_toggle %}hidden{% endif %}>
+                            <i class="ri-eye-line"></i> 预览
+                        </a>
+                        {% else %}
+                        <a href="{% if library_template %}{% url 'evaluation_latex_template_preview' library_template.key %}?file={{ selected_file|urlencode }}&amp;edit=1{% else %}{% url 'evaluation_report_template' report.pk %}?file={{ selected_file|urlencode }}&amp;edit=1{% endif %}"
+                           class="eval-tex-btn eval-tex-btn-primary" id="tex-mode-toggle"
+                           {% if not show_tex_edit_toggle %}hidden{% endif %}>
+                            <i class="ri-edit-line"></i> 编辑
+                        </a>
+                        {% endif %}
+                    </div>
+                </div>
+                {% if edit_mode %}
+                <form method="post" action="{% if library_template %}{% url 'evaluation_latex_template_preview_save' library_template.key %}{% else %}{% url 'evaluation_report_template_save' report.pk %}{% endif %}"
+                      class="eval-tex-edit-form" id="tex-edit-form">
+                    {% csrf_token %}
+                    <input type="hidden" name="file" id="tex-file-input" value="{{ selected_file }}">
+                    <div class="eval-tex-pane">
+                        <div class="eval-tex-gutter" id="tex-gutter">
+                            <div class="eval-tex-gutter-inner" id="tex-gutter-inner"></div>
+                        </div>
+                        <textarea class="eval-tex-textarea" id="tex-textarea" name="content"
+                                  spellcheck="false" autocomplete="off" autocorrect="off"
+                                  autocapitalize="off">{{ tex_content }}</textarea>
+                    </div>
+                    <div class="eval-tex-edit-actions" id="tex-edit-actions">
+                        <span class="eval-tex-edit-hint">{% if library_template %}保存后写入模板库{% else %}保存后写入报告工作区 · 快捷键 Ctrl+S{% endif %}</span>
+                        <a href="{% if library_template %}{% url 'evaluation_latex_template_preview' library_template.key %}?file={{ selected_file|urlencode }}{% else %}{% url 'evaluation_report_template' report.pk %}?file={{ selected_file|urlencode }}{% endif %}"
+                           class="eval-tex-btn eval-tex-btn-secondary" id="tex-cancel-link">取消</a>
+                        <button type="submit" class="eval-tex-btn eval-tex-btn-success">
+                            <i class="ri-save-line"></i> 保存
+                        </button>
+                    </div>
+                </form>
+                {% else %}
+                <div class="eval-tex-pane">
+                    <div class="eval-tex-gutter" id="tex-gutter">
+                        <div class="eval-tex-gutter-inner" id="tex-gutter-inner">
+                            {% for line in tex_lines %}
+                            <span>{{ forloop.counter }}</span>
+                            {% empty %}
+                            <span>1</span>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    <pre class="eval-tex-codebody" id="tex-codebody">{{ tex_content }}</pre>
+                </div>
+                {% endif %}
+                </div>
+                <div id="tex-view-asset" class="eval-tex-view-panel eval-tex-asset-pane"{% if initial_view != "asset" %} hidden{% endif %}>
+                    <div class="eval-asset-toolbar" id="tex-asset-toolbar"
+                         {% if not preview_asset or preview_asset.preview_type != "image" %}hidden{% endif %}>
+                        <div class="eval-asset-toolbar-group" aria-label="旋转与镜像">
+                            <button type="button" class="eval-asset-tool-btn" id="asset-rotate-left" title="逆时针 90°">
+                                <i class="ri-anticlockwise-line"></i>
+                            </button>
+                            <button type="button" class="eval-asset-tool-btn" id="asset-rotate-right" title="顺时针 90°">
+                                <i class="ri-clockwise-line"></i>
+                            </button>
+                            <span class="eval-asset-toolbar-divider"></span>
+                            <button type="button" class="eval-asset-tool-btn" id="asset-flip-h" title="水平镜像">
+                                <i class="ri-arrow-left-right-line"></i>
+                            </button>
+                            <button type="button" class="eval-asset-tool-btn" id="asset-flip-v" title="垂直镜像">
+                                <i class="ri-arrow-up-down-line"></i>
+                            </button>
+                            <button type="button" class="eval-asset-tool-btn" id="asset-reset" title="重置">
+                                <i class="ri-refresh-line"></i>
+                            </button>
+                        </div>
+                        <div class="eval-asset-toolbar-group" aria-label="A4 参考">
+                            <button type="button" class="eval-asset-tool-btn is-active" id="asset-a4-portrait" title="A4 纵版参考">A4 纵</button>
+                            <button type="button" class="eval-asset-tool-btn" id="asset-a4-landscape" title="A4 横版参考">A4 横</button>
+                        </div>
+                        <div class="eval-asset-meta" id="tex-asset-meta">加载后显示物理尺寸</div>
+                    </div>
+                    <div class="eval-a4-scroll" id="tex-a4-scroll"
+                         {% if not preview_asset or preview_asset.preview_type != "image" %}hidden{% endif %}>
+                        <div class="eval-a4-sheet-wrap">
+                            <div class="eval-a4-sheet" id="eval-a4-sheet">
+                                <span class="eval-a4-sheet-label">A4 参考页 · 210 × 297 mm</span>
+                                <div class="eval-a4-sheet-grid" aria-hidden="true"></div>
+                                <div class="eval-asset-img-stage">
+                                    <img class="eval-asset-img-on-page" id="tex-asset-image" alt="" decoding="async"
+                                         {% if preview_asset and preview_asset.preview_type == "image" %}
+                                         src="{% if library_template %}{% url 'evaluation_latex_template_media' library_template.key preview_asset.media_relpath %}{% else %}{% url 'evaluation_report_work_media' report.pk preview_asset.media_relpath %}{% endif %}"
+                                         {% else %}hidden{% endif %}>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="eval-asset-pdf-wrap" id="tex-asset-pdf-wrap"
+                         {% if not preview_asset or preview_asset.preview_type != "pdf" %}hidden{% endif %}>
+                        <iframe id="tex-asset-pdf" title="PDF 预览"
+                                {% if preview_asset and preview_asset.preview_type == "pdf" %}
+                                src="{% if library_template %}{% url 'evaluation_latex_template_media' library_template.key preview_asset.media_relpath %}{% else %}{% url 'evaluation_report_work_media' report.pk preview_asset.media_relpath %}{% endif %}"
+                                {% else %}hidden{% endif %}></iframe>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+<script>
+(function () {
+    document.querySelectorAll('[data-folder-toggle]').forEach(function (row) {
+        row.addEventListener('click', function () {
+            var item = row.closest('.eval-tex-tree-item--folder');
+            if (item) item.classList.toggle('is-collapsed');
+        });
+    });
+
+    var workspace = document.getElementById('tex-workspace');
+    var fileTree = document.getElementById('tex-file-tree');
+    var codePanel = document.getElementById('tex-view-code');
+    var assetPanel = document.getElementById('tex-view-asset');
+    var gutter = document.getElementById('tex-gutter');
+    var gutterInner = document.getElementById('tex-gutter-inner');
+    var textarea = document.getElementById('tex-textarea');
+    var codebody = document.getElementById('tex-codebody');
+    var scrollEl = textarea || codebody;
+    var fileTitle = document.getElementById('tex-file-title');
+    var charCount = document.getElementById('tex-char-count');
+    var fileInput = document.getElementById('tex-file-input');
+    var modeToggle = document.getElementById('tex-mode-toggle');
+    var cancelLink = document.getElementById('tex-cancel-link');
+    var form = document.getElementById('tex-edit-form');
+    var assetImg = document.getElementById('tex-asset-image');
+    var assetPdf = document.getElementById('tex-asset-pdf');
+    var assetToolbar = document.getElementById('tex-asset-toolbar');
+    var a4Scroll = document.getElementById('tex-a4-scroll');
+    var a4Sheet = document.getElementById('eval-a4-sheet');
+    var a4Label = a4Sheet && a4Sheet.querySelector('.eval-a4-sheet-label');
+    var assetMeta = document.getElementById('tex-asset-meta');
+    var pdfWrap = document.getElementById('tex-asset-pdf-wrap');
+    var btnRotateLeft = document.getElementById('asset-rotate-left');
+    var btnRotateRight = document.getElementById('asset-rotate-right');
+    var btnFlipH = document.getElementById('asset-flip-h');
+    var btnFlipV = document.getElementById('asset-flip-v');
+    var btnReset = document.getElementById('asset-reset');
+    var btnA4Portrait = document.getElementById('asset-a4-portrait');
+    var btnA4Landscape = document.getElementById('asset-a4-landscape');
+
+    if (!workspace) return;
+
+    var FALLBACK_DPI = 300;
+    var MM_PER_INCH = 25.4;
+    var A4_RATIO_PORTRAIT = 210 / 297;
+    var A4_RATIO_LANDSCAPE = 297 / 210;
+    var inferredDpi = FALLBACK_DPI;
+    var imageRotation = 0;
+    var imageFlipH = false;
+    var imageFlipV = false;
+    var a4Landscape = false;
+
+    var contentUrl = workspace.dataset.contentUrl;
+    var pageUrl = workspace.dataset.pageUrl;
+    var editMode = workspace.dataset.editMode === '1';
+    var currentFile = workspace.dataset.currentFile || 'main.tex';
+    var currentView = workspace.dataset.initialView || 'tex';
+    var savedContent = textarea ? textarea.value : (codebody ? codebody.textContent : '');
+    var loading = false;
+
+    function lineCountFromText(text) {
+        if (!text) return 1;
+        return text.split('\n').length;
+    }
+
+    function renderGutter(count) {
+        if (!gutter) return;
+        var inner = gutterInner || gutter.querySelector('.eval-tex-gutter-inner');
+        if (!inner) return;
+        var html = '';
+        for (var i = 1; i <= count; i++) {
+            html += '<span>' + i + '</span>';
+        }
+        inner.innerHTML = html;
+    }
+
+    function syncGutterScroll() {
+        if (gutter && scrollEl) gutter.scrollTop = scrollEl.scrollTop;
+    }
+
+    function isDirty() {
+        return editMode && currentView === 'tex' && textarea && textarea.value !== savedContent;
+    }
+
+    function isTexFile(path) {
+        return /\.tex$/i.test(path || '');
+    }
+
+    function updateHeaderForTex(file) {
+        if (charCount) charCount.hidden = false;
+        if (fileTitle) {
+            fileTitle.textContent = file;
+            fileTitle.title = file;
+        }
+        if (fileInput) fileInput.value = file;
+        if (modeToggle) {
+            modeToggle.hidden = !isTexFile(file);
+            if (isTexFile(file)) {
+                modeToggle.href = editMode ? buildPageUrl(file, false, 'tex') : buildPageUrl(file, true, 'tex');
+            }
+        }
+        if (cancelLink) cancelLink.href = buildPageUrl(file, false, 'tex');
+    }
+
+    function updateHeaderForAsset(file) {
+        if (fileTitle) {
+            fileTitle.textContent = file;
+            fileTitle.title = file;
+        }
+    }
+
+    function buildPageUrl(file, edit, view) {
+        var q = 'file=' + encodeURIComponent(file);
+        if (view === 'asset') {
+            q += '&view=asset';
+        } else if (edit && isTexFile(file)) {
+            q += '&edit=1';
+        }
+        return pageUrl + '?' + q;
+    }
+
+    function pxToMm(px, dpi) {
+        return px / (dpi || inferredDpi) * MM_PER_INCH;
+    }
+
+    function formatMm(n) {
+        return (Math.round(n * 10) / 10).toFixed(1);
+    }
+
+    function inferImageDpi(nw, nh) {
+        if (!nw || !nh) return FALLBACK_DPI;
+        var ratio = nw / nh;
+        var tol = 0.1;
+        if (Math.abs(ratio - A4_RATIO_PORTRAIT) < tol) {
+            return nw / (210 / MM_PER_INCH);
+        }
+        if (Math.abs(ratio - A4_RATIO_LANDSCAPE) < tol) {
+            return nw / (297 / MM_PER_INCH);
+        }
+        return FALLBACK_DPI;
+    }
+
+    function resetImageTransform() {
+        imageRotation = 0;
+        imageFlipH = false;
+        imageFlipV = false;
+        if (btnFlipH) btnFlipH.classList.remove('is-active');
+        if (btnFlipV) btnFlipV.classList.remove('is-active');
+        applyImageTransform();
+    }
+
+    function applyImageTransform() {
+        if (!assetImg) return;
+        var sx = imageFlipH ? -1 : 1;
+        var sy = imageFlipV ? -1 : 1;
+        assetImg.style.transform =
+            'translate(-50%, -50%) rotate(' + imageRotation + 'deg) scaleX(' + sx + ') scaleY(' + sy + ')';
+    }
+
+    function applyA4Orientation() {
+        if (!a4Sheet) return;
+        a4Sheet.classList.toggle('is-landscape', a4Landscape);
+        if (a4Label) {
+            a4Label.textContent = a4Landscape
+                ? 'A4 参考页 · 297 × 210 mm（横版）'
+                : 'A4 参考页 · 210 × 297 mm（纵版）';
+        }
+        if (btnA4Portrait) btnA4Portrait.classList.toggle('is-active', !a4Landscape);
+        if (btnA4Landscape) btnA4Landscape.classList.toggle('is-active', a4Landscape);
+        updateAssetMeta();
+    }
+
+    function updateAssetMeta() {
+        if (!assetMeta || !assetImg || !assetImg.naturalWidth) return;
+        var wMm = pxToMm(assetImg.naturalWidth, inferredDpi);
+        var hMm = pxToMm(assetImg.naturalHeight, inferredDpi);
+        var rot = ((imageRotation % 360) + 360) % 360;
+        var effW = (rot === 90 || rot === 270) ? hMm : wMm;
+        var effH = (rot === 90 || rot === 270) ? wMm : hMm;
+        var pageW = a4Landscape ? 297 : 210;
+        var pageH = a4Landscape ? 210 : 297;
+        var imgLandscape = effW >= effH;
+        var pageLandscape = pageW >= pageH;
+        var fitHint = imgLandscape === pageLandscape ? '方向与 A4 一致' : '方向与 A4 不一致，可考虑旋转';
+        var overflow = (effW > pageW || effH > pageH) ? ' · 超出可打印区' : ' · 可纳入页面';
+        var dpiLabel = Math.abs(inferredDpi - FALLBACK_DPI) < 1
+            ? FALLBACK_DPI + ' DPI'
+            : '推断 ' + Math.round(inferredDpi) + ' DPI';
+        assetMeta.textContent =
+            '约 ' + formatMm(effW) + ' × ' + formatMm(effH) + ' mm（' + dpiLabel + '）· ' + fitHint + overflow;
+    }
+
+    function layoutImageOnA4() {
+        if (!assetImg || !assetImg.naturalWidth) return;
+        inferredDpi = inferImageDpi(assetImg.naturalWidth, assetImg.naturalHeight);
+        var wMm = pxToMm(assetImg.naturalWidth, inferredDpi);
+        var hMm = pxToMm(assetImg.naturalHeight, inferredDpi);
+        assetImg.style.width = wMm + 'mm';
+        assetImg.style.height = hMm + 'mm';
+        assetImg.hidden = false;
+        applyImageTransform();
+        updateAssetMeta();
+    }
+
+    function bindAssetImageLoad() {
+        if (!assetImg) return;
+        if (assetImg.complete && assetImg.naturalWidth) {
+            layoutImageOnA4();
+        } else {
+            assetImg.onload = function () {
+                resetImageTransform();
+                layoutImageOnA4();
+            };
+        }
+    }
+
+    function setActiveItem(relpath) {
+        if (!fileTree) return;
+        fileTree.querySelectorAll('.js-tex-file-link, .js-asset-link').forEach(function (link) {
+            var path = link.dataset.texRelpath || link.dataset.assetRelpath;
+            link.classList.toggle('is-active', path === relpath);
+        });
+    }
+
+    function showTexView() {
+        if (codePanel) codePanel.hidden = false;
+        if (assetPanel) assetPanel.hidden = true;
+        if (assetToolbar) assetToolbar.hidden = true;
+        if (a4Scroll) a4Scroll.hidden = true;
+        if (pdfWrap) pdfWrap.hidden = true;
+        if (assetImg) {
+            assetImg.removeAttribute('src');
+            assetImg.hidden = true;
+        }
+        if (assetPdf) {
+            assetPdf.hidden = true;
+            assetPdf.src = 'about:blank';
+        }
+        currentView = 'tex';
+    }
+
+    function showAssetView(relpath, previewUrl, previewType) {
+        if (codePanel) codePanel.hidden = true;
+        if (assetPanel) assetPanel.hidden = false;
+
+        var isImage = previewType === 'image';
+        if (assetToolbar) assetToolbar.hidden = !isImage;
+        if (a4Scroll) a4Scroll.hidden = !isImage;
+        if (pdfWrap) pdfWrap.hidden = isImage;
+        if (assetPdf) assetPdf.hidden = isImage;
+
+        if (isImage && assetImg) {
+            resetImageTransform();
+            assetImg.hidden = true;
+            assetImg.onload = null;
+            assetImg.src = previewUrl;
+            assetImg.alt = relpath;
+            bindAssetImageLoad();
+        } else if (previewType === 'pdf' && assetPdf) {
+            assetPdf.src = previewUrl;
+        }
+
+        updateHeaderForAsset(relpath);
+        workspace.dataset.currentFile = relpath;
+        currentFile = relpath;
+        currentView = 'asset';
+        setActiveItem(relpath);
+    }
+
+    function applyContent(content) {
+        showTexView();
+        savedContent = content;
+        if (textarea) {
+            textarea.value = content;
+            renderGutter(lineCountFromText(content));
+            textarea.scrollTop = 0;
+            if (gutter) gutter.scrollTop = 0;
+        } else if (codebody) {
+            codebody.textContent = content;
+            renderGutter(lineCountFromText(content));
+            codebody.scrollTop = 0;
+            if (gutter) gutter.scrollTop = 0;
+        }
+        if (charCount) charCount.textContent = content.length + ' 字符';
+    }
+
+    function setLoading(on) {
+        loading = on;
+        workspace.classList.toggle('is-loading', on);
+    }
+
+    function confirmLeave() {
+        return !isDirty() || window.confirm('当前文件有未保存的修改，确定切换吗？');
+    }
+
+    function loadFile(file, pushHistory) {
+        if (loading) return;
+        if (currentView === 'tex' && file === currentFile) return;
+        if (!confirmLeave()) return;
+
+        setLoading(true);
+        fetch(contentUrl + '?file=' + encodeURIComponent(file), {
+            headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+        })
+            .then(function (res) {
+                if (!res.ok) {
+                    return res.json().then(function (data) {
+                        throw new Error(data.error || '加载失败');
+                    });
+                }
+                return res.json();
+            })
+            .then(function (data) {
+                currentFile = data.file;
+                currentView = 'tex';
+                applyContent(data.content);
+                updateHeaderForTex(data.file);
+                workspace.dataset.currentFile = data.file;
+                setActiveItem(data.file);
+                if (pushHistory !== false) {
+                    window.history.pushState(
+                        { file: data.file, edit: editMode, view: 'tex' },
+                        '',
+                        buildPageUrl(data.file, editMode, 'tex')
+                    );
+                }
+            })
+            .catch(function (err) {
+                window.alert(err.message || '无法加载文件');
+            })
+            .finally(function () {
+                setLoading(false);
+            });
+    }
+
+    function loadAsset(relpath, previewUrl, previewType, pushHistory) {
+        if (loading) return;
+        if (currentView === 'asset' && relpath === currentFile) return;
+        if (!confirmLeave()) return;
+
+        showAssetView(relpath, previewUrl, previewType);
+        workspace.dataset.currentFile = relpath;
+        currentFile = relpath;
+        if (pushHistory !== false) {
+            window.history.pushState(
+                { file: relpath, edit: editMode, view: 'asset' },
+                '',
+                buildPageUrl(relpath, editMode, 'asset')
+            );
+        }
+    }
+
+    function restoreFromState(state, pushHistory) {
+        if (!state || !state.file) return;
+        if (state.view === 'asset') {
+            var assetLink = fileTree && fileTree.querySelector(
+                '.js-asset-link[data-asset-relpath="' + CSS.escape(state.file) + '"]'
+            );
+            if (assetLink) {
+                loadAsset(
+                    state.file,
+                    assetLink.dataset.previewUrl,
+                    assetLink.dataset.previewType || 'image',
+                    pushHistory
+                );
+            }
+            return;
+        }
+        loadFile(state.file, pushHistory);
+    }
+
+    if (btnRotateLeft) {
+        btnRotateLeft.addEventListener('click', function () {
+            imageRotation = (imageRotation - 90 + 360) % 360;
+            applyImageTransform();
+            updateAssetMeta();
+        });
+    }
+    if (btnRotateRight) {
+        btnRotateRight.addEventListener('click', function () {
+            imageRotation = (imageRotation + 90) % 360;
+            applyImageTransform();
+            updateAssetMeta();
+        });
+    }
+    if (btnFlipH) {
+        btnFlipH.addEventListener('click', function () {
+            imageFlipH = !imageFlipH;
+            btnFlipH.classList.toggle('is-active', imageFlipH);
+            applyImageTransform();
+        });
+    }
+    if (btnFlipV) {
+        btnFlipV.addEventListener('click', function () {
+            imageFlipV = !imageFlipV;
+            btnFlipV.classList.toggle('is-active', imageFlipV);
+            applyImageTransform();
+        });
+    }
+    if (btnReset) {
+        btnReset.addEventListener('click', resetImageTransform);
+    }
+    if (btnA4Portrait) {
+        btnA4Portrait.addEventListener('click', function () {
+            a4Landscape = false;
+            applyA4Orientation();
+        });
+    }
+    if (btnA4Landscape) {
+        btnA4Landscape.addEventListener('click', function () {
+            a4Landscape = true;
+            applyA4Orientation();
+        });
+    }
+
+    if (fileTree) {
+        fileTree.addEventListener('click', function (e) {
+            var texLink = e.target.closest('.js-tex-file-link');
+            if (texLink) {
+                e.preventDefault();
+                loadFile(texLink.dataset.texRelpath);
+                return;
+            }
+            var assetLink = e.target.closest('.js-asset-link');
+            if (assetLink) {
+                e.preventDefault();
+                loadAsset(
+                    assetLink.dataset.assetRelpath,
+                    assetLink.dataset.previewUrl,
+                    assetLink.dataset.previewType || 'image'
+                );
+            }
+        });
+    }
+
+    window.addEventListener('popstate', function (e) {
+        if (e.state && e.state.file) {
+            restoreFromState(e.state, false);
+            return;
+        }
+        var params = new URLSearchParams(window.location.search);
+        var file = params.get('file') || 'main.tex';
+        var view = params.get('view') || 'tex';
+        restoreFromState({ file: file, view: view, edit: editMode }, false);
+    });
+
+    var initView = workspace.dataset.initialView || 'tex';
+    var initFile = workspace.dataset.currentFile || currentFile;
+
+    if (!window.history.state) {
+        window.history.replaceState(
+            { file: initFile, edit: editMode, view: initView },
+            '',
+            window.location.href
+        );
+    }
+
+    if (currentView === 'tex' && textarea) {
+        function syncFromTextarea() {
+            renderGutter(lineCountFromText(textarea.value));
+            syncGutterScroll();
+        }
+
+        function saveForm() {
+            if (form && typeof form.requestSubmit === 'function') {
+                form.requestSubmit();
+            } else if (form) {
+                form.submit();
+            }
+        }
+
+        textarea.addEventListener('input', syncFromTextarea);
+        textarea.addEventListener('scroll', syncGutterScroll);
+        textarea.addEventListener('keydown', function (e) {
+            if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+                e.preventDefault();
+                saveForm();
+            }
+        });
+        syncFromTextarea();
+    } else if (currentView === 'tex' && codebody && gutter) {
+        codebody.addEventListener('scroll', syncGutterScroll);
+        renderGutter(lineCountFromText(codebody.textContent));
+    }
+
+    if (currentView === 'tex') {
+        updateHeaderForTex(currentFile);
+    }
+
+    if (fileTree && currentView === 'asset') {
+        setActiveItem(currentFile);
+        if (assetImg && assetImg.src && !assetImg.hidden) {
+            bindAssetImageLoad();
+        }
+    }
+
+    applyA4Orientation();
+})();
+</script>
+{% endblock %}

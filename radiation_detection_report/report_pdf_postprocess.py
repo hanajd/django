@@ -4,10 +4,13 @@
 
 from __future__ import annotations
 
+import logging
 import re
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional, Sequence
 
 import fitz
+
+logger = logging.getLogger(__name__)
 
 
 def _norm(s: Any) -> str:
@@ -428,6 +431,7 @@ def finalize_single_report_pdf(
     has_radiation_protection: bool = False,
     toc_skip_qc_minors: bool = False,
     include_qc_content: bool = True,
+    ordered_submit_payloads: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> bytes:
     """
     在 HTMLPDF 回填及（可选）放射防护表插入之后执行：
@@ -490,6 +494,23 @@ def finalize_single_report_pdf(
         inspected_fill = _norm((overlay or {}).get("inspection_index_line"))
         if inspected_fill:
             fill_results_section_inspection_number(doc, inspected_fill)
+        try:
+            from radiation_detection_report.instrument_table_overlay import (
+                apply_results_instrument_tables,
+                resolve_results_instrument_scope,
+            )
+
+            apply_results_instrument_tables(
+                doc,
+                source_payload=source_payload if isinstance(source_payload, dict) else None,
+                ordered_submit_payloads=ordered_submit_payloads,
+                instrument_scope=resolve_results_instrument_scope(
+                    has_radiation_protection=has_radiation_protection,
+                    include_qc_content=include_qc_content,
+                ),
+            )
+        except Exception:
+            logger.exception("apply results instrument tables failed")
         report_no = _norm((overlay or {}).get("report_no_display")) or _extract_report_no_from_doc(doc)
         regenerate_single_report_table_of_contents(
             doc,

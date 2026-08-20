@@ -78,6 +78,12 @@ ROLE_PERMISSION_MATRIX: List[Tuple[str, str, str, str]] = [
         "使用侧栏「评价报告表」制作预评价报告（独立工作区，不写业务库）",
         "workflow",
     ),
+    (
+        "perm_evaluation_report",
+        "评价报告书",
+        "使用侧栏「评价报告书」制作预评价/控制效果评价报告书（上传评价信息表、结构化编辑、LaTeX 编译）",
+        "workflow",
+    ),
 ]
 
 # 仅通过 UserProfile.perm_overrides 生效、Role 模型无对应字段的补充键（须纳入 role_has 白名单）
@@ -249,6 +255,7 @@ ROLE_DEFAULT_PERMS_BY_CODE: Dict[str, Dict[str, bool]] = {
         "perm_create_library_project": True,
         "perm_biz_registry": True,
         "perm_f1_eval": False,
+        "perm_evaluation_report": False,
     },
     "template_tester": {
         "perm_manage_users": False,
@@ -267,6 +274,7 @@ ROLE_DEFAULT_PERMS_BY_CODE: Dict[str, Dict[str, bool]] = {
         "perm_create_library_project": True,
         "perm_biz_registry": False,
         "perm_f1_eval": True,
+        "perm_evaluation_report": True,
     },
     "template_editor": {
         "perm_manage_users": False,
@@ -285,6 +293,7 @@ ROLE_DEFAULT_PERMS_BY_CODE: Dict[str, Dict[str, bool]] = {
         "perm_create_library_project": True,
         "perm_biz_registry": False,
         "perm_f1_eval": False,
+        "perm_evaluation_report": False,
     },
 }
 # 与 app_user 同级的文件库/登记默认，后续可在「编辑角色」中细调
@@ -321,6 +330,7 @@ ROLE_DEFAULT_PERMS_BY_CODE[COMMISSION_COORDINATOR_ROLE_CODE] = {
     "perm_create_library_project": True,
     "perm_biz_registry": True,
     "perm_f1_eval": False,
+    "perm_evaluation_report": False,
 }
 
 # 新业务线组织角色默认权限（与 org_roles.ORG_ROLE_SEED 对齐；迁移/ensure 时写入 Role 表）
@@ -675,6 +685,30 @@ def library_user_may_mock_inspection_submit(user) -> bool:
 def role_has_htmlpdf(user) -> bool:
     """是否可使用模板编辑器：独立权限，或与 OCR 处理一并开启（兼容旧角色）。"""
     return role_has(user, "perm_htmlpdf") or role_has(user, "perm_process_pipeline")
+
+
+def library_user_may_access_evaluation_report(user) -> bool:
+    """评价报告书（LaTeX）：``perm_evaluation_report``；评价部/测试组兼容开放。
+
+    - 角色权限 ``perm_evaluation_report``（评价部主任/员工默认开启）；
+    - test / party_a_demo / test-N 同组演示账号可用（便于测试）；
+    - template_tester 可用；
+    - 系统超管 / super_admin / admin 可用。
+    """
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+    code = _role_code(user)
+    if code in ("super_admin", "admin"):
+        return True
+    if role_has(user, "perm_evaluation_report"):
+        return True
+    if library_user_is_test_peer(user):
+        return True
+    if code in ("dept_director_evaluation", "dept_staff_evaluation", "template_tester"):
+        return True
+    return False
 
 
 def library_user_may_access_f1_eval(user) -> bool:
@@ -1475,6 +1509,7 @@ def role_ui_context(user) -> Dict[str, Any]:
         "ui_sidebar_show_commission_manage": False,
         "ui_sidebar_show_user_management": False,
         "ui_sidebar_show_f1_eval": False,
+        "ui_sidebar_show_evaluation_report": False,
         "ui_sidebar_show_detection_workflow_hubs": False,
         "ui_dashboard_hide_json_tile": False,
         "ui_dashboard_site_record_focus": False,
@@ -1547,6 +1582,7 @@ def role_ui_context(user) -> Dict[str, Any]:
         ),
         "ui_sidebar_show_user_management": bool(show_user_mgmt),
         "ui_sidebar_show_f1_eval": bool(library_user_may_access_f1_eval(user)),
+        "ui_sidebar_show_evaluation_report": bool(library_user_may_access_evaluation_report(user)),
         "ui_sidebar_show_detection_workflow_hubs": show_detection_hubs,
         "ui_dashboard_hide_json_tile": bool(hide_json),
         "ui_dashboard_site_record_focus": bool(site_focus),

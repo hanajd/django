@@ -4,9 +4,9 @@
 
 | 文件 | 说明 |
 |------|------|
-| `apps/core/urls.py` | 全部 Web 路径：`login`、`dashboard`、RBAC、文件库、项目工作台、任务模板库、HTMLPDF 与 API、管线预览、使用说明与流程练习等 |
+| `apps/core/urls.py` | 全部 Web 路径：`login`、`dashboard`、RBAC、文件库、项目工作台、任务模板库、HTMLPDF 与 API、管线预览、使用说明与流程练习等；并 `include` **`evaluation-reports/`** |
 
-根站点将 `''` 指向该文件，故业务路径多为 **`/files/...`、`/users/...`** 等（无前缀）。
+根站点将 `''` 指向该文件，故业务路径多为 **`/files/...`、`/users/...`、`/evaluation-reports/...`** 等（无额外前缀）。
 
 完整功能清单见 [07-features-catalog.md](07-features-catalog.md) §2。
 
@@ -69,11 +69,54 @@
 |------|------|
 | `/database/devices/` | 检测仪器台账（`InstrumentCatalog`） |
 
+### 2.7 报告流程枢纽
+
+| 路径 | 说明 |
+|------|------|
+| `/files/hub/site-records/` | 现场记录侧入口 |
+| `/files/hub/report-generate/` | 报告生成 |
+| `/files/hub/review-sign/` | 审核签字 |
+| `/files/hub/report-download/` | 报告下载 |
+
+服务：`apps/core/workflow_hub_service.py`。一致性方案见专题 [报告流程枢纽与医院委托工作台数据一致性方案.md](报告流程枢纽与医院委托工作台数据一致性方案.md)。
+
+### 2.8 评价报告表（F.1）
+
+| 路径 | 说明 |
+|------|------|
+| `/files/f1-eval/` | F.1 工作台入口及下属 api/media/download |
+
+权限：`perm_f1_eval`。详述：[评价报告表-F1功能说明.md](评价报告表-F1功能说明.md)。
+
+### 2.9 评价报告书
+
+| 路径 | 说明 |
+|------|------|
+| `/evaluation-reports/` | 列表 / 创建 / 详情 |
+| `/evaluation-reports/<pk>/evaluation-form/` | 评价信息表 |
+| `/evaluation-reports/<pk>/edit/` | 结构化正文编辑 |
+| `/evaluation-reports/<pk>/attachments/` | 附件管理（预览、staging、A3/旋转/宽度） |
+| `/evaluation-reports/<pk>/build/`、`/pdf/` | 编译与 PDF |
+| `/evaluation-reports/templates/` | LaTeX 模板库 |
+
+视图包：`apps/evaluation_report/`。详述：[评价报告书-LaTeX功能说明.md](评价报告书-LaTeX功能说明.md)。
+
+### 2.10 设置与其它
+
+| 路径 | 说明 |
+|------|------|
+| `/settings/app-ota/` | Android APK OTA 发版（超管） |
+| `/settings/debug/` | 调试相关设置 |
+| `/account/profile/`、`/account/signatures/` | 个人资料与签名 |
+| `/help/coordinator/` | 委托协调员帮助 |
+
 ## 3. 视图主体
 
 | 文件 | 说明 |
 |------|------|
-| `apps/core/views.py` | 体量大：聚合了认证、仪表盘、用户/角色/菜单 CRUD、文件库、项目工作台、任务模板、HTMLPDF 编辑器与 JSON API、管线入口、使用说明视图、流程练习 start/finish 等 |
+| `apps/core/views.py` | 体量大：认证、仪表盘、RBAC、文件库、项目工作台、任务模板、HTMLPDF、管线、使用说明等 |
+| `apps/core/f1_eval_*.py` | F.1 工作台 |
+| `apps/evaluation_report/` | 评价报告书独立 App |
 
 **维护建议**：新功能若继续膨胀，可按域拆为 `views/` 包（需同步调整 import 与测试）；当前为单文件历史结构。
 
@@ -100,6 +143,7 @@
 | `htmlpdf_report_mapping_service.py` | 报告↔现场记录字段映射 |
 | `pipeline_service.py` | 文档处理管线编排 |
 | `workflow_service.py` | 项目检测流程成员与状态 |
+| `workflow_hub_service.py` | 报告流程枢纽四页数据 |
 | `commission_org_service.py` | 委托单位树索引 |
 | `commission_management_service.py` | 委托管理页数据 |
 | `hospital_info_service.py` | 医院信息 CRUD、合并报告 |

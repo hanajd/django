@@ -1,0 +1,58 @@
+<ul class="eval-tex-tree{% if nested %} eval-tex-tree-nested{% endif %}">
+    {% for node in nodes %}
+    <li class="eval-tex-tree-item eval-tex-tree-item--{{ node.kind }}">
+        {% if node.kind == "folder" %}
+        <div class="eval-tex-tree-row eval-tex-tree-row--folder" data-folder-toggle>
+            <span class="eval-tex-tree-chevron" aria-hidden="true"><i class="ri-arrow-down-s-line"></i></span>
+            <span class="eval-tex-tree-icon" aria-hidden="true"><i class="ri-folder-3-line"></i></span>
+            <span class="eval-tex-tree-label"{% if node.library_name %} title="文件库：{{ node.library_name }}"{% endif %}>{{ node.name }}</span>
+        </div>
+        <div class="eval-tex-tree-children">
+            {% include "evaluation_report/_tex_file_tree.html" with nodes=node.children nested=True report=report library_template=library_template selected_file=selected_file edit_mode=edit_mode latex_source=latex_source %}
+        </div>
+        {% elif node.kind == "file" %}
+        <a href="{% if library_template %}{% url 'evaluation_latex_template_preview' library_template.key %}?file={{ node.relpath|urlencode }}{% if edit_mode %}&amp;edit=1{% endif %}{% else %}{% url 'evaluation_report_template' report.pk %}?file={{ node.relpath|urlencode }}{% if edit_mode %}&amp;edit=1{% endif %}{% endif %}"
+           class="eval-tex-tree-row eval-tex-tree-row--file js-tex-file-link{% if node.relpath == selected_file %} is-active{% endif %}"
+           data-tex-relpath="{{ node.relpath }}">
+            <span class="eval-tex-tree-chevron eval-tex-tree-chevron--spacer" aria-hidden="true"></span>
+            <span class="eval-tex-tree-icon" aria-hidden="true"><i class="ri-file-text-line"></i></span>
+            <span class="eval-tex-tree-label"{% if node.library_name %} title="文件库：{{ node.library_name }}"{% endif %}>{{ node.name }}</span>
+        </a>
+        {% elif node.kind == "asset" %}
+        {% if library_template %}
+        <a href="{% url 'evaluation_latex_template_media' library_template.key node.relpath %}"
+           class="eval-tex-tree-row eval-tex-tree-row--asset js-asset-link{% if node.relpath == selected_file %} is-active{% endif %}"
+           data-asset-relpath="{{ node.relpath }}"
+           data-preview-url="{% url 'evaluation_latex_template_media' library_template.key node.relpath %}"
+           data-preview-type="{{ node.preview_type }}">
+            <span class="eval-tex-tree-chevron eval-tex-tree-chevron--spacer" aria-hidden="true"></span>
+            <span class="eval-tex-tree-icon" aria-hidden="true">
+                {% if node.preview_type == "pdf" %}<i class="ri-file-pdf-line"></i>{% else %}<i class="ri-image-line"></i>{% endif %}
+            </span>
+            <span class="eval-tex-tree-label"{% if node.library_name %} title="文件库：{{ node.library_name }}"{% endif %}>{{ node.name }}</span>
+        </a>
+        {% elif latex_source == "work" and node.media_relpath %}
+        <a href="{% url 'evaluation_report_work_media' report.pk node.media_relpath %}"
+           class="eval-tex-tree-row eval-tex-tree-row--asset js-asset-link{% if node.relpath == selected_file %} is-active{% endif %}"
+           data-asset-relpath="{{ node.relpath }}"
+           data-preview-url="{% url 'evaluation_report_work_media' report.pk node.media_relpath %}"
+           data-preview-type="{{ node.preview_type }}">
+            <span class="eval-tex-tree-chevron eval-tex-tree-chevron--spacer" aria-hidden="true"></span>
+            <span class="eval-tex-tree-icon" aria-hidden="true">
+                {% if node.preview_type == "pdf" %}<i class="ri-file-pdf-line"></i>{% else %}<i class="ri-image-line"></i>{% endif %}
+            </span>
+            <span class="eval-tex-tree-label"{% if node.library_name %} title="文件库：{{ node.library_name }}"{% endif %}>{{ node.name }}</span>
+        </a>
+        {% else %}
+        <span class="eval-tex-tree-row eval-tex-tree-row--asset is-muted">
+            <span class="eval-tex-tree-chevron eval-tex-tree-chevron--spacer" aria-hidden="true"></span>
+            <span class="eval-tex-tree-icon" aria-hidden="true">
+                {% if node.preview_type == "pdf" %}<i class="ri-file-pdf-line"></i>{% else %}<i class="ri-image-line"></i>{% endif %}
+            </span>
+            <span class="eval-tex-tree-label"{% if node.library_name %} title="文件库：{{ node.library_name }}"{% endif %}>{{ node.name }}</span>
+        </span>
+        {% endif %}
+        {% endif %}
+    </li>
+    {% endfor %}
+</ul>

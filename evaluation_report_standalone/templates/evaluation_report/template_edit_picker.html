@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}模板编辑{% endblock %}
+{% block page_title %}模板编辑{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-6xl space-y-6">
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+            <a href="{% url 'evaluation_report_list' %}" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; 返回评价报告</a>
+            <h1 class="mt-2 text-2xl font-semibold text-slate-900">模板编辑</h1>
+            <p class="mt-1 max-w-3xl text-sm text-slate-600">
+                选择一份 LaTeX 模板，用与项目正文相同的可视化编辑器维护<strong>模板结构</strong>。
+                此处保存只会写入模板库，与具体项目内容隔离，避免误把项目数据写进模板。
+            </p>
+        </div>
+        <a href="{% url 'evaluation_latex_template_list' %}"
+           class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+            LaTeX 模板库（源码）
+        </a>
+    </div>
+
+    <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <table class="min-w-full divide-y divide-slate-100 text-left text-sm">
+            <thead class="bg-slate-50">
+                <tr>
+                    <th class="px-5 py-3 text-xs font-semibold uppercase text-slate-500">名称</th>
+                    <th class="px-5 py-3 text-xs font-semibold uppercase text-slate-500">键</th>
+                    <th class="px-5 py-3 text-xs font-semibold uppercase text-slate-500">类型</th>
+                    <th class="px-5 py-3 text-xs font-semibold uppercase text-slate-500">来源</th>
+                    <th class="px-5 py-3 text-right text-xs font-semibold uppercase text-slate-500">操作</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                {% for tpl in templates %}
+                <tr class="hover:bg-slate-50/80">
+                    <td class="px-5 py-4 font-medium text-slate-900">{{ tpl.name }}</td>
+                    <td class="px-5 py-4 font-mono text-xs text-slate-600">{{ tpl.key }}</td>
+                    <td class="px-5 py-4 text-slate-600">{{ tpl.report_subtype_label }}</td>
+                    <td class="px-5 py-4 text-slate-600">{{ tpl.get_source_display }}{% if tpl.is_system %} · 系统{% endif %}</td>
+                    <td class="px-5 py-4 text-right whitespace-nowrap">
+                        {% if tpl.has_main_tex %}
+                        <a href="{% url 'evaluation_latex_template_structured_edit' tpl.key %}"
+                           class="inline-flex items-center rounded-lg bg-teal-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-800">
+                            进入编辑
+                        </a>
+                        {% else %}
+                        <span class="text-amber-700 text-sm">缺少 main.tex</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="5" class="px-5 py-12 text-center text-slate-500">暂无模板，请先在模板库中创建。</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -2531,6 +2531,8 @@
 
         function flushMapSessionDraftToCache() {
             if (!mapSession) return;
+            // 把当前绑定面板中的未失焦输入一并写入 draft，再按栏位 id 写入缓存
+            syncMapDraftFromUi();
             const rid = String(mapSession.reportPdfFieldId || '').trim().toLowerCase();
             if (!rid) return;
             const draft = mapSession.draftConfig || {};
@@ -2663,10 +2665,18 @@
         const mapTemplateRequirementHint = document.getElementById('mapTemplateRequirementHint');
         const mapValueCasesPanel = document.getElementById('mapValueCasesPanel');
         let mapValueCasesEditorApi = null;
+        /** 条件映射面板当前绑定的报告栏位 id；用于防止共用 DOM 把 A 的条件写进 B */
+        let mapValueCasesBoundFieldId = '';
         const mapBtnInsertSlot1 = document.getElementById('mapBtnInsertSlot1');
         const mapBtnApplyPreview = document.getElementById('mapBtnApplyPreview');
         const mapBtnSaveConfig = document.getElementById('mapBtnSaveConfig');
         const mainEl = document.querySelector('.main');
+
+        function clearMapValueCasesPanel() {
+            if (mapValueCasesPanel) mapValueCasesPanel.innerHTML = '';
+            mapValueCasesEditorApi = null;
+            mapValueCasesBoundFieldId = '';
+        }
 
         function cloneValueCases(rows) {
             return (rows || []).map((r, i) => normalizeConditionalRuleRow(r, i));
@@ -3078,8 +3088,13 @@
         function renderMapValueCasesPanel() {
             if (!mapValueCasesPanel || !mapSession) return;
             const draft = mapSession.draftConfig;
-            syncValueCasesFromEditorDom(draft);
+            const rid = String(mapSession.reportPdfFieldId || '').trim().toLowerCase();
+            // 仅在「同一栏位」重绘时把 DOM 回写 draft；切栏位后旧卡片绝不能写入新 draft
+            if (rid && mapValueCasesBoundFieldId === rid) {
+                syncValueCasesFromEditorDom(draft);
+            }
             mapValueCasesPanel.innerHTML = '';
+            mapValueCasesEditorApi = null;
             ensureDraftValueCases(draft);
             const h4 = document.createElement('h4');
             h4.textContent = '条件映射';
@@ -3098,6 +3113,7 @@
             });
             mapValueCasesPanel.appendChild(editor);
             mapValueCasesEditorApi = editor;
+            mapValueCasesBoundFieldId = rid;
         }
 
         function getReportPdfFieldId(f, idx) {
@@ -3123,6 +3139,11 @@
             if (!draft) return;
             ensureDraftValueCases(draft);
             if (!mapValueCasesPanel) return;
+            const rid = mapSession
+                ? String(mapSession.reportPdfFieldId || '').trim().toLowerCase()
+                : '';
+            // DOM 未绑定到当前栏位时禁止回写，避免条件映射串栏
+            if (!rid || mapValueCasesBoundFieldId !== rid) return;
             const cards = mapValueCasesPanel.querySelectorAll('.map-case-row-card');
             if (!cards.length) return;
             cards.forEach((card, idx) => {
@@ -3824,8 +3845,11 @@
 
         function enterMapMode(reportFieldId) {
             if (mapSession && mapSession.reportFieldId !== reportFieldId) {
+                // 先把当前栏位 DOM 写入其 draft，再清面板，避免旧条件卡片污染下一栏位
+                syncMapDraftFromUi();
                 flushMapSessionDraftToCache();
                 persistMapCacheNow();
+                clearMapValueCasesPanel();
             }
             const f = getFieldById(reportFieldId);
             if (!f) {
@@ -3852,9 +3876,9 @@
                 reportPdfFieldId: reportPdfFieldId,
                 draftConfig: {
                     reportPdfFieldId: reportPdfFieldId,
-                    sources: loaded.sources,
-                    valueTemplate: loaded.valueTemplate,
-                    valueCases: loaded.valueCases,
+                    sources: cloneMapSources(loaded.sources),
+                    valueTemplate: loaded.valueTemplate || '',
+                    valueCases: cloneValueCases(loaded.valueCases),
                     mapSource: 'explicit',
                     mapRuleLabel: ''
                 }
@@ -3974,6 +3998,7 @@
 
         function dismissMapModeUi() {
             mapSession = null;
+            clearMapValueCasesPanel();
             setMapOverlayOpen(false);
             if (mapReportPreviewContainer) mapReportPreviewContainer.innerHTML = '';
             if (siteMapPdfContainer) siteMapPdfContainer.innerHTML = '';
@@ -3991,6 +4016,7 @@
             persistMapCacheNow();
             }
             mapSession = null;
+            clearMapValueCasesPanel();
             setMapOverlayOpen(false);
             if (mapReportPreviewContainer) mapReportPreviewContainer.innerHTML = '';
             if (siteMapPdfContainer) siteMapPdfContainer.innerHTML = '';

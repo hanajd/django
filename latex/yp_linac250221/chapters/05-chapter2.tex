@@ -1,0 +1,174 @@
+\chapter{工程分析}
+
+（加速器模板说明：本项目典型设备为医用电子直线加速器及 CT 模拟定位机。正文请按项目实际填写；下列骨架对照 YP250221 / KP250454 报批稿目录。）
+
+%-----------------------------------------------------------
+\section{建设项目概况}
+\begin{enumerate}
+\item 建设项目名称：\projectnamefull
+\item 建设单位：\buildunit
+
+法定代表人：\buildunitlegalrep \qquad 联系人：\buildunitcontact \qquad 联系电话：\buildunitphone
+
+\item 建设地址：\buildaddress
+\item 设计单位：\designunit
+\item 建设项目性质：\projectnature
+\item 建设规模：\constructionscale
+\item 发展规划：\developmentplan
+\item 建设项目放射性危害程度与诊疗风险危害分类：
+
+根据《放射诊疗建设项目卫生审查管理规定》（卫监发〔2012〕25号）第四条规定：放射诊疗建设项目按照可能产生的放射性危害程度与诊疗风险分为危害严重和危害一般两类。本项目涉及放射治疗（医用电子直线加速器、CT模拟定位机）的使用，属于放射性危害程度与诊疗风险\textbf{\radiationhazarddegree}的放射诊疗建设项目。
+\end{enumerate}
+
+%-----------------------------------------------------------
+\section{人员结构}
+
+建设单位拟为本项目配置放射肿瘤医师、医学物理人员、放射治疗技师及维修人员等。现有人员清单、拟配备情况及岗位职责见表~\ref{tab:ch2-linac-staff1}、表~\ref{tab:ch2-linac-staff2}、表~\ref{tab:ch2-linac-staff3}。
+
+\begin{table}[H]
+\centering
+\caption{建设单位现有放射治疗工作人员清单}
+\label{tab:ch2-linac-staff1}
+\begin{tabular}{|c|c|c|c|c|c|c|}
+\hline
+序号 & 姓名 & 学历 & 专业 & 职称 & 大型设备上岗证/进修情况 & 工作岗位 \\
+\hline
+\erpTabInput{files/staffList.tex}
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{本项目放射工作人员拟配备一览表}
+\label{tab:ch2-linac-staff2}
+\begin{tabular}{|m{1.8cm}|m{2.6cm}|m{1cm}|m{1.8cm}|m{1.5cm}|m{3.8cm}|m{1cm}|}
+\hline
+开展项目
+& \multicolumn{2}{m{3.6cm}|}{\centering 现有放射治疗工作人员}
+& 计划增加配置人数
+& \multicolumn{2}{m{4.8cm}|}{\centering 法规、标准要求}
+& 评价 \\
+\hline
+\erpTabInput{files/staffConfig.tex}
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{本项目工作人员岗位职责内容}
+\label{tab:ch2-linac-staff3}
+\begin{tabular}{|c|c|c|}
+\hline
+工作岗位 & 定岗人数 & 具体职责 \\
+\hline
+\erpTabInput{files/staffDuties.tex}
+\end{tabular}
+\end{table}
+
+%-----------------------------------------------------------
+\section{周围环境}
+
+\input{files/surroundings}
+
+%-----------------------------------------------------------
+\section{环境本底辐射水平}
+
+\input{files/backgroundradiation}
+
+%-----------------------------------------------------------
+\section{分析}
+
+本项目涉及放射治疗（医用电子直线加速器、CT模拟定位机）的使用。
+
+\subsection{医用电子直线加速器工程分析}
+
+\subsubsection{医用电子直线加速器工作原理}
+
+医用电子直线加速器可利用电子束或 X 射线束对患者病灶进行照射。典型结构单元包括：加速管、电子枪、微波系统、调制器、束流传输及准直系统、真空系统、恒温水冷系统和控制保护系统等。电子在加速管中获得能量后，可作为电子线输出，或打靶产生 X 射线输出。建设项目拟涉及的加速器通常具备 VMAT、IMRT、IGRT 等功能，可配备 CBCT、EPID，并具有常规模式与非均整（FFF）模式。
+
+（请补充本项目拟购加速器原理框图、内部结构示意及功能配置说明。）
+
+\subsubsection{医用电子直线加速器放射治疗流程}
+
+\begin{enumerate}
+\item 患者经诊断与治疗正当性判断后预约放疗；
+\item 体位固定与 CT 模拟定位，影像传至治疗计划系统；
+\item 医师勾画靶区与危及器官，物理师制定并优化计划；
+\item 计划验证与确认后实施治疗；
+\item 治疗中按规程摆位、出束、记录；治疗结束后患者离开，设备回零。
+\end{enumerate}
+
+（请按建设单位实际流程补充。）
+
+\subsubsection{医用电子直线加速器项目用房情况}
+
+（说明加速器机房、控制室、迷路、辅助机房等用房组成、面积及功能分区。）
+
+\subsection{CT模拟定位工程分析}
+
+\subsubsection{CT模拟定位工作原理}
+
+CT 模拟定位机通过 X 射线断层成像获取患者定位影像，用于放疗靶区勾画与计划设计。主要参数包括管电压、管电流、孔径等。
+
+\subsubsection{CT模拟定位工作程序}
+
+\begin{enumerate}
+\item 患者体位固定与标记；
+\item CT 扫描获取定位影像；
+\item 影像传输至治疗计划系统；
+\item 医师/物理师据此制定放疗计划。
+\end{enumerate}
+
+\subsubsection{CT模拟定位机项目用房情况}
+
+（说明 CT 模拟定位机房、控制室及相关辅助用房情况。）
+
+%-----------------------------------------------------------
+\section{预期运行分析}
+
+根据建设单位提供资料，本项目预期运行工作量如下（请按项目填写）。
+
+\begin{table}[H]
+\centering
+\caption{本项目预期运行工作量}
+\label{tab:ch2-linac-workload}
+\begin{tabular}{|c|c|c|c|c|c|c|c|c|}
+\hline
+序号 & 设备 & 预期诊疗患者人次 & 单人次平均出束时间 & 周工作天数 & 年工作周数 & 周工作量（h） & 年工作量（h） & 备注 \\
+\hline
+\erpTabInput{files/workloadRows.tex}
+\end{tabular}
+\end{table}
+
+%-----------------------------------------------------------
+\section{设备配置}
+
+建设单位放射诊疗设备及配套设施配置情况与《放射诊疗管理规定》的符合情况见表~\ref{tab:ch2-linac-equip}。
+
+\begin{table}[H]
+\centering
+\caption{建设单位放射诊疗设备配置评价}
+\label{tab:ch2-linac-equip}
+\begin{tabular}{|c|c|c|c|}
+\hline
+开展项目 & 配置计划 & 国家要求 & 评价 \\
+\hline
+\multirow{3}{*}{放射治疗}
+& 医用电子直线加速器（台数） & \multirow{3}{*}{至少有一台远距离放射治疗装置，并具有模拟定位设备和相应的治疗计划系统等设备} &  \\
+\cline{2-2}\cline{4-4}
+& CT模拟定位机（台数） &  &  \\
+\cline{2-2}\cline{4-4}
+& 配套计划系统（套数） &  &  \\
+\hline
+\end{tabular}
+\end{table}
+
+%-----------------------------------------------------------
+\section{项目利旧情况}
+
+（说明新建/改建性质，机房与设备是否新建、新购；质控设备、管理制度、人员等利旧情况。）
+
+%-----------------------------------------------------------
+\section{小结}
+
+本项目建设规模、人员配备、周围环境、工程分析、预期工作量及设备配置等情况见上文。评价结论：（请归纳是否满足开展放射治疗项目的相关要求。）

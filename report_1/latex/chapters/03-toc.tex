@@ -1,0 +1,42 @@
+% ======================================================================
+% 页面4：目录（第一页强制显示页眉页脚 + 仅罗马数字页码）
+% ======================================================================
+\clearpage
+\pagenumbering{roman}
+
+% ==============================================
+% �� 强制把 plain 样式改成你要的页眉页脚
+% 这是唯一能让目录第一页显示的方法
+% ==============================================
+\fancypagestyle{plain}{%
+    \fancyhf{}%
+    \lhead{\zihao{-5}\songti \buildunit\project\reporttype}%
+    \rhead{\zihao{-5}\songti \reportno}%
+    \lfoot{\zihao{-5}\songti \company\quad 编制}%
+    \rfoot{\zihao{-5}\songti \thepage}%
+    \renewcommand{\headrulewidth}{0pt}%
+    \renewcommand{\footrulewidth}{0pt}%
+}
+
+% 目录整体样式
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\zihao{-5}\songti \buildunit\project\reporttype}
+\rhead{\zihao{-5}\songti \reportno}
+\lfoot{\zihao{-5}\songti \company\quad 编制}
+\rfoot{\zihao{-5}\songti \thepage}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% 强制当前页使用我们定义好的 plain
+\thispagestyle{plain}
+
+% 目录标题
+{\centering\zihao{-2}\heiti 目\quad 录\par}
+\vspace{5mm}
+
+\titlecontents{chapter}[0pt]{\zihao{-4}\heiti}{\thecontentslabel\quad}{}{\titlerule*[10pt]{.}\contentspage}
+\titlecontents{section}[20pt]{\zihao{-4}\songti}{\thecontentslabel\quad}{}{\titlerule*[10pt]{.}\contentspage}
+\makeatletter\@starttoc{toc}\makeatother
+\InsertBlankPage
+

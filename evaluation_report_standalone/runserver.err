@@ -1,0 +1,59 @@
+Watching for file changes with StatReloader
+[11/Aug/2026 15:11:14] "GET /evaluation-reports/1/upload/evaluation_form/preview/?view=markdown HTTP/1.1" 200 35136
+[11/Aug/2026 15:11:16] "GET /evaluation-reports/1/work-media/images/image1.png HTTP/1.1" 200 2398
+[11/Aug/2026 15:11:16] "GET /evaluation-reports/1/work-media/images/image2.png HTTP/1.1" 200 55503
+[11/Aug/2026 15:11:16] "GET /evaluation-reports/1/work-media/images/image6.png HTTP/1.1" 200 87218
+[11/Aug/2026 15:11:16] "GET /evaluation-reports/1/work-media/images/image3.png HTTP/1.1" 200 18281
+[11/Aug/2026 15:11:16] "GET /evaluation-reports/1/work-media/images/image4.png HTTP/1.1" 200 4393
+[11/Aug/2026 15:11:16] "GET /evaluation-reports/1/work-media/images/image5.png HTTP/1.1" 200 50109
+Not Found: /favicon.ico
+[11/Aug/2026 15:11:16] "GET /favicon.ico HTTP/1.1" 404 3181
+[11/Aug/2026 15:11:18] "GET /evaluation-reports/1/edit/ HTTP/1.1" 200 23479
+[11/Aug/2026 15:11:18] "GET /evaluation-reports/1/work-media/images/qc_watermark_logo.png HTTP/1.1" 200 5509
+[11/Aug/2026 15:11:23] "GET /evaluation-reports/1/edit/?chapter=qualification HTTP/1.1" 200 23322
+[11/Aug/2026 15:11:23] "GET /evaluation-reports/1/work-media/images/edit_009d49f088aa.png HTTP/1.1" 200 3214063
+[11/Aug/2026 15:11:25] "GET /evaluation-reports/1/edit/?chapter=cover HTTP/1.1" 200 23479
+[11/Aug/2026 15:11:25] "GET /evaluation-reports/1/work-media/images/qc_watermark_logo.png HTTP/1.1" 200 5509
+[11/Aug/2026 15:11:48] "GET /evaluation-reports/1/edit/?chapter=ch1 HTTP/1.1" 200 169669
+[11/Aug/2026 15:11:48] "GET /evaluation-reports/1/work-media/images/36206a1fa856f3c75e9768c449840858e88a84866a00149cd1884e4bc4970aea.jpg HTTP/1.1" 200 130940
+[11/Aug/2026 15:11:48] "GET /evaluation-reports/1/work-media/images/f3bd04b8831dd978bbbd5a069d52cb1093d26d458cd3092b993aa6a270343823.jpg HTTP/1.1" 200 305152
+[11/Aug/2026 15:11:59] "GET /evaluation-reports/1/edit/?chapter=ch3 HTTP/1.1" 200 129308
+C:\Users\13785\Desktop\markdown2latex\evaluation_report_standalone\apps\evaluation_report\services.py changed, reloading.
+Watching for file changes with StatReloader
+[11/Aug/2026 15:12:03] "GET /evaluation-reports/1/edit/?chapter=ch2 HTTP/1.1" 200 189528
+[11/Aug/2026 15:12:03] "GET /evaluation-reports/1/work-media/images/56b4a458e33a5e8424cf78421224c04ad280c06e263cf45a7215755c99bc2eb9.jpg HTTP/1.1" 200 362428
+[11/Aug/2026 15:12:03] "GET /evaluation-reports/1/work-media/images/742957d7db84f202a6fe63845484d3d59fc740aaa3874e5ff9ee8d77beded25c.jpg HTTP/1.1" 200 154900
+[11/Aug/2026 15:12:03] "GET /evaluation-reports/1/work-media/images/28812430930e3985fc977bde460dee8eded594c66ae4cc8430b18a49fc807716.jpg HTTP/1.1" 200 165966
+C:\Users\13785\Desktop\markdown2latex\evaluation_report_standalone\apps\evaluation_report\services.py changed, reloading.
+Watching for file changes with StatReloader
+[11/Aug/2026 15:12:43] "GET /evaluation-reports/1/attachments/ HTTP/1.1" 200 37588
+[11/Aug/2026 15:12:44] "GET /evaluation-reports/1/upload/evaluation_form/preview/?view=markdown HTTP/1.1" 200 35136
+[11/Aug/2026 15:12:45] "GET /evaluation-reports/1/work-media/images/image1.png HTTP/1.1" 200 2398
+[11/Aug/2026 15:12:45] "GET /evaluation-reports/1/work-media/images/image4.png HTTP/1.1" 200 4393
+[11/Aug/2026 15:12:45] "GET /evaluation-reports/1/work-media/images/image5.png HTTP/1.1" 200 50109
+[11/Aug/2026 15:12:45] "GET /evaluation-reports/1/work-media/images/image2.png HTTP/1.1" 200 55503
+[11/Aug/2026 15:12:45] "GET /evaluation-reports/1/work-media/images/image3.png HTTP/1.1" 200 18281
+[11/Aug/2026 15:12:45] "GET /evaluation-reports/1/work-media/images/image6.png HTTP/1.1" 200 87218
+[11/Aug/2026 15:15:29] "GET /evaluation-reports/1/evaluation-form/ HTTP/1.1" 200 6570
+[11/Aug/2026 15:15:31] "GET /evaluation-reports/1/ HTTP/1.1" 200 12652
+[11/Aug/2026 15:15:32] "GET /evaluation-reports/1/pdf/?v=1786084791 HTTP/1.1" 200 6062524
+C:\Users\13785\Desktop\markdown2latex\evaluation_report_standalone\converter\pdf2latex.py changed, reloading.
+Watching for file changes with StatReloader
+C:\Users\13785\Desktop\markdown2latex\evaluation_report_standalone\apps\evaluation_report\keywords_service.py changed, reloading.
+Watching for file changes with StatReloader
+C:\Users\13785\Desktop\markdown2latex\evaluation_report_standalone\apps\evaluation_report\services.py changed, reloading.
+Watching for file changes with StatReloader
+C:\Users\13785\Desktop\markdown2latex\evaluation_report_standalone\converter\pdf2latex.py changed, reloading.
+Watching for file changes with StatReloader
+C:\Users\13785\Desktop\markdown2latex\evaluation_report_standalone\apps\evaluation_report\structured_views.py changed, reloading.
+Watching for file changes with StatReloader
+C:\Users\13785\Desktop\markdown2latex\evaluation_report_standalone\apps\evaluation_report\services.py changed, reloading.
+Watching for file changes with StatReloader
+C:\Users\13785\Desktop\markdown2latex\evaluation_report_standalone\apps\evaluation_report\services.py changed, reloading.
+Watching for file changes with StatReloader
+C:\Users\13785\Desktop\markdown2latex\evaluation_report_standalone\converter\project_vars.py changed, reloading.
+Watching for file changes with StatReloader
+[11/Aug/2026 17:12:38] "GET /login/ HTTP/1.1" 200 1759
+[11/Aug/2026 17:12:38,436] - Broken pipe from ('127.0.0.1', 8675)
+[11/Aug/2026 17:20:58] "GET /evaluation-reports/1/edit/ HTTP/1.1" 200 23479
+[11/Aug/2026 17:20:58] "GET /evaluation-reports/1/work-media/images/qc_watermark_logo.png HTTP/1.1" 200 5509

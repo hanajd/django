@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     # 自定义应用
     'apps.core',
     'apps.api',
+    'apps.evaluation_report',
 ]
 
 # 中间件
@@ -167,6 +168,15 @@ FILE_LIBRARY_REPORT_DIR = FILE_LIBRARY_ROOT / 'reports'
 FILE_LIBRARY_ATTACHMENT_DIR = FILE_LIBRARY_ROOT / 'attachments'
 FILE_LIBRARY_INSPECTION_SUBMIT_DIR = FILE_LIBRARY_ROOT / 'inspection_submits'
 FILE_LIBRARY_INSPECTION_PHOTO_DIR = FILE_LIBRARY_ROOT / 'inspection_photos'
+FILE_LIBRARY_EVALUATION_FORM_DIR = FILE_LIBRARY_ROOT / 'evaluation_forms'
+
+# 评价报告书（LaTeX）：模板根目录与工作区（与 evaluation_report_standalone 对齐）
+LATEX_TEMPLATE_ROOT = BASE_DIR / 'latex'
+LATEX_ENGINE = os.environ.get('LATEX_ENGINE', 'lualatex')
+LATEX_RUN_TIMES = int(os.environ.get('LATEX_RUN_TIMES', '2'))
+CONVERTER_KEYWORDS_CSV = BASE_DIR / 'converter' / 'data' / 'project_keywords.csv'
+EVALUATION_REPORT_WORK_ROOT = MEDIA_ROOT / 'evaluation_reports' / 'work'
+EVALUATION_LATEX_TEMPLATE_ROOT = MEDIA_ROOT / 'evaluation_reports' / 'latex_templates'
 FILE_LIBRARY_TEMP_ROOT = FILE_LIBRARY_ROOT / 'temp'
 # Paths passed to utils.pipeline_config.set_pipeline_directories（见 apps.core.pipeline_service）
 PIPELINE_TEMP_PDF = FILE_LIBRARY_TEMP_ROOT / 'temp_pdf'

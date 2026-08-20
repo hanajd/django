@@ -1,51 +1,87 @@
 # 06 运维、脚本与管理界面
 
+**整理日期**：2026-08-20
+
+---
+
 ## 1. Django Admin
 
-- 入口：`/admin/`（`tablet_backend/urls.py`）。  
-- 注册内容：`apps/core/admin.py`（及项目内其它 `admin.py` 若有）。  
-- 用户「文件库容量配额（字节）」在用户编辑页的内联 **用户资料** 中维护（默认 5GiB）；超级用户及角色为超级管理员/普通管理员不校验配额。
+- 入口：`/admin/`  
+- 注册：`apps/core/admin.py`、`apps/evaluation_report/admin.py`  
+- 用户「文件库容量配额」在用户资料内联中维护（默认约 5GiB）；超管/管理员角色通常不校验配额。
+
+---
 
 ## 2. 自定义管理命令
 
-### 2.1 `apps/core/management/commands/`
+用法：`python manage.py <command> [options]`
 
-| 命令 | 文件 | 用途 |
-|------|------|------|
-| `init_data` | `init_data.py` | 初始化角色与菜单种子数据 |
-| `ensure_party_a_demo` | `ensure_party_a_demo.py` | 甲方演示/引导环境相关数据 |
-| `ensure_template_tester` | `ensure_template_tester.py` | 模板测试角色与用户 |
-| `backup_database` | `backup_database.py` | SQLite 在线备份、列出备份、恢复 |
-| `purge_library_trash` | `purge_library_trash.py` | 永久删除回收站中超时（默认 31 天）的文件库记录；建议由 cron 每日执行 |
-| `check_library_media` | `check_library_media.py` | 校验 DB 文件库记录与 `media/file_library` 磁盘是否一致；缺失则移入回收站。启动时默认自动执行，可加 `--dry-run` |
-| `migrate_template_storage_layout` | `migrate_template_storage_layout.py` | 迁移模板到分层目录结构 `templates/{检测类型}/{设备}/report\|site/{code}/` |
-| `reconstruct_task_templates_from_storage` | `reconstruct_task_templates_from_storage.py` | 从 `templates/**/_task.json` 还原 DB 绑定 |
-| `repair_task_template_library` | `repair_task_template_library.py` | 补齐任务模板库缺口（执行前自动备份） |
-| `fix_repaired_task_templates` | `fix_repaired_task_templates.py` | 修复还原后的模板绑定配对 |
+### 2.1 `apps.core`
 
-### 2.2 `apps/api/management/commands/`
+| 命令 | 用途 |
+|------|------|
+| `init_data` | 角色与菜单种子 |
+| `ensure_party_a_demo` | 甲方演示/引导环境 |
+| `ensure_template_tester` | 模板测试角色与用户 |
+| `ensure_org_roles` | 行政/检测部/评价部组织角色 |
+| `ensure_org_directors` | 三部门主任演示账号（见 [组织主任账号说明.md](组织主任账号说明.md)） |
+| `ensure_commission_coordinator` | 委托协调员相关 |
+| `seed_sales_products` | 销售产品目录种子 |
+| `set_jwt_runtime` | 写入/更新 JWT 运行时配置 |
+| `backup_database` | SQLite 备份 / 列表 / 恢复 |
+| `purge_library_trash` | 永久清理超期回收站（建议 cron） |
+| `check_library_media` | DB 与 `media/file_library` 一致性；缺失移入回收站（启动时可自动跑） |
+| `migrate_template_storage_layout` | 模板分层目录迁移 |
+| `reconstruct_task_templates_from_storage` | 从 `templates/**/_task.json` 还原绑定 |
+| `repair_task_template_library` | 补齐任务模板库缺口（执行前备份） |
+| `fix_repaired_task_templates` | 修复还原后的模板配对 |
+| `reorganize_site_records_layout` | 现场记录目录重组 |
+| `reorganize_reports_layout` | 报告目录重组 |
 
-| 命令 | 文件 | 用途 |
-|------|------|------|
-| `mock_inspection_submit` | `mock_inspection_submit.py` | 从前端模板 JSON 生成模拟提交并可选预览回填 |
+### 2.2 `apps.api`
 
-使用方式：`python3 manage.py <command> [options]`
+| 命令 | 用途 |
+|------|------|
+| `mock_inspection_submit` | 从前端模板 JSON 生成模拟提交 |
+
+### 2.3 `apps.evaluation_report`
+
+| 命令 | 用途 |
+|------|------|
+| `seed_evaluation_report_templates` | 评价报告书模板种子 |
+
+Standalone 工程另有 `bootstrap_standalone` 等，不属于主站 `manage.py`。
+
+### 2.4 `scripts/`（非 manage）
+
+仓库 `scripts/` 下为一次性修复/审计脚本（字段映射、第五章公式等）。执行前先读脚本头注释并备份数据。
+
+---
 
 ## 3. 日志与监控
 
-- 项目未强制统一日志配置；生产建议配置 `LOGGING` 将错误落盘或接入采集。  
-- 长时间任务（OCR、管线）注意进程超时与磁盘占用（`temp` 目录）。
+- 可配置 `LOGGING`；`logs/` 可能含请求统计等中间件输出。  
+- OCR/管线注意 `media/file_library/temp` 磁盘与超时。
+
+---
 
 ## 4. 静态与媒体
 
-- `collectstatic`：部署生产时收集到 `STATIC_ROOT`。  
-- `MEDIA_ROOT`：用户上传与文件库内容，**需备份**；迁移服务器时与数据库一并规划。
+- 生产：`collectstatic` → `STATIC_ROOT`。  
+- `MEDIA_ROOT`：**必须备份**（文件库、评价报告工作区、F.1、APK、签名）。  
+- 启动完整性：`library_media_integrity`（可用环境变量关闭）。
+
+---
 
 ## 5. 安全发布清单（摘要）
 
-- [ ] `DEBUG=False`、`SECRET_KEY` 环境变量  
-- [ ] `ALLOWED_HOSTS`、HTTPS、`SECURE_*` 头（按部署环境）  
-- [ ] 数据库连接与迁移  
-- [ ] `CORS_ALLOWED_ORIGINS` 仅允许可信前端源  
-- [ ] JWT 过期策略与刷新接口保护  
-- [ ] 文件上传大小限制、反病毒（若单位要求）
+- [ ] `DEBUG=False`、`SECRET_KEY` 来自环境变量  
+- [ ] `ALLOWED_HOSTS`、HTTPS、`SECURE_*`  
+- [ ] 数据库迁移已执行（含 `evaluation_report`）  
+- [ ] `CORS_ALLOWED_ORIGINS` 收紧  
+- [ ] JWT 策略与刷新保护  
+- [ ] 上传大小限制；TeX/字体（若启用评价报告书）  
+- [ ] OTA APK 目录权限与发版流程  
+- [ ] 演示账号改密  
+
+完整交付见 [部署流程-从零安装与源码保护评估.md](部署流程-从零安装与源码保护评估.md)。

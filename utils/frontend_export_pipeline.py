@@ -153,6 +153,7 @@ def build_runtime_frontend_schema(
     task_obj=None,
     project_obj=None,
     extra_formula_source: Any = None,
+    prefill_instruments_from_dispatch: bool = True,
 ) -> Dict[str, Any]:
     """
     与 ``InspectionTaskFrontendJsonExportAPIView`` 默认 runtime 导出一致：
@@ -211,7 +212,10 @@ def build_runtime_frontend_schema(
         )
 
         instrument_root = build_instruments_root_for_frontend_export(
-            task_obj=task_obj, project_obj=project_obj, payload=payload
+            task_obj=task_obj,
+            project_obj=project_obj,
+            payload=payload,
+            prefill_from_dispatch=prefill_instruments_from_dispatch,
         )
         if isinstance(instrument_root, dict):
             payload = {**payload, **instrument_root}
@@ -223,7 +227,11 @@ def build_runtime_frontend_schema(
             enrich_payload_hospital_info_from_frontend_chapter(payload, frontend_obj)
             frontend_obj = _inject_frontend_payload_defaults(frontend_obj, payload)
         frontend_obj = _inject_instruments_root_into_frontend_export(
-            frontend_obj, payload, task_obj=task_obj, project_obj=project_obj
+            frontend_obj,
+            payload,
+            task_obj=task_obj,
+            project_obj=project_obj,
+            prefill_from_dispatch=prefill_instruments_from_dispatch,
         )
 
     from utils.unified_template_fields import enrich_frontend_steps_rect_from_pdf_fields

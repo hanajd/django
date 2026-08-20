@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}新建 LaTeX 模板{% endblock %}
+{% block page_title %}新建 LaTeX 模板{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-2xl space-y-6">
+    <div>
+        <a href="{% url 'evaluation_latex_template_list' %}" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; 返回模板库</a>
+        <h1 class="mt-2 text-2xl font-semibold text-slate-900">新建 LaTeX 模板</h1>
+        <p class="mt-1 text-sm text-slate-600">创建后可继续上传；也可在下方一并提交 ZIP 或多文件（需含 <code class="rounded bg-slate-100 px-1">main.tex</code>）。</p>
+    </div>
+
+    <form method="post" enctype="multipart/form-data" class="space-y-5 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        {% csrf_token %}
+        <div>
+            <label class="block text-sm font-medium text-slate-700">模板名称 <span class="text-red-500">*</span></label>
+            <input type="text" name="name" required maxlength="255" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-700">说明</label>
+            <textarea name="description" rows="2" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"></textarea>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-700">评价报告类型</label>
+            <select name="report_subtype" id="report_subtype" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm">
+                <option value="">— 不限 —</option>
+                {% for val, label in subtype_choices %}
+                <option value="{{ val }}">{{ label }}</option>
+                {% endfor %}
+            </select>
+            <p class="mt-1 text-xs text-slate-500">用于新建报告时按类型自动匹配模板。</p>
+        </div>
+
+        <div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 space-y-4">
+            <p class="text-sm font-medium text-slate-800">初始上传（可选）</p>
+            <div>
+                <label class="block text-xs font-medium text-slate-600">ZIP 压缩包</label>
+                <input type="file" name="zip_file" accept=".zip,application/zip" class="mt-1 block w-full text-sm">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-600">多文件 / 文件夹</label>
+                <input type="file" name="files" multiple webkitdirectory directory
+                       class="mt-1 block w-full text-sm" id="template-files-input">
+                <p class="mt-1 text-xs text-slate-500">可一次选择整个文件夹；相对路径会保留。</p>
+            </div>
+            <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" name="replace" value="1">
+                上传前清空已有文件（新建时通常无需勾选）
+            </label>
+        </div>
+
+        <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700">
+            创建模板
+        </button>
+    </form>
+</div>
+<script>
+(function () {
+    var input = document.getElementById('template-files-input');
+    if (!input || !input.form) return;
+    input.form.addEventListener('submit', function () {
+        var files = input.files;
+        for (var i = 0; i < files.length; i++) {
+            var hidden = document.createElement('input');
+            hidden.type = 'hidden';
+            hidden.name = 'relative_paths';
+            hidden.value = files[i].webkitRelativePath || files[i].name;
+            input.form.appendChild(hidden);
+        }
+    });
+})();
+</script>
+{% endblock %}

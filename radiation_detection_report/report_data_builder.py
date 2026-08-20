@@ -179,6 +179,7 @@ _DEFAULT_NOTES = [
     "1. 上表中检测结果未扣除本底值。",
     "2. 检测结果已按响应时间修正系数修正。",
 ]
+_ANNUAL_DOSE_NOTE_BODY = "年剂量估算=最大曝光时间×每周曝光次数×50"
 
 
 def _norm(s: Any) -> str:
@@ -188,6 +189,81 @@ def _norm(s: Any) -> str:
 def _norm_result_cell(s: Any) -> str:
     """检测结果格：保留组间换行，仅去掉首尾空白。"""
     return str(s or "").strip()
+
+
+def _iter_report_data_points(data: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for key in ("points", "points_group2"):
+        items = data.get(key) or []
+        if not isinstance(items, list):
+            continue
+        for pt in items:
+            if isinstance(pt, dict):
+                rows.append(pt)
+                for sub in pt.get("sub_rows") or []:
+                    if isinstance(sub, dict):
+                        rows.append(sub)
+    return rows
+
+
+def _annual_dose_cell_has_value(raw: Any) -> bool:
+    s = _norm(raw)
+    if not s or s in ("/", "—", "-", "–"):
+        return False
+    return True
+
+
+def _report_data_has_annual_dose(data: Mapping[str, Any]) -> bool:
+    """仅当防护点位实际填有年剂量估算时，才追加第 3 条注释。"""
+    for row in _iter_report_data_points(data):
+        if _annual_dose_cell_has_value(row.get("annual_dose_msv")):
+            return True
+    return False
+
+
+def _notes_already_have_annual_dose_formula(notes: Sequence[str]) -> bool:
+    blob = re.sub(r"\s+", "", "".join(str(n) for n in notes))
+    return "年剂量估算" in blob and "最大曝光时间" in blob and "每周曝光次数" in blob and "×" in blob
+
+
+def _rewrite_annual_dose_formula_in_notes(notes: Sequence[str]) -> List[str]:
+    """旧版用 * 的公式改成 ×；已是 × 则原样返回。"""
+    out: List[str] = []
+    changed = False
+    for n in notes:
+        s = str(n)
+        if "年剂量估算" in s and "最大曝光时间" in s and "*" in s:
+            s = s.replace("*", "×")
+            changed = True
+        out.append(s)
+    return out if changed else list(notes)
+
+
+def _next_note_number(notes: Sequence[str]) -> int:
+    max_n = 0
+    for n in notes:
+        for m in re.finditer(r"(?:^|[\n；;。]\s*)(\d{1,2})\s*[.．、]", str(n)):
+            max_n = max(max_n, int(m.group(1)))
+    return max_n + 1 if max_n else len([x for x in notes if str(x).strip()]) + 1
+
+
+def _ensure_annual_dose_note(data: Mapping[str, Any]) -> Dict[str, Any]:
+    """防护表含年剂量估算时，在表末注释追加计算公式。"""
+    if not isinstance(data, dict):
+        return {}
+    out = dict(data)
+    if not _report_data_has_annual_dose(out):
+        return out
+    notes = [str(n).rstrip() for n in (out.get("notes") or []) if str(n).strip()]
+    notes = _rewrite_annual_dose_formula_in_notes(notes)
+    if _notes_already_have_annual_dose_formula(notes):
+        out["notes"] = notes
+        return out
+    if not notes:
+        notes = list(_DEFAULT_NOTES)
+    notes.append(f"{_next_note_number(notes)}. {_ANNUAL_DOSE_NOTE_BODY}")
+    out["notes"] = notes
+    return out
 
 
 def _dynamic_data(payload: Mapping[str, Any]) -> Dict[str, Any]:
@@ -1813,7 +1889,7 @@ def build_report_data_from_bindings(
         out["condition_group2"] = condition_group2 or ""
         out["points_group2"] = _finalize_report_point_ids(points_group2)
         out["include_annual_dose_column"] = True
-    return apply_report_evaluations(out)
+    return _ensure_annual_dose_note(apply_report_evaluations(out))
 
 
 def _normalize_report_seq_id(seq_val: Any) -> str:
@@ -2265,7 +2341,7 @@ def build_report_data_from_extracted(extracted: Mapping[str, Any]) -> Optional[D
         "background": {"label": "本底值（μSv/h）", "value": bg_value},
         "notes": notes,
     }
-    return apply_report_evaluations(out)
+    return _ensure_annual_dose_note(apply_report_evaluations(out))
 
 
 def _enrich_report_data_from_site_extract(
@@ -2464,8 +2540,10 @@ def try_build_report_data(
             site_template_parsed=site_template_parsed,
         )
         if data and data.get("points"):
-            return apply_report_evaluations(
-                _enrich_report_data_from_site_extract(data, site_pdf_path=site_pdf_path)
+            return _ensure_annual_dose_note(
+                apply_report_evaluations(
+                    _enrich_report_data_from_site_extract(data, site_pdf_path=site_pdf_path)
+                )
             )
 
     if site_pdf_path:
@@ -2482,10 +2560,10 @@ def try_build_report_data(
                 if first_loc in ("检测项目", "检测点位置", "检测条件"):
                     data = None
             if isinstance(data, dict) and data.get("points"):
-                return apply_report_evaluations(data)
+                return _ensure_annual_dose_note(apply_report_evaluations(data))
             built = build_report_data_from_extracted(extracted)
             if built and built.get("points"):
-                return built
+                return _ensure_annual_dose_note(built)
         except Exception:
             pass
     return None

@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}{{ template_obj.name }} · LaTeX 模板{% endblock %}
+{% block page_title %}LaTeX 模板管理{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-4xl space-y-6">
+    <div>
+        <a href="{% url 'evaluation_latex_template_list' %}" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; 返回模板库</a>
+        <h1 class="mt-2 text-2xl font-semibold text-slate-900">{{ template_obj.name }}</h1>
+        <p class="mt-1 text-sm text-slate-600 font-mono">{{ template_obj.key }} · {{ template_obj.get_source_display }}{% if template_obj.is_system %} · 系统内置{% endif %}</p>
+    </div>
+
+    {% if not template_obj.is_editable %}
+    <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        内置模板为<strong>只读</strong>。如需修改，请新建模板并上传副本。
+    </div>
+    {% endif %}
+
+    <form method="post" class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="update_meta">
+        <div>
+            <label class="block text-sm font-medium text-slate-700">名称</label>
+            <input type="text" name="name" required value="{{ template_obj.name }}" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-700">说明</label>
+            <textarea name="description" rows="2" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm">{{ template_obj.description }}</textarea>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-700">评价报告类型</label>
+            <select name="report_subtype" id="report_subtype" class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm">
+                <option value="">— 不限 —</option>
+                {% for val, label in subtype_choices %}
+                <option value="{{ val }}" {% if template_obj.report_subtype == val %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            <p class="mt-1 text-xs text-slate-500">用于新建报告时按类型自动匹配模板。</p>
+        </div>
+        <div class="pt-2 text-right">
+            <button type="submit" class="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900">保存信息</button>
+        </div>
+    </form>
+
+    {% if template_obj.is_editable %}
+    <form method="post" enctype="multipart/form-data" action="{% url 'evaluation_latex_template_upload' template_obj.key %}"
+          class="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" id="template-upload-form">
+        {% csrf_token %}
+        <h2 class="text-lg font-semibold text-slate-900">上传文件</h2>
+        <div>
+            <label class="block text-sm font-medium text-slate-700">ZIP 压缩包</label>
+            <input type="file" name="zip_file" accept=".zip,application/zip" class="mt-1 block w-full text-sm">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-700">多文件 / 文件夹</label>
+            <input type="file" name="files" multiple webkitdirectory directory class="mt-1 block w-full text-sm" id="template-upload-files">
+            <p class="mt-1 text-xs text-slate-500">支持选择整个目录；会保留相对路径（如 chapters/01.tex）。</p>
+        </div>
+        <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" name="replace" value="1">
+            上传前清空现有文件
+        </label>
+        <div>
+            <button type="submit" class="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700">上传</button>
+        </div>
+    </form>
+    {% endif %}
+
+    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div class="flex items-center justify-between gap-3">
+            <h2 class="text-lg font-semibold text-slate-900">文件列表（{{ files|length }}）</h2>
+            <a href="{% url 'evaluation_latex_template_preview' template_obj.key %}"
+               class="text-sm text-indigo-600 hover:text-indigo-800">打开预览 / 编辑</a>
+        </div>
+        <ul class="mt-4 max-h-80 overflow-y-auto divide-y divide-slate-100 font-mono text-xs text-slate-600">
+            {% for f in files %}
+            <li class="py-1.5 flex justify-between gap-2">
+                <span>{{ f.relpath }}</span>
+                <span class="text-slate-400 shrink-0">{{ f.size }} B</span>
+            </li>
+            {% empty %}
+            <li class="py-6 text-center text-slate-500 font-sans text-sm">尚未上传文件</li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    {% if not template_obj.is_system %}
+    <form method="post" action="{% url 'evaluation_latex_template_delete' template_obj.key %}"
+          onsubmit="return confirm('确定删除模板「{{ template_obj.name }}」？此操作不可恢复。');">
+        {% csrf_token %}
+        <button type="submit" class="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-100">删除模板</button>
+    </form>
+    {% endif %}
+</div>
+<script>
+(function () {
+    var form = document.getElementById('template-upload-form');
+    var input = document.getElementById('template-upload-files');
+    if (!form || !input) return;
+    form.addEventListener('submit', function () {
+        form.querySelectorAll('input[name="relative_paths"]').forEach(function (el) { el.remove(); });
+        var files = input.files;
+        for (var i = 0; i < files.length; i++) {
+            var hidden = document.createElement('input');
+            hidden.type = 'hidden';
+            hidden.name = 'relative_paths';
+            hidden.value = files[i].webkitRelativePath || files[i].name;
+            form.appendChild(hidden);
+        }
+    });
+})();
+</script>
+{% endblock %}

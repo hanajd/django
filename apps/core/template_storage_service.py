@@ -284,3 +284,213 @@ def infer_storage_slot_for_file(lf: LibraryFile, task: LibraryTask | None) -> st
     ).exists() and not lf.library_tasks.filter(pk=task.pk).exists():
         return "history"
     return "current"
+
+
+def _move_disk_file_to_task_history(task: LibraryTask, abs_path: Path) -> Path | None:
+    """Move a loose file under task current/ into history/ (unique name if needed)."""
+    if not abs_path.is_file():
+        return None
+    try:
+        hist_rel = build_template_relative_path(
+            disk_name=abs_path.name, task=task, slot="history"
+        )
+        hist_abs = pipeline_service.library_absolute_path(hist_rel)
+    except ValueError:
+        return None
+    hist_abs.parent.mkdir(parents=True, exist_ok=True)
+    dest = hist_abs
+    if dest.exists():
+        stem, suf = abs_path.stem, abs_path.suffix
+        n = 1
+        while True:
+            cand = hist_abs.parent / f"{stem}__dup{n}{suf}"
+            if not cand.exists():
+                dest = cand
+                break
+            n += 1
+    shutil.move(str(abs_path), str(dest))
+    return dest
+
+
+def reconcile_task_current_template_storage(task: LibraryTask) -> dict[str, Any]:
+    """使任务 ``current/`` 与任务模板库当前挂载一致。
+
+    规则：
+    - ``current/`` 仅保留 ``get_task_template_pair`` 得到的主 PDF + 主 JSON；
+    - 其余仍绑定在该任务上的同角色模板解除绑定并归档到 ``history/``；
+    - ``current/`` 中无库记录或未挂载的散文件移入 ``history/``；
+    - 备份后缀（``.bak`` / ``.pre-fit`` 等）一律归档；
+    - 最后刷新 ``_task.json``。
+    """
+    from apps.core.library_file_service import detach_files_from_projects, detach_files_from_tasks
+    from apps.core.library_task_template_binding_service import (
+        get_task_template_pair,
+        infer_template_file_role,
+        is_auxiliary_template_json_file,
+        sync_template_file_disk_after_task_detach,
+    )
+    from apps.core.models import LibraryTaskTemplateBindingHistory
+
+    stats: dict[str, Any] = {
+        "task_id": task.pk,
+        "task_code": task.code,
+        "kept": [],
+        "archived_bound": [],
+        "archived_orphan_disk": [],
+        "unbound": [],
+        "errors": [],
+    }
+
+    pdf_lf, json_lf = get_task_template_pair(task)
+    keep_ids: set[int] = set()
+    keep_names: set[str] = set()
+    for lf in (pdf_lf, json_lf):
+        if lf is None:
+            continue
+        keep_ids.add(int(lf.pk))
+        keep_names.add(_disk_name_from_library_file(lf))
+        # Ensure keepers sit in current/
+        try:
+            relocate_library_template_file(lf, task=task, slot="current", write_manifest=False)
+            stats["kept"].append(
+                {
+                    "id": lf.pk,
+                    "role": infer_template_file_role(lf),
+                    "name": lf.original_name,
+                    "disk": _disk_name_from_library_file(lf),
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            stats["errors"].append(f"keep {lf.pk}: {exc}")
+
+    # Extra bound pdf/json on this task → detach + archive
+    for lf in list(
+        task.library_files.filter(category=LibraryFile.CATEGORY_TEMPLATE, deleted_at__isnull=True)
+    ):
+        if int(lf.pk) in keep_ids:
+            continue
+        if is_auxiliary_template_json_file(lf):
+            # auxiliary belongs in auxiliary/, not current
+            try:
+                relocate_library_template_file(
+                    lf, task=task, slot="auxiliary", write_manifest=False
+                )
+            except Exception as exc:  # noqa: BLE001
+                stats["errors"].append(f"aux {lf.pk}: {exc}")
+            continue
+        role = infer_template_file_role(lf)
+        if role not in (
+            LibraryTaskTemplateBindingHistory.ROLE_PDF,
+            LibraryTaskTemplateBindingHistory.ROLE_JSON,
+        ):
+            continue
+        try:
+            LibraryTaskTemplateBindingHistory.objects.create(
+                library_task=task,
+                library_file=lf,
+                file_id_snapshot=lf.pk,
+                original_name_snapshot=lf.original_name or "",
+                file_role=role,
+                replaced_by=None,
+                replaced_by_file=pdf_lf if role == LibraryTaskTemplateBindingHistory.ROLE_PDF else json_lf,
+                source="reconcile_current",
+            )
+        except Exception:
+            pass
+        detach_files_from_tasks([lf.pk], [task.pk])
+        project_ids = list(task.projects.values_list("id", flat=True))
+        if project_ids:
+            detach_files_from_projects([lf.pk], project_ids)
+        sync_template_file_disk_after_task_detach(
+            lf,
+            former_task=task,
+            user=None,
+            source="reconcile_current",
+            record_history=False,
+        )
+        stats["unbound"].append(lf.pk)
+        stats["archived_bound"].append(lf.original_name or _disk_name_from_library_file(lf))
+
+    # Sweep disk current/ for leftovers
+    try:
+        current_dir = task_storage_manifest_path(task, slot="current").parent
+    except ValueError:
+        return stats
+    if current_dir.is_dir():
+        for fp in list(current_dir.iterdir()):
+            if not fp.is_file() or fp.name == MANIFEST_FILENAME:
+                continue
+            if fp.name in keep_names:
+                continue
+            low = fp.name.lower()
+            # Always archive backup / pre-fit copies
+            is_backup = (
+                ".bak" in low
+                or ".pre-fit" in low
+                or low.endswith(".bak")
+                or ".json." in low  # e.g. xxx.json.pre-fit-...
+            )
+            rel = str(
+                Path("templates").joinpath(*task_storage_base_segments(task), "current", fp.name)
+            ).replace("\\", "/")
+            row = LibraryFile.objects.filter(
+                category=LibraryFile.CATEGORY_TEMPLATE,
+                relative_path=rel,
+                deleted_at__isnull=True,
+            ).first()
+            if row is not None and int(row.pk) in keep_ids:
+                continue
+            if row is not None:
+                # Unbound or foreign — archive under this task history
+                try:
+                    if row.library_tasks.filter(pk=task.pk).exists():
+                        detach_files_from_tasks([row.pk], [task.pk])
+                    relocate_library_template_file(
+                        row, task=task, slot="history", write_manifest=False
+                    )
+                    stats["archived_bound"].append(row.original_name or fp.name)
+                except Exception as exc:  # noqa: BLE001
+                    stats["errors"].append(f"archive lf {row.pk}: {exc}")
+                continue
+            # Pure orphan on disk
+            try:
+                dest = _move_disk_file_to_task_history(task, fp)
+                if dest:
+                    stats["archived_orphan_disk"].append(dest.name)
+            except Exception as exc:  # noqa: BLE001
+                stats["errors"].append(f"orphan {fp.name}: {exc}")
+            if is_backup:
+                pass  # already handled as orphan/bound above
+
+    _write_manifest_for_task(task)
+    return stats
+
+
+def reconcile_all_task_current_template_storage() -> dict[str, Any]:
+    """对全部任务执行 ``reconcile_task_current_template_storage``。"""
+    summary = {
+        "tasks": 0,
+        "with_changes": 0,
+        "archived_bound": 0,
+        "archived_orphan_disk": 0,
+        "unbound": 0,
+        "errors": 0,
+        "details": [],
+    }
+    for task in LibraryTask.objects.all().order_by("id").iterator():
+        summary["tasks"] += 1
+        stats = reconcile_task_current_template_storage(task)
+        changed = bool(
+            stats["archived_bound"]
+            or stats["archived_orphan_disk"]
+            or stats["unbound"]
+            or stats["errors"]
+        )
+        if changed:
+            summary["with_changes"] += 1
+            summary["archived_bound"] += len(stats["archived_bound"])
+            summary["archived_orphan_disk"] += len(stats["archived_orphan_disk"])
+            summary["unbound"] += len(stats["unbound"])
+            summary["errors"] += len(stats["errors"])
+            summary["details"].append(stats)
+    return summary

@@ -517,18 +517,21 @@ def _inject_frontend_payload_defaults(frontend_obj: dict, payload: dict) -> dict
 
 
 def _inject_instruments_root_into_frontend_export(
-    frontend_obj: dict, payload: dict, *, task_obj=None, project_obj=None
+    frontend_obj: dict, payload: dict, *, task_obj=None, project_obj=None, prefill_from_dispatch: bool = True
 ) -> dict:
     """
     导出给 App 的前端 JSON 根级带上检测仪器初值：
-    - instruments：已与任务模板绑定合并后的列表（与提交接口 submit 中 instruments 同形）；
-    - 不再写入 instrumentCatalogOptions；下拉数据由前端走登记/仪器台账 API。
+    - 首次打开：用项目派工套件预填；
+    - 已有提交仪器：原样写入，不再用派工覆盖。
     """
     if not isinstance(frontend_obj, dict):
         return frontend_obj
     frontend_obj.pop("instrumentCatalogOptions", None)
     bundle = build_instruments_root_for_frontend_export(
-        task_obj=task_obj, project_obj=project_obj, payload=payload
+        task_obj=task_obj,
+        project_obj=project_obj,
+        payload=payload,
+        prefill_from_dispatch=prefill_from_dispatch,
     )
     frontend_obj.update(bundle)
     for legacy_key in ("instrumentsByScope", "instrumentSetsByScope", "instrumentBindings"):
@@ -943,6 +946,19 @@ class _InspectionTaskAccessMixin:
         return f"{idx:02d}"
 
     @staticmethod
+    def _commission_library_tasks(project: LibraryProject) -> list:
+        """与工作台「委托立项」一致的任务集。"""
+        from apps.core.project_equipment_service import project_tasks_for_user_assignment
+
+        if project is None:
+            return []
+        return project_tasks_for_user_assignment(project)
+
+    @staticmethod
+    def _commission_library_task_ids(project: LibraryProject) -> set[int]:
+        return {int(t.pk) for t in _InspectionTaskAccessMixin._commission_library_tasks(project)}
+
+    @staticmethod
     def _resolve_project_task_by_no(project: LibraryProject, task_no: str):
         raw = str(task_no or "").strip()
         if not raw:
@@ -956,7 +972,11 @@ class _InspectionTaskAccessMixin:
         tasks = list(project.library_tasks.order_by("code", "id"))
         if idx > len(tasks):
             return None
-        return tasks[idx - 1]
+        library_task = tasks[idx - 1]
+        allowed_ids = _InspectionTaskAccessMixin._commission_library_task_ids(project)
+        if allowed_ids and int(library_task.pk) not in allowed_ids:
+            return None
+        return library_task
 
     @staticmethod
     def _has_project_membership(user, project: LibraryProject) -> bool:
@@ -1169,18 +1189,17 @@ class _InspectionTaskAccessMixin:
             inst_list, inst_scoped = self._instruments_for_task_response(obj, proj, task_obj)
             payload_for_inst = obj.raw_payload if isinstance(obj.raw_payload, dict) else {}
         else:
-            bundle = coerce_submit_instruments(
-                None, project_obj=proj, task_obj=task_obj
-            )
-            inst_list = bundle.array_for_api
-            inst_scoped = bundle.scoped
+            inst_list, inst_scoped = [], {}
             payload_for_inst = {}
         inst_export = build_instruments_root_for_frontend_export(
             task_obj=task_obj,
             project_obj=proj,
             payload=payload_for_inst,
+            prefill_from_dispatch=not has_payload,
         )
-        if isinstance(inst_export.get("instruments"), list) and inst_export["instruments"]:
+        if isinstance(inst_export.get("instruments"), list) and (
+            not has_payload or inst_export["instruments"]
+        ):
             inst_list = inst_export["instruments"]
         if isinstance(inst_export.get("instrumentsByScope"), dict) and inst_export["instrumentsByScope"]:
             inst_scoped = inst_export["instrumentsByScope"]
@@ -1270,9 +1289,17 @@ class InspectionPendingAPIView(_InspectionTaskAccessMixin, APIView):
             "project", "library_task", "assigned_by"
         )
         assignments = list(ass_qs.order_by("-created_at"))
+        commission_ids_by_project: dict[int, set[int]] = {}
         case_by_no = {}
         assigned_at_map = {}
         for a in assignments:
+            if a.project_id and a.library_task_id:
+                pid = int(a.project_id)
+                if pid not in commission_ids_by_project:
+                    commission_ids_by_project[pid] = self._commission_library_task_ids(a.project)
+                allowed = commission_ids_by_project[pid]
+                if allowed and int(a.library_task_id) not in allowed:
+                    continue
             task_no = self._build_assignment_task_no(a)
             if task_no in case_by_no:
                 continue
@@ -1902,7 +1929,9 @@ class InspectionProjectTaskListAPIView(APIView):
             library_task_equipment_context_by_task_id,
         )
 
-        tasks = list(project.library_tasks.order_by("code", "id"))
+        all_ordered = list(project.library_tasks.order_by("code", "id"))
+        allowed_ids = _InspectionTaskAccessMixin._commission_library_task_ids(project)
+        tasks = [t for t in all_ordered if int(t.pk) in allowed_ids] if allowed_ids else all_ordered
         if not tasks:
             return _ok("获取成功", {"projectId": project.code, "count": 0, "list": []})
         equipment_ctx = library_task_equipment_context_by_task_id(project)
@@ -1918,7 +1947,7 @@ class InspectionProjectTaskListAPIView(APIView):
         rows = []
         template_cache = {}
         overseer = library_user_can_assign_tasks_to_participants(request.user)
-        for idx, library_task in enumerate(tasks, start=1):
+        for library_task in tasks:
             if overseer:
                 assignment = LibraryTaskAssignment.objects.filter(
                     project=project, library_task=library_task
@@ -1931,7 +1960,9 @@ class InspectionProjectTaskListAPIView(APIView):
                 )
             if assignment is None and not overseer:
                 continue
-            task_no = f"{idx:02d}"
+            task_no = _InspectionTaskAccessMixin._build_project_task_no(project, library_task)
+            if not task_no:
+                continue
             if library_task.id not in template_cache:
                 template_cache[library_task.id] = (
                     _resolve_task_template_json(library_task),
@@ -1957,7 +1988,7 @@ class InspectionProjectTaskListAPIView(APIView):
                         project,
                         library_task,
                         task_no=task_no,
-                        ordered_tasks=tasks,
+                        ordered_tasks=all_ordered,
                     ),
                     **eq_fields,
                     "projectId": _InspectionTaskAccessMixin._project_public_id(project),

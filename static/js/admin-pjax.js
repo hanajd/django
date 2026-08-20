@@ -17,6 +17,33 @@
     }
   }
 
+  /**
+   * 评价报告书编辑页依赖 extra_head（KaTeX / 大段专用 CSS）。
+   * PJAX 只替换 #admin-page-body，不会带上头资源，章切换会表现为“渲染失败”。
+   */
+  function requiresFullPage(href) {
+    try {
+      var path = new URL(href, window.location.origin).pathname;
+    } catch (e) {
+      return false;
+    }
+    if (path.indexOf("/evaluation-reports/") < 0) return false;
+    return (
+      /\/evaluation-reports\/\d+\/edit(\/|$)/.test(path) ||
+      /\/evaluation-reports\/templates\/[^/]+\/edit(\/|$)/.test(path)
+    );
+  }
+
+  function currentPageRequiresFull() {
+    return !!(
+      document.querySelector("[data-admin-pjax-require-full]") ||
+      document.getElementById("se-app") ||
+      document.getElementById("fe-app") ||
+      document.getElementById("te-app") ||
+      document.getElementById("fl-app")
+    );
+  }
+
   function shouldHandleLink(a, event) {
     if (!a || a.tagName !== "A" || !a.href) return false;
     if (event && (event.defaultPrevented || event.button !== 0)) return false;
@@ -24,6 +51,8 @@
     if (a.target && a.target !== "_self") return false;
     if (a.hasAttribute("download")) return false;
     if (a.getAttribute("data-admin-pjax") === "off") return false;
+    if (a.closest && a.closest('[data-admin-pjax="off"]')) return false;
+    if (requiresFullPage(a.href) || currentPageRequiresFull()) return false;
     var rel = (a.getAttribute("rel") || "").toLowerCase();
     if (rel.indexOf("external") >= 0 || rel.indexOf("noopener") >= 0) return false;
     if (!sameOrigin(a.href)) return false;
@@ -72,7 +101,7 @@
 
   function navigate(href, push) {
     var body = document.getElementById(BODY_ID);
-    if (!body) {
+    if (!body || requiresFullPage(href) || currentPageRequiresFull()) {
       window.location.href = href;
       return;
     }

@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}编辑流程图 · {{ current.title }}{% endblock %}
+
+{% block extra_head %}
+<style>
+  body:has(#fl-app) { overflow: hidden; }
+  body:has(#fl-app) .flex.min-h-screen { height: 100vh; overflow: hidden; }
+  body:has(#fl-app) main { overflow: hidden !important; padding: 0 !important; }
+  .fl-page { height: 100vh; display: flex; flex-direction: column; background: #f1f5f9; overflow: hidden; }
+  .fl-toolbar {
+    flex-shrink: 0; background: #0f172a; color: #e2e8f0;
+    padding: 0.55rem 0.85rem; display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center;
+  }
+  .fl-toolbar-right {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 0.4rem;
+  }
+  .fl-toolbar a, .fl-toolbar button {
+    font-size: 0.75rem; padding: 0.35rem 0.6rem; border-radius: 0.4rem;
+    border: 1px solid transparent; background: transparent; color: #e2e8f0; cursor: pointer;
+  }
+  .fl-toolbar a:hover, .fl-toolbar button:hover { background: #1e293b; }
+  .fl-toolbar button.primary { background: #4f46e5; }
+  .fl-toolbar .sep { width: 1px; height: 1.35rem; background: #334155; margin: 0 0.2rem; }
+  #fl-status { font-size: 0.75rem; color: #94a3b8; }
+  #fl-status.ok { color: #6ee7b7; } #fl-status.err { color: #fca5a5; }
+  .fl-main { flex: 1; overflow: hidden; padding: 0.85rem; display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem; }
+  @media (max-width: 960px) { .fl-main { grid-template-columns: 1fr; overflow: auto; } }
+  .fl-card {
+    background: #fff; border-radius: 0.5rem; padding: 0.75rem;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.08); display: flex; flex-direction: column; min-height: 0;
+  }
+  .fl-card h2 { font-size: 0.9rem; font-weight: 600; margin: 0 0 0.5rem; color: #0f172a; }
+  #fl-code {
+    flex: 1; width: 100%; min-height: 280px; resize: none; border: 1px solid #cbd5e1; border-radius: 0.4rem;
+    padding: 0.65rem 0.75rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.82rem; line-height: 1.45; color: #0f172a;
+  }
+  #fl-preview {
+    flex: 1; overflow: auto; border: 1px solid #e2e8f0; border-radius: 0.4rem;
+    padding: 0.75rem; background: #fff;
+  }
+  .se-flow-rich { display: flex; flex-direction: column; gap: 0; color: #111; width: 100%; }
+  .se-flow-unit,
+  .se-flow-vlink {
+    display: grid;
+    grid-template-columns: minmax(5.5rem, 1fr) minmax(9rem, 11.5rem) minmax(7rem, 1.15fr);
+    column-gap: 0.35rem;
+    align-items: center;
+    width: 100%;
+  }
+  .se-flow-side { font-size: 0.7rem; color: #222; line-height: 1.35; }
+  .se-flow-side.left { text-align: right; padding-right: 0.15rem; }
+  .se-flow-side.right {
+    text-align: left; display: flex; flex-direction: column; align-items: flex-start; gap: 0.25rem;
+  }
+  .se-flow-main { display: flex; justify-content: center; }
+  .se-flow-step {
+    border: 1px solid #111; border-radius: 0; background: #fff; color: #111;
+    padding: 0.4rem 0.55rem; width: 100%; max-width: 11.5rem;
+    text-align: center; font-size: 0.8rem; line-height: 1.35;
+  }
+  .se-flow-step.side { font-size: 0.72rem; max-width: 7.5rem; width: auto; min-width: 4.5rem; padding: 0.3rem 0.45rem; }
+  .se-flow-note { font-size: 0.68rem; color: #222; line-height: 1.35; }
+  .se-flow-h-branch { display: flex; align-items: center; gap: 0.15rem; }
+  .se-flow-h-edge {
+    position: relative; display: flex; align-items: center;
+    min-width: 2.4rem; height: 1.1rem; margin-right: 0.1rem;
+  }
+  .se-flow-h-edge .se-flow-edge-lab {
+    position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%);
+    white-space: nowrap; font-size: 0.65rem; line-height: 1;
+  }
+  .se-flow-hline { display: block; height: 0; flex: 1; min-width: 1.6rem; border-top: 1.5px solid #111; }
+  .se-flow-arrowhead-h {
+    display: block; width: 0; height: 0; flex-shrink: 0;
+    border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+    border-left: 7px solid #111;
+  }
+  .se-flow-vlink { min-height: 1.35rem; align-items: stretch; }
+  .se-flow-vlink-mid { display: flex; flex-direction: column; align-items: center; position: relative; }
+  .se-flow-vshaft { position: relative; display: flex; justify-content: center; width: 100%; min-height: 0.55rem; }
+  .se-flow-vshaft.tip { min-height: 0.7rem; }
+  .se-flow-vline { display: block; width: 0; border-left: 1.5px solid #111; min-height: 0.55rem; }
+  .se-flow-vshaft.tip .se-flow-vline { min-height: 0.45rem; }
+  .se-flow-arrowhead {
+    position: absolute; left: 50%; bottom: 0; transform: translateX(-50%);
+    width: 0; height: 0;
+    border-left: 4px solid transparent; border-right: 4px solid transparent;
+    border-top: 7px solid #111;
+  }
+  .se-flow-pass {
+    position: absolute; left: calc(50% + 0.45rem); top: 50%; transform: translateY(-50%);
+    font-size: 0.65rem; color: #111; white-space: nowrap;
+  }
+  .se-flow-mid-branch {
+    display: flex; align-items: center; align-self: stretch;
+    width: calc(50% + 7.5rem); margin-left: 50%;
+    gap: 0.15rem; min-height: 1.6rem; padding: 0.1rem 0;
+  }
+  .se-flow-mid-branch .se-flow-hline { min-width: 2.2rem; flex: 1; }
+  .se-flow-edge-lab { font-size: 0.65rem; color: #111; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fl-page" id="fl-app"
+     data-chapter="{{ current.key }}"
+     data-block="{{ block_id }}"
+     data-new="{{ is_new|yesno:'1,0' }}"
+     data-after="{{ after_id }}"
+     data-pos="{{ insert_pos }}"
+     data-save-url="{{ save_url }}"
+     data-preview-url="{{ preview_url }}"
+     data-back="{{ back_url }}"
+     data-csrf="{{ csrf_token }}">
+  <div class="fl-toolbar">
+    <a href="{{ back_url }}">&larr; 返回正文</a>
+    <div class="sep"></div>
+    <button type="button" id="fl-preview-btn">刷新预览</button>
+    <div class="fl-toolbar-right">
+      <span id="fl-status"></span>
+      <button type="button" class="primary" id="fl-save">保存并返回</button>
+    </div>
+  </div>
+  <div class="fl-main">
+    <div class="fl-card">
+      <h2>LaTeX</h2>
+      <textarea id="fl-code" spellcheck="false"></textarea>
+    </div>
+    <div class="fl-card">
+      <h2>预览</h2>
+      <div id="fl-preview"></div>
+    </div>
+  </div>
+</div>
+<script id="fl-model-data" type="application/json">{{ model_json|safe }}</script>
+<script>
+(function () {
+  const app = document.getElementById('fl-app');
+  const csrf = app.dataset.csrf;
+  const saveUrl = app.dataset.saveUrl;
+  const previewUrl = app.dataset.previewUrl;
+  const backUrl = app.dataset.back;
+  const chapter = app.dataset.chapter;
+  const blockId = app.dataset.block;
+  const isNew = app.dataset.new === '1';
+  const afterId = app.dataset.after || '';
+  const insertPos = app.dataset.pos || 'after';
+  const statusEl = document.getElementById('fl-status');
+  const codeEl = document.getElementById('fl-code');
+  const previewEl = document.getElementById('fl-preview');
+  let model = { kind: 'flowchart', caption: '', steps: [], latex: '' };
+  try { model = JSON.parse(document.getElementById('fl-model-data').textContent || '{}'); } catch (e) {}
+  codeEl.value = model.latex || '';
+
+  let timer = null;
+  async function refreshPreview() {
+    const latex = codeEl.value;
+    statusEl.textContent = '';
+    statusEl.className = '';
+    try {
+      const resp = await fetch(previewUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+        body: JSON.stringify({ latex }),
+      });
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || '预览失败');
+      previewEl.innerHTML = data.preview_html || '';
+      model.caption = data.caption || model.caption;
+      model.steps = data.steps || model.steps;
+    } catch (err) {
+      statusEl.textContent = String(err.message || err);
+      statusEl.className = 'err';
+    }
+  }
+
+  codeEl.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(refreshPreview, 450);
+  });
+  document.getElementById('fl-preview-btn').addEventListener('click', refreshPreview);
+
+  document.getElementById('fl-save').addEventListener('click', async () => {
+    const latex = codeEl.value.trim();
+    if (!latex) {
+      statusEl.textContent = 'LaTeX 不能为空';
+      statusEl.className = 'err';
+      return;
+    }
+    statusEl.textContent = '保存中…';
+    statusEl.className = '';
+    try {
+      await refreshPreview();
+      const resp = await fetch(saveUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+        body: JSON.stringify({
+          chapter,
+          block_id: blockId,
+          is_new: isNew,
+          after_id: afterId,
+          insert_pos: insertPos,
+          model: {
+            kind: 'flowchart',
+            caption: model.caption || '',
+            steps: model.steps || [],
+            latex,
+          },
+        }),
+      });
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || '保存失败');
+      statusEl.textContent = '已保存';
+      statusEl.className = 'ok';
+      location.href = data.redirect || backUrl;
+    } catch (err) {
+      statusEl.textContent = String(err.message || err);
+      statusEl.className = 'err';
+    }
+  });
+
+  refreshPreview();
+})();
+</script>
+{% endblock %}

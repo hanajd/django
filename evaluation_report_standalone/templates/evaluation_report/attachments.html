@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block title %}附件管理 | {{ report.title }}{% endblock %}
+
+{% block content %}
+<style>
+.attachment-grid { display: flex; flex-wrap: wrap; gap: .75rem; }
+.attachment-grid.sortable .attachment-card { cursor: grab; }
+.attachment-grid .sortable-ghost { opacity: .4; }
+.attachment-card { width: 7.5rem; flex: 0 0 7.5rem; overflow: hidden; border: 1px solid #e2e8f0; border-radius: .5rem; background: #fff; }
+.attachment-preview { position: relative; display: flex; aspect-ratio: 4/3; align-items: center; justify-content: center; overflow: hidden; background: #f8fafc; }
+.attachment-preview img { width: 100%; height: 100%; object-fit: cover; }
+.attachment-preview i { font-size: 2rem; color: #94a3b8; }
+.attachment-index { position: absolute; top: .25rem; left: .25rem; min-width: 1.25rem; height: 1.25rem; border-radius: .25rem; background: rgb(15 23 42 / .75); color: #fff; font-size: .65rem; line-height: 1.25rem; text-align: center; }
+.attachment-meta { border-top: 1px solid #f1f5f9; padding: .4rem; }
+.attachment-name { display: block; overflow: hidden; color: #475569; font-size: .65rem; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-actions { display: flex; gap: .25rem; margin-top: .35rem; }
+.attachment-actions a, .attachment-actions button { flex: 1; border: 1px solid #e2e8f0; border-radius: .25rem; background: #fff; padding: .2rem; color: #475569; font-size: .65rem; text-align: center; }
+.attachment-actions button { border-color: #fecaca; color: #dc2626; }
+</style>
+
+<div class="mx-auto max-w-6xl space-y-5">
+    <header class="flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+            <a href="{% url 'evaluation_report_structured_edit' report.pk %}" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; 返回正文编辑</a>
+            <h1 class="mt-2 text-2xl font-semibold text-slate-900">附件上传与微调</h1>
+            <p class="mt-1 text-sm text-slate-600">{{ report.title }} · 已确认 {{ progress.done }}/{{ progress.total }} 个材料栏目</p>
+        </div>
+        <span class="inline-flex self-start rounded-md bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-800">流程 4 / 6</span>
+    </header>
+
+    <nav class="flex flex-wrap items-center gap-2 text-sm" aria-label="报告制作流程">
+        <a href="{% url 'evaluation_report_evaluation_form' report.pk %}" class="rounded-md bg-emerald-50 px-3 py-2 text-emerald-900">1. 评价信息表</a>
+        <span class="text-slate-300">&rarr;</span>
+        <a href="{% url 'evaluation_report_upload_preview' report.pk 'evaluation_form' %}?view=markdown" class="rounded-md bg-emerald-50 px-3 py-2 text-emerald-900">2. 基础报告</a>
+        <span class="text-slate-300">&rarr;</span>
+        <a href="{% url 'evaluation_report_structured_edit' report.pk %}" class="rounded-md bg-emerald-50 px-3 py-2 text-emerald-900">3. 正文编辑</a>
+        <span class="text-slate-300">&rarr;</span>
+        <span class="rounded-md bg-indigo-600 px-3 py-2 font-medium text-white">4. 附件管理</span>
+        <span class="text-slate-300">&rarr;</span>
+        <span class="rounded-md bg-slate-100 px-3 py-2 text-slate-500">5. 生成 PDF</span>
+    </nav>
+
+    <div class="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+        每个栏目可选择多个文件。先加入待上传区，拖动调整顺序，再点击该栏目的“确认上传”；已上传文件也可以继续排序、预览或删除。
+    </div>
+
+    <section class="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        <ul class="divide-y divide-slate-100">
+            {% for row in attachment_rows %}
+            <li id="slot-{{ row.slot.slot_key }}" class="scroll-mt-4 px-5 py-5">
+                <div class="space-y-4">
+                    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div class="min-w-0">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <span class="inline-flex h-6 w-6 items-center justify-center rounded-full {% if row.uploaded %}bg-emerald-100 text-emerald-700{% else %}bg-slate-100 text-slate-400{% endif %}">
+                                    <i class="{% if row.uploaded %}ri-check-line{% else %}ri-subtract-line{% endif %}"></i>
+                                </span>
+                                <h2 class="font-medium text-slate-900">{{ row.slot.label }}</h2>
+                                {% if row.slot.required %}<span class="text-xs text-red-600">必填</span>{% endif %}
+                                {% if row.staging_count %}<span class="text-xs text-indigo-600">待上传 {{ row.staging_count }} 个</span>{% endif %}
+                                {% if row.files %}<span class="text-xs text-slate-500">已上传 {{ row.files|length }} 个</span>{% endif %}
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <form method="post" enctype="multipart/form-data"
+                                  action="{% url 'evaluation_report_upload_stage' report.pk row.slot.slot_key %}"
+                                  class="attachment-stage-form inline-flex items-center gap-2">
+                                {% csrf_token %}
+                                <input type="file" name="file" multiple
+                                       accept="image/*,.pdf,.png,.jpg,.jpeg,.gif,.webp,.bmp,.tif,.tiff"
+                                       class="attachment-file-input hidden">
+                                <button type="button" class="attachment-pick rounded-md border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50">
+                                    <i class="ri-add-line"></i> 选择文件
+                                </button>
+                                <button type="submit" class="attachment-stage-submit rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-indigo-200" disabled>加入待上传</button>
+                            </form>
+                            {% if row.staging_count %}
+                            <form method="post" action="{% url 'evaluation_report_upload_staging_commit' report.pk row.slot.slot_key %}">
+                                {% csrf_token %}
+                                <button type="submit" class="rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-800">确认上传 ({{ row.staging_count }})</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    {% if row.staging_files %}
+                    <div class="rounded-lg border border-dashed border-indigo-200 bg-indigo-50/50 p-3">
+                        <p class="mb-2 text-xs font-medium text-indigo-900">待上传文件，可拖动调整顺序</p>
+                        <div class="attachment-grid{% if row.staging_files|length > 1 %} sortable{% endif %}"
+                             {% if row.staging_files|length > 1 %}data-reorder-url="{% url 'evaluation_report_upload_staging_reorder' report.pk row.slot.slot_key %}"{% endif %}>
+                            {% for f in row.staging_files %}
+                            <div class="attachment-card" data-file-id="{{ f.id }}">
+                                <div class="attachment-preview">
+                                    <span class="attachment-index">{{ forloop.counter }}</span>
+                                    {% if f.preview_kind == 'image' %}<img src="{{ f.media_url }}" alt="{{ f.filename }}" loading="lazy">
+                                    {% elif f.preview_kind == 'pdf' %}<i class="ri-file-pdf-2-line text-red-500"></i>
+                                    {% else %}<i class="ri-file-line"></i>{% endif %}
+                                </div>
+                                <div class="attachment-meta">
+                                    <span class="attachment-name" title="{{ f.filename }}">{{ f.filename }}</span>
+                                    <div class="attachment-actions">
+                                        <form method="post" action="{% url 'evaluation_report_upload_staging_delete' report.pk row.slot.slot_key %}" onsubmit="return confirm('确定移除这个待上传文件吗？');">
+                                            {% csrf_token %}<input type="hidden" name="file_id" value="{{ f.id }}"><button type="submit">移除</button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    {% if row.files %}
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <p class="mb-2 text-xs font-medium text-slate-700">已上传文件，可拖动调整最终顺序</p>
+                        <div class="attachment-grid{% if row.files|length > 1 %} sortable{% endif %}"
+                             {% if row.files|length > 1 %}data-reorder-url="{% url 'evaluation_report_upload_file_reorder' report.pk row.slot.slot_key %}"{% endif %}>
+                            {% for f in row.files %}
+                            <div class="attachment-card" data-file-id="{{ f.id }}">
+                                <a href="{% url 'evaluation_report_upload_preview' report.pk row.slot.slot_key %}?file_id={{ f.id }}" class="attachment-preview" title="预览 {{ f.filename }}">
+                                    <span class="attachment-index">{{ forloop.counter }}</span>
+                                    {% if f.preview_kind == 'image' %}<img src="{{ f.media_url }}" alt="{{ f.filename }}" loading="lazy">
+                                    {% elif f.preview_kind == 'pdf' %}<i class="ri-file-pdf-2-line text-red-500"></i>
+                                    {% else %}<i class="ri-file-line"></i>{% endif %}
+                                </a>
+                                <div class="attachment-meta">
+                                    <span class="attachment-name" title="{{ f.filename }}">{{ f.filename }}</span>
+                                    <div class="attachment-actions">
+                                        <a href="{% url 'evaluation_report_upload_preview' report.pk row.slot.slot_key %}?file_id={{ f.id }}">预览</a>
+                                        <form method="post" action="{% url 'evaluation_report_upload_file_delete' report.pk row.slot.slot_key f.id %}" onsubmit="return confirm('确定删除这个已上传文件吗？');">
+                                            {% csrf_token %}<button type="submit">删除</button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% elif not row.staging_files %}
+                    <p class="pl-8 text-xs text-slate-400">该栏目尚未上传附件</p>
+                    {% endif %}
+                </div>
+            </li>
+            {% empty %}
+            <li class="px-5 py-8 text-center text-sm text-slate-500">当前报告模板没有附件栏目。</li>
+            {% endfor %}
+        </ul>
+    </section>
+
+    <div class="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <p class="text-sm text-slate-500">附件微调完成后，返回报告详情确认生成 PDF。</p>
+        <a href="{% url 'evaluation_report_detail' report.pk %}"
+           class="inline-flex items-center justify-center gap-2 rounded-md bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700">
+            下一步：确认生成 PDF <i class="ri-arrow-right-line"></i>
+        </a>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script>
+(function () {
+    function getCookie(name) {
+        var match = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
+        return match ? decodeURIComponent(match[1]) : '';
+    }
+    var csrfToken = getCookie('csrftoken');
+
+    document.querySelectorAll('.attachment-stage-form').forEach(function (form) {
+        var input = form.querySelector('.attachment-file-input');
+        var pick = form.querySelector('.attachment-pick');
+        var submit = form.querySelector('.attachment-stage-submit');
+        pick.addEventListener('click', function () { input.click(); });
+        input.addEventListener('change', function () {
+            submit.disabled = !(input.files && input.files.length);
+        });
+    });
+
+    document.querySelectorAll('.attachment-grid.sortable').forEach(function (grid) {
+        if (typeof Sortable === 'undefined') return;
+        new Sortable(grid, {
+            animation: 180,
+            draggable: '.attachment-card',
+            ghostClass: 'sortable-ghost',
+            onEnd: function () {
+                var cards = Array.from(grid.querySelectorAll('.attachment-card'));
+                cards.forEach(function (card, index) {
+                    var badge = card.querySelector('.attachment-index');
+                    if (badge) badge.textContent = String(index + 1);
+                });
+                var url = grid.getAttribute('data-reorder-url');
+                if (!url) return;
+                var ids = cards.map(function (card) { return card.getAttribute('data-file-id'); }).filter(Boolean);
+                fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-CSRFToken': csrfToken,
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: 'order=' + encodeURIComponent(ids.join(','))
+                }).catch(function () { alert('保存附件顺序失败，请刷新页面后重试。'); });
+            }
+        });
+    });
+})();
+</script>
+{% endblock %}

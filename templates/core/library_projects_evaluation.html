@@ -64,7 +64,42 @@
                 {% endif %}
             </div>
             {% endif %}
-            <p class="text-xs text-slate-400 text-center">评价报告书功能建设中，上线后将按医院一并展示。</p>
+            <p class="text-xs text-slate-400 text-center">评价报告书请在侧栏「评价报告书」或下方列表进入编制。</p>
+
+            <section class="rounded-2xl border border-indigo-100 bg-white shadow-sm overflow-hidden">
+                <div class="px-4 py-3 border-b border-indigo-50 bg-indigo-50/60 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                        <h2 class="text-sm font-semibold text-indigo-950">
+                            <i class="ri-book-2-line mr-1"></i>评价报告书
+                        </h2>
+                        <p class="text-xs text-indigo-800/80 mt-0.5">共 {{ overview.book_count|default:0 }} 份 · 上传评价信息表 → 编辑 → 编译 PDF</p>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <a href="{% url 'evaluation_report_list' %}" class="px-3 py-1.5 text-xs rounded-lg border border-indigo-200 text-indigo-900 hover:bg-indigo-50">全部报告书</a>
+                        <a href="{% url 'evaluation_report_create' %}" class="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">新建报告书</a>
+                    </div>
+                </div>
+                {% if book_projects %}
+                <ul class="divide-y divide-slate-100">
+                    {% for proj in book_projects %}
+                    <li class="px-4 py-3 flex flex-wrap items-center justify-between gap-2 hover:bg-slate-50/80">
+                        <div class="min-w-0">
+                            <p class="text-sm font-medium text-slate-900 truncate">{{ proj.name }}</p>
+                            <p class="text-xs text-slate-500 mt-0.5 truncate">
+                                {{ proj.hospital_label }} · {{ proj.report_subtype_label }} · {{ proj.status_label }}
+                            </p>
+                        </div>
+                        <div class="flex flex-wrap gap-2 shrink-0">
+                            <a href="{{ proj.edit_url }}" class="px-2.5 py-1 text-xs rounded-lg border border-slate-200 text-slate-700 hover:bg-white">编辑</a>
+                            <a href="{{ proj.open_url }}" class="px-2.5 py-1 text-xs rounded-lg bg-teal-700 text-white hover:bg-teal-800">管理</a>
+                        </div>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="px-4 py-8 text-center text-sm text-slate-500">暂无评价报告书。点击「新建报告书」开始。</p>
+                {% endif %}
+            </section>
         </div>
 
         {% if selected_project %}

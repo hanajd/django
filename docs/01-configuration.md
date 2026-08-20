@@ -11,7 +11,7 @@
 
 - Django 自带：`admin`、`auth`、`sessions` 等  
 - 第三方：`rest_framework`、`rest_framework_simplejwt`、`corsheaders`、`django_filters`  
-- 业务：`apps.core`、`apps.api`
+- 业务：`apps.core`、`apps.api`、`apps.evaluation_report`
 
 ## 3. 模板与全局上下文
 
@@ -24,8 +24,11 @@
 
 - `FILE_LIBRARY_ROOT`、`FILE_LIBRARY_UPLOAD_DIR`、`FILE_LIBRARY_TEMPLATE_DIR`、现场记录/报告/附件/检测提交等目录常量。  
 - 管线临时目录：`PIPELINE_TEMP_PDF`、`PIPELINE_BATCH_ARCHIVE` 等。
+- **评价报告书**：`LATEX_TEMPLATE_ROOT`（仓库 `latex/`）、`EVALUATION_REPORT_WORK_ROOT`、`EVALUATION_LATEX_TEMPLATE_ROOT`、`CONVERTER_KEYWORDS_CSV`（见 [评价报告书-LaTeX功能说明.md](评价报告书-LaTeX功能说明.md)）。
+- **评价报告表 F.1**：`F1_EVAL_PACKAGE_DIR`（仓库 `f1_eval_report/`）、`F1_EVAL_WORKSPACE_ROOT`（默认 `media/f1_eval/workspaces`）。
+- **App OTA**：`APP_OTA_APK_DIR`（默认 `media/apk`）、`APP_OTA_RUNTIME_CONFIG_FILE`（根目录 `app_ota_runtime.json`）。
 
-**接手注意**：迁移存储或清理磁盘时，需与 `apps.core.library_file_service`、`pipeline_service` 中的路径假设一致。
+**接手注意**：迁移存储或清理磁盘时，需与 `library_file_service`、`pipeline_service`、评价报告书/F.1 工作区路径假设一致。
 
 **启动校验**（`apps.core.library_media_integrity`）：服务启动后扫描未在回收站中的 `LibraryFile`，若 `FILE_LIBRARY_ROOT` 下无对应磁盘文件则自动移入回收站；卡住的 OCR 任务（源文件均缺失）标记为失败。可通过 `LIBRARY_MEDIA_INTEGRITY_ON_STARTUP=0` 或 `LIBRARY_MEDIA_INTEGRITY_SKIP=1` 关闭；亦可手动执行 `python manage.py check_library_media`（`--dry-run` 仅统计）。
 
@@ -57,3 +60,15 @@
 - **Ollama**：`OLLAMA_HOST`、`OLLAMA_OPTIONS` 等，与 `utils/ollama_extract`、管线配合。
 
 具体调用链见 [05-utils-and-pipelines.md](05-utils-and-pipelines.md)。
+
+## 7. 运行时 JSON（可选热更新）
+
+仓库根目录可能存在（以 `settings` 中路径为准）：
+
+| 文件 | 用途 |
+|------|------|
+| `jwt_runtime.json` | JWT 寿命等（`set_jwt_runtime` 可写） |
+| `app_ota_runtime.json` | Android 版本与 APK 元数据 |
+| `llm_runtime.json` / `pdf_fill_runtime.json` / `decimal_precision_runtime.json` | LLM / 填报精度等可调参数 |
+
+生产勿把含密钥的文件提交进 Git；备份时与 `MEDIA_ROOT`、数据库一并纳入。

@@ -1,0 +1,75 @@
+% ======================================================================
+% 页面1：封面（绝对定位对齐《封面样式》样张）
+% 字体：除右上编号/版本外全部加粗；项目名与报告类型 28 磅；
+%       （报批稿）与底栏单位/日期为三号；汉字用思源宋体 VF（wght=700）；
+%       数字与英文用 Times New Roman
+% ======================================================================
+\begin{titlepage}
+\thispagestyle{empty}
+% 思源宋体可变字体：封面汉字真粗体（wght=700）；页眉用常规字重（wght=400）
+% 注意：须用 axis={wght=...}；单独写 wght= 无效，会落在 ExtraLight
+\IfFileExists{fonts/SourceHanSerifSC-VF.ttf}{%
+  \newCJKfontfamily\CoverSerifRegular{SourceHanSerifSC-VF.ttf}[%
+    Path=fonts/,
+    Renderer=HarfBuzz,
+    RawFeature={mode=harf;axis={wght=400}}%
+  ]%
+  \newCJKfontfamily\CoverSerifBold{SourceHanSerifSC-VF.ttf}[%
+    Path=fonts/,
+    Renderer=HarfBuzz,
+    RawFeature={mode=harf;axis={wght=700}}%
+  ]%
+}{%
+  \newcommand{\CoverSerifRegular}{\songti\mdseries}%
+  \newcommand{\CoverSerifBold}{\songti\bfseries}%
+}%
+% \normalfont 保证西文/数字走 Times；\CoverSerif* 只切换 CJK
+\newcommand{\CoverHeaderFont}{\normalfont\mdseries\CoverSerifRegular\zihao{3}}%
+\newcommand{\CoverTitleFont}{\normalfont\bfseries\CoverSerifBold\fontsize{28bp}{36bp}\selectfont}%
+\newcommand{\CoverMetaFont}{\normalfont\bfseries\CoverSerifBold\zihao{3}}%
+\begin{tikzpicture}[remember picture, overlay]
+  \node[anchor=north west, inner sep=0pt]
+    at ([xshift=65.6pt, yshift=-94.6pt]current page.north west)
+    {\includegraphics[width=4.62cm]{images/qc_watermark_logo.png}};
+
+  % 右上编号 / 版本（页眉：不加粗）
+  \node[anchor=north east, inner sep=0pt]
+    at ([xshift=-79.4pt, yshift=-91.6pt]current page.north east)
+    {\CoverHeaderFont\reportno};
+  \node[anchor=north east, inner sep=0pt]
+    at ([xshift=-79.4pt, yshift=-112.4pt]current page.north east)
+    {\CoverHeaderFont\reportver};
+
+  % 上段：建设单位标题行 + 项目名称 — 思源宋体 28 磅加粗
+  \node[anchor=north, inner sep=0pt]
+    at ([yshift=-211.3pt]current page.north)
+    {\CoverTitleFont\buildunit};
+  \node[anchor=north, inner sep=0pt]
+    at ([yshift=-253.1pt]current page.north)
+    {\CoverTitleFont\project};
+
+  % 中段：报告类型 28 磅加粗；（报批稿）三号加粗
+  \node[anchor=north, inner sep=0pt]
+    at ([yshift=-390.0pt]current page.north)
+    {\CoverTitleFont\radiationhazard};
+  \node[anchor=north, inner sep=0pt]
+    at ([yshift=-431.8pt]current page.north)
+    {\CoverTitleFont\reportkind};
+  \node[anchor=north, inner sep=0pt]
+    at ([yshift=-471.9pt]current page.north)
+    {\CoverMetaFont\mitnote};
+
+  % 底段：建设单位 / 评价单位 / 日期 — 思源宋体三号加粗
+  \node[anchor=north west, inner sep=0pt]
+    at ([xshift=143.4pt, yshift=-637.5pt]current page.north west)
+    {\CoverMetaFont 建设单位：\buildunit};
+  \node[anchor=north west, inner sep=0pt]
+    at ([xshift=143.4pt, yshift=-668.7pt]current page.north west)
+    {\CoverMetaFont 评价单位：\company};
+  \node[anchor=north, inner sep=0pt]
+    at ([yshift=-696.6pt]current page.north)
+    {\CoverMetaFont\printdate};
+\end{tikzpicture}
+\null
+\end{titlepage}
+\InsertBlankPage

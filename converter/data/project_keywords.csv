@@ -1,0 +1,74 @@
+command,label_cn,category,md_pattern,md_table_label,default_value,notes
+reportno,报告编号,cover,^\*\*报告编号[：:]\s*(.+?)\*\*$,报告编号,赣检测院YP250420,封面右上
+reportver,报告版本,cover,,,（C 版）,封面右上
+buildunit,建设单位,cover,^建设单位[：:]\s*(.+)$,,萍乡市人民医院,封面标题与底栏
+project,建设项目名称,cover,,,后装治疗机机房改建项目,封面标题（不含建设单位前缀）
+equipment,主要设备/装置,cover,,,后装治疗机,封面项目名称组成部分
+projectscope,建设内容/子项,cover,,,机房改建项目,封面项目名称组成部分
+radiationhazard,报告类型（上）,cover,,,放射性职业病危害,封面中段
+reportkind,报告类型（下）,cover,,,预评价报告书,封面中段
+mitnote,文稿状态,cover,,,（报批稿）,封面中段如（报批稿）
+company,评价单位,cover,^评价单位[：:]\s*(.+)$,评价单位,江西辐射剂量检测院有限公司,封面底栏
+printdate,封面日期,cover,^编制日期[：:]\s*(.+)$,,2025 年 9 月,封面底栏
+legalrep,法定代表人（评价单位）,declaration,,法定代表人,黄龙（签字或盖章）,声明页表格
+projectleader,项目负责人,declaration,,项目负责人,刘 沅,声明页表格
+projectleadercert,项目负责人证书编号,declaration,,,FWJP-250420,声明页表格
+reportwriter,报告编写人,declaration,,报告编写人,刘 沅,声明页表格
+reportwritercert,报告编写人证书编号,declaration,,,FWJP-250420,声明页表格
+reportreviewer,报告审核人,declaration,,报告审核人,方伟东,声明页表格
+reportreviewercert,报告审核人证书编号,declaration,,,FWJP-250420,声明页表格
+reportsignatory,报告签发人,declaration,,报告签发人,刘 焦,声明页表格
+reportsignatorycert,报告签发人证书编号,declaration,,,FWJP-250420,声明页表格
+signyear,签发年份,declaration,,,,声明页日期（留空待填）
+signmonth,签发月份,declaration,,,,声明页日期（留空待填）
+signday,签发日期,declaration,,,,声明页日期（留空待填）
+companyaddress,评价单位地址,declaration,^地址[：:]\s*(.+)$,,江西省南昌市青山湖区顺外路392号君嘉广场2号楼9楼西,声明页页脚
+companyzip,邮政编码,declaration,^邮编[：:]\s*(.+)$,,330029,声明页页脚
+companyphone,联系电话,declaration,^电话[：:]\s*(.+)$,,0791-88225536,声明页页脚
+companyemail,电子邮箱,declaration,^邮箱[：:]\s*(.+)$,,jxfs2018@163.com,声明页页脚
+unitprofile,建设单位概况,chapter1,,,,1.x 个性化长文 → files/unitProfile.tex
+projectintro,项目建设背景,chapter1,,,,1.x 个性化长文 → files/projectIntro.tex
+sourcetype,辐射源类型,chapter1,,,含密封源装置,表1.3-1 第二列
+sourcedevice,辐射源设备,chapter1,,,拟新购的1台后装治疗机,表1.3-1 第三列
+sourceremark,辐射源备注,chapter1,,,1）设备参数见下文表3.1-1\\2）用途：用于后装治疗\\3）使用$\mathrm{^{192}Ir}$放射源,表1.3-1 备注列
+basicmaterials,基础资料（1.5.3）,chapter1,,,,个性化长文 → files/basicmaterials.tex
+projectnamefull,建设项目全称,chapter2,,项目名称,萍乡市人民医院后装治疗机机房改建项目,表2.1 概况表
+buildaddress,建设地址,chapter2,,建设地址,江西省萍乡市开发区武功山中大道 8 号,表2.1
+projectnature,项目性质,chapter2,,项目性质,改建,表2.1
+designunit,设计单位,chapter2,,设计单位,浙江省现代建筑设计研究院有限公司,表2.1
+equipmentconfig,设备配置,chapter2,,设备配置,1 台后装机，$^{192}\mathrm{Ir}$源，活度$3.7\times10^{11}\,\mathrm{Bq}$（10Ci）,表2.1
+totalinvestment,总投资,chapter2,,总投资,200 万元，放射卫生防护计划投资 30 万元,表2.1
+constructionscale,建设规模,chapter2,,建设规模,在原有后装机房内更换一台后装治疗机（型号待定，内置 1 枚放射源 $^{192}\mathrm{Ir}$，活度为：$3.7\times10^{11}\,\mathrm{Bq}$（10Ci）），项目计划总投资 200 万元，放射卫生防护计划投资 30 万元。,表2.1
+developmentplan,发展规划,chapter2,,,除本项目外，放射治疗项目尚无其他发展规划。,表2.1
+riskclassification,诊疗风险危害分类,chapter2,,风险分类,危害严重类放射诊疗建设项目,表2.1
+radiationhazarddegree,放射性危害程度,chapter2,,放射性危害程度,危害严重类,表2.1 / 小结
+buildunitlegalrep,法定代表人（建设单位）,chapter2,,,刘绍华,概况/附件；勿与声明页混用
+buildunitcontact,联系人（建设单位）,chapter2,,联系人,陈佳龙,概况表
+buildunitphone,联系电话（建设单位）,chapter2,,联系电话,13707991201,概况表
+stafflist,表2.2-1现有放射工作人员,chapter2,,,,表体 → files/staffList.tex
+staffconfig,表2.2-2人员配备一览,chapter2,,,,表体 → files/staffConfig.tex
+staffduties,表2.2-3岗位职责,chapter2,,,,表体 → files/staffDuties.tex
+surroundings,周围环境,chapter2,,,,2.3 → files/surroundings.tex
+backgroundradiation,环境本底辐射水平,chapter2,,,,2.4 → files/backgroundradiation.tex
+protectionlayout,防护设施布置（2.5.3）,chapter2,,,,2.5.3 → files/protectionlayout.tex
+workloadrows,表2.6-1预期运行工作量,chapter2,,,,表体 → files/workloadRows.tex
+sourcesummary,小结辐射源简述,chapter2,,,1台后装治疗机，使用1枚放射源 $^{192}\mathrm{Ir}$,2.8 小结
+sourceoverview,3.1辐射源项概况,chapter3,,,,正文+表 → files/sourceoverview.tex
+tab412,表4.1-2周围环境一览,chapter4,,,,→ files/tab412.tex
+tab414,表4.1-4机房尺寸,chapter4,,,,→ files/tab414.tex
+fig41images,4.1附图,chapter4,,,,平面/剖面/分区图 → files/fig41images.tex
+tab421,表4.2-1屏蔽设计,chapter4,,,,→ files/tab421.tex
+fig42points,图4.2关注点选取,chapter4,,,,平面+剖面 → files/fig42points.tex
+workload4222,4.2.2.2后装治疗工作量,chapter4,,,,→ files/workload4222.tex
+tab423,表4.2-3剂量率控制水平,chapter4,,,,→ files/tab423.tex
+figsafetypos,防护安全措施拟安装位置图,chapter4,,,,→ files/figSafetyPos.tex
+figvent,后装治疗机机房通风布局图,chapter4,,,,→ files/figVent.tex
+figcable,电缆沟风管穿墙示意图,chapter4,,,,→ files/figCable.tex
+emergencyorg,第7章应急组织名单,chapter7,,,,→ files/应急组织与职责.tex；由评价信息表获取
+localenvphone,当地生态环境主管部门电话,chapter7,,,,市生态环境局24小时值班电话
+localhealthphone,当地卫生健康主管部门电话,chapter7,,,,医政处电话
+protectionorg,第8章放射防护管理组织名单,chapter8,,,,→ files/放射防护管理组织.tex；由评价信息表获取
+healthstaffrows,表8.3-2职业人员健康管理,chapter8,,,,→ files/healthStaffRows.tex
+reporttype,报告类型全称,shared,,,放射性职业病危害预评价报告书,由 radiationhazard+reportkind 组合；页眉等
+reportname,报告全称,shared,,,,由 projectnamefull+reporttype 组合；声明页表格
+reportdate,报告日期,shared,,,2025年6月,正文引用的报告日期

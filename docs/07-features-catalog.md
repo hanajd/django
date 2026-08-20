@@ -2,7 +2,7 @@
 
 本文档按**用户可见能力**整理当前 Django 项目的全部功能，便于接手、排障与文档同步。实现细节以代码为准；业务规则专题见文末「专题文档索引」。
 
-**最后整理**：2026-05-22
+**最后整理**：2026-08-20
 
 ---
 
@@ -11,7 +11,7 @@
 | 维度 | 说明 |
 |------|------|
 | 项目名 | `tablet_backend` — 放射检测 / 平板业务后台 |
-| Web | 服务端渲染：文件库、项目工作台、模板编辑、委托管理、仪器台账等 |
+| Web | 服务端渲染：文件库、项目工作台、模板编辑、委托管理、仪器台账、**报告枢纽**、**评价报告表 F.1**、**评价报告书**、OTA 发版等 |
 | API | JWT REST：`/api/v2/`（推荐）、`/api/v1/`（兼容） |
 | 客户端 | 平板 App 检测流程；Web 与 API 共用 `apps.core.models` |
 
@@ -82,11 +82,60 @@
 |------|------|
 | `/database/devices/` | **检测仪器台账**：`InstrumentCatalog` 登记、编辑、出库/入库 |
 
-### 2.7 Django Admin
+### 2.7 报告流程枢纽
 
 | 路径 | 功能 |
 |------|------|
-| `/admin/` | Django 管理后台（模型注册见 `apps/core/admin.py`） |
+| `/files/hub/site-records/` | 枢纽：现场记录侧 |
+| `/files/hub/report-generate/` | 枢纽：报告生成 |
+| `/files/hub/review-sign/` | 枢纽：审核签字 |
+| `/files/hub/report-download/` | 枢纽：报告下载 |
+
+服务：`workflow_hub_service.py`。一致性：[报告流程枢纽与医院委托工作台数据一致性方案.md](报告流程枢纽与医院委托工作台数据一致性方案.md)。
+
+### 2.8 评价报告表（F.1）
+
+权限：`perm_f1_eval`。详述：[评价报告表-F1功能说明.md](评价报告表-F1功能说明.md)。
+
+| 路径 | 功能 |
+|------|------|
+| `/files/f1-eval/` | F.1 工作台（项目 / 章节 / 表格 / 附件相册 / 格式 / 生成 PDF） |
+| `/files/f1-eval/api/*` | 章节保存、表格 CRUD、Excel 导入导出、图件、封面元数据、附件、生成、项目 CRUD/派工等 |
+| `/files/f1-eval/media/*`、`/download/<kind>/` | 附件/资源媒体与 PDF/产物下载 |
+
+### 2.9 评价报告书（LaTeX）
+
+路由：`apps/evaluation_report/urls.py`，挂载前缀 `/evaluation-reports/`。权限：`perm_evaluation_report`。详述：[评价报告书-LaTeX功能说明.md](评价报告书-LaTeX功能说明.md)。
+
+| 路径 | 功能 |
+|------|------|
+| `/evaluation-reports/` | 报告列表 |
+| `/evaluation-reports/create/` | 新建（医院、子类型、模板） |
+| `/evaluation-reports/<pk>/evaluation-form/` | ① 评价信息表上传 |
+| `/evaluation-reports/<pk>/generate-base/` | ② 生成基础报告 |
+| `/evaluation-reports/<pk>/edit/` | ③ 结构化正文编辑（个性化字段蓝底高亮） |
+| `/evaluation-reports/<pk>/attachments/` | ④ 附件：选文件预览 → 待上传 → 确认；图片可调旋转 / A3 横置 / 宽度 |
+| `/evaluation-reports/<pk>/build/`、`/pdf/` | ⑤ 编译与预览 PDF |
+| `/evaluation-reports/<pk>/keywords/` | 项目关键词（项目信息） |
+| `/evaluation-reports/templates/`、`.../edit/` | LaTeX 模板库与模板结构化编辑 |
+| `/evaluation-reports/keywords/schema/` | 通用关键词映射 |
+
+与「评价报告表」（F.1）不是同一功能。
+
+### 2.10 设置、账号与其它
+
+| 路径 | 功能 |
+|------|------|
+| `/settings/app-ota/` | Android APK OTA 发版（超管） |
+| `/settings/debug/` | 调试相关设置 |
+| `/account/profile/`、`/account/signatures/` | 个人资料与签名图 |
+| `/help/coordinator/` | 委托协调员帮助 |
+
+### 2.11 Django Admin
+
+| 路径 | 功能 |
+|------|------|
+| `/admin/` | Django 管理后台（`apps/core/admin.py`、`apps/evaluation_report/admin.py`） |
 
 ---
 
@@ -149,6 +198,15 @@
 | `/registry/site-records/` | 现场原始记录 CRUD |
 | `/registry/reports/` | 报告 CRUD；`GET .../trace/` 全链路追溯 |
 
+### 3.5 Android OTA（v2）
+
+| 端点 | 功能 |
+|------|------|
+| `GET /api/v2/app/version` | 查询最新版本与下载信息 |
+| `GET /api/v2/app/apk/<filename>` | 下载 APK |
+
+Web 发版：`/settings/app-ota/`。规格：[ANDROID_OTA_UPDATE_SPEC.md](ANDROID_OTA_UPDATE_SPEC.md)。
+
 ---
 
 ## 4. 核心业务工作流
@@ -208,19 +266,31 @@
 - 链路：PDF → MinerU → MD 清洗 → Ollama 设备 JSON
 - 结果写入 `json` 分类 + `LibraryOCRProcessTask` 状态跟踪
 
+### 4.9 报告流程枢纽
+
+- `/files/hub/*` 四页串联现场记录 → 生成 → 审核签字 → 下载
+- 与医院委托工作台数据对齐见专题文档
+
+### 4.10 评价报告表 F.1 / 评价报告书
+
+- F.1：`/files/f1-eval/` → 工作区 → `f1_eval_report` 生成 PDF  
+- 评价报告书：信息表 → 基础报告 → 结构化编辑 → 附件 → LaTeX 编译  
+
 ---
 
 ## 5. 权限与角色
 
 来源：`apps/core/library_access.py` — `ROLE_PERMISSION_MATRIX`
 
-### 5.1 权限位（11 项 + 2 项仅 UserProfile 覆盖）
+### 5.1 权限位
 
 **基础操作**：`perm_manage_users` · `perm_manage_roles` · `perm_manage_menus` · `perm_file_library` · `perm_file_upload` · `perm_file_upload_attachment` · `perm_file_download` · `perm_file_preview` · `perm_file_delete`
 
 **数据范围**：`perm_file_scope_own_only`（仅本人数据）
 
 **流程与业务**：`perm_process_pipeline` · `perm_htmlpdf` · `perm_assign_tasks` · `perm_create_library_project` · `perm_biz_registry`
+
+**评价业务**：`perm_f1_eval`（评价报告表）· `perm_evaluation_report`（评价报告书）
 
 **仅 UserProfile 覆盖**：`perm_library_task_templates_write`（任务模板沙箱自建）、`perm_mock_inspection_submit`（模拟提交）
 
@@ -237,6 +307,7 @@
 | `app_user` | 旧版 App 用户（兼容） |
 | `template_editor` | 模板编辑 |
 | `template_tester` | 模板测试 |
+| 组织演示角色 | 行政/检测/评价主任等（见 `ensure_org_*`） |
 
 `APP_SIDE_ROLE_CODES`：上述五类检测岗位 + `app_user`；仅这些角色可参与任务分配与检测 API。
 
@@ -259,9 +330,13 @@
 
 检测：InspectionCase → InspectionSubmission / SiteRecord / Report
       InspectionCaseWorkflowState / LibraryProjectWorkflowMember
+      CaseReportSignatureRecord（报告签字留痕）
 
 仪器：InstrumentCatalog / InstrumentCheckoutLog
 台账：InspectedOrganization / BizContact / BizDevice
+签名：UserSignature / UserSignatureEvent
+产品：SalesProduct* / LibraryProjectProduct*
+评价报告书：EvaluationReport*（独立 app）；F.1 以 media 工作区为主
 ```
 
 ---
@@ -279,6 +354,7 @@
 | `instrument_inventory_service.py` | 仪器出库/入库、派工自动分配 |
 | `commission_org_service.py` | 委托单位树索引与路径解析 |
 | `pdf_merge.py` | 多报告 PDF 合并（封面/目录/叠印） |
+| `workflow_hub_service.py` | 报告流程枢纽页数据 |
 | `document_pipeline.py` | MinerU + Ollama 文档结构化管线 |
 
 更多见 [04-domain-models-and-services.md](04-domain-models-and-services.md)、[05-utils-and-pipelines.md](05-utils-and-pipelines.md)。
@@ -287,21 +363,17 @@
 
 ## 8. 管理命令
 
+完整表见 [06-scripts-and-admin.md](06-scripts-and-admin.md)。常用：
+
 | 命令 | 用途 |
 |------|------|
-| `init_data` | 初始化角色与菜单种子数据 |
-| `ensure_party_a_demo` | 甲方演示账号 |
-| `ensure_template_tester` | 模板测试角色与用户 |
-| `backup_database` | SQLite 备份/列出/恢复 |
-| `purge_library_trash` | 永久清理超保留期回收站文件 |
-| `check_library_media` | 校验库文件磁盘与 DB 一致性 |
-| `migrate_template_storage_layout` | 迁移模板到分层目录结构 |
-| `reconstruct_task_templates_from_storage` | 从 `templates/**/_task.json` 还原 DB 绑定 |
-| `repair_task_template_library` | 补齐任务模板库缺口（执行前自动备份） |
-| `fix_repaired_task_templates` | 修复还原后的模板绑定配对 |
-| `mock_inspection_submit`（api） | 从前端模板 JSON 生成模拟提交 |
-
-详见 [06-scripts-and-admin.md](06-scripts-and-admin.md)。
+| `init_data` | 角色与菜单种子 |
+| `ensure_party_a_demo` / `ensure_org_directors` / `ensure_org_roles` | 演示与组织角色 |
+| `seed_sales_products` / `seed_evaluation_report_templates` | 产品 / 评价报告书模板种子 |
+| `backup_database` / `purge_library_trash` / `check_library_media` | 备份与媒体一致性 |
+| `migrate_template_storage_layout` 等 | 模板库迁移/修复 |
+| `mock_inspection_submit`（api） | 模拟检测提交 |
+| `set_jwt_runtime` | JWT 运行时配置 |
 
 ---
 
@@ -314,11 +386,14 @@
 | [00-overview.md](00-overview.md) | 项目定位、目录、运行 |
 | [01-configuration.md](01-configuration.md) | settings、环境变量 |
 | [02-web-ui-core.md](02-web-ui-core.md) | Web 路由与 views |
-| [03-rest-api.md](03-rest-api.md) | v1/v2 API 分工 |
+| [03-rest-api.md](03-rest-api.md) | v1/v2 API、OTA |
 | [04-domain-models-and-services.md](04-domain-models-and-services.md) | 模型与服务 |
 | [05-utils-and-pipelines.md](05-utils-and-pipelines.md) | utils 与管线 |
 | [06-scripts-and-admin.md](06-scripts-and-admin.md) | 管理命令与 Admin |
+| [评价报告书-LaTeX功能说明.md](评价报告书-LaTeX功能说明.md) | 评价报告书 LaTeX |
+| [评价报告表-F1功能说明.md](评价报告表-F1功能说明.md) | F.1 工作台 |
 | [backend_usage_guide.md](backend_usage_guide.md) | 使用说明代码清单 |
+| [README.md](README.md) | 接手阅读路径与全索引 |
 
 ### 业务与对接文档
 
@@ -327,7 +402,10 @@
 | [后台管理系统说明（甲方版）.md](后台管理系统说明（甲方版）.md) | **面向甲方**的后台能力总览 |
 | [WORKFLOW_COMMISSION_DISPATCH.md](WORKFLOW_COMMISSION_DISPATCH.md) | 委托→派工→App 链路 |
 | [检测业务多角色与工作流说明.md](检测业务多角色与工作流说明.md) | 多角色与流程环节 |
+| [报告流程枢纽与医院委托工作台数据一致性方案.md](报告流程枢纽与医院委托工作台数据一致性方案.md) | hub 与工作台一致性 |
 | [合并报告规则说明.md](合并报告规则说明.md) | 合并报告规则 |
+| [现场记录生成报告流程说明.md](现场记录生成报告流程说明.md) | 现场记录→报告 |
+| [医院信息-产品管理说明.md](医院信息-产品管理说明.md) | 销售产品目录 |
 | [仪器台账出库入库.md](仪器台账出库入库.md) | 仪器出库入库 |
 | [任务模板检测仪器绑定与JSON模板.md](任务模板检测仪器绑定与JSON模板.md) | 仪器绑定与 JSON |
 | [FRONTEND_FORM_SCHEMA.md](FRONTEND_FORM_SCHEMA.md) | 前端 JSON 架构 |
@@ -336,16 +414,25 @@
 | [报告单项判定规则与逻辑.md](报告单项判定规则与逻辑.md) | 单项判定回填 |
 | [质控拍照照片提交说明.md](质控拍照照片提交说明.md) | sectionPhotos 提交 |
 | [前端检测仪器两栏位改版说明.md](前端检测仪器两栏位改版说明.md) | 质控/防护仪器分 scope |
-| [模板编辑器修改说明.md](模板编辑器修改说明.md) | 编辑器改造记录（部分已演进） |
+| [ANDROID_OTA_UPDATE_SPEC.md](ANDROID_OTA_UPDATE_SPEC.md) | App OTA |
+| [打包与新设备安装说明.md](打包与新设备安装说明.md) | 打包与新机安装 |
+| [部署流程-从零安装与源码保护评估.md](部署流程-从零安装与源码保护评估.md) | 从零安装与交付 |
+| [组织主任账号说明.md](组织主任账号说明.md) | 演示账号 |
 | [ADMIN_PERFORMANCE_OPTIMIZATION.md](ADMIN_PERFORMANCE_OPTIMIZATION.md) | 性能优化路线图 |
 
 ---
 
-## 10. 近期重要行为（2026-05）
+## 10. 近期重要行为（摘录）
 
 | 主题 | 行为 |
 |------|------|
-| 模板历史恢复 | 任务上下文下历史 JSON 按 `library_template_file_accessible_for_task` 鉴权，与编辑器下拉一致 |
-| instrument_select | 仅第三章含「主要检测仪器」的栏位识别为仪器选择，避免第五章结果格误识别 |
-| 报告字段映射 | 多现场任务按 `siteTaskId` 选取提交；栏位 id 与 placeholder 相同时不合并数值 token |
-| 单项判定 | 现场记录同行已「不合格」时，报告重算前强制 `failLabel`，优先于数值推断 |
+| 三线报告并存 | 检测 PDF / F.1 表 / 评价报告书；权限与 URL 分离 |
+| 评价报告书嵌入主站 | 信息表→基础报告→结构化编辑→附件→编译；`perm_evaluation_report` |
+| 附件显示选项 | `page_mode` / `rotate` / `width_percent`；选文件即时预览 |
+| 个性化字段高亮 | 编辑页 `.se-kw` 蓝底标记展开宏 |
+| 报告流程枢纽 | `/files/hub/*` 四阶段入口 |
+| App OTA | `/settings/app-ota/` + `/api/v2/app/*` |
+| 模板历史恢复 | 任务上下文下历史 JSON 鉴权与编辑器下拉一致 |
+| instrument_select | 仅第三章「主要检测仪器」栏位识别为仪器选择 |
+| 报告字段映射 | 多现场按 `siteTaskId`；栏位 id 与 placeholder 相同不合并数值 token |
+| 单项判定 | 现场同行已「不合格」时强制 `failLabel` |

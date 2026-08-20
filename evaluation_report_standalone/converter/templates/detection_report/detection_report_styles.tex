@@ -1,0 +1,134 @@
+% Detection report style — metrics from DSA.pdf (SimSun + Times New Roman)
+\ProvidesFile{detection_report_styles.tex}[2026/06/03 v2 DSA layout]
+
+\usepackage[fontset=windows]{ctex}
+\usepackage{geometry}
+\usepackage{fancyhdr}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{makecell}
+\usepackage{longtable}
+\usepackage{ragged2e}
+\usepackage{calc}
+
+% PDF margins: header x=71.28–523.93 pt; section x=58.92 pt
+\geometry{
+  paper=a4paper,
+  top=15mm,
+  bottom=25mm,
+  left=25mm,
+  right=25mm,
+  headheight=14.5pt,
+  headsep=7mm,
+  footskip=10mm,
+  includeheadfoot
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0pt}
+
+% ---- Font sizes measured from DSA.pdf ----
+\newcommand{\DRFontCoverCompany}{\fontsize{26.05bp}{32bp}\songti\selectfont}
+\newcommand{\DRFontCoverCompanyEn}{\fontsize{14.05bp}{18bp}\rmfamily\bfseries\selectfont}
+\newcommand{\DRFontCoverMainTitle}{\fontsize{42bp}{50bp}\songti\selectfont}
+\newcommand{\DRFontCoverTestEn}{\fontsize{18bp}{22bp}\rmfamily\bfseries\selectfont}
+\newcommand{\DRFontCoverReportNoCn}{\fontsize{12bp}{16bp}\songti\selectfont}
+\newcommand{\DRFontCoverReportNoEn}{\fontsize{12bp}{16bp}\rmfamily\bfseries\selectfont}
+\newcommand{\DRFontCoverLabel}{\fontsize{14.05bp}{22bp}\songti\selectfont}
+\newcommand{\DRFontCoverSeal}{\fontsize{12bp}{16bp}\songti\selectfont}
+\newcommand{\DRFontFooter}{\fontsize{10.45bp}{14bp}\songti\selectfont}
+\newcommand{\DRFontDeclTitle}{\fontsize{21.95bp}{28bp}\songti\selectfont}
+\newcommand{\DRFontDeclBody}{\fontsize{14.05bp}{22bp}\songti\selectfont}
+\newcommand{\DRFontBodyHeaderCn}{\fontsize{10.45bp}{14bp}\songti\selectfont}
+\newcommand{\DRFontBodyHeaderEn}{\fontsize{10.45bp}{14bp}\rmfamily\selectfont}
+\newcommand{\DRFontSection}{\fontsize{12bp}{18bp}\songti\selectfont}
+\newcommand{\DRFontSubsection}{\fontsize{12bp}{18bp}\songti\selectfont}
+\newcommand{\DRFontBodyText}{\fontsize{12bp}{18bp}\songti\selectfont}
+\newcommand{\DRFontTable}{\fontsize{12bp}{15bp}\songti\selectfont}
+\newcommand{\DRFontTableSmall}{\fontsize{10.45bp}{14bp}\songti\selectfont}
+
+\newcommand{\DRReportNoSplit}{%
+  {\DRFontCoverReportNoCn 报告编号：\reportnocn}%
+  {\DRFontCoverReportNoEn \reportnoen}%
+}
+
+% Cover page — footer address only
+\fancypagestyle{coverfoot}{%
+  \fancyhf{}%
+  \renewcommand{\headrulewidth}{0pt}%
+  \renewcommand{\footrulewidth}{0pt}%
+}
+
+% Body: header left=报告编号, right=第 n 页/共 m 页 (PDF layout)
+\fancypagestyle{detection}{%
+  \fancyhf{}%
+  \fancyhead[L]{%
+    {\DRFontBodyHeaderCn 报告编号：\reportnocn}%
+    {\DRFontBodyHeaderEn \reportnoen}%
+  }%
+  \fancyhead[R]{\DRFontBodyHeaderCn 第\thepage\ 页/共\pageref{LastBodyPage}\ 页}%
+  \renewcommand{\headrulewidth}{0pt}%
+  \renewcommand{\footrulewidth}{0pt}%
+}
+
+\fancypagestyle{declaration}{%
+  \fancyhf{}%
+  \renewcommand{\headrulewidth}{0pt}%
+  \renewcommand{\footrulewidth}{0pt}%
+}
+
+% Section x=58.92 pt ≈ 2 pt left of main text block
+\newcommand{\DRSection}[1]{%
+  \vspace{0.35em}%
+  \noindent\hspace{-1.5mm}{\DRFontSection #1\par}%
+  \vspace{0.15em}%
+}
+
+\newcommand{\DRSubsection}[1]{%
+  \vspace{0.35em}%
+  \noindent{\DRFontSubsection #1\par}%
+  \vspace{0.1em}%
+}
+
+\newcommand{\DRVertMainInstruments}{%
+  \begin{tabular}{@{}c@{}}主\\要\\检\\测\\仪\\器\end{tabular}%
+}
+
+\newenvironment{DRTable}{%
+  \vspace{0.15em}%
+  \noindent\hspace{1.5mm}%
+  \begin{minipage}[t]{0.98\textwidth}%
+  \DRFontTable%
+  \renewcommand{\arraystretch}{1.08}%
+  \setlength{\tabcolsep}{4pt}%
+}{%
+  \end{minipage}%
+  \vspace{0.25em}%
+}
+
+\newenvironment{DRTableSmall}{%
+  \vspace{0.1em}%
+  \noindent\hspace{1.5mm}%
+  \begin{minipage}[t]{0.98\textwidth}%
+  \DRFontTableSmall%
+  \renewcommand{\arraystretch}{1.05}%
+  \setlength{\tabcolsep}{3pt}%
+}{%
+  \end{minipage}%
+  \vspace{0.2em}%
+}
+
+\newcommand{\DRSignatureBlock}{%
+  \vspace{1.8em}%
+  \DRFontBodyText
+  \noindent
+  编\hspace{2em}制\hspace{2em}人\hspace{4em}审\hspace{2em}核\hspace{2em}人\par
+  \vspace{1.2em}%
+  \noindent
+  授\hspace{0.5em}权\hspace{0.5em}签\hspace{0.5em}字\hspace{0.5em}人\hspace{4em}签\hspace{0.5em}发\hspace{0.5em}日\hspace{0.5em}期\hspace{2em}年\hspace{2em}月\hspace{2em}日\par
+  \vspace{2em}%
+  \begin{flushright}\DRFontCoverSeal 检测单位（检测专用印章）\end{flushright}%
+  \newpage
+}

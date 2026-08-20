@@ -1,0 +1,872 @@
+{% extends "base.html" %}
+{% block title %}编辑表格 · {{ current.title }}{% endblock %}
+
+{% block extra_head %}
+{% load static %}
+<link rel="stylesheet" href="{% static 'vendor/katex/katex.min.css' %}">
+<script src="{% static 'vendor/katex/katex.min.js' %}"></script>
+<script>
+  (function () {
+    if (typeof katex !== 'undefined') return;
+    var css = document.createElement('link');
+    css.rel = 'stylesheet';
+    css.href = 'https://cdn.bootcdn.net/ajax/libs/katex/0.16.9/katex.min.css';
+    document.head.appendChild(css);
+    var s = document.createElement('script');
+    s.src = 'https://cdn.bootcdn.net/ajax/libs/katex/0.16.9/katex.min.js';
+    s.onerror = function () {
+      var s2 = document.createElement('script');
+      s2.src = 'https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js';
+      document.head.appendChild(s2);
+    };
+    document.head.appendChild(s);
+  })();
+</script>
+<style>
+  .te-page { margin: 0; height: 100vh; display: flex; flex-direction: column; background: #f1f5f9; overflow: hidden; }
+  body:has(#te-app) { overflow: hidden; }
+  body:has(#te-app) .flex.min-h-screen { height: 100vh; overflow: hidden; }
+  body:has(#te-app) main { overflow: hidden !important; padding: 0 !important; }
+  .te-toolbar {
+    position: relative; z-index: 40; flex-shrink: 0; background: #0f172a; color: #e2e8f0;
+    padding: 0.55rem 0.85rem; display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center;
+  }
+  .te-toolbar-right {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 0.4rem;
+  }
+  .te-toolbar .sep { width:1px; height:1.35rem; background:#334155; margin:0 0.2rem; }
+  .te-toolbar button, .te-toolbar a, .te-toolbar label {
+    font-size: 0.75rem; padding: 0.35rem 0.6rem; border-radius: 0.4rem; border: 1px solid transparent;
+    background: transparent; color: #e2e8f0; cursor: pointer;
+  }
+  .te-toolbar button:hover, .te-toolbar a:hover { background: #1e293b; }
+  .te-toolbar button.primary { background:#4f46e5; }
+  .te-toolbar select, .te-toolbar input[type=text] {
+    background:#1e293b; color:#e2e8f0; border:1px solid #334155; border-radius:0.35rem;
+    padding:0.25rem 0.45rem; font-size:0.75rem;
+  }
+  .te-main { flex:1; overflow:auto; padding: 1.25rem; }
+  .te-card { max-width: min(1200px, 96vw); margin: 0 auto; background:#fff; border-radius:0.75rem; padding:1.25rem; box-shadow:0 1px 3px rgb(0 0 0/0.08); }
+  .te-grid {
+    width: max-content; max-width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+  .te-grid col.te-row-head { width: 2.2rem; }
+  .te-grid th.col-head {
+    background:#f8fafc; font-size:0.68rem; color:#64748b; padding:0.3rem 0.25rem;
+    border:1px solid #e2e8f0; font-weight: 500; white-space: nowrap;
+  }
+  .te-grid td {
+    border:1px solid #cbd5e1; padding:0; vertical-align: middle;
+    position: relative; overflow: hidden;
+  }
+  .te-grid td.selected { outline: 2px solid #6366f1; outline-offset: -2px; background: #eef2ff; }
+  .te-grid td.skip { background: repeating-linear-gradient(45deg,#f8fafc,#f8fafc 4px,#eef2ff 4px,#eef2ff 8px); }
+  .te-grid textarea {
+    width:100%; min-height: 2.4rem; border:0; outline:none;
+    resize: none; overflow: auto;
+    padding:0.4rem 0.45rem; font-size:0.82rem; background:#fff;
+    font-family: ui-monospace, Consolas, monospace; box-sizing: border-box;
+  }
+  .te-cell-view {
+    min-height: 2.4rem; padding: 0.4rem 0.45rem; font-size: 0.82rem; line-height: 1.4;
+    white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; cursor: text;
+    box-sizing: border-box;
+  }
+  .te-math {
+    display: inline; padding: 0 0.12rem; margin: 0 0.05rem; border-radius: 0.2rem;
+    cursor: pointer; border-bottom: 1px dashed #a5b4fc;
+  }
+  .te-math:hover { background: #eef2ff; }
+  .te-math > .katex { font-size: 1em; }
+  .te-math-err { color: #b91c1c; font-size: 0.8em; font-family: ui-monospace, monospace; }
+  .te-meta { display:flex; flex-wrap:wrap; gap:0.75rem; margin-bottom:0.85rem; align-items:end; }
+  .te-meta label { font-size:0.75rem; color:#64748b; display:flex; flex-direction:column; gap:0.2rem; }
+  .te-meta input, .te-meta select { border:1px solid #e2e8f0; border-radius:0.35rem; padding:0.35rem 0.5rem; font-size:0.85rem; }
+  #te-status { font-size:0.75rem; color:#94a3b8; margin-left:0.5rem; }
+  #te-status.ok { color:#6ee7b7; } #te-status.err { color:#fca5a5; }
+
+  .fe-modal-mask {
+    display: none; position: fixed; inset: 0; z-index: 80;
+    background: rgb(15 23 42 / 0.45); align-items: center; justify-content: center; padding: 1rem;
+  }
+  .fe-modal-mask.open { display: flex; }
+  .fe-modal {
+    width: min(720px, 100%); background: #fff; border-radius: 0.6rem;
+    box-shadow: 0 20px 50px rgb(0 0 0 / 0.25); overflow: hidden;
+  }
+  .fe-modal-hd {
+    display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center;
+    padding: 0.65rem 0.85rem; background: #0f172a; color: #e2e8f0;
+  }
+  .fe-modal-hd h3 { font-size: 0.9rem; font-weight: 600; margin: 0; margin-right: auto; }
+  .fe-modal-hd button, .fe-modal-hd select {
+    font-size: 0.75rem; padding: 0.3rem 0.55rem; border-radius: 0.35rem;
+    border: 1px solid #334155; background: #1e293b; color: #e2e8f0; cursor: pointer;
+  }
+  .fe-modal-hd button.primary { background: #4f46e5; border-color: #4f46e5; }
+  #fe-modal-status { font-size: 0.72rem; color: #94a3b8; }
+  #fe-modal-status.err { color: #fca5a5; }
+  .fe-modal-bd { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; padding: 0.85rem; }
+  @media (max-width: 700px) { .fe-modal-bd { grid-template-columns: 1fr; } }
+  .fe-modal-bd label { display: block; font-size: 0.75rem; color: #64748b; margin-bottom: 0.3rem; }
+  #fe-code {
+    width: 100%; min-height: 10rem; border: 1px solid #cbd5e1; border-radius: 0.4rem;
+    padding: 0.55rem; font-family: ui-monospace, Consolas, monospace; font-size: 0.85rem;
+  }
+  .fe-modal-preview {
+    min-height: 10rem; border: 1px solid #e2e8f0; border-radius: 0.4rem;
+    padding: 0.75rem; background: #f8fafc; overflow: auto;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .fe-modal-preview .err { color: #b91c1c; font-size: 0.8rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="te-page" id="te-app"
+     data-chapter="{{ current.key }}"
+     data-block="{{ block_id }}"
+     data-new="{{ is_new|yesno:'1,0' }}"
+     data-after="{{ after_id }}"
+     data-pos="{{ insert_pos }}"
+     data-save-url="{{ save_url }}"
+     data-back="{{ back_url }}"
+     data-csrf="{{ csrf_token }}">
+  <div class="te-toolbar">
+    <a href="{{ back_url }}">&larr; 返回正文</a>
+    <div class="sep"></div>
+    <button type="button" data-act="insert-row-above">上方插行</button>
+    <button type="button" data-act="insert-row-below">下方插行</button>
+    <button type="button" data-act="insert-col-left">左侧插列</button>
+    <button type="button" data-act="insert-col-right">右侧插列</button>
+    <button type="button" data-act="delete-row">删行</button>
+    <button type="button" data-act="delete-col">删列</button>
+    <div class="sep"></div>
+    <button type="button" data-act="merge">合并单元格</button>
+    <button type="button" data-act="unmerge">取消合并</button>
+    <div class="sep"></div>
+    <button type="button" data-act="align-l">左对齐</button>
+    <button type="button" data-act="align-c">居中</button>
+    <button type="button" data-act="align-r">右对齐</button>
+    <div class="te-toolbar-right">
+      <span id="te-status"></span>
+      <button type="button" class="primary" id="te-save">保存并返回</button>
+    </div>
+  </div>
+
+  <div class="te-main">
+    <div class="te-card">
+      <h1 class="text-lg font-semibold text-slate-900 mb-3">表格编辑 · {{ current.title }}</h1>
+      <p class="text-xs text-slate-500 mb-3" style="margin-top:-0.35rem">
+        显示内容与正文预览一致（已展开项目信息中的个性化字段
+        {% if has_body_input %}，并已载入 files/ 表体{% endif %}）。
+        全局字段请到 <a href="{{ keywords_url }}" class="text-indigo-600 hover:underline">项目信息</a> 修改后返回正文再编辑。
+      </p>
+      <div class="te-meta">
+        {% if not is_front %}
+        <label>表题<input type="text" id="te-caption" placeholder="可选"></label>
+        {% else %}
+        <input type="hidden" id="te-caption" value="">
+        {% endif %}
+        <label>环境
+          <select id="te-env">
+            <option value="tabular">tabular（普通表）</option>
+            <option value="tabularx">tabularx（自动均分）</option>
+            <option value="longtable">longtable（长表跨页）</option>
+          </select>
+        </label>
+        <label>边框
+          <select id="te-bordered">
+            <option value="1">有边框 |</option>
+            <option value="0">无边框</option>
+          </select>
+        </label>
+        <label>选中列类型
+          <select id="te-col-kind">
+            <option value="l">l 左对齐</option>
+            <option value="c">c 居中</option>
+            <option value="r">r 右对齐</option>
+            <option value="X">X 自动均分</option>
+            <option value="p">p{宽} 段落列</option>
+            <option value="m">m{宽} 垂直居中</option>
+            <option value="b">b{宽} 底部对齐</option>
+          </select>
+        </label>
+        <label>列宽（p/m/b）<input type="text" id="te-col-width" placeholder="如 2.0cm / 0.25\textwidth" style="min-width:10rem"></label>
+        <button type="button" data-act="apply-col" style="align-self:end;background:#334155;color:#fff;border:0;border-radius:0.35rem;padding:0.4rem 0.7rem;font-size:0.75rem;cursor:pointer">应用到选中列</button>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="te-grid" id="te-grid"></table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="fe-modal-mask" id="fe-modal-mask" aria-hidden="true">
+  <div class="fe-modal" role="dialog" aria-modal="true">
+    <div class="fe-modal-hd">
+      <h3>编辑单元格公式</h3>
+      <select id="fe-mode" title="预览形式">
+        <option value="inline">行内预览</option>
+        <option value="display">独立预览</option>
+      </select>
+      <span id="fe-modal-status"></span>
+      <button type="button" id="fe-cancel">取消</button>
+      <button type="button" class="primary" id="fe-ok">确定</button>
+    </div>
+    <div class="fe-modal-bd">
+      <div>
+        <label>LaTeX 代码（不要包 $）</label>
+        <textarea id="fe-code" spellcheck="false" placeholder="例如：3.7\times 10^{11}"></textarea>
+      </div>
+      <div>
+        <label>渲染预览</label>
+        <div class="fe-modal-preview"><div id="fe-preview"></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script id="te-model-data" type="application/json">{{ model_json|safe }}</script>
+<script>
+(function () {
+  const app = document.getElementById('te-app');
+  const csrf = app.dataset.csrf;
+  const saveUrl = app.dataset.saveUrl;
+  const chapter = app.dataset.chapter;
+  const blockId = app.dataset.block;
+  const isNew = app.dataset.new === '1';
+  const afterId = app.dataset.after || '';
+  const insertPos = app.dataset.pos || 'after';
+  const statusEl = document.getElementById('te-status');
+  let model = JSON.parse(document.getElementById('te-model-data').textContent);
+  let sel = new Set();
+  let anchor = null;
+  let editing = null; // {r,c}
+  let feState = null; // {r,c,idx}
+
+  function key(r,c){ return r+','+c; }
+  function parseKey(k){ const [r,c]=k.split(',').map(Number); return {r,c}; }
+
+  /** Find the merge-anchor that owns grid position (r,c). */
+  function cellOwner(r, c) {
+    const direct = model.cells[r] && model.cells[r][c];
+    if (direct && !direct.skip) return { r, c, cell: direct };
+    for (let rr = r; rr >= 0; rr--) {
+      const row = model.cells[rr];
+      if (!row) continue;
+      for (let cc = c; cc >= 0; cc--) {
+        const a = row[cc];
+        if (!a || a.skip) continue;
+        const cs = Math.max(1, a.colspan || 1);
+        const rs = Math.max(1, a.rowspan || 1);
+        if (rr + rs - 1 >= r && cc + cs - 1 >= c) return { r: rr, c: cc, cell: a };
+      }
+    }
+    return { r, c, cell: direct || { text: '', colspan: 1, rowspan: 1, skip: false } };
+  }
+
+  /**
+   * Expand a selection to the bounding box needed for merge.
+   * Already-merged cells are selected by their anchor only (e.g. colspan=5
+   * lives at column 0); without expansion, merge would shrink them to 1 column.
+   */
+  function expandMergeBounds(list) {
+    let r0 = Infinity, r1 = -Infinity, c0 = Infinity, c1 = -Infinity;
+    list.forEach(({ r, c }) => {
+      const o = cellOwner(r, c);
+      const cs = Math.max(1, (o.cell && o.cell.colspan) || 1);
+      const rs = Math.max(1, (o.cell && o.cell.rowspan) || 1);
+      r0 = Math.min(r0, o.r);
+      r1 = Math.max(r1, o.r + rs - 1);
+      c0 = Math.min(c0, o.c);
+      c1 = Math.max(c1, o.c + cs - 1);
+    });
+    if (!Number.isFinite(r0)) return null;
+    // Grow until every intersecting merge is fully inside the box.
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let r = 0; r < model.cells.length; r++) {
+        const row = model.cells[r];
+        if (!row) continue;
+        for (let c = 0; c < row.length; c++) {
+          const cell = row[c];
+          if (!cell || cell.skip) continue;
+          const cs = Math.max(1, cell.colspan || 1);
+          const rs = Math.max(1, cell.rowspan || 1);
+          const r2 = r + rs - 1;
+          const c2 = c + cs - 1;
+          const intersects = !(r2 < r0 || r > r1 || c2 < c0 || c > c1);
+          if (!intersects) continue;
+          if (r < r0) { r0 = r; changed = true; }
+          if (r2 > r1) { r1 = r2; changed = true; }
+          if (c < c0) { c0 = c; changed = true; }
+          if (c2 > c1) { c1 = c2; changed = true; }
+        }
+      }
+    }
+    return { r0, r1, c0, c1 };
+  }
+
+  function escapeHtml(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function escapeAttr(s) {
+    return escapeHtml(s).replace(/'/g, '&#39;');
+  }
+
+  document.getElementById('te-caption').value = model.caption || '';
+  document.getElementById('te-env').value = model.env || 'tabular';
+  document.getElementById('te-bordered').value = model.bordered ? '1' : '0';
+
+  function ensureRect() {
+    const cols = model.cols.length;
+    model.cells.forEach(row => {
+      while (row.length < cols) row.push({text:'', colspan:1, rowspan:1, align:'', skip:false});
+    });
+  }
+
+  function cellViewHtml(text) {
+    const s = String(text || '');
+    let out = '', last = 0, idx = 0, m;
+    const re = /\$([^$]+)\$/g;
+    while ((m = re.exec(s))) {
+      out += escapeHtml(s.slice(last, m.index)).replace(/\n/g, '<br>');
+      out += '<span class="te-math" contenteditable="false" data-idx="' + idx +
+        '" data-latex="' + escapeAttr(m.group ? m[1] : m[1]) + '"></span>';
+      idx += 1;
+      last = m.index + m[0].length;
+    }
+    out += escapeHtml(s.slice(last)).replace(/\n/g, '<br>');
+    return out || '<br>';
+  }
+
+  function whenKatex(fn) {
+    if (typeof katex !== 'undefined') { fn(); return; }
+    let n = 0;
+    const t = setInterval(() => {
+      n += 1;
+      if (typeof katex !== 'undefined' || n > 80) {
+        clearInterval(t);
+        fn();
+      }
+    }, 50);
+  }
+
+  function renderMathIn(rootEl) {
+    whenKatex(() => {
+      rootEl.querySelectorAll('.te-math').forEach(span => {
+        const latex = span.getAttribute('data-latex') || '';
+        span.innerHTML = '';
+        if (!latex) return;
+        if (typeof katex === 'undefined') {
+          span.textContent = '$' + latex + '$';
+          return;
+        }
+        try {
+          katex.render(latex, span, { throwOnError: false, displayMode: false, strict: 'ignore' });
+        } catch (err) {
+          span.innerHTML = '<span class="te-math-err">' + escapeHtml(latex) + '</span>';
+        }
+      });
+    });
+  }
+
+  function collectCells() {
+    // flush active textarea first
+    if (editing) {
+      const ta = document.querySelector('#te-grid textarea[data-r="' + editing.r + '"][data-c="' + editing.c + '"]');
+      if (ta && model.cells[editing.r] && model.cells[editing.r][editing.c] && !model.cells[editing.r][editing.c].skip) {
+        model.cells[editing.r][editing.c].text = ta.value;
+      }
+    }
+    document.querySelectorAll('#te-grid textarea[data-r]').forEach(ta => {
+      const r = +ta.dataset.r, c = +ta.dataset.c;
+      if (model.cells[r] && model.cells[r][c] && !model.cells[r][c].skip) {
+        model.cells[r][c].text = ta.value;
+      }
+    });
+    model.caption = document.getElementById('te-caption').value;
+    model.env = document.getElementById('te-env').value;
+    model.bordered = document.getElementById('te-bordered').value === '1';
+  }
+
+  function paintSel() {
+    document.querySelectorAll('#te-grid td[data-r]').forEach(td => {
+      const k = key(+td.dataset.r, +td.dataset.c);
+      td.classList.toggle('selected', sel.has(k));
+    });
+  }
+
+  function colWidthStyle(col, cmVals, totalCm) {
+    const width = (col && col.width) || '';
+    const m = /^([\d.]+)\s*cm$/i.exec(width.trim());
+    if (m && totalCm > 0) {
+      const cm = parseFloat(m[1]);
+      const pct = Math.max(3.5, cm / totalCm * 100);
+      // Approximate printable width: ~17cm content ≈ 640px at editor scale
+      const px = Math.max(36, Math.round(cm / totalCm * 640));
+      return 'width:' + pct.toFixed(1) + '%; min-width:' + px + 'px';
+    }
+    if (/mylen|dimexpr|textwidth|linewidth/i.test(width)) {
+      return 'width:12%; min-width:4rem';
+    }
+    if (col && col.kind === 'X') {
+      return 'width:50%; min-width:6rem';
+    }
+    if (col && (col.kind === 'l' || col.kind === 'c' || col.kind === 'r') && !width) {
+      return 'width:auto; min-width:3rem';
+    }
+    return 'min-width:3.5rem';
+  }
+
+  function buildColgroup() {
+    const cols = model.cols || [];
+    const cmVals = cols.map(col => {
+      const m = /^([\d.]+)\s*cm$/i.exec(String(col.width || '').trim());
+      return m ? parseFloat(m[1]) : 0;
+    });
+    const known = cmVals.filter(v => v > 0);
+    let vals = cmVals.slice();
+    if (known.length && known.length < vals.length) {
+      const avg = known.reduce((a, b) => a + b, 0) / known.length;
+      vals = vals.map(v => (v > 0 ? v : avg));
+    }
+    const totalCm = vals.reduce((a, b) => a + b, 0);
+    let html = '<colgroup><col class="te-row-head">';
+    cols.forEach((col, i) => {
+      const style = colWidthStyle(col, vals, totalCm || vals[i] || 0);
+      html += '<col style="' + style + '">';
+    });
+    html += '</colgroup>';
+    return html;
+  }
+
+  function render() {
+    ensureRect();
+    const grid = document.getElementById('te-grid');
+    const cols = model.cols;
+    let html = buildColgroup();
+    html += '<thead><tr><th class="col-head"></th>';
+    cols.forEach((col, i) => {
+      const label = col.kind + (col.width ? ('{' + col.width + '}') : '');
+      html += '<th class="col-head" data-col-i="'+i+'" title="点击选中列后在上方设置类型/宽度">'+label+'</th>';
+    });
+    html += '</tr></thead><tbody>';
+    model.cells.forEach((row, r) => {
+      const visible = row.some(cell => cell && !cell.skip);
+      html += '<tr' + (visible ? '' : ' style="height:2.8em"') + '><th class="col-head">'+(r+1)+'</th>';
+      row.forEach((cell, c) => {
+        if (cell.skip) return;
+        const cls = sel.has(key(r,c)) ? ' selected' : '';
+        const rs = Math.max(1, cell.rowspan || 1);
+        let style = cell.align==='c'?'text-align:center':(cell.align==='r'?'text-align:right':'text-align:left');
+        if (rs > 1) style += ';vertical-align:top;height:' + (2.6 * rs) + 'em';
+        const span = (cell.colspan>1?' colspan="'+cell.colspan+'"':'') + (rs>1?' rowspan="'+rs+'"':'');
+        const isEdit = editing && editing.r === r && editing.c === c;
+        html += '<td class="'+cls+'" data-r="'+r+'" data-c="'+c+'"'+span+' style="'+style+'">';
+        if (isEdit) {
+          html += '<textarea data-r="'+r+'" data-c="'+c+'">' + escapeHtml(cell.text || '') + '</textarea>';
+        } else {
+          html += '<div class="te-cell-view" data-r="'+r+'" data-c="'+c+'">' + cellViewHtml(cell.text || '') + '</div>';
+        }
+        html += '</td>';
+      });
+      html += '</tr>';
+    });
+    html += '</tbody>';
+    grid.innerHTML = html;
+    renderMathIn(grid);
+    if (editing) {
+      const ta = grid.querySelector('textarea[data-r="' + editing.r + '"][data-c="' + editing.c + '"]');
+      if (ta) {
+        ta.focus();
+        const len = ta.value.length;
+        try { ta.setSelectionRange(len, len); } catch (e) {}
+        // Grow textarea to content height without a resize grip
+        ta.style.height = 'auto';
+        ta.style.height = Math.max(38, ta.scrollHeight) + 'px';
+        ta.addEventListener('input', function () {
+          this.style.height = 'auto';
+          this.style.height = Math.max(38, this.scrollHeight) + 'px';
+        });
+      }
+    }
+  }
+
+  function startCellEdit(r, c) {
+    collectCells();
+    editing = { r, c };
+    sel.clear(); sel.add(key(r, c)); anchor = { r, c };
+    render();
+  }
+
+  function endCellEdit() {
+    if (!editing) return;
+    collectCells();
+    editing = null;
+    render();
+  }
+
+  function replaceNthMath(text, n, newBody) {
+    const re = /\$[^$]+\$/g;
+    let i = 0, m, out = '', last = 0;
+    const s = String(text || '');
+    while ((m = re.exec(s))) {
+      if (i === n) {
+        out += s.slice(last, m.index) + '$' + newBody + '$';
+        last = m.index + m[0].length;
+        out += s.slice(last);
+        return out;
+      }
+      i++;
+    }
+    return s;
+  }
+
+  /* ---- formula modal ---- */
+  const feMask = document.getElementById('fe-modal-mask');
+  const feCode = document.getElementById('fe-code');
+  const feMode = document.getElementById('fe-mode');
+  const fePreview = document.getElementById('fe-preview');
+  const feStatus = document.getElementById('fe-modal-status');
+
+  function feRenderPreview() {
+    const body = feCode.value.trim();
+    const display = feMode.value === 'display';
+    fePreview.innerHTML = '';
+    if (!body) {
+      fePreview.innerHTML = '<span class="err">请输入公式</span>';
+      return;
+    }
+    if (typeof katex === 'undefined') {
+      fePreview.textContent = body;
+      return;
+    }
+    try {
+      katex.render(body, fePreview, { throwOnError: false, displayMode: display, strict: 'ignore' });
+    } catch (err) {
+      fePreview.innerHTML = '<span class="err">' + String(err) + '</span>';
+    }
+  }
+
+  function openFormulaModal(r, c, idx, body) {
+    collectCells();
+    feState = { r, c, idx: Number(idx) || 0 };
+    feCode.value = body || '';
+    feMode.value = 'inline';
+    feStatus.textContent = '';
+    feStatus.className = '';
+    feMask.classList.add('open');
+    feMask.setAttribute('aria-hidden', 'false');
+    whenKatex(feRenderPreview);
+    setTimeout(() => feCode.focus(), 50);
+  }
+
+  function closeFormulaModal() {
+    feMask.classList.remove('open');
+    feMask.setAttribute('aria-hidden', 'true');
+    feState = null;
+  }
+
+  function confirmFormulaModal() {
+    const body = feCode.value.trim();
+    if (!body) {
+      feStatus.textContent = '公式不能为空';
+      feStatus.className = 'err';
+      return;
+    }
+    if (!feState) return;
+    const { r, c, idx } = feState;
+    const cell = model.cells[r] && model.cells[r][c];
+    if (!cell || cell.skip) {
+      feStatus.textContent = '单元格无效';
+      feStatus.className = 'err';
+      return;
+    }
+    cell.text = replaceNthMath(cell.text || '', idx, body);
+    editing = null;
+    closeFormulaModal();
+    render();
+  }
+
+  feCode.addEventListener('input', feRenderPreview);
+  feMode.addEventListener('change', feRenderPreview);
+  document.getElementById('fe-cancel').addEventListener('click', closeFormulaModal);
+  document.getElementById('fe-ok').addEventListener('click', confirmFormulaModal);
+  feMask.addEventListener('click', (e) => { if (e.target === feMask) closeFormulaModal(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && feMask.classList.contains('open')) {
+      e.preventDefault();
+      closeFormulaModal();
+    }
+  });
+
+  document.getElementById('te-grid').addEventListener('mousedown', (e) => {
+    if (e.target.closest('.te-math')) return; // handled on dblclick / click
+    const th = e.target.closest('th[data-col-i]');
+    if (th) {
+      collectCells();
+      editing = null;
+      const ci = +th.dataset.colI;
+      sel.clear();
+      model.cells.forEach((row, r) => { if (row[ci] && !row[ci].skip) sel.add(key(r, ci)); });
+      anchor = {r:0, c:ci};
+      const col = model.cols[ci] || {};
+      document.getElementById('te-col-kind').value = col.kind || 'l';
+      document.getElementById('te-col-width').value = col.width || '';
+      render();
+      return;
+    }
+    const td = e.target.closest('td[data-r]');
+    if (!td || td.classList.contains('skip')) return;
+    if (e.target.closest('textarea')) return;
+    const r = +td.dataset.r, c = +td.dataset.c;
+    if (editing && (editing.r !== r || editing.c !== c)) {
+      endCellEdit();
+    }
+    if (e.ctrlKey || e.metaKey) {
+      const k = key(r,c);
+      if (sel.has(k)) sel.delete(k); else sel.add(k);
+    } else if (e.shiftKey && anchor) {
+      sel.clear();
+      const a = cellOwner(anchor.r, anchor.c);
+      const b = cellOwner(r, c);
+      const aCs = Math.max(1, (a.cell && a.cell.colspan) || 1);
+      const aRs = Math.max(1, (a.cell && a.cell.rowspan) || 1);
+      const bCs = Math.max(1, (b.cell && b.cell.colspan) || 1);
+      const bRs = Math.max(1, (b.cell && b.cell.rowspan) || 1);
+      const r0 = Math.min(a.r, b.r);
+      const r1 = Math.max(a.r + aRs - 1, b.r + bRs - 1);
+      const c0 = Math.min(a.c, b.c);
+      const c1 = Math.max(a.c + aCs - 1, b.c + bCs - 1);
+      for (let i = r0; i <= r1; i++) for (let j = c0; j <= c1; j++) sel.add(key(i, j));
+    } else {
+      sel.clear(); sel.add(key(r,c)); anchor = {r,c};
+      const col = model.cols[c] || {};
+      document.getElementById('te-col-kind').value = col.kind || 'l';
+      document.getElementById('te-col-width').value = col.width || '';
+    }
+    paintSel();
+  });
+
+  document.getElementById('te-grid').addEventListener('dblclick', (e) => {
+    const math = e.target.closest('.te-math');
+    if (math) {
+      e.preventDefault();
+      e.stopPropagation();
+      const td = math.closest('td[data-r]');
+      if (!td) return;
+      const r = +td.dataset.r, c = +td.dataset.c;
+      openFormulaModal(r, c, math.getAttribute('data-idx') || '0', math.getAttribute('data-latex') || '');
+      return;
+    }
+    const view = e.target.closest('.te-cell-view');
+    if (view) {
+      e.preventDefault();
+      startCellEdit(+view.dataset.r, +view.dataset.c);
+    }
+  });
+
+  document.getElementById('te-grid').addEventListener('click', (e) => {
+    const math = e.target.closest('.te-math');
+    if (!math) return;
+    e.preventDefault();
+    e.stopPropagation();
+    // single click on math: select cell only (edit on dblclick)
+    const td = math.closest('td[data-r]');
+    if (!td) return;
+    const r = +td.dataset.r, c = +td.dataset.c;
+    sel.clear(); sel.add(key(r, c)); anchor = { r, c };
+    paintSel();
+  });
+
+  document.getElementById('te-grid').addEventListener('focusout', (e) => {
+    if (!e.target.matches('textarea[data-r]')) return;
+    // delay to allow toolbar clicks
+    setTimeout(() => {
+      if (!editing) return;
+      if (document.activeElement && document.activeElement.closest && document.activeElement.closest('#te-grid textarea')) return;
+      if (document.activeElement && document.activeElement.closest && document.activeElement.closest('.te-toolbar, .te-meta, .fe-modal')) return;
+      endCellEdit();
+    }, 120);
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (feMask.classList.contains('open')) return;
+    if (e.key === 'Enter' && !e.shiftKey && !editing && sel.size === 1) {
+      const { r, c } = parseKey([...sel][0]);
+      if (document.activeElement && document.activeElement.tagName === 'TEXTAREA') return;
+      e.preventDefault();
+      startCellEdit(r, c);
+    }
+    if (e.key === 'F2' && sel.size === 1) {
+      const { r, c } = parseKey([...sel][0]);
+      e.preventDefault();
+      startCellEdit(r, c);
+    }
+  });
+
+  function selectedList() {
+    return [...sel].map(parseKey).sort((a,b)=> a.r-b.r || a.c-b.c);
+  }
+
+  function act(name) {
+    collectCells();
+    editing = null;
+    const list = selectedList();
+    if (name === 'apply-col') {
+      const kind = document.getElementById('te-col-kind').value;
+      const width = document.getElementById('te-col-width').value.trim();
+      const cols = [...new Set(list.map(x => x.c))];
+      if (!cols.length && anchor) cols.push(anchor.c);
+      cols.forEach(c => {
+        if (['p','m','b'].includes(kind)) {
+          model.cols[c] = {kind, width: width || '2cm', raw: kind + '{' + (width || '2cm') + '}'};
+        } else if (kind === 'X') {
+          model.cols[c] = {kind: 'X', width: '', raw: 'X'};
+        } else {
+          model.cols[c] = {kind, width: '', raw: kind};
+        }
+      });
+      render(); return;
+    }
+    if (name.startsWith('align-') && list.length) {
+      const align = name.slice(-1);
+      list.forEach(({r,c}) => {
+        if (!model.cells[r][c].skip) model.cells[r][c].align = align;
+      });
+      render(); return;
+    }
+    if (name === 'insert-row-below' || name === 'insert-row-above') {
+      const r = list[0] ? list[0].r : model.cells.length - 1;
+      const at = name === 'insert-row-above' ? r : r + 1;
+      const row = model.cols.map(() => ({text:'', colspan:1, rowspan:1, align:'', skip:false}));
+      model.cells.splice(at, 0, row);
+      model.hlines = model.hlines || [];
+      model.hlines.splice(at, 0, true);
+      render(); return;
+    }
+    if (name === 'insert-col-left' || name === 'insert-col-right') {
+      const c = list[0] ? list[0].c : model.cols.length - 1;
+      const at = name === 'insert-col-left' ? c : c + 1;
+      model.cols.splice(at, 0, {kind:'l', width:'', raw:'l'});
+      model.cells.forEach(row => row.splice(at, 0, {text:'', colspan:1, rowspan:1, align:'', skip:false}));
+      render(); return;
+    }
+    if (name === 'delete-row' && list.length) {
+      const rows = [...new Set(list.map(x => x.r))].sort((a,b)=>b-a);
+      rows.forEach(r => { model.cells.splice(r,1); if (model.hlines) model.hlines.splice(r,1); });
+      if (!model.cells.length) model.cells = [model.cols.map(()=>({text:'',colspan:1,rowspan:1,align:'',skip:false}))];
+      sel.clear(); render(); return;
+    }
+    if (name === 'delete-col' && list.length) {
+      const cols = [...new Set(list.map(x => x.c))].sort((a,b)=>b-a);
+      cols.forEach(c => {
+        model.cols.splice(c,1);
+        model.cells.forEach(row => row.splice(c,1));
+      });
+      if (!model.cols.length) { model.cols=[{kind:'l',width:'',raw:'l'}]; model.cells=[[{text:'',colspan:1,rowspan:1,align:'',skip:false}]]; }
+      sel.clear(); render(); return;
+    }
+    if (name === 'merge' && list.length >= 1) {
+      const bounds = expandMergeBounds(list);
+      if (!bounds) return;
+      const { r0, r1, c0, c1 } = bounds;
+      const area = (r1 - r0 + 1) * (c1 - c0 + 1);
+      if (area < 2) {
+        alert('请选择至少两个单元格再合并');
+        return;
+      }
+      // Prefer text from top-left of the expanded region (usually the visible anchor).
+      let text = '';
+      let align = 'c';
+      for (let r = r0; r <= r1; r++) {
+        for (let c = c0; c <= c1; c++) {
+          const cell = model.cells[r] && model.cells[r][c];
+          if (cell && !cell.skip && (cell.text || '').trim()) {
+            text = text ? (text + ' ' + cell.text) : cell.text;
+            if (cell.align) align = cell.align;
+          }
+        }
+      }
+      // Keep right-align for 签发时间-like rows when previous anchor was right-aligned.
+      const top = model.cells[r0] && model.cells[r0][c0];
+      if (top && !top.skip && top.align) align = top.align;
+      for (let r = r0; r <= r1; r++) {
+        for (let c = c0; c <= c1; c++) {
+          if (r === r0 && c === c0) {
+            model.cells[r][c] = {
+              text,
+              colspan: c1 - c0 + 1,
+              rowspan: r1 - r0 + 1,
+              align: align || 'c',
+              skip: false,
+            };
+          } else {
+            model.cells[r][c] = { text: '', colspan: 1, rowspan: 1, align: '', skip: true };
+          }
+        }
+      }
+      // Do not draw horizontal rules through the middle of a vertical merge.
+      model.hlines = model.hlines || [];
+      while (model.hlines.length < model.cells.length) model.hlines.push(true);
+      for (let r = r0; r < r1; r++) model.hlines[r] = false;
+      if (r1 < model.hlines.length) model.hlines[r1] = true;
+      sel.clear();
+      sel.add(key(r0, c0));
+      render();
+      return;
+    }
+    if (name === 'unmerge' && list.length) {
+      list.forEach(({r,c}) => {
+        const cell = model.cells[r][c];
+        if (!cell || cell.skip) return;
+        const cs = cell.colspan||1, rs = cell.rowspan||1;
+        const text = cell.text, align = cell.align;
+        for (let dr=0; dr<rs; dr++) for (let dc=0; dc<cs; dc++) {
+          model.cells[r+dr][c+dc] = {text: (dr===0&&dc===0)?text:'', colspan:1, rowspan:1, align, skip:false};
+        }
+      });
+      render(); return;
+    }
+  }
+
+  document.querySelector('.te-toolbar').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-act]');
+    if (btn) act(btn.getAttribute('data-act'));
+  });
+  document.querySelector('.te-card').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-act]');
+    if (btn) act(btn.getAttribute('data-act'));
+  });
+
+  document.getElementById('te-save').addEventListener('click', async () => {
+    collectCells();
+    editing = null;
+    statusEl.textContent = '保存中…'; statusEl.className='';
+    try {
+      const resp = await fetch(saveUrl, {
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-CSRFToken':csrf},
+        body: JSON.stringify({
+          chapter, block_id: blockId, is_new: isNew, model,
+          after_id: afterId, insert_pos: insertPos,
+        }),
+      });
+      const data = await resp.json();
+      if (!data.ok) { statusEl.textContent = data.error||'失败'; statusEl.className='err'; return; }
+      statusEl.textContent = '已保存'; statusEl.className='ok';
+      location.href = data.redirect || app.dataset.back;
+    } catch (err) {
+      statusEl.textContent = String(err); statusEl.className='err';
+    }
+  });
+
+  render();
+})();
+</script>
+{% endblock %}

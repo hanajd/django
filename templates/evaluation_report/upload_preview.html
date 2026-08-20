@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+{% block title %}预览 · {{ slot.label }}{% endblock %}
+{% block page_title %}材料预览{% endblock %}
+
+{% block content %}
+<style>
+.eval-thumb-grid { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.eval-thumb-grid.sortable .eval-thumb-card { cursor: grab; }
+.eval-thumb-grid.sortable .eval-thumb-card:active { cursor: grabbing; }
+.eval-thumb-grid .sortable-ghost { opacity: 0.4; }
+.eval-thumb-card {
+    width: 7.5rem; flex-shrink: 0; border-radius: 0.5rem;
+    border: 1px solid #e2e8f0; background: #fff; overflow: hidden;
+}
+.eval-thumb-preview {
+    position: relative; aspect-ratio: 4 / 3; background: #f8fafc;
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.eval-thumb-preview img { width: 100%; height: 100%; object-fit: cover; }
+.eval-thumb-preview .eval-thumb-icon { font-size: 2rem; color: #94a3b8; }
+.eval-thumb-preview .eval-thumb-icon.pdf { color: #ef4444; }
+.eval-thumb-index {
+    position: absolute; top: 0.25rem; left: 0.25rem;
+    min-width: 1.25rem; height: 1.25rem; padding: 0 0.25rem;
+    border-radius: 0.25rem; background: rgba(15, 23, 42, 0.72);
+    color: #fff; font-size: 0.65rem; font-weight: 600; line-height: 1.25rem; text-align: center;
+}
+.eval-thumb-meta { padding: 0.35rem 0.4rem 0.45rem; border-top: 1px solid #f1f5f9; }
+.eval-thumb-name {
+    display: block; font-size: 0.65rem; line-height: 1.3; color: #475569;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.eval-thumb-actions { display: flex; gap: 0.25rem; margin-top: 0.35rem; }
+.eval-thumb-actions button {
+    flex: 1; font-size: 0.6rem; padding: 0.15rem 0; border-radius: 0.25rem;
+    text-align: center; border: 1px solid #fecaca; background: #fff; color: #dc2626;
+}
+</style>
+<div class="mx-auto max-w-7xl space-y-4">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+            {% if is_eval_form %}
+            <a href="{% url 'evaluation_report_evaluation_form' report.pk %}" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; 返回评价信息表</a>
+            {% else %}
+            <a href="{% url 'evaluation_report_attachments' report.pk %}" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; 返回附件管理</a>
+            {% endif %}
+            <h1 class="mt-2 text-2xl font-semibold text-slate-900">{{ slot.label }}</h1>
+            {% if is_staging %}
+            <p class="mt-1 text-sm text-slate-600">{{ report.title }} · 待上传预览</p>
+            {% else %}
+            <p class="mt-1 text-sm text-slate-600">{{ report.title }} · {{ library_file.original_name }}</p>
+            {% if slot.files.count > 1 %}
+            <p class="text-xs text-slate-400">当前预览第 {{ upload_file.sort_order|add:1 }} 个文件（共 {{ slot.files.count }} 个）</p>
+            {% endif %}
+            {% endif %}
+        </div>
+        {% if is_eval_form %}
+        <div class="flex flex-wrap gap-2">
+            <a href="{% url 'evaluation_report_upload_preview' report.pk slot.slot_key %}?view=raw"
+               class="rounded-xl px-4 py-2 text-sm {% if view_mode == 'raw' %}bg-indigo-600 text-white{% else %}border border-slate-200 bg-white hover:bg-slate-50{% endif %}">
+                原文件
+            </a>
+            <a href="{% url 'evaluation_report_upload_preview' report.pk slot.slot_key %}?view=markdown"
+               class="rounded-xl px-4 py-2 text-sm {% if view_mode == 'markdown' %}bg-indigo-600 text-white{% else %}border border-slate-200 bg-white hover:bg-slate-50{% endif %}">
+                Markdown
+            </a>
+            <a href="{% url 'evaluation_report_upload_preview' report.pk slot.slot_key %}?view=tex"
+               class="rounded-xl px-4 py-2 text-sm {% if view_mode == 'tex' %}bg-indigo-600 text-white{% else %}border border-slate-200 bg-white hover:bg-slate-50{% endif %}">
+                LaTeX
+            </a>
+            {% if view_mode == 'tex' %}
+            <a href="{% url 'evaluation_report_upload_preview' report.pk slot.slot_key %}?view={{ view_mode }}&refresh=1"
+               class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm hover:bg-slate-50">
+                重新转换
+            </a>
+            {% endif %}
+            <a href="{% url 'evaluation_report_keywords' report.pk %}?next={{ request.get_full_path|urlencode }}"
+               class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800 hover:bg-emerald-100">
+                项目信息
+            </a>
+            <a href="{% url 'evaluation_report_structured_edit' report.pk %}"
+               class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-800 hover:bg-slate-50"
+               title="不根据本表生成章节，直接用模板进入正文编辑">
+                跳过，直接进入正文编辑
+            </a>
+            <form method="post" action="{% url 'evaluation_report_generate_base' report.pk %}" class="inline-flex">
+                {% csrf_token %}
+                <button type="submit" class="rounded-xl bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700">
+                    根据评价信息表生成基础报告并进入正文编辑
+                </button>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if is_eval_form %}
+    <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+        <p class="font-medium">本页只做评价信息表转换预览，不会自动进入正文。</p>
+        <p class="mt-1 text-amber-900/90">不想用本表生成基础章节时，请点下方橙色按钮直接进入正文编辑。</p>
+        <div class="mt-3 flex flex-wrap gap-2">
+            <a href="{% url 'evaluation_report_structured_edit' report.pk %}"
+               class="inline-flex items-center rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-700">
+                跳过，直接进入正文编辑
+            </a>
+            <form method="post" action="{% url 'evaluation_report_generate_base' report.pk %}" class="inline-flex">
+                {% csrf_token %}
+                <button type="submit" class="rounded-lg border border-amber-300 bg-white px-4 py-2.5 text-sm font-medium text-amber-950 hover:bg-amber-100">
+                    根据本表生成基础报告并进入正文
+                </button>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+    {% if is_staging %}
+    <div class="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+        已选择 <strong>{{ staging_files|length }}</strong> 个文件，尚未入库。请拖动调整顺序，确认后点击「上传文件」。
+    </div>
+
+    <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div class="eval-thumb-grid{% if staging_files|length > 1 %} sortable{% endif %}"
+             {% if staging_files|length > 1 %}
+             data-reorder-url="{% url 'evaluation_report_upload_staging_reorder' report.pk slot.slot_key %}"
+             {% endif %}>
+            {% for f in staging_files %}
+            <div class="eval-thumb-card" data-file-id="{{ f.id }}">
+                <div class="eval-thumb-preview">
+                    <span class="eval-thumb-index">{{ forloop.counter }}</span>
+                    {% if f.preview_kind == 'image' %}
+                    <img src="{{ f.media_url }}" alt="{{ f.filename }}" loading="lazy">
+                    {% elif f.preview_kind == 'pdf' %}
+                    <i class="ri-file-pdf-2-line eval-thumb-icon pdf"></i>
+                    {% else %}
+                    <i class="ri-file-line eval-thumb-icon"></i>
+                    {% endif %}
+                </div>
+                <div class="eval-thumb-meta">
+                    <span class="eval-thumb-name" title="{{ f.filename }}">{{ f.filename }}</span>
+                    <div class="eval-thumb-actions">
+                        <form method="post" action="{% url 'evaluation_report_upload_staging_delete' report.pk slot.slot_key %}"
+                              onsubmit="return confirm('确定移除此文件？');">
+                            {% csrf_token %}
+                            <input type="hidden" name="file_id" value="{{ f.id }}">
+                            <button type="submit">移除</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% if staging_files|length > 1 %}
+        <p class="mt-3 text-xs text-slate-400"><i class="ri-drag-move-line align-middle"></i> 拖动卡片调整上传顺序</p>
+        {% endif %}
+
+        <div class="mt-5 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+            <form method="post" action="{% url 'evaluation_report_upload_staging_commit' report.pk slot.slot_key %}">
+                {% csrf_token %}
+                <button type="submit" class="rounded-xl bg-indigo-600 px-5 py-2 text-sm text-white hover:bg-indigo-700">
+                    上传文件
+                </button>
+            </form>
+            <form method="post" enctype="multipart/form-data"
+                  action="{% url 'evaluation_report_upload_stage' report.pk slot.slot_key %}"
+                  class="eval-add-more-form inline-flex">
+                {% csrf_token %}
+                <input type="file" name="file" multiple
+                       accept="image/*,.pdf,.png,.jpg,.jpeg,.gif,.webp,.bmp,.tif,.tiff"
+                       class="eval-add-more-input hidden">
+                <button type="button" class="eval-add-more-btn rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm hover:bg-slate-50">
+                    继续选择
+                </button>
+            </form>
+            <a href="{% url 'evaluation_report_attachments' report.pk %}"
+               class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm hover:bg-slate-50">
+                返回附件管理
+            </a>
+        </div>
+    </section>
+    {% else %}
+
+    {% if error %}
+    <div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{{ error }}</div>
+    {% endif %}
+
+    {% if view_mode == 'markdown' and markdown_content %}
+    <div class="flex flex-wrap gap-2">
+        <a href="{% url 'evaluation_report_upload_preview' report.pk slot.slot_key %}?view=markdown&amp;format=rendered&amp;file_id={{ upload_file.pk }}"
+           class="rounded-lg px-3 py-1.5 text-xs {% if markdown_format == 'rendered' %}bg-slate-800 text-white{% else %}border border-slate-200 bg-white hover:bg-slate-50{% endif %}">
+            渲染预览
+        </a>
+        <a href="{% url 'evaluation_report_upload_preview' report.pk slot.slot_key %}?view=markdown&amp;format=source&amp;file_id={{ upload_file.pk }}"
+           class="rounded-lg px-3 py-1.5 text-xs {% if markdown_format == 'source' %}bg-slate-800 text-white{% else %}border border-slate-200 bg-white hover:bg-slate-50{% endif %}">
+            源码
+        </a>
+        {% if is_eval_form %}
+        <a href="{% url 'evaluation_report_upload_preview' report.pk slot.slot_key %}?view=markdown&amp;format={{ markdown_format }}&amp;refresh=1"
+           class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs hover:bg-slate-50">
+            重新转换
+        </a>
+        {% endif %}
+    </div>
+    {% if markdown_format == 'source' %}
+    <section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div class="border-b border-slate-100 bg-slate-50 px-4 py-3 flex justify-between">
+            <h2 class="text-sm font-semibold text-slate-800">Markdown 源码</h2>
+            <span class="text-xs text-slate-500">{{ markdown_content|length }} 字符</span>
+        </div>
+        <pre class="max-h-[calc(100vh-14rem)] overflow-auto p-4 text-xs leading-relaxed font-mono whitespace-pre-wrap break-words">{{ markdown_content }}</pre>
+    </section>
+    {% else %}
+    <section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div class="border-b border-slate-100 bg-slate-50 px-4 py-3 flex justify-between">
+            <h2 class="text-sm font-semibold text-slate-800">Markdown 渲染预览</h2>
+            <span class="text-xs text-slate-500">{{ markdown_content|length }} 字符</span>
+        </div>
+        <div class="p-4">
+            {% include "includes/markdown_render_block.html" with md_payload=md_payload payload_id="eval-md-json" root_id="eval-md-root" %}
+        </div>
+    </section>
+    {% endif %}
+    {% endif %}
+
+    {% if view_mode == 'tex' and tex_content %}
+    <section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div class="border-b border-slate-100 bg-slate-50 px-4 py-3 flex justify-between">
+            <h2 class="text-sm font-semibold text-slate-800">LaTeX 片段预览</h2>
+            <span class="text-xs text-slate-500">{{ tex_content|length }} 字符</span>
+        </div>
+        <pre class="max-h-[calc(100vh-12rem)] overflow-auto p-4 text-xs leading-relaxed font-mono whitespace-pre-wrap break-words bg-slate-950/5">{{ tex_content }}</pre>
+    </section>
+    {% endif %}
+
+    {% if view_mode != 'markdown' and view_mode != 'tex' %}
+    {% if preview_kind == 'pdf' %}
+    <section class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <iframe src="{{ media_url }}" class="w-full h-[calc(100vh-10rem)] min-h-[480px]" title="PDF 预览"></iframe>
+    </section>
+    {% elif preview_kind == 'image' %}
+    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm text-center">
+        <img src="{{ media_url }}" alt="{{ library_file.original_name }}" class="mx-auto max-h-[calc(100vh-12rem)] max-w-full object-contain">
+    </section>
+    {% elif preview_kind == 'docx' %}
+    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <p class="text-sm text-slate-600">Word 文档无法在浏览器内直接渲染，请使用「Markdown」标签转换后预览，或下载原文件。</p>
+        <a href="{{ media_url }}" download class="mt-4 inline-flex rounded-xl bg-slate-800 px-4 py-2 text-sm text-white hover:bg-slate-900">下载原文件</a>
+    </section>
+    {% elif preview_kind == 'download' %}
+    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <a href="{{ media_url }}" download class="inline-flex rounded-xl bg-slate-800 px-4 py-2 text-sm text-white hover:bg-slate-900">下载文件</a>
+    </section>
+    {% else %}
+    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <a href="{{ media_url }}" download class="inline-flex rounded-xl bg-slate-800 px-4 py-2 text-sm text-white hover:bg-slate-900">下载文件</a>
+    </section>
+    {% endif %}
+    {% endif %}
+    {% endif %}
+</div>
+
+{% if is_staging %}
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script>
+(function () {
+    function getCookie(name) {
+        var match = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
+        return match ? decodeURIComponent(match[1]) : '';
+    }
+    var csrfToken = getCookie('csrftoken');
+
+    document.querySelectorAll('.eval-add-more-form').forEach(function (form) {
+        var input = form.querySelector('.eval-add-more-input');
+        var btn = form.querySelector('.eval-add-more-btn');
+        if (input && btn) {
+            btn.addEventListener('click', function () { input.click(); });
+            input.addEventListener('change', function () {
+                if (input.files && input.files.length) form.submit();
+            });
+        }
+    });
+
+    document.querySelectorAll('.eval-thumb-grid.sortable').forEach(function (grid) {
+        if (typeof Sortable === 'undefined') return;
+        new Sortable(grid, {
+            animation: 180,
+            draggable: '.eval-thumb-card',
+            ghostClass: 'sortable-ghost',
+            onEnd: function () {
+                grid.querySelectorAll('.eval-thumb-index').forEach(function (badge, idx) {
+                    badge.textContent = String(idx + 1);
+                });
+                var url = grid.getAttribute('data-reorder-url');
+                if (!url) return;
+                var ids = Array.from(grid.querySelectorAll('.eval-thumb-card')).map(function (el) {
+                    return el.getAttribute('data-file-id');
+                }).filter(Boolean);
+                fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-CSRFToken': csrfToken,
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: 'order=' + encodeURIComponent(ids.join(','))
+                }).catch(function () {
+                    alert('保存顺序失败，请刷新页面后重试');
+                });
+            }
+        });
+    });
+})();
+</script>
+{% endif %}
+{% endblock %}

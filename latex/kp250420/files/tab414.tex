@@ -1,0 +1,43 @@
+% 个性化：tab414 — 表体可改；题注固定
+\begin{table}[H]
+\centering
+\caption{放射治疗项目机房尺寸设计情况及评价}
+\label{tab:ch4-room-size}
+\setlength{\tabcolsep}{2pt}
+\renewcommand{\arraystretch}{1.3}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{|
+>{\centering\arraybackslash}m{1.8cm}|
+>{\centering\arraybackslash}m{2.2cm}|
+>{\centering\arraybackslash}m{2.0cm}|
+>{\centering\arraybackslash}m{3.8cm}|
+>{\centering\arraybackslash}m{2.0cm}|
+>{\centering\arraybackslash}m{3.2cm}
+>{\centering\arraybackslash}m{1.1cm}|
+>{\centering\arraybackslash}m{0.8cm}|
+}
+\hline
+\multirow{2}{*}{机房名称}
+& \multirow{2}{*}{所在位置}
+& \multicolumn{3}{m{6.0cm}|}{\centering 设计情况}
+& \multicolumn{2}{m{4.5cm}|}{\centering 标准要求}
+& \multirow{2}{*}{评价} \\
+\cline{3-7}
+&
+& \parbox{2.0cm}{\centering 机房设计有效使用面积（\(\mathrm{m^2}\)）}
+& 尺寸（\(\mathrm{m}\)）
+& \parbox{2.0cm}{\centering 最小单边长度\\（\(\mathrm{m}\)）}
+& \multicolumn{2}{m{4.5cm}|}{\centering 最小有效使用面积（\(\mathrm{m^2}\)）\\最小单边长度（\(\mathrm{m}\)）}
+& \\
+\hline
+（机房）
+& （位置）
+&
+&
+&
+& \multicolumn{2}{m{4.5cm}|}{\centering GBZ 121-2020 6.2.1}
+&  \\
+\hline
+\end{tabular}%
+}
+\end{table}

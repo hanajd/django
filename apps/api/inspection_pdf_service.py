@@ -369,7 +369,9 @@ def resolve_report_task_for_case(
     if not allow_single_report_fallback:
         return None
     reports = report_tasks_for_project(project)
-    return reports[0] if reports else None
+    if len(reports) == 1:
+        return reports[0]
+    return None
 
 
 def _is_inspection_submit_json_linked_to_case(lf: LibraryFile) -> bool:

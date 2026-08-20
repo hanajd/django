@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}新建评价报告{% endblock %}
+{% block page_title %}新建评价报告{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-2xl space-y-6">
+    <div>
+        <a href="{% url 'evaluation_report_list' %}" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; 返回列表</a>
+        <h1 class="mt-2 text-2xl font-semibold text-slate-900">新建评价报告模板实例</h1>
+        <p class="mt-1 text-sm text-slate-600">选定医院与评价报告类型后，系统加载对应 LaTeX 模板及材料上传清单。</p>
+    </div>
+
+    <form method="post" class="space-y-5 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        {% csrf_token %}
+        <div>
+            <label class="block text-sm font-medium text-slate-700">报告标题</label>
+            <input type="text" name="title" required maxlength="255"
+                   class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                   placeholder="例如：萍乡市人民医院后装治疗机机房改建项目预评价">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-700">医院 <span class="text-red-500">*</span></label>
+            <select name="hospital" required class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm">
+                <option value="">— 请选择 —</option>
+                {% for h in hospitals %}
+                <option value="{{ h.pk }}">{{ h.name }}</option>
+                {% endfor %}
+            </select>
+            <p class="mt-1 text-xs text-slate-500">评价信息表将归入文件库「评价信息表」分类，并关联该医院。</p>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-700">评价报告类型 <span class="text-red-500">*</span></label>
+            <select name="report_subtype" id="report_subtype" required class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm">
+                {% for val, label in subtype_choices %}
+                <option value="{{ val }}" {% if val == 'brachy_pre' %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            <p class="mt-1 text-xs text-slate-500">后装预评 / 后装控评 / 加速器预评 / 加速器控评。</p>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-700">LaTeX 模板 <span class="text-red-500">*</span></label>
+            <select name="latex_template_key" required class="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" id="latex-template-select">
+                <option value="">— 请选择 —</option>
+                {% for t in template_registry %}
+                <option value="{{ t.key }}" data-subtype="{{ t.report_subtype }}">
+                    {{ t.name }}{% if t.subtype_label %} · {{ t.subtype_label }}{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+            <p class="mt-1 text-xs text-slate-500">列表会按所选评价报告类型筛选；可在 <a href="{% url 'evaluation_latex_template_list' %}" class="text-indigo-600 hover:underline">LaTeX 模板库</a> 维护模板。</p>
+        </div>
+        <div class="rounded-xl bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+            <p class="font-medium">模板库说明</p>
+            <p class="mt-1">新建报告需选择已上传的 LaTeX 模板（须含 <code class="rounded bg-white px-1">main.tex</code>）。系统内置后装/加速器预评与控评模板亦可选用。</p>
+        </div>
+        <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700">
+            创建并进入上传清单
+        </button>
+    </form>
+</div>
+<script>
+(function () {
+    var subtypeSelect = document.getElementById("report_subtype");
+    var templateSelect = document.getElementById("latex-template-select");
+
+    function filterTemplates() {
+        if (!templateSelect || !subtypeSelect) return;
+        var subtype = subtypeSelect.value;
+        var options = templateSelect.querySelectorAll("option");
+        var firstVisible = null;
+        options.forEach(function (opt) {
+            if (!opt.value) return;
+            var match = !opt.dataset.subtype || opt.dataset.subtype === subtype;
+            opt.hidden = !match;
+            opt.disabled = !match;
+            if (match && !firstVisible) firstVisible = opt;
+        });
+        var current = templateSelect.options[templateSelect.selectedIndex];
+        if (current && (current.hidden || current.disabled)) {
+            templateSelect.value = firstVisible ? firstVisible.value : "";
+        }
+    }
+
+    if (subtypeSelect) subtypeSelect.addEventListener("change", filterTemplates);
+    filterTemplates();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,9 @@
+# Evaluation report standalone — local testing stack
+Django>=4.2,<6
+Pillow>=10.0.0
+pymupdf>=1.24.0
+pdfplumber>=0.11.0
+python-docx>=1.1.0
+pypdf>=4.0.0
+PyPDF2>=3.0.0
+pdf2image>=1.17.0

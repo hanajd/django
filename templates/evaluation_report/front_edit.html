@@ -1,0 +1,776 @@
+{% extends "base.html" %}
+{% block title %}{% if template_mode %}{{ current.title }} · 模板 {{ latex_template_name }}{% else %}{{ current.title }} · {{ report.title }}{% endif %}{% endblock %}
+{% block page_title %}{% if template_mode %}{{ current.title }} · 模板{% else %}{{ current.title }} · {{ report.title }}{% endif %}{% endblock %}
+
+{% block extra_head %}
+<style>
+  body:has(#fe-app) { overflow: hidden; }
+  body:has(#fe-app) main { overflow: hidden !important; }
+  .fe-page { height: 100%; display: flex; flex-direction: column; background: #e2e8f0; overflow: hidden; }
+  .fe-toolbar {
+    flex-shrink: 0; background: #0f172a; color: #e2e8f0;
+    padding: 0.5rem 0.85rem; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center;
+  }
+  .fe-toolbar-right {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 0.4rem;
+  }
+  .fe-toolbar a, .fe-toolbar button {
+    font-size: 0.78rem; padding: 0.35rem 0.65rem; border-radius: 0.4rem;
+    border: 1px solid transparent; background: transparent; color: #e2e8f0; cursor: pointer;
+  }
+  .fe-toolbar a:hover, .fe-toolbar button:hover { background: #1e293b; }
+  .fe-toolbar button.primary { background: #4f46e5; }
+  .fe-toolbar button.template { background: #0f766e; color: #fff; border-color: #0f766e; }
+  .fe-toolbar .sep { width: 1px; height: 1.35rem; background: #334155; margin: 0 0.15rem; }
+  #fe-status { font-size: 0.75rem; color: #94a3b8; }
+  #fe-status.ok { color: #6ee7b7; } #fe-status.err { color: #fca5a5; }
+  .fe-body { flex: 1; overflow: hidden; display: flex; min-height: 0; }
+  .fe-nav {
+    width: 11.5rem; flex-shrink: 0; overflow: auto; background: #f8fafc;
+    border-right: 1px solid #cbd5e1; padding: 0.65rem 0.4rem;
+  }
+  .fe-nav .grp { font-size: 0.68rem; color: #64748b; padding: 0.45rem 0.55rem 0.2rem; font-weight: 600; }
+  .fe-nav a {
+    display: block; padding: 0.35rem 0.55rem; border-radius: 0.35rem;
+    font-size: 0.8rem; color: #334155; text-decoration: none;
+  }
+  .fe-nav a:hover { background: #e2e8f0; }
+  .fe-nav a.active { background: #e0e7ff; color: #3730a3; font-weight: 600; }
+  .fe-nav a .fe-miss {
+    display: inline-block; margin-left: 0.35rem; min-width: 1.1rem; padding: 0 0.28rem;
+    border-radius: 999px; background: #fef3c7; color: #92400e; font-size: 0.65rem; font-weight: 700;
+    line-height: 1.15rem; text-align: center; vertical-align: middle;
+  }
+  .fe-canvas-wrap { flex: 1; overflow: auto; padding: 1.25rem; }
+  .fe-sheet {
+    width: min(210mm, 100%); min-height: 280mm; margin: 0 auto;
+    background: #fff; box-shadow: 0 4px 24px rgb(0 0 0 / 0.12);
+    padding: 18mm 16mm 16mm; position: relative;
+    display: flex; flex-direction: column; color: #111;
+    font-family: "SimSun", "Songti SC", "Noto Serif SC", serif;
+  }
+  .fe-sheet.fe-sheet-qual {
+    width: 210mm; min-height: auto; height: auto; padding: 0;
+    box-sizing: border-box; background: transparent; box-shadow: none; gap: 0.75rem;
+    position: relative;
+  }
+  .fe-qual-a4 {
+    width: 210mm; height: 297mm; box-sizing: border-box;
+    background: #fff; box-shadow: 0 4px 24px rgb(0 0 0 / 0.12);
+    # 证书框 18.48×25.09cm，整体下移约 12mm 给页眉留空
+    padding: 35mm 12.6mm 11.1mm;
+    display: flex; flex-direction: column;
+    position: relative;
+  }
+  .fe-qual-a4 .fe-chrome-head {
+    position: absolute; top: 8mm; left: 12.6mm; right: 12.6mm;
+    margin-bottom: 0; flex-shrink: 0;
+  }
+  .fe-qual {
+    flex: 1; display: flex; flex-direction: column; align-items: stretch;
+    justify-content: center; min-height: 0; gap: 0;
+  }
+  .fe-qual-legend {
+    display: none; /* legend shown under page with controls */
+  }
+  .fe-qual-stage {
+    position: relative; width: 18.48cm; height: 25.09cm; flex: 0 0 auto;
+    align-self: center;
+    border: 2px dashed #6366f1; background:
+      repeating-linear-gradient(-45deg, #eef2ff, #eef2ff 6px, #e0e7ff 6px, #e0e7ff 12px);
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+  }
+  .fe-qual-stage .stage-label {
+    position: absolute; top: 0.25rem; left: 0.4rem; z-index: 2;
+    font-size: 0.65rem; color: #4338ca; background: rgba(255,255,255,0.85);
+    padding: 0.05rem 0.3rem; border-radius: 0.2rem; pointer-events: none;
+  }
+  .fe-qual-fit {
+    position: relative; box-sizing: border-box;
+    border: 2px solid #0f766e; background: #fff;
+    box-shadow: 0 0 0 1px rgba(15,118,110,0.15);
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+  }
+  .fe-qual-fit .fit-label {
+    position: absolute; bottom: 0.2rem; right: 0.3rem; z-index: 2;
+    font-size: 0.62rem; color: #0f766e; background: rgba(255,255,255,0.9);
+    padding: 0.05rem 0.3rem; border-radius: 0.2rem; pointer-events: none;
+  }
+  .fe-qual-fit img {
+    display: block; max-width: none; max-height: none;
+    /* 用容器尺寸表达导出占用；图片本身再按角度旋转铺满容器 */
+    width: 100%; height: 100%; object-fit: fill;
+  }
+  .fe-qual-fit.rot-wrap {
+    /* 旋转由 JS 用宽高互换后的容器表达，图片用 CSS rotate 对齐视觉 */
+  }
+  .fe-qual-fit img.is-rot {
+    width: auto; height: auto; object-fit: contain;
+  }
+  .fe-qual-empty {
+    color: #64748b; font-size: 0.82rem; text-align: center; padding: 1rem;
+    line-height: 1.5;
+  }
+  .fe-qual-controls {
+    flex-shrink: 0; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center;
+    padding: 0.55rem 0.65rem; background: #fff; border: 1px solid #cbd5e1;
+    border-radius: 0.4rem; font-size: 0.75rem; color: #334155;
+    box-shadow: 0 2px 10px rgb(0 0 0 / 0.06);
+  }
+  .fe-qual-controls .legend {
+    width: 100%; display: flex; flex-wrap: wrap; gap: 0.75rem;
+    font-size: 0.72rem; color: #475569; margin-bottom: 0.15rem;
+  }
+  .fe-qual-controls .legend span { display: inline-flex; align-items: center; gap: 0.3rem; }
+  .fe-qual-controls .legend i {
+    display: inline-block; width: 0.85rem; height: 0.85rem; border-radius: 2px;
+  }
+  .fe-qual-controls .legend .lg-max { border: 2px dashed #6366f1; background: #eef2ff; }
+  .fe-qual-controls .legend .lg-fit { border: 2px solid #0f766e; background: rgba(13,148,136,0.18); }
+  .fe-qual-controls button {
+    font-size: 0.72rem; padding: 0.25rem 0.55rem; border-radius: 0.3rem;
+    border: 1px solid #94a3b8; background: #fff; color: #0f172a; cursor: pointer;
+  }
+  .fe-qual-controls button:hover { background: #e2e8f0; }
+  .fe-qual-controls button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .fe-qual-controls .val {
+    min-width: 3.5rem; text-align: center; font-variant-numeric: tabular-nums;
+    font-weight: 600; color: #0f172a;
+  }
+  .fe-qual-controls .grp {
+    display: inline-flex; align-items: center; gap: 0.25rem;
+    padding-right: 0.45rem; margin-right: 0.15rem; border-right: 1px solid #cbd5e1;
+  }
+  .fe-qual-controls .grp:last-child { border-right: none; margin-right: 0; padding-right: 0; }
+  .fe-upload-row {
+    margin-top: 0; display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center;
+    font-size: 0.72rem; color: #555;
+  }
+  .fe-upload-row input[type=file] { font-size: 0.72rem; max-width: 11rem; }
+  .fe-upload-row button {
+    font-size: 0.72rem; padding: 0.2rem 0.5rem; border-radius: 0.3rem;
+    background: #1e293b; color: #fff; border: none; cursor: pointer;
+  }
+  .fe-chrome-head, .fe-chrome-foot {
+    display: flex; justify-content: space-between; gap: 1rem;
+    font-size: 0.72rem; color: #222; line-height: 1.35;
+  }
+  .fe-chrome-head { border-bottom: none; margin-bottom: 0.75rem; padding-bottom: 0.25rem; }
+  .fe-chrome-foot {
+    margin-top: auto; padding-top: 0.65rem; border-top: 1px solid #333;
+    white-space: pre-line;
+  }
+  .fe-chrome-foot.multi { display: block; }
+  .fe-cover { display: flex; flex-direction: column; flex: 1; min-height: 260mm; }
+  .fe-cover-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+  .fe-logo-box { width: 4.6cm; flex-shrink: 0; }
+  .fe-logo-box img { width: 100%; height: auto; display: block; }
+  .fe-logo-box .ph {
+    width: 100%; aspect-ratio: 401/137; border: 1px dashed #999; display: flex;
+    align-items: center; justify-content: center; font-size: 0.75rem; color: #666;
+  }
+  .fe-cover-meta {
+    text-align: right; font-size: 0.95rem; font-weight: 400; line-height: 1.55;
+    padding-top: 0.15rem; flex: 1; min-width: 0;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 0.15rem;
+  }
+  .fe-cover-meta input {
+    display: block; width: auto; max-width: 100%; min-width: 4rem; text-align: right;
+    border: none; border-bottom: 1px dashed #ccc; background: transparent;
+    font: inherit; color: inherit; padding: 0.1rem 0;
+    field-sizing: content; overflow: visible;
+  }
+  .fe-cover-meta input:focus { outline: none; border-bottom-color: #6366f1; }
+  .fe-cover-mid {
+    display: flex; flex-direction: column; align-items: center;
+    text-align: center; gap: 0.35rem; padding: 1.75rem 0 0;
+  }
+  .fe-cover-mid .unit-block {
+    width: 100%; display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
+  }
+  .fe-cover-mid .unit-line {
+    font-size: 1.55rem; font-weight: 700; line-height: 1.4;
+  }
+  .fe-cover-mid .title-block {
+    width: 100%; margin-top: 2.75rem; display: flex; flex-direction: column;
+    align-items: center; gap: 0.4rem;
+  }
+  .fe-cover-mid .title-line {
+    font-size: 1.55rem; font-weight: 700; line-height: 1.4;
+  }
+  .fe-cover-mid input, .fe-cover-mid textarea {
+    width: auto; max-width: 100%; min-width: 4rem; box-sizing: content-box;
+    border: none; border-bottom: 1px dashed #ccc; background: transparent;
+    font: inherit; color: inherit; text-align: center; resize: none;
+    field-sizing: content; overflow: visible;
+  }
+  .fe-cover-mid input:focus, .fe-cover-mid textarea:focus {
+    outline: none; border-bottom-color: #6366f1;
+  }
+  .fe-cover-mid .mit {
+    font-size: 0.95rem; font-weight: 700; margin-top: 0.45rem;
+  }
+  .fe-cover-spacer { flex: 1; min-height: 2rem; }
+  .fe-cover-bot {
+    text-align: center; font-size: 0.95rem; font-weight: 700; line-height: 1.75; padding-bottom: 1rem;
+  }
+  .fe-cover-bot .bot-block {
+    display: inline-block; text-align: left; max-width: 100%;
+  }
+  .fe-cover-bot .row { display: flex; align-items: baseline; gap: 0.15rem; margin: 0.35rem 0; }
+  .fe-cover-bot input {
+    border: none; border-bottom: 1px dashed #ccc; background: transparent;
+    font: inherit; text-align: left; width: auto; min-width: 4rem; max-width: 100%;
+    field-sizing: content; overflow: visible;
+  }
+  .fe-cover-bot input:focus { outline: none; border-bottom-color: #6366f1; }
+  .fe-cover-bot .date-row { margin-top: 0.85rem; text-align: center; }
+  .fe-cover-bot .date-row input { text-align: center; }
+  .fe-decl { flex: 1; display: flex; flex-direction: column; }
+  .fe-decl .head {
+    text-align: center; font-size: 1.35rem; font-weight: 700; line-height: 1.4; margin-bottom: 0.35rem;
+  }
+  .fe-decl .no { text-align: center; font-size: 0.95rem; margin-bottom: 1.25rem; }
+  .fe-decl .title {
+    text-align: center; font-size: 1.2rem; font-weight: 700;
+    font-family: "SimHei", "Heiti SC", sans-serif; margin: 0.5rem 0 0.85rem;
+  }
+  .fe-decl .statement {
+    font-size: 1rem; line-height: 1.7; text-align: justify; text-indent: 2em;
+    border: none; outline: none; box-shadow: none; width: 100%;
+    min-height: 0; height: auto; resize: none; overflow: hidden;
+    background: transparent; font-family: inherit; color: inherit;
+    padding: 0; margin: 0; display: block; field-sizing: content;
+  }
+  .fe-decl .statement:focus { outline: none; border: none; box-shadow: none; }
+  .fe-decl .table-wrap { margin-top: 1.25rem; }
+  .fe-decl .table-wrap .bar {
+    display: flex; justify-content: flex-end; margin-bottom: 0.35rem;
+  }
+  .fe-decl .table-wrap a {
+    font-size: 0.75rem; padding: 0.25rem 0.55rem; border-radius: 0.3rem;
+    background: #4f46e5; color: #fff; text-decoration: none;
+  }
+  .fe-decl table.se-preview-table {
+    width: 100%; border-collapse: collapse; font-size: 0.78rem; table-layout: fixed;
+  }
+  .fe-decl table.se-preview-table td {
+    border: 1px solid #111; padding: 0.35rem 0.4rem; vertical-align: middle;
+  }
+  .fe-decl table.se-preview-table tr.se-rowspan-pad {
+    height: 2.8em;
+  }
+  .fe-pdf-banner {
+    flex-shrink: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.65rem;
+    padding: 0.55rem 0.85rem; background: #ecfdf5; border-bottom: 1px solid #a7f3d0;
+    color: #065f46; font-size: 0.82rem;
+  }
+  .fe-pdf-banner a {
+    display: inline-flex; align-items: center; padding: 0.3rem 0.65rem; border-radius: 0.35rem;
+    background: #059669; color: #fff; text-decoration: none; font-size: 0.78rem;
+  }
+  .fe-pdf-banner a.secondary { background: #fff; color: #065f46; border: 1px solid #6ee7b7; }
+  .fe-pdf-banner .dismiss {
+    margin-left: auto; background: transparent; border: none; color: #047857;
+    cursor: pointer; font-size: 0.75rem; text-decoration: underline;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fe-page" id="fe-app"
+     data-admin-pjax="off"
+     data-admin-pjax-require-full
+     data-chapter="{{ current.key }}"
+     data-page-key="{{ page_key }}"
+     data-save-url="{{ save_url }}"
+     data-template-mode="{% if template_mode %}1{% else %}0{% endif %}"
+     data-template-name="{{ latex_template_name|default:''|escape }}"
+     data-upload-url="{{ upload_url }}"
+     data-table-edit-url="{{ table_edit_url }}"
+     data-media-base="{{ media_base }}"
+     data-csrf="{{ csrf_token }}">
+  {% if not template_mode and pdf_ready and pdf_view_url %}
+  <div class="fe-pdf-banner" id="fe-pdf-banner">
+    <strong>报告 PDF 已生成</strong>
+    <span>可预览或下载；附件请在生成前于「材料上传」中准备。</span>
+    <a href="{{ pdf_view_url }}?v={{ report.updated_at|date:'U' }}" target="_blank" rel="noopener">预览 PDF</a>
+    <a class="secondary" href="{{ pdf_download_url }}">下载</a>
+    <button type="button" class="dismiss" id="fe-pdf-dismiss">关闭</button>
+  </div>
+  {% endif %}
+  <div class="fe-toolbar">
+    {% if template_mode %}
+    <a href="{{ back_url }}" title="返回模板选择">&larr; 模板列表</a>
+    <div class="sep"></div>
+    <span style="color:#64748b;font-size:0.8rem">模板 · {{ latex_template_name }}</span>
+    {% else %}
+    <a href="{% url 'evaluation_report_detail' report.pk %}" title="返回报告详情">&larr; 报告详情</a>
+    <div class="sep"></div>
+    <a href="{{ keywords_url }}">项目信息</a>
+    <a href="{% url 'evaluation_report_attachments' report.pk %}" title="上传/管理附件材料">上传附件</a>
+    {% endif %}
+    <div class="fe-toolbar-right">
+      <span id="fe-status"></span>
+      {% if template_mode %}
+      <button type="button" class="template" id="fe-save">保存模板</button>
+      {% else %}
+      <button type="button" class="primary" id="fe-save">保存</button>
+      {% endif %}
+    </div>
+  </div>
+  <div class="fe-body">
+    <aside class="fe-nav">
+      {% for group, items in chapter_groups.items %}
+      <div class="grp">{{ group }}</div>
+      {% for ch in items %}
+      <a href="{{ edit_base }}?chapter={{ ch.key }}" class="{% if ch.key == current.key %}active{% endif %}" data-chapter="{{ ch.key }}">{{ ch.title }}</a>
+      {% endfor %}
+      {% endfor %}
+    </aside>
+    <div class="fe-canvas-wrap">
+      <div class="fe-sheet" id="fe-sheet"></div>
+    </div>
+  </div>
+</div>
+<script id="fe-page-data" type="application/json">{{ page_json|safe }}</script>
+<script id="fe-chrome-data" type="application/json">{{ page_chrome_json|safe }}</script>
+<script>
+(function () {
+  const app = document.getElementById('fe-app');
+  const sheet = document.getElementById('fe-sheet');
+  const statusEl = document.getElementById('fe-status');
+  const chapter = app.dataset.chapter;
+  const pageKey = app.dataset.pageKey;
+  const saveUrl = app.dataset.saveUrl;
+  const uploadUrl = app.dataset.uploadUrl;
+  const tableEditUrl = app.dataset.tableEditUrl;
+  const mediaBase = app.dataset.mediaBase || '';
+  const csrf = app.dataset.csrf;
+  let page = {};
+  let chrome = { show: false };
+  try { page = JSON.parse(document.getElementById('fe-page-data').textContent || '{}'); } catch (e) {}
+  try { chrome = JSON.parse(document.getElementById('fe-chrome-data').textContent || '{}'); } catch (e) {}
+
+  (function stampUnfilledNavBadges() {
+    let map = {};
+    try { map = {{ unfilled_by_chapter_json|default:'{}'|safe }}; } catch (e) { map = {}; }
+    if (!map || typeof map !== 'object') return;
+    document.querySelectorAll('.fe-nav a[data-chapter]').forEach(function (a) {
+      var key = a.getAttribute('data-chapter') || '';
+      var n = map[key];
+      if (!n) return;
+      var span = document.createElement('span');
+      span.className = 'fe-miss';
+      span.title = '本章有 ' + n + ' 项未填';
+      span.textContent = String(n);
+      a.appendChild(span);
+    });
+  })();
+
+  function esc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function imgUrl(path) {
+    if (!path) return '';
+    return mediaBase + String(path).replace(/^\/+/, '');
+  }
+
+  function chromeHtml() {
+    if (!chrome || !chrome.show) return { head: '', foot: '' };
+    const head = '<div class="fe-chrome-head"><div>' + esc(chrome.lhead || '') +
+      '</div><div>' + esc(chrome.rhead || '') + '</div></div>';
+    let foot = '';
+    if (chrome.lfoot || chrome.rfoot) {
+      const footCls = (chrome.lfoot || '').includes('\\n') || (chrome.lfoot || '').includes('\n') ? ' multi' : '';
+      foot = '<div class="fe-chrome-foot' + footCls + '"><div>' +
+        esc(chrome.lfoot || '').replace(/\n/g, '<br>') + '</div>' +
+        (chrome.rfoot ? '<div>' + esc(chrome.rfoot) + '</div>' : '') + '</div>';
+    }
+    return { head, foot };
+  }
+
+  function renderCover() {
+    sheet.classList.remove('fe-sheet-qual');
+    const src = imgUrl(page.logo_path);
+    sheet.innerHTML =
+      '<div class="fe-cover">' +
+      '<div class="fe-cover-top">' +
+        '<div class="fe-logo-box">' +
+          (src
+            ? '<img src="' + esc(src) + '" alt="">'
+            : '<div class="ph">Logo</div>') +
+          '<div class="fe-upload-row">' +
+            '<input type="file" accept="image/*" id="fe-file">' +
+            '<button type="button" id="fe-upload">上传 Logo</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="fe-cover-meta">' +
+          '<input data-k="reportno" value="' + esc(page.reportno) + '" placeholder="报告编号">' +
+          '<input data-k="reportver" value="' + esc(page.reportver) + '" placeholder="版本">' +
+        '</div>' +
+      '</div>' +
+      '<div class="fe-cover-mid">' +
+        '<div class="unit-block">' +
+          '<input class="unit-line" data-k="buildunit" value="' + esc(page.buildunit) + '" placeholder="建设单位">' +
+          '<input class="unit-line" data-k="project" value="' + esc(page.project) + '" placeholder="项目名称">' +
+        '</div>' +
+        '<div class="title-block">' +
+          '<input class="title-line" data-k="radiationhazard" value="' + esc(page.radiationhazard) + '" placeholder="报告类型（上）">' +
+          '<input class="title-line" data-k="reportkind" value="' + esc(page.reportkind) + '" placeholder="报告类型（下）">' +
+          '<input class="mit" data-k="mitnote" value="' + esc(page.mitnote) + '" placeholder="(报批稿)">' +
+        '</div>' +
+      '</div>' +
+      '<div class="fe-cover-spacer"></div>' +
+      '<div class="fe-cover-bot">' +
+        '<div class="bot-block">' +
+          '<div class="row"><span>建设单位：</span><input data-k="buildunit2" value="' + esc(page.buildunit) + '"></div>' +
+          '<div class="row"><span>评价单位：</span><input data-k="company" value="' + esc(page.company) + '"></div>' +
+        '</div>' +
+        '<div class="date-row"><input data-k="printdate" value="' + esc(page.printdate) + '" placeholder="印刷日期"></div>' +
+      '</div></div>';
+    bindFields();
+    bindUpload('logo_path');
+    const b2 = sheet.querySelector('[data-k="buildunit2"]');
+    const b1 = sheet.querySelector('[data-k="buildunit"]');
+    if (b2 && b1) {
+      b2.addEventListener('input', () => {
+        page.buildunit = b2.value; b1.value = b2.value;
+        b1._feAutoSize && b1._feAutoSize();
+        b2._feAutoSize && b2._feAutoSize();
+      });
+      b1.addEventListener('input', () => {
+        page.buildunit = b1.value; b2.value = b1.value;
+        b1._feAutoSize && b1._feAutoSize();
+        b2._feAutoSize && b2._feAutoSize();
+      });
+    }
+    autoSizeCoverInputs();
+  }
+
+  function normAngle(a) {
+    a = Number(a) || 0;
+    a = ((a % 360) + 360) % 360;
+    return a;
+  }
+  function normScale(s) {
+    s = Number(s);
+    if (!isFinite(s) || s <= 0) return 1;
+    return Math.max(0.1, Math.min(2, Math.round(s * 100) / 100));
+  }
+  function ensureQualDefaults() {
+    if (page.image_angle == null) page.image_angle = 90;
+    if (page.image_scale == null) page.image_scale = 1;
+    page.image_angle = normAngle(page.image_angle);
+    page.image_scale = normScale(page.image_scale);
+  }
+
+  /** LaTeX angle is CCW; CSS rotate is CW → use negative. */
+  function cssRotateFromLatex(angle) {
+    return -normAngle(angle);
+  }
+
+  /** Final on-page size after rotate + keepaspectratio into text box, times scale. */
+  function computeFitMm(natW, natH, angle, scale, boxW, boxH) {
+    const rot = normAngle(angle);
+    let w = natW, h = natH;
+    if (rot === 90 || rot === 270) { w = natH; h = natW; }
+    if (!w || !h || !boxW || !boxH) return { w: 0, h: 0 };
+    const r = Math.min(boxW / w, boxH / h);
+    const sc = normScale(scale);
+    return { w: w * r * sc, h: h * r * sc };
+  }
+
+  function updateQualPreview() {
+    const stage = document.getElementById('fe-qual-stage');
+    const fit = document.getElementById('fe-qual-fit');
+    const img = document.getElementById('fe-qual-img');
+    const angEl = document.getElementById('fe-qual-angle');
+    const scEl = document.getElementById('fe-qual-scale');
+    const sizeEl = document.getElementById('fe-qual-size');
+    if (!stage || !fit) return;
+    ensureQualDefaults();
+    if (angEl) angEl.textContent = page.image_angle + '°';
+    if (scEl) scEl.textContent = Math.round(page.image_scale * 100) + '%';
+
+    const boxW = Number(page.text_w_mm) || 184.8;
+    const boxH = Number(page.text_h_mm) || 250.9;
+    const natW = img && img.naturalWidth ? img.naturalWidth : 0;
+    const natH = img && img.naturalHeight ? img.naturalHeight : 0;
+
+    if (!page.image_path || !natW) {
+      fit.style.display = 'none';
+      if (sizeEl) sizeEl.textContent = '—';
+      return;
+    }
+    const dims = computeFitMm(natW, natH, page.image_angle, page.image_scale, boxW, boxH);
+    const stageW = stage.clientWidth || 1;
+    const stageH = stage.clientHeight || 1;
+    const pxPerMmX = stageW / boxW;
+    const pxPerMmY = stageH / boxH;
+    const fitW = Math.max(2, dims.w * pxPerMmX);
+    const fitH = Math.max(2, dims.h * pxPerMmY);
+    fit.style.display = 'flex';
+    fit.style.width = fitW + 'px';
+    fit.style.height = fitH + 'px';
+
+    // Fill the occupancy box: rotate image inside a pre-swapped container logic
+    // Container already has final w×h; draw image with CSS rotate and scale to cover.
+    const rot = normAngle(page.image_angle);
+    const cssDeg = cssRotateFromLatex(rot);
+    if (img) {
+      // Unrotated image aspect inside rotated visual: size so after CSS rotate it fills fit box.
+      if (rot === 90 || rot === 270) {
+        img.style.width = fitH + 'px';
+        img.style.height = fitW + 'px';
+      } else {
+        img.style.width = fitW + 'px';
+        img.style.height = fitH + 'px';
+      }
+      img.style.transform = 'rotate(' + cssDeg + 'deg)';
+      img.style.transformOrigin = 'center center';
+    }
+    if (sizeEl) {
+      sizeEl.textContent = dims.w.toFixed(1) + '×' + dims.h.toFixed(1) + ' mm';
+    }
+  }
+
+  function renderQual() {
+    ensureQualDefaults();
+    const src = imgUrl(page.image_path);
+    const ch = chromeHtml();
+    const tw = Number(page.text_w_mm) || 184.8;
+    const th = Number(page.text_h_mm) || 250.9;
+    const twCm = (Number(page.frame_w_cm) || tw / 10).toFixed(2);
+    const thCm = (Number(page.frame_h_cm) || th / 10).toFixed(2);
+    sheet.classList.add('fe-sheet-qual');
+    sheet.innerHTML =
+      '<div class="fe-qual-a4">' +
+        ch.head +
+        '<div class="fe-qual">' +
+          '<div class="fe-qual-stage" id="fe-qual-stage">' +
+            '<div class="stage-label">版心（最大可用）</div>' +
+            (src
+              ? '<div class="fe-qual-fit" id="fe-qual-fit" style="display:none">' +
+                  '<img id="fe-qual-img" src="' + esc(src) + '" alt="">' +
+                  '<div class="fit-label">实际占用</div>' +
+                '</div>'
+              : '<div class="fe-qual-empty">请上传资质证书图片<br>虚线框为 PDF 版心最大可用范围</div>') +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="fe-qual-controls">' +
+        '<div class="legend">' +
+          '<span><i class="lg-max"></i>证书框 ' + twCm + '×' + thCm + ' cm（默认最大）</span>' +
+          '<span><i class="lg-fit"></i>导出实际占用</span>' +
+        '</div>' +
+        '<div class="grp">' +
+          '<span>旋转</span>' +
+          '<button type="button" id="fe-rot-ccw" title="逆时针 90°（LaTeX angle+90）">↺ 90°</button>' +
+          '<button type="button" id="fe-rot-cw" title="顺时针 90°">↻ 90°</button>' +
+          '<span class="val" id="fe-qual-angle">' + page.image_angle + '°</span>' +
+        '</div>' +
+        '<div class="grp">' +
+          '<span>大小</span>' +
+          '<button type="button" id="fe-scale-down" title="缩小 5%">−</button>' +
+          '<span class="val" id="fe-qual-scale">' + Math.round(page.image_scale * 100) + '%</span>' +
+          '<button type="button" id="fe-scale-up" title="放大 5%">+</button>' +
+          '<button type="button" id="fe-scale-reset" title="铺满版心">铺满</button>' +
+        '</div>' +
+        '<div class="grp">' +
+          '<span>占用</span>' +
+          '<span class="val" id="fe-qual-size" style="min-width:7rem">—</span>' +
+        '</div>' +
+        '<div class="fe-upload-row" style="margin-left:auto">' +
+          '<input type="file" accept="image/*" id="fe-file">' +
+          '<button type="button" id="fe-upload">上传证书图片</button>' +
+        '</div>' +
+      '</div>';
+    bindUpload('image_path');
+    const hasImg = !!src;
+    sheet.querySelectorAll('#fe-rot-ccw,#fe-rot-cw,#fe-scale-down,#fe-scale-up,#fe-scale-reset')
+      .forEach(btn => { btn.disabled = !hasImg; });
+    document.getElementById('fe-rot-ccw')?.addEventListener('click', () => {
+      page.image_angle = normAngle(page.image_angle + 90);
+      updateQualPreview();
+      statusEl.textContent = '已调整旋转（请点保存）';
+      statusEl.className = '';
+    });
+    document.getElementById('fe-rot-cw')?.addEventListener('click', () => {
+      page.image_angle = normAngle(page.image_angle - 90);
+      updateQualPreview();
+      statusEl.textContent = '已调整旋转（请点保存）';
+      statusEl.className = '';
+    });
+    document.getElementById('fe-scale-down')?.addEventListener('click', () => {
+      page.image_scale = normScale(page.image_scale - 0.05);
+      updateQualPreview();
+      statusEl.textContent = '已调整大小（请点保存）';
+      statusEl.className = '';
+    });
+    document.getElementById('fe-scale-up')?.addEventListener('click', () => {
+      page.image_scale = normScale(page.image_scale + 0.05);
+      updateQualPreview();
+      statusEl.textContent = '已调整大小（请点保存）';
+      statusEl.className = '';
+    });
+    document.getElementById('fe-scale-reset')?.addEventListener('click', () => {
+      page.image_scale = 1;
+      updateQualPreview();
+      statusEl.textContent = '已恢复铺满（请点保存）';
+      statusEl.className = '';
+    });
+    const img = document.getElementById('fe-qual-img');
+    if (img) {
+      if (img.complete && img.naturalWidth) updateQualPreview();
+      else img.addEventListener('load', updateQualPreview);
+    }
+    requestAnimationFrame(updateQualPreview);
+  }
+
+  function renderDecl() {
+    sheet.classList.remove('fe-sheet-qual');
+    const ch = chromeHtml();
+    const editHref = tableEditUrl
+      ? (tableEditUrl + '?chapter=' + encodeURIComponent(chapter) +
+        '&block=' + encodeURIComponent(page.table_block_id || ''))
+      : '';
+    sheet.innerHTML =
+      ch.head +
+      '<div class="fe-decl">' +
+        '<div class="title" style="font-size:1.35rem;font-weight:700">声明</div>' +
+        '<textarea class="statement" data-k="statement" rows="1">' + esc(page.statement) + '</textarea>' +
+        '<div class="table-wrap">' +
+          (editHref
+            ? '<div class="bar"><a href="' + esc(editHref) + '">编辑表格</a></div>'
+            : '<div class="bar"><span style="font-size:0.75rem;color:#94a3b8">模板模式：声明表格请用源码预览维护</span></div>') +
+          (page.table_preview_html || '<p style="font-size:0.8rem;color:#666">暂无表格</p>') +
+        '</div>' +
+      '</div>' +
+      ch.foot;
+    bindFields();
+    const st = sheet.querySelector('textarea.statement');
+    if (st) autoSizeStatement(st);
+  }
+
+  function autoSizeStatement(el) {
+    const fit = () => {
+      el.style.height = 'auto';
+      el.style.height = Math.max(el.scrollHeight, 1) + 'px';
+    };
+    fit();
+    el.addEventListener('input', fit);
+    // Font/layout settle after paint
+    requestAnimationFrame(fit);
+  }
+
+  function autoSizeInput(el) {
+    if (!el || el.tagName !== 'INPUT') return;
+    const fit = () => {
+      // 先缩到极小再读 scrollWidth，避免宽度卡住导致长文本裁切
+      const prev = el.style.width;
+      el.style.width = '0px';
+      const next = Math.ceil(Math.max(el.scrollWidth + 2, 64));
+      el.style.width = next + 'px';
+      if (!el.value && prev === '') el.style.width = '';
+    };
+    fit();
+    el.addEventListener('input', fit);
+    el._feAutoSize = fit;
+  }
+
+  function autoSizeCoverInputs() {
+    sheet.querySelectorAll('.fe-cover input[data-k]').forEach(autoSizeInput);
+    requestAnimationFrame(() => {
+      sheet.querySelectorAll('.fe-cover input[data-k]').forEach(el => el._feAutoSize && el._feAutoSize());
+    });
+  }
+
+  function bindFields() {
+    sheet.querySelectorAll('[data-k]').forEach(el => {
+      const k = el.getAttribute('data-k');
+      if (k === 'buildunit2') return;
+      el.addEventListener('input', () => { page[k] = el.value; });
+    });
+  }
+
+  function bindUpload(pathKey) {
+    document.getElementById('fe-upload')?.addEventListener('click', async () => {
+      const file = document.getElementById('fe-file')?.files?.[0];
+      if (!file) {
+        statusEl.textContent = '请先选择图片';
+        statusEl.className = 'err';
+        return;
+      }
+      statusEl.textContent = '上传中…';
+      statusEl.className = '';
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('chapter', chapter);
+      try {
+        const resp = await fetch(uploadUrl, { method: 'POST', headers: { 'X-CSRFToken': csrf }, body: fd });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || '上传失败');
+        page[pathKey] = data.path || data.relpath || '';
+        if (pathKey === 'image_path') {
+          // 新图默认：逆时针 90° + 铺满版心（可再用按钮微调）
+          page.image_angle = 90;
+          page.image_scale = 1;
+        }
+        statusEl.textContent = '已上传，正在写入…';
+        statusEl.className = 'ok';
+        render();
+        // 上传后立刻保存，避免仅预览有图而 PDF 仍是黑色 \rule 占位
+        const saveResp = await fetch(saveUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+          body: JSON.stringify({ chapter, page }),
+        });
+        const saveData = await saveResp.json();
+        if (!saveData.ok) throw new Error(saveData.error || '写入失败');
+        statusEl.textContent = '已上传并保存';
+        statusEl.className = 'ok';
+      } catch (err) {
+        statusEl.textContent = String(err.message || err);
+        statusEl.className = 'err';
+      }
+    });
+  }
+
+  function render() {
+    if (pageKey === 'cover') renderCover();
+    else if (pageKey === 'qualification') renderQual();
+    else renderDecl();
+  }
+
+  document.getElementById('fe-save').addEventListener('click', async () => {
+    statusEl.textContent = '保存中…';
+    statusEl.className = '';
+    try {
+      const resp = await fetch(saveUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+        body: JSON.stringify({ chapter, page }),
+      });
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || '保存失败');
+      statusEl.textContent = data.message || (app.dataset.templateMode === '1' ? '已保存模板' : '已保存');
+      statusEl.className = 'ok';
+    } catch (err) {
+      statusEl.textContent = String(err.message || err);
+      statusEl.className = 'err';
+    }
+  });
+
+  render();
+  document.getElementById('fe-pdf-dismiss')?.addEventListener('click', () => {
+    document.getElementById('fe-pdf-banner')?.remove();
+    if (history.replaceState) {
+      const u = new URL(location.href);
+      u.searchParams.delete('pdf');
+      history.replaceState({}, '', u.pathname + u.search + u.hash);
+    }
+  });
+})();
+</script>
+{% endblock %}

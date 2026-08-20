@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% block title %}编辑公式 · {{ current.title }}{% endblock %}
+
+{% block extra_head %}
+{% load static %}
+<link rel="stylesheet" href="{% static 'vendor/katex/katex.min.css' %}">
+<script src="{% static 'vendor/katex/katex.min.js' %}"></script>
+<style>
+  body:has(#fe-app) { overflow: hidden; }
+  body:has(#fe-app) .flex.min-h-screen { height: 100vh; overflow: hidden; }
+  body:has(#fe-app) main { overflow: hidden !important; padding: 0 !important; }
+  .fe-page { height: 100vh; display: flex; flex-direction: column; background: #f1f5f9; overflow: hidden; }
+  .fe-toolbar {
+    flex-shrink: 0; background: #0f172a; color: #e2e8f0;
+    padding: 0.55rem 0.85rem; display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center;
+  }
+  .fe-toolbar-right {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 0.4rem;
+  }
+  .fe-toolbar a, .fe-toolbar button {
+    font-size: 0.75rem; padding: 0.35rem 0.65rem; border-radius: 0.4rem;
+    border: 1px solid transparent; background: transparent; color: #e2e8f0; cursor: pointer;
+  }
+  .fe-toolbar a:hover, .fe-toolbar button:hover { background: #1e293b; }
+  .fe-toolbar button.primary { background: #4f46e5; }
+  .fe-toolbar select {
+    background: #1e293b; color: #e2e8f0; border: 1px solid #334155;
+    border-radius: 0.35rem; padding: 0.3rem 0.5rem; font-size: 0.75rem;
+  }
+  .fe-toolbar .sep { width: 1px; height: 1.35rem; background: #334155; margin: 0 0.15rem; }
+  #fe-status { font-size: 0.75rem; color: #94a3b8; }
+  #fe-status.ok { color: #6ee7b7; } #fe-status.err { color: #fca5a5; }
+  .fe-main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+  @media (max-width: 900px) { .fe-main { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; } }
+  .fe-pane { display: flex; flex-direction: column; min-height: 0; padding: 1rem; }
+  .fe-pane h2 { font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 0.5rem; }
+  .fe-code {
+    flex: 1; width: 100%; resize: none; border: 1px solid #cbd5e1; border-radius: 0.5rem;
+    padding: 0.85rem 1rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.95rem; line-height: 1.55; background: #fff; color: #0f172a;
+  }
+  .fe-preview-box {
+    flex: 1; border: 1px solid #cbd5e1; border-radius: 0.5rem; background: #fff;
+    display: flex; align-items: center; justify-content: center; padding: 1.5rem; overflow: auto;
+  }
+  .fe-preview-box .err { color: #b91c1c; font-size: 0.85rem; white-space: pre-wrap; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fe-page" id="fe-app"
+     data-chapter="{{ current.key }}"
+     data-block="{{ block_id }}"
+     data-new="{{ is_new|yesno:'1,0' }}"
+     data-after="{{ after_id }}"
+     data-pos="{{ insert_pos }}"
+     data-parent="{{ parent_id }}"
+     data-idx="{{ inline_idx }}"
+     data-inline="{{ is_inline_edit|yesno:'1,0' }}"
+     data-mode="{{ mode }}"
+     data-save-url="{{ save_url }}"
+     data-back="{{ back_url }}"
+     data-csrf="{{ csrf_token }}">
+  <script type="application/json" id="fe-body-data">{{ body_json|safe }}</script>
+  <div class="fe-toolbar">
+    <a href="{{ back_url }}">&larr; 返回正文</a>
+    <div class="sep"></div>
+    <label class="text-xs text-slate-400">形式
+      <select id="fe-mode" title="快捷切换定界符（也可直接改左侧代码）">
+        <option value="inline">行内 $...$</option>
+        <option value="display">独立 \[...\]</option>
+        <option value="display2">独立 $$...$$</option>
+        <option value="equation">equation</option>
+        <option value="equation*">equation*</option>
+        <option value="align">align</option>
+        <option value="align*">align*</option>
+      </select>
+    </label>
+    <div class="fe-toolbar-right">
+      <span id="fe-status"></span>
+      <button type="button" class="primary" id="fe-save">保存并返回</button>
+    </div>
+  </div>
+  <div class="fe-main">
+    <div class="fe-pane">
+      <h2>LaTeX 代码（含定界符；$...$ / $$...$$ / \[...\] / \begin{align}...\end{align}）</h2>
+      <textarea id="fe-code" class="fe-code" spellcheck="false"></textarea>
+    </div>
+    <div class="fe-pane">
+      <h2>渲染预览 <span id="fe-mode-hint" style="font-weight:400;color:#94a3b8"></span></h2>
+      <div class="fe-preview-box"><div id="fe-preview"></div></div>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  const app = document.getElementById('fe-app');
+  const codeEl = document.getElementById('fe-code');
+  const modeEl = document.getElementById('fe-mode');
+  const previewEl = document.getElementById('fe-preview');
+  const statusEl = document.getElementById('fe-status');
+  const modeHint = document.getElementById('fe-mode-hint');
+  const csrf = app.dataset.csrf;
+  const saveUrl = app.dataset.saveUrl;
+  let syncing = false;
+  const MATH_ENVS = ['equation', 'equation*', 'align', 'align*', 'gather', 'gather*', 'multline', 'multline*'];
+
+  let initialBody = '';
+  try { initialBody = JSON.parse(document.getElementById('fe-body-data').textContent || '""'); } catch (e) {}
+  const initialMode = app.dataset.inline === '1' ? 'inline' : (app.dataset.mode || 'display');
+
+  function wrapFormulaSource(body, mode) {
+    const bare = String(body || '').trim();
+    if (mode === 'inline') return '$' + bare + '$';
+    if (mode === 'display2') return '$$\n' + bare + '\n$$';
+    if (MATH_ENVS.indexOf(mode) >= 0) {
+      return '\\begin{' + mode + '}\n' + bare + '\n\\end{' + mode + '}';
+    }
+    return '\\[\n' + bare + '\n\\]';
+  }
+
+  function parseFormulaSource(src) {
+    let s = String(src || '').trim();
+    if (!s) return { mode: 'display', body: '', display: true, selectValue: 'display' };
+    let m = s.match(/^\$\$([\s\S]*?)\$\$$/);
+    if (m) return { mode: 'display', body: m[1].trim(), display: true, selectValue: 'display2' };
+    m = s.match(/^\$([^$\n]+)\$$/);
+    if (m) return { mode: 'inline', body: m[1].trim(), display: false, selectValue: 'inline' };
+    m = s.match(/^\\\[([\s\S]*?)\\\]$/);
+    if (m) return { mode: 'display', body: m[1].trim(), display: true, selectValue: 'display' };
+    m = s.match(/^\\begin\{(equation\*?|align\*?|gather\*?|multline\*)\}([\s\S]*?)\\end\{\1\}$/);
+    if (m) return { mode: m[1], body: m[2].trim(), display: true, selectValue: m[1] };
+    return { mode: 'display', body: s, display: true, selectValue: 'display', bare: true };
+  }
+
+  function formulaSourceForKatex(parsed) {
+    if (!parsed.body) return '';
+    if (MATH_ENVS.indexOf(parsed.mode) >= 0) {
+      return '\\begin{' + parsed.mode + '}' + parsed.body + '\\end{' + parsed.mode + '}';
+    }
+    return parsed.body;
+  }
+
+  function render() {
+    const parsed = parseFormulaSource(codeEl.value);
+    if (modeHint) {
+      const label = parsed.mode === 'inline' ? '行内' : (parsed.mode === 'display' ? '独立' : parsed.mode);
+      modeHint.textContent = '· 识别为 ' + label;
+    }
+    if (modeEl.value !== parsed.selectValue) {
+      syncing = true;
+      modeEl.value = parsed.selectValue;
+      syncing = false;
+    }
+    previewEl.innerHTML = '';
+    if (!parsed.body) {
+      previewEl.innerHTML = '<span class="err">请输入公式</span>';
+      return;
+    }
+    if (typeof katex === 'undefined') {
+      previewEl.textContent = parsed.body;
+      return;
+    }
+    try {
+      katex.render(formulaSourceForKatex(parsed), previewEl, {
+        throwOnError: false, displayMode: parsed.display, strict: 'ignore',
+      });
+    } catch (err) {
+      previewEl.innerHTML = '<span class="err">' + String(err) + '</span>';
+    }
+  }
+
+  const looksWrapped = /^\$|\\\[|\\begin\{/.test(String(initialBody || '').trim());
+  codeEl.value = looksWrapped ? String(initialBody || '').trim() : wrapFormulaSource(initialBody, initialMode);
+  syncing = true;
+  modeEl.value = parseFormulaSource(codeEl.value).selectValue;
+  syncing = false;
+
+  codeEl.addEventListener('input', render);
+  modeEl.addEventListener('change', () => {
+    if (syncing) return;
+    const parsed = parseFormulaSource(codeEl.value);
+    codeEl.value = wrapFormulaSource(parsed.body, modeEl.value);
+    render();
+  });
+
+  function whenKatex(fn) {
+    if (typeof katex !== 'undefined') { fn(); return; }
+    let n = 0;
+    const t = setInterval(() => {
+      n++;
+      if (typeof katex !== 'undefined' || n > 40) { clearInterval(t); fn(); }
+    }, 50);
+  }
+  whenKatex(render);
+
+  document.getElementById('fe-save').addEventListener('click', async () => {
+    const parsed = parseFormulaSource(codeEl.value);
+    if (!parsed.body) { statusEl.textContent = '公式不能为空'; statusEl.className = 'err'; return; }
+    statusEl.textContent = '保存中…'; statusEl.className = '';
+    try {
+      const resp = await fetch(saveUrl, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
+        body: JSON.stringify({
+          chapter: app.dataset.chapter,
+          block_id: app.dataset.block,
+          is_new: app.dataset.new === '1',
+          after_id: app.dataset.after || '',
+          insert_pos: app.dataset.pos || 'after',
+          parent_id: app.dataset.parent || '',
+          inline_idx: app.dataset.inline === '1' ? Number(app.dataset.idx) : -1,
+          body: parsed.body,
+          mode: parsed.mode,
+        }),
+      });
+      const data = await resp.json();
+      if (!data.ok) { statusEl.textContent = data.error || '失败'; statusEl.className = 'err'; return; }
+      statusEl.textContent = '已保存'; statusEl.className = 'ok';
+      location.href = data.redirect || app.dataset.back;
+    } catch (err) {
+      statusEl.textContent = String(err); statusEl.className = 'err';
+    }
+  });
+})();
+</script>
+{% endblock %}

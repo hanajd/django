@@ -325,6 +325,8 @@ def library_disk_dir_and_rel_prefix(category: str) -> Tuple[Path, str]:
         return Path(settings.FILE_LIBRARY_ATTACHMENT_DIR), "attachments"
     if category == LibraryFile.CATEGORY_INSPECTION_SUBMIT:
         return Path(settings.FILE_LIBRARY_INSPECTION_SUBMIT_DIR), "inspection_submits"
+    if category == LibraryFile.CATEGORY_EVALUATION_FORM:
+        return Path(settings.FILE_LIBRARY_EVALUATION_FORM_DIR), "evaluation_forms"
     raise ValueError(f"unsupported library category: {category}")
 
 

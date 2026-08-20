@@ -34,12 +34,22 @@
 - API 大量使用 `apps.core.models` 中的 `Library*`、`Inspection*`、`Registry*` 等模型。  
 - 文件落盘路径、权限边界应与 `library_access`、`library_file_service` 保持一致，避免 API 与 Web 行为分叉。
 
-## 5. 维护注意
+## 5. Android OTA（v2）
 
-- 新增对外接口：优先在 **v2** 增加并写清 OpenAPI/内部文档；避免仅在 v1 扩展。  
-- 改动检测状态机或提交结构时，同步检查 **Web 端项目工作台 / 文件库** 是否依赖同一套模型字段。
+| 端点 | 说明 |
+|------|------|
+| `GET /api/v2/app/version` | 客户端查最新版本与下载信息 |
+| `GET /api/v2/app/apk/<filename>` | 下载 APK |
 
-## 6. 关于 `apps/api/urls.py`
+Web 发版页：`/settings/app-ota/`。规格：[ANDROID_OTA_UPDATE_SPEC.md](ANDROID_OTA_UPDATE_SPEC.md)。运行时配置可落在根目录 `app_ota_runtime.json`，APK 目录 `media/apk/`。
 
-根路由 `tablet_backend/urls.py` 只 `include` 了 **`urls_v1.py`** 与 **`urls_v2.py`**。  
-`apps/api/urls.py` 与 v1 内容相近，但**当前未被主 urls 引用**；维护时以 `urls_v1.py`、`urls_v2.py` 为准。合并或删除前请全局搜索 `include`，确认无其它入口引用。
+## 6. 维护注意
+
+- 新增对外接口：优先在 **v2** 增加；避免仅在 v1 扩展。  
+- 改动检测状态机或提交结构时，同步检查 **Web 项目工作台 / 文件库 / hub** 是否依赖同一套模型字段。  
+- OpenAPI：仓库根 `openapi.yaml` 可能滞后，以 `urls_v2.py` 为准。
+
+## 7. 关于 `apps/api/urls.py`
+
+根路由只 `include` 了 **`urls_v1.py`** 与 **`urls_v2.py`**。  
+`apps/api/urls.py` **当前未被主 urls 引用**；维护时以 v1/v2 文件为准。

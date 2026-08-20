@@ -1049,8 +1049,17 @@ def _pdf_check_mark_color() -> tuple[float, float, float]:
     return (1, 0, 0)
 
 
+_INSTRUMENT_CELL_PREFIX_QC = "质量控制（性能）检测："
+_INSTRUMENT_CELL_PREFIX_RP = "工作场所放射防护检测："
+
+
 def _pdf_text_field_wants_justify_for_instrument_line(field: Dict[str, Any]) -> bool:
     """检测仪器类占位格：回填 PDF 时用两端对齐（insert_textbox）。"""
+    ft = str(field.get("fieldType") or field.get("type") or "").strip().lower()
+    if ft == "instrument_select":
+        return True
+    if str(field.get("instrumentScope") or "").strip():
+        return True
     parts: list[str] = []
     for k in ("id", "placeholder", "originalPlaceholder", "title", "label", "fieldId", "pdfFieldId"):
         v = field.get(k)
@@ -1065,6 +1074,92 @@ def _pdf_text_field_wants_justify_for_instrument_line(field: Dict[str, Any]) -> 
     if "有效期至" in val and "年" in val and "月" in val and "日" in val:
         return True
     return False
+
+
+def _smallest_table_cell_containing_point(
+    cells: Sequence[fitz.Rect], point: fitz.Point
+) -> fitz.Rect | None:
+    hits = [rect for rect in cells if rect.contains(point)]
+    if not hits:
+        return None
+    hits.sort(key=lambda r: max(0.0, float(r.width) * float(r.height)))
+    return hits[0]
+
+
+def _printed_text_in_rect(page: fitz.Page, rect: fitz.Rect) -> str:
+    try:
+        raw = page.get_textbox(rect) or ""
+    except Exception:
+        raw = ""
+    return re.sub(r"\s+", "", str(raw).strip())
+
+
+def _instrument_line_prefix_fallback(field: Dict[str, Any]) -> str:
+    scope = str(field.get("instrumentScope") or "").strip()
+    if scope == "radiationProtection":
+        return _INSTRUMENT_CELL_PREFIX_RP
+    if scope == "qualityControl":
+        return _INSTRUMENT_CELL_PREFIX_QC
+    parts: list[str] = []
+    for k in ("id", "placeholder", "originalPlaceholder", "title", "label", "fieldId"):
+        v = field.get(k)
+        if isinstance(v, str) and v.strip():
+            parts.append(v.strip())
+    blob = " ".join(parts)
+    if "放射防护" in blob:
+        return _INSTRUMENT_CELL_PREFIX_RP
+    if "质量控制" in blob or "质控" in blob:
+        return _INSTRUMENT_CELL_PREFIX_QC
+    return ""
+
+
+def _instrument_line_prefix_from_printed(printed: str, field: Dict[str, Any]) -> str:
+    t = re.sub(r"\s+", "", str(printed or "").strip())
+    for sep in ("：", ":"):
+        i = t.find(sep)
+        if i >= 0:
+            prefix = t[: i + len(sep)]
+            if prefix:
+                return prefix
+    return _instrument_line_prefix_fallback(field)
+
+
+def _strip_leading_instrument_prefix(text: str, prefix: str) -> str:
+    t = str(text or "").strip()
+    p = str(prefix or "").strip()
+    if p and t.startswith(p):
+        return t[len(p) :].lstrip(" \t")
+    return t
+
+
+def _apply_page_redactions(page: fitz.Page) -> None:
+    try:
+        img_none = getattr(fitz, "PDF_REDACT_IMAGE_NONE", 0)
+        page.apply_redactions(images=img_none)
+        return
+    except TypeError:
+        pass
+    except Exception:
+        pass
+    try:
+        page.apply_redactions()
+    except Exception:
+        pass
+
+
+def _fit_instrument_cell_text(
+    prefix: str,
+    packed: str,
+    rect: fitz.Rect,
+    font: fitz.Font,
+    *,
+    max_font_pt: float = DEFAULT_FONT_PT,
+) -> Tuple[str, float]:
+    """整格叠印：前缀后直接接仪器，装不下也不让前缀单独占一行；仪器串仍按「；」边界换行。"""
+    packed = str(packed or "").strip()
+    prefix = str(prefix or "").strip()
+    combined = f"{prefix}{packed}" if prefix else packed
+    return fit_instrument_text_for_box(combined, rect, font, max_font_pt=max_font_pt)
 
 
 def build_filled_pdf(
@@ -1101,8 +1196,79 @@ def build_filled_pdf(
         used.add(font_name)
 
     try:
+        page_cell_rects: Dict[int, List[fitz.Rect]] = {}
+        instrument_cell_overlay: Dict[int, Dict[str, Any]] = {}
+        pages_need_redact: set[int] = set()
+
+        def _cells_for_page(page_index: int) -> List[fitz.Rect]:
+            if page_index not in page_cell_rects:
+                page_cell_rects[page_index] = _extract_table_cell_rects(doc[page_index])
+            return page_cell_rects[page_index]
+
+        page_count = len(doc)
         for f in fields:
-            page_index = int(f["page"]) - 1
+            try:
+                page_index = int(f["page"]) - 1
+            except Exception:
+                continue
+            if page_index < 0 or page_index >= page_count:
+                continue
+            page = doc[page_index]
+            field_type = (f.get("fieldType") or "text").lower()
+            raw_rect = fitz.Rect(f["x0"], f["y0"], f["x1"], f["y1"])
+            if field_type == "text" and not f.get("_syntheticQcVerdict"):
+                raw_rect = ensure_min_text_rect(raw_rect)
+            r = safe_inset_rect(raw_rect, 0.6)
+            text = str(f.get("value", "")).strip()
+            if f.get("_syntheticQcVerdict") and text:
+                try:
+                    erase = fitz.Rect(
+                        r.x0 - 1.5,
+                        r.y0 - 1.0,
+                        r.x1 + 1.5,
+                        r.y1 + 1.0,
+                    )
+                    page.add_redact_annot(erase, fill=(1, 1, 1))
+                    pages_need_redact.add(page_index)
+                except Exception:
+                    pass
+                continue
+            if not text or not _pdf_text_field_wants_justify_for_instrument_line(f):
+                continue
+            pt = fitz.Point((raw_rect.x0 + raw_rect.x1) / 2.0, (raw_rect.y0 + raw_rect.y1) / 2.0)
+            cell = _smallest_table_cell_containing_point(_cells_for_page(page_index), pt)
+            if cell is None or cell.is_empty:
+                continue
+            page_area = float(page.rect.width) * float(page.rect.height)
+            if page_area > 0 and float(cell.width) * float(cell.height) > page_area * 0.35:
+                continue
+            printed = _printed_text_in_rect(page, cell)
+            prefix = _instrument_line_prefix_from_printed(printed, f)
+            try:
+                erase = fitz.Rect(cell.x0 + 1.0, cell.y0 + 1.0, cell.x1 - 1.0, cell.y1 - 1.0)
+                if erase.is_empty or erase.width < 8 or erase.height < 8:
+                    erase = cell
+                page.add_redact_annot(erase, fill=(1, 1, 1))
+                pages_need_redact.add(page_index)
+            except Exception:
+                continue
+            instrument_cell_overlay[id(f)] = {
+                "rect": safe_inset_rect(cell, 1.6),
+                "prefix": prefix,
+            }
+
+        for page_index in sorted(pages_need_redact):
+            if 0 <= page_index < page_count:
+                _apply_page_redactions(doc[page_index])
+
+        for f in fields:
+            try:
+                page_index = int(f["page"]) - 1
+            except Exception:
+                continue
+            # JSON 页码可能超出当前绑定 PDF 页数：跳过越界栏位，避免整份渲染失败
+            if page_index < 0 or page_index >= page_count:
+                continue
             page = doc[page_index]
             field_type = (f.get("fieldType") or "text").lower()
             raw_rect = fitz.Rect(f["x0"], f["y0"], f["x1"], f["y1"])
@@ -1179,27 +1345,27 @@ def build_filled_pdf(
             except Exception:
                 pass
 
-            if f.get("_syntheticQcVerdict"):
-                try:
-                    erase = fitz.Rect(
-                        r.x0 - 1.5,
-                        r.y0 - 1.0,
-                        r.x1 + 1.5,
-                        r.y1 + 1.0,
-                    )
-                    page.add_redact_annot(erase, fill=(1, 1, 1))
-                    page.apply_redactions()
-                except Exception:
-                    pass
             use_simsun = contains_cjk(text) or not times_font_path
             font_file = SIMSUN_FONT if use_simsun else times_font_path
             font_name = "F_SIMSUN" if use_simsun else "F_TIMES"
             _ensure_font(page, page_index, font_name, Path(font_file))
             font_obj = fitz.Font(fontfile=str(font_file))
             is_instrument = _pdf_text_field_wants_justify_for_instrument_line(f)
+            instrument_overlay = instrument_cell_overlay.get(id(f)) if is_instrument else None
+            instrument_prefix = ""
+            if isinstance(instrument_overlay, dict):
+                overlay_rect = instrument_overlay.get("rect")
+                if isinstance(overlay_rect, fitz.Rect) and not overlay_rect.is_empty:
+                    r = overlay_rect
+                instrument_prefix = str(instrument_overlay.get("prefix") or "").strip()
+                text = _strip_leading_instrument_prefix(text, instrument_prefix)
             if _pdf_field_is_qc_verdict_slot(f):
                 wrapped_text = text
                 fs = fill_font_pt
+            elif is_instrument and instrument_prefix:
+                wrapped_text, fs = _fit_instrument_cell_text(
+                    instrument_prefix, text, r, font_obj, max_font_pt=fill_font_pt
+                )
             elif is_instrument:
                 wrapped_text, fs = fit_instrument_text_for_box(
                     text, r, font_obj, max_font_pt=fill_font_pt

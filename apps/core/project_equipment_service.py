@@ -84,7 +84,10 @@ def resolve_workbench_equipment_scope_org(
 
 
 def project_tasks_for_user_assignment(project: LibraryProject) -> list[LibraryTask]:
-    """向参与人同步任务时：有委托设备则仅各设备任务链，否则沿用项目已挂载任务。"""
+    """
+    项目工作台「委托立项」可见的库任务：有受检设备时仅各设备报告 + 现场来源链；
+    无设备时沿用项目已挂载任务。派工同步与检测任务 API 共用此范围。
+    """
     if LibraryProjectEquipment.objects.filter(project=project).exists():
         tasks = collect_library_tasks_for_project_equipments(project)
         if tasks:

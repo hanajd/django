@@ -4935,6 +4935,15 @@ def _apply_radiation_protection_mean_formulas(payload: Dict[str, Any]) -> Dict[s
                     and not str(mf.get("fieldExpression") or "").strip()
                     and not mf.get("fieldFormulaUserOverride")
                 ):
+                    try:
+                        from radiation_detection_report.chapter5_field_sync import (
+                            _field_is_narrow_dual_reading_cell,
+                        )
+
+                        if _field_is_narrow_dual_reading_cell(mf):
+                            continue
+                    except Exception:
+                        pass
                     mf["fieldExpression"] = f"avg({','.join(pids[:3])})"
     return payload
 

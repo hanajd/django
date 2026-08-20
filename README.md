@@ -1,194 +1,193 @@
 # Django 检测业务后台与 API（tablet_backend）
 
-本仓库为 **检测 / 平板业务的后台管理系统** 与 **REST API**：Web 为服务端渲染（模板 + Tailwind CDN），API 供 App / 平板等客户端（JWT 或 Session）。
+放射检测 / 平板业务的 **Web 后台** 与 **REST API**（工程包名 `tablet_backend`）。
 
-主要能力概览：
+| 项 | 说明 |
+|----|------|
+| Web | 服务端渲染（Django 模板 + Tailwind CDN） |
+| API | JWT / Session；**`/api/v2/` 推荐**，`/api/v1/` 兼容 |
+| 默认端口 | **`11223`**（可用环境变量 `DJANGO_PORT` 覆盖） |
+| Python | **3.12.x**（见 `requirements.txt`；核心 Web/API 在 3.10+ 亦可试跑） |
 
-- **Web**：登录、用户 / 角色 / 菜单、**文件库**（多分类、回收站、配额）、**项目工作台**、**任务模板库**、**模板编辑器（HTMLPDF）**、可选 **文档识别管线**、内置 **使用说明与流程练习**。
-- **API**：`v1` 与 `v2` 两套前缀；检测流程（提交、草稿、项目—任务、文件、OCR、签名、导出等）；台账（受检单位、设备、案件、现场记录、报告等）。
-- **报告 / 现场记录**：检测提交数据与 HTMLPDF 模板字段映射、生成 PDF 并写入文件库及项目 / 任务关联。
+## 主要能力
 
-默认 HTTP 端口：**`11223`**（可用环境变量 `DJANGO_PORT` 覆盖，见 `tablet_backend/settings.py` 中的 `PORT`）。
+- **检测主链路**：文件库、项目工作台、委托/医院、任务模板、HTMLPDF 模板编辑、报告流程枢纽（`/files/hub/*`）、仪器台账、App 检测提交 → 现场记录/报告 PDF  
+- **评价报告表（F.1）**：`/files/f1-eval/`（`perm_f1_eval`）  
+- **评价报告书（LaTeX）**：`/evaluation-reports/`（`perm_evaluation_report`）  
+- **其它**：RBAC、使用说明/流程练习、Android OTA（`/settings/app-ota/` + `/api/v2/app/*`）
 
-更细的架构与阅读顺序见 **`docs/00-overview.md`** 与 **`docs/README.md`**（文档索引）。
+三条「报告」勿混：
+
+| 名称 | 入口 | 产物 |
+|------|------|------|
+| 检测报告 | 文件库 / hub / App | 防护检测 PDF |
+| 评价报告表 F.1 | `/files/f1-eval/` | F.1 表单 PDF |
+| 评价报告书 | `/evaluation-reports/` | LaTeX 编译 PDF |
+
+接手与全面掌握请从 **[docs/README.md](docs/README.md)** 开始（含阅读路径与全索引）。功能总览见 [docs/07-features-catalog.md](docs/07-features-catalog.md)。
 
 ---
 
 ## 1. 技术栈
 
-- Python **3.10+**（本地请优先使用 `python3`）
-- **Django 4.2.x**
-- **Django REST Framework** + **SimpleJWT** + **django-filter** + **corsheaders**
-- **PyMuPDF（fitz）**、Pillow、pdf2image、pypdf 等（PDF / 图像）
+- **Django 4.2** + DRF + SimpleJWT + django-filter + corsheaders  
+- PDF / 图像：PyMuPDF、pypdf、PyPDF2、Pillow、pdf2image  
+- 办公文档：openpyxl、python-docx、lxml（评价报告书转换等）  
+- 可选 OCR 管线：MinerU、Ollama SDK、outlines  
+- 前端辅助（公式叠印 / 引导）：根目录 `package.json`（`mathjax-full`、`driver.js`）
 
-Python 依赖见仓库根目录 **`requirements.txt`**。模板编辑器独立实验目录另有 **`htmlpdf/requirements.txt`**（主站以根目录 `requirements.txt` 为准）。
+依赖安装：
+
+```bash
+pip install -r requirements.txt
+npm install   # 需要公式渲染或流程练习时
+```
+
+模板编辑器实验目录另有 `htmlpdf/requirements.txt`；**主站以根目录 `requirements.txt` 为准**。
 
 ---
 
-## 2. 目录结构（与当前代码一致）
+## 2. 目录结构（摘要）
 
 ```text
 django/
 ├── apps/
-│   ├── core/                 # Web 视图、模型、权限、文件库、管线入口、HTMLPDF 后端服务（htmlpdf_service）等
-│   └── api/                  # REST：urls_v1 / urls_v2、检测与台账 ViewSet / APIView
-├── tablet_backend/           # 工程配置：settings、根 urls（Web + /api/v1 + /api/v2）、wsgi
-├── templates/                # 全局布局 + core 业务页 + guide 使用说明
-├── static/                   # 静态资源
-├── media/
-│   └── file_library/         # 文件库落盘（uploads、json、templates、…，见 settings）
-├── htmlpdf/                  # 模板编辑器单页（templates/index.html）、全文坐标脚本、数据文件等
-├── utils/                    # PDF、规则引擎、文档管线、Ollama 等与 Web 解耦的工具
-├── docs/                     # 接手说明（配置、Web、API、领域模型、管线、脚本等）
+│   ├── core/                 # Web、主模型、文件库、F.1、枢纽、HTMLPDF 后端
+│   ├── api/                  # REST：urls_v1 / urls_v2、检测、台账、OTA
+│   └── evaluation_report/    # 评价报告书（LaTeX）
+├── tablet_backend/           # settings、根 urls、wsgi/asgi
+├── templates/ · static/ · htmlpdf/
+├── utils/                    # 规则引擎、管线、PDF/公式工具
+├── converter/ · latex/       # 评价报告书 MD↔LaTeX 与 TeX 工程
+├── f1_eval_report/           # F.1 PDF 生成库（主站 import）
+├── media/                    # 运行时落盘（file_library、evaluation_reports、f1_eval、apk…）
+├── docs/                     # 维护文档（从 README.md 进入）
 ├── manage.py
-├── API_DOCUMENTATION.md      # API 说明（维护时请与接口变更同步）
-└── README.md                 # 本文件
+└── requirements.txt
 ```
+
+并行/独立工程（**非** `INSTALLED_APPS`）：`evaluation_report_standalone/`、`f1_eval_standalone/` 等。详见 [docs/00-overview.md](docs/00-overview.md)。
 
 ---
 
 ## 3. 本地快速启动
 
-### 3.1 虚拟环境（可选）
-
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-### 3.2 安装依赖
-
-```bash
+python3 -m venv .venv && source .venv/bin/activate   # 建议
 pip install -r requirements.txt
-```
-
-### 3.3 数据库迁移
-
-```bash
 python3 manage.py migrate
-```
-
-### 3.4 管理员账号（可选）
-
-```bash
-python3 manage.py createsuperuser
-```
-
-### 3.5 启动开发服务
-
-```bash
+python3 manage.py init_data                 # 角色/菜单种子（按需）
+python3 manage.py createsuperuser           # 可选
 python3 manage.py runserver 0.0.0.0:11223
 ```
 
-浏览器访问：
-
 | 用途 | URL |
 |------|-----|
-| Web 后台首页 | `http://127.0.0.1:11223/` |
+| Web 后台 | `http://127.0.0.1:11223/` |
 | Django Admin | `http://127.0.0.1:11223/admin/` |
+| API v2 | `http://127.0.0.1:11223/api/v2/` |
 | API v1 | `http://127.0.0.1:11223/api/v1/` |
-| API v2（项目—任务等新路由） | `http://127.0.0.1:11223/api/v2/` |
+| 评价报告书 | `http://127.0.0.1:11223/evaluation-reports/` |
+| F.1 评价报告表 | `http://127.0.0.1:11223/files/f1-eval/` |
 
-种子数据、演示账号等见 **`docs/06-scripts-and-admin.md`**（如 `init_data`、`ensure_party_a_demo` 等命令）。
+其它种子命令（演示账号、产品目录、评价报告书模板等）见 [docs/06-scripts-and-admin.md](docs/06-scripts-and-admin.md)。组织主任演示账号见 [docs/组织主任账号说明.md](docs/组织主任账号说明.md)。
+
+评价报告书编译还需本机 **TeX**（lualatex/xelatex 等）及中文字体；详见 [docs/评价报告书-LaTeX功能说明.md](docs/评价报告书-LaTeX功能说明.md)。
 
 ---
 
 ## 4. 配置与安全
 
-- 主配置：**`tablet_backend/settings.py`**
-- 环境变量、文件库路径、JWT、CORS、演示账号 IP 等：**`docs/01-configuration.md`**
+- 主配置：`tablet_backend/settings.py`  
+- 环境变量、媒体路径、JWT/CORS、演示账号加固：[docs/01-configuration.md](docs/01-configuration.md)  
+- **整机搬迁（库 + media + 依赖）**：[docs/打包与新设备安装说明.md](docs/打包与新设备安装说明.md)  
+- 生产常驻与加固：[docs/部署流程-从零安装与源码保护评估.md](docs/部署流程-从零安装与源码保护评估.md)
 
-开发环境默认：`DEBUG=True`、`ALLOWED_HOSTS=['*']`、数据库 **SQLite**（`db.sqlite3`）、语言 **`zh-hans`**、时区 **`Asia/Shanghai`**。
+开发默认：`DEBUG=True`、`ALLOWED_HOSTS=['*']`、SQLite（`db.sqlite3`）、`zh-hans` / `Asia/Shanghai`。
 
-**生产环境**务必自行设置：`SECRET_KEY`、`DEBUG=False`、`ALLOWED_HOSTS`、数据库、HTTPS、静态与媒体存储、CORS 白名单等。
+**生产**务必设置：`SECRET_KEY`、`DEBUG=False`、`ALLOWED_HOSTS`、数据库、HTTPS、静态/媒体、CORS 白名单。勿提交密钥与 `.env`。
 
 ---
 
-## 5. 核心业务流程（简述）
+## 5. 核心业务（简述）
 
-### 5.1 检测提交 → 现场记录 / 报告 PDF（taskNo / 项目—任务）
+### 5.1 检测：提交 → 现场记录 / 报告 PDF
 
-1. 客户端调用检测提交相关 API（具体路径见 `API_DOCUMENTATION.md` 与 `docs/03-rest-api.md`）。
-2. 后端持久化提交数据，并可在文件库 **检测提交** 分类写入结构化文件。
-3. 按项目、任务与模板绑定选择 HTMLPDF 模板与映射规则。
-4. 填充字段并生成 PDF，落库到 **现场记录** / **报告** 等分类，并维护与项目、任务的关联。
+1. App 或 Web 模拟走检测 API（v2：项目 → 任务 → start/draft/submit）  
+2. 写入 `InspectionSubmission` 与文件库「检测提交」等分类  
+3. `inspection_report_make` 按任务模板绑定回填 HTMLPDF → 现场记录 / 报告 PDF  
 
-报告制作、字段归一化等大逻辑主要在 **`apps/api/inspection_report_make.py`**；通用 PDF 填充与模板解析也在 **`apps/api/inspection_pdf_service.py`**。
+主逻辑：`apps/api/inspection_report_make.py`、`inspection_pdf_service.py`。专题：[docs/现场记录生成报告流程说明.md](docs/现场记录生成报告流程说明.md)。
 
-### 5.2 文件库内手动导出
+### 5.2 报告流程枢纽
 
-在 Web **文件库**对应分类中勾选记录后，可触发现场记录 / 报告 PDF 等导出（权限与项目范围见角色与 `library_access`）。与自动链路共用同一套填充与合并规则。
+`/files/hub/site-records/` → `report-generate/` → `review-sign/` → `report-download/`。服务：`apps/core/workflow_hub_service.py`。
 
 ### 5.3 文档识别管线（可选）
 
-上传 **待识别文件** 分类中的 PDF / 图片后，可在 **文档识别** 独立页运行管线（MinerU / Ollama 等由环境变量与 `utils/document_pipeline` 配置；详见 **`docs/05-utils-and-pipelines.md`**）。产出可写入文件库 **数据文件（json）** 分类并参与后续业务。
+`/files/process/` 或 API OCR；MinerU + Ollama，见 [docs/05-utils-and-pipelines.md](docs/05-utils-and-pipelines.md)。未安装时可降级，不影响日常文件库与报告导出。
+
+### 5.4 评价业务
+
+- F.1：[docs/评价报告表-F1功能说明.md](docs/评价报告表-F1功能说明.md)  
+- 评价报告书：[docs/评价报告书-LaTeX功能说明.md](docs/评价报告书-LaTeX功能说明.md)
 
 ---
 
-## 6. 映射与模板维护
+## 6. API 文档
 
-| 内容 | 位置 |
+| 文档 | 说明 |
 |------|------|
-| 提交占位符 → 模板字段映射 | `apps/api/inspection_submit_placeholder_maps.py` |
-| 模板解析、text/check/image 填充、PDF 渲染 | `apps/api/inspection_pdf_service.py` |
-| 报告合并、bindings、与 HTMLPDF 协同的大量逻辑 | `apps/api/inspection_report_make.py` |
-| 浏览器内 PDF 模板编辑页 | `htmlpdf/templates/index.html` |
-| 编辑器后端（导入导出、临时 PDF、build_filled_pdf 等） | `apps/core/htmlpdf_service.py` + `apps/core/views.py` 中 `htmlpdf_*` 与 `htmlpdf_api_*` |
-| 公式与判定字段语义（人读） | `docs/json公式说明.md` |
-
-模板与上传文件实体默认在 **`media/file_library/`** 下各子目录（见 settings 中 `FILE_LIBRARY_*`）。
+| [docs/03-rest-api.md](docs/03-rest-api.md) | v1 / v2 分工与维护约定 |
+| [docs/API_DOCUMENTATION_V2.md](docs/API_DOCUMENTATION_V2.md) | v2 接口说明（优先） |
+| [docs/API_DOCUMENTATION_V1.md](docs/API_DOCUMENTATION_V1.md) | v1 兼容 |
+| 根目录 `openapi.yaml` | 草稿；**以 `apps/api/urls_v2.py` 为准** |
 
 ---
 
-## 7. API 文档
+## 7. 权限与文件关联（要点）
 
-- **`API_DOCUMENTATION.md`**：接口列表与约定。
-- **`docs/03-rest-api.md`**：`/api/v1` 与 `/api/v2` 分工说明。
-
-接口变更时请同步更新 `API_DOCUMENTATION.md`。
-
----
-
-## 8. 项目、任务与文件关联（重要）
-
-- 项目挂载任务时会同步任务关联的文件；解除挂载时会按策略移除不应再见的关联。
-- 任务侧文件变更会传播到已关联项目（具体规则以代码为准）。
-- 文件库列表受 **角色权限** 与 **「仅本人数据」** 等范围控制（见 `apps/core/library_access.py`）。
+- 权限矩阵与「仅本人数据」：`apps/core/library_access.py`  
+- 项目挂载任务会同步关联文件；解除挂载按策略清理可见关联  
+- 评价能力：`perm_f1_eval` / `perm_evaluation_report`（与检测岗位权限分离）
 
 ---
 
-## 9. 常见问题（FAQ）
+## 8. 常见问题
 
-### Q1：模板里某些栏位没有填上值？
+**模板栏位未填上**  
+核对占位/映射 key、`fieldType`（text/check/image）与提交数据是否一致。见 [docs/json公式说明.md](docs/json公式说明.md)。
 
-- 核对模板里占位与映射 key 是否一致（含大小写）。
-- 核对提交或来源数据中是否存在对应字段。
-- 核对 `fieldType`（text / check / image）是否与控件一致。
+**文件库或 API 列表为空**  
+核对用户可见项目/任务范围、文件是否已关联、`perm_file_library` 等。
 
-### Q2：文件库列表或 API 文件列表为空？
+**手动导出报告失败**  
+核对项目是否关联报告输出任务、模板绑定与现场记录/提交数据源。
 
-- 核对当前用户可见的 **项目 / 任务** 范围与文件是否已关联。
-- 核对请求的分类与权限（`perm_file_library` 等）。
+**OCR / 管线失败**  
+查 `media/file_library/temp`、`MINERU_BACKEND`、`OLLAMA_HOST`；无 GPU 时用默认 `pipeline` 后端。
 
-### Q3：手动导出报告未生成？
-
-- 核对项目是否关联报告输出任务、是否绑定可解析的 HTMLPDF 模板与数据源（现场记录 / 检测提交等）。
+**评价报告书编译失败**  
+查本机 TeX、`latex/` 宏包、工作区 `media/evaluation_reports/` 权限。
 
 ---
 
-## 10. 开发建议
+## 9. 开发建议
 
-- 先读 **`docs/00-overview.md`**，再按负责范围读 **`docs/02-web-ui-core.md`** 或 **`docs/03-rest-api.md`**。
-- 改检测提交流 / 报告 PDF：**`inspection_report_make.py`**、**`inspection_pdf_service.py`**、**`inspection_submit_placeholder_maps.py`**。
-- 改模板编辑器交互：**`htmlpdf/templates/index.html`**；改保存契约时再动 **`apps/core/views.py`**（`htmlpdf_api_*`）与 **`htmlpdf_service.py`**。
-- 提交前可做语法检查（示例）：
+1. 先读 [docs/README.md](docs/README.md) → [docs/00-overview.md](docs/00-overview.md) → [docs/07-features-catalog.md](docs/07-features-catalog.md)  
+2. 改检测/报告 PDF：`apps/api/inspection_report_make.py` 等  
+3. 改 Web 路由：`apps/core/urls.py`；改 API：优先扩展 **v2**  
+4. 改评价报告书：`apps/evaluation_report/` + `converter/` + `latex/`  
+5. 改 F.1：`apps/core/f1_eval_*.py` + `f1_eval_report/`  
 
 ```bash
-python3 -m py_compile apps/api/*.py apps/core/*.py
+python3 -m py_compile apps/api/*.py apps/core/*.py apps/evaluation_report/*.py
 ```
+
+改路由 / 权限 / 模型后，请同步更新 `docs/07-features-catalog.md` 与相关专题。
 
 ---
 
-## 11. 许可
+## 10. 许可
 
 仓库若未包含 `LICENSE`，对外分发前请自行补充许可证并在本段注明。

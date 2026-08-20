@@ -1,0 +1,2466 @@
+{% extends "base.html" %}
+{% block title %}{% if template_mode %}模板编辑 · {{ latex_template_name }}{% else %}报告编辑 · {{ report.title }}{% endif %}{% endblock %}
+
+{% block extra_head %}
+{% load static %}
+<link rel="stylesheet" href="{% static 'vendor/katex/katex.min.css' %}">
+<script src="{% static 'vendor/katex/katex.min.js' %}"></script>
+<script>
+  /* CDN fallback if local KaTeX missing / failed */
+  (function () {
+    if (typeof katex !== 'undefined') return;
+    var css = document.createElement('link');
+    css.rel = 'stylesheet';
+    css.href = 'https://cdn.bootcdn.net/ajax/libs/katex/0.16.9/katex.min.css';
+    document.head.appendChild(css);
+    var s = document.createElement('script');
+    s.src = 'https://cdn.bootcdn.net/ajax/libs/katex/0.16.9/katex.min.js';
+    s.onerror = function () {
+      var s2 = document.createElement('script');
+      s2.src = 'https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js';
+      document.head.appendChild(s2);
+    };
+    document.head.appendChild(s);
+  })();
+</script>
+<style>
+  /* 锁定外层滚动，避免顶栏盖住左侧章节导航 */
+  body:has(#se-app) { overflow: hidden; }
+  body:has(#se-app) .flex.min-h-screen { height: 100vh; overflow: hidden; }
+  body:has(#se-app) main { overflow: hidden !important; padding: 0 !important; }
+  .se-page {
+    margin: 0;
+    height: 100vh;
+    display: flex; flex-direction: column;
+    background: #e2e8f0;
+    overflow: hidden;
+  }
+  .se-pdf-banner {
+    flex-shrink: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.65rem;
+    padding: 0.55rem 0.85rem; background: #ecfdf5; border-bottom: 1px solid #a7f3d0;
+    color: #065f46; font-size: 0.82rem; z-index: 25;
+  }
+  .se-pdf-banner a {
+    display: inline-flex; align-items: center; padding: 0.3rem 0.65rem; border-radius: 0.35rem;
+    background: #059669; color: #fff; text-decoration: none; font-size: 0.78rem;
+  }
+  .se-pdf-banner a.secondary { background: #fff; color: #065f46; border: 1px solid #6ee7b7; }
+  .se-pdf-banner .dismiss {
+    margin-left: auto; background: transparent; border: none; color: #047857;
+    cursor: pointer; font-size: 0.75rem; text-decoration: underline;
+  }
+  .se-toolbar {
+    position: relative; z-index: 20; flex-shrink: 0;
+    background: #f8fafc; color: #0f172a;
+    border-bottom: 1px solid #cbd5e1;
+    display: flex; flex-direction: column;
+  }
+  .se-tb-row {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem;
+    padding: 0.35rem 0.75rem;
+  }
+  .se-tb-row.nav {
+    background: #0f172a; color: #e2e8f0; padding: 0.45rem 0.75rem; gap: 0.4rem;
+  }
+  .se-tb-row.nav a, .se-tb-row.nav button {
+    display: inline-flex; align-items: center;
+    border-radius: 0.4rem; padding: 0.3rem 0.6rem;
+    font-size: 0.78rem; font-weight: 500; border: 1px solid transparent;
+    background: transparent; color: #e2e8f0; cursor: pointer; white-space: nowrap;
+  }
+  .se-tb-row.nav a:hover, .se-tb-row.nav button:hover { background: #1e293b; }
+  .se-tb-row.nav button.primary { background: #4f46e5; }
+  .se-tb-row.nav button.success { background: #059669; }
+  .se-tb-row.nav button.template { background: #0f766e; }
+  .se-tb-row.nav select {
+    background: #1e293b; color: #e2e8f0; border: 1px solid #334155;
+    border-radius: 0.35rem; padding: 0.25rem 0.45rem; font-size: 0.75rem; max-width: 12rem;
+  }
+  .se-tb-row.format { border-bottom: 1px solid #e2e8f0; background: #fff; }
+  .se-sep { width: 1px; height: 1.35rem; background: #cbd5e1; margin: 0 0.2rem; }
+  .se-tb-row.nav .se-sep { background: #334155; }
+  .se-grp { display: inline-flex; align-items: center; gap: 0.2rem; }
+  .se-grp-label { font-size: 0.65rem; color: #94a3b8; margin-right: 0.1rem; white-space: nowrap; }
+  .se-tb-row.format button {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 1.85rem; height: 1.85rem; padding: 0 0.45rem;
+    border-radius: 0.3rem; border: 1px solid transparent;
+    background: transparent; color: #334155; cursor: pointer;
+    font-size: 0.8rem; font-weight: 600; white-space: nowrap;
+  }
+  .se-tb-row.format button:hover { background: #f1f5f9; border-color: #e2e8f0; }
+  .se-tb-row.format button.is-on { background: #eef2ff; border-color: #c7d2fe; color: #3730a3; }
+  .se-tb-row.format button.b { font-weight: 800; }
+  .se-tb-row.format button.i { font-style: italic; font-family: Georgia, serif; }
+  .se-tb-row.format button.u { text-decoration: underline; }
+  .se-tb-row.format select {
+    border: 1px solid #e2e8f0; border-radius: 0.3rem; background: #fff;
+    padding: 0.2rem 0.35rem; font-size: 0.75rem; color: #334155; height: 1.85rem;
+  }
+  .se-insert-hint { font-size: 0.7rem; color: #64748b; }
+  .se-body { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+  .se-nav {
+    width: 200px; flex-shrink: 0; overflow-y: auto; height: 100%;
+    border-right: 1px solid #cbd5e1; background: #fff; padding: 0.75rem 0.5rem;
+  }
+  .se-nav .grp { font-size: 0.65rem; font-weight: 700; color: #94a3b8; text-transform: uppercase;
+    letter-spacing: 0.04em; padding: 0.5rem 0.65rem 0.25rem; }
+  .se-nav a { display: block; border-radius: 0.45rem; padding: 0.4rem 0.65rem; font-size: 0.82rem; color: #334155; }
+  .se-nav a:hover { background: #f1f5f9; }
+  .se-nav a.active { background: #eef2ff; color: #3730a3; font-weight: 600; }
+  .se-canvas-wrap { flex: 1; overflow: auto; padding: 1.25rem; }
+  .se-doc {
+    max-width: 820px; margin: 0 auto; background: #fff;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.08), 0 8px 24px rgb(0 0 0 / 0.06);
+    border-radius: 0.25rem; padding: 2.25rem 3.25rem 3.5rem 2.75rem; min-height: 70vh;
+    /* A4 正文栏宽度固定；A3 横置区单独撑开，不牵动前后 A4 内容 */
+    overflow: visible;
+  }
+  .se-page-chrome-head, .se-page-chrome-foot {
+    display: flex; justify-content: space-between; gap: 1rem;
+    font-size: 0.72rem; color: #222; line-height: 1.4;
+    font-family: "SimSun", "Songti SC", "Noto Serif SC", serif;
+  }
+  .se-page-chrome-head { margin: 0 0 0.85rem; }
+  .se-page-chrome-foot { margin: 1.5rem 0 0; padding-top: 0.35rem; }
+  .se-doc-title { font-size: 1.05rem; font-weight: 700; color: #0f172a; }
+  .se-doc-hint { font-size: 0.75rem; color: #64748b; margin: 0.2rem 0 1.25rem; }
+  .se-front-banner {
+    background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
+    border-radius: 0.5rem; padding: 0.65rem 0.85rem; font-size: 0.8rem; margin-bottom: 1rem;
+  }
+  .se-block {
+    position: relative;
+    margin: 0.1rem 0;
+    padding: 0.15rem 2.6rem 0.15rem 0.35rem;
+    border-radius: 0.35rem;
+    border: 1px solid transparent;
+  }
+  .se-block:hover { background: #f8fafc; }
+  .se-block.is-active {
+    background: #f8fafc;
+    border-color: #c7d2fe;
+  }
+  .se-block .se-ops {
+    position: absolute; right: 0.15rem; top: 0.2rem;
+    display: none; flex-direction: column; gap: 0.15rem; z-index: 6;
+    padding: 0.1rem;
+  }
+  /* 悬停、编辑中、点选后都显示，避免鼠标移向按钮时消失 */
+  .se-block:hover .se-ops,
+  .se-block:focus-within .se-ops,
+  .se-block.is-active .se-ops {
+    display: inline-flex;
+  }
+  .se-ops button, .se-ops a {
+    font-size: 0.68rem; line-height: 1; padding: 0.28rem 0.4rem; border-radius: 0.3rem;
+    border: 1px solid #e2e8f0; background: #fff; color: #475569; cursor: pointer;
+    text-decoration: none; min-width: 1.6rem; text-align: center;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+  }
+  .se-ops button:hover, .se-ops a:hover { background: #eef2ff; border-color: #c7d2fe; color: #3730a3; }
+  .se-ops button[data-act="del"]:hover { background: #fef2f2; border-color: #fecaca; color: #b91c1c; }
+  .se-h-row {
+    display: flex; align-items: baseline; gap: 0.35rem; width: 100%;
+  }
+  .se-h-num {
+    flex: 0 0 auto; font-weight: 700; color: #0f172a; user-select: none;
+    font-variant-numeric: tabular-nums; white-space: nowrap; line-height: 1.35;
+  }
+  .se-h-row > input[data-f="title"] {
+    flex: 1 1 auto; min-width: 0; width: auto !important;
+    border: 0; outline: none; background: transparent; color: #0f172a;
+    padding: 0.2rem 0; margin: 0;
+  }
+  .se-h-row > input.se-h-chapter { font-size: 1.5rem; font-weight: 700; }
+  .se-h-row > input.se-h-section { font-size: 1.2rem; font-weight: 700; }
+  .se-h-row > input.se-h-subsection { font-size: 1.05rem; font-weight: 600; }
+  .se-h-row > input.se-h-subsubsection { font-size: 0.95rem; font-weight: 600; color: #334155; }
+  .se-h-num.lv-chapter { font-size: 1.5rem; }
+  .se-h-num.lv-section { font-size: 1.2rem; }
+  .se-h-num.lv-subsection { font-size: 1.05rem; }
+  .se-h-num.lv-subsubsection { font-size: 0.95rem; color: #334155; font-weight: 600; }
+  .se-block[data-block-type="heading"] { margin: 0.35rem 0; }
+  .se-block[data-level="chapter"] { margin: 0.7rem 0 0.4rem; }
+  .se-block[data-level="section"] { margin: 0.85rem 0 0.3rem; }
+  .se-block[data-level="subsection"] { margin: 0.65rem 0 0.2rem; }
+  .se-block[data-level="subsubsection"] { margin: 0.45rem 0 0.15rem; }
+  .se-prose {
+    width: 100%; border: 0; outline: none; background: transparent;
+    font-size: 0.95rem; line-height: 1.85; color: #1e293b; padding: 0.15rem 0;
+    min-height: 1.85em; display: block;
+    box-shadow: none;
+  }
+  .se-prose:focus,
+  .se-prose:focus-visible {
+    outline: none;
+    background: transparent;
+    box-shadow: none;
+  }
+  .se-prose p {
+    margin: 0 0 0.75em; text-indent: 2em; text-align: justify;
+  }
+  .se-prose p:last-child { margin-bottom: 0.15em; }
+  /* 无段落标签时也缩进首行 */
+  .se-prose:not(:has(p)) { text-indent: 2em; text-align: justify; }
+  /* 正文段落：无选中框/底色，直接编辑 */
+  .se-block[data-block-type="text"] {
+    margin: 0;
+    padding: 0.05rem 0;
+    border: none !important;
+    border-radius: 0;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+  .se-block[data-block-type="text"]:hover,
+  .se-block[data-block-type="text"].is-active,
+  .se-block[data-block-type="text"]:focus-within {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+  .se-zihao { line-height: inherit; }
+  .se-prose strong { font-weight: 700; }
+  .se-prose em { font-style: italic; }
+  .se-prose u { text-decoration: underline; }
+  .se-preview-table {
+    width: 100%; border-collapse: collapse; font-size: 0.8rem; background: #fff;
+    table-layout: fixed;
+  }
+  .se-preview-table td, .se-preview-table th {
+    border: 1px solid #94a3b8; padding: 0.4rem 0.45rem; vertical-align: middle;
+    word-break: break-word; white-space: pre-wrap; line-height: 1.45;
+  }
+  .se-preview-table tr.se-rowspan-pad { height: 2.8em; }
+  .se-table-caption, .se-preview-table caption,
+  .se-float-caption {
+    caption-side: top; text-align: center; font-size: 0.85rem; font-weight: 600;
+    color: #0f172a; margin-bottom: 0.45rem; padding: 0.25rem 0;
+  }
+  .se-float-caption {
+    display: flex; align-items: baseline; justify-content: center; gap: 0.35rem;
+    flex-wrap: wrap; width: 100%;
+  }
+  .se-float-caption.below { margin-top: 0.55rem; margin-bottom: 0.15rem; }
+  .se-float-caption.above { margin-top: 0.1rem; margin-bottom: 0.55rem; }
+  .se-float-label {
+    flex: 0 0 auto; font-weight: 700; white-space: nowrap; user-select: none;
+  }
+  .se-float-caption input.se-caption {
+    flex: 1 1 12rem; min-width: 8rem; max-width: 36rem;
+    border: 0; border-bottom: 1px dashed #cbd5e1; outline: none;
+    background: transparent; text-align: center; font-size: 0.85rem; font-weight: 600;
+    color: #0f172a; padding: 0.1rem 0.2rem;
+  }
+  .se-img-wrap { margin: 0.75rem 0; padding: 0.65rem; border: 1px dashed #cbd5e1; border-radius: 0.5rem; }
+  .se-img-preview {
+    display: block; margin: 0.5rem auto; height: auto;
+    max-width: 100%; width: auto;
+    border-radius: 0.25rem; background: #f1f5f9;
+    object-fit: contain;
+  }
+  .se-img-meta { font-size: 0.75rem; color: #64748b; font-family: ui-monospace, monospace; }
+  .se-img-width-hint { font-size: 0.7rem; color: #94a3b8; text-align: center; margin-top: 0.15rem; }
+  .se-img-wrap.is-a3 {
+    border-color: #f59e0b; background: linear-gradient(180deg, #fffbeb 0%, #fff 40%);
+  }
+  .se-img-a3-badge {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    font-size: 0.72rem; color: #92400e; margin: 0.35rem 0 0.15rem;
+  }
+  .se-img-a3-badge input { accent-color: #d97706; }
+
+  /* —— A3 横置独占页（真实 420×297mm，连续页合并为一组） —— */
+  .se-a3-run {
+    margin: 1.5rem 0;
+    padding: 0.85rem 0.75rem 1rem;
+    background:
+      repeating-linear-gradient(
+        -45deg,
+        #e2e8f0 0 6px,
+        #eef2f7 6px 12px
+      );
+    border: 1px solid #94a3b8;
+    border-radius: 0.45rem;
+    width: 420mm;
+    max-width: none;
+    box-sizing: border-box;
+    /* 相对 A4 栏居中；前后正文仍是 820px A4 宽 */
+    position: relative;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+  .se-a3-run-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+    margin-bottom: 0.65rem; padding: 0 0.15rem;
+  }
+  .se-a3-run-title {
+    font-size: 0.78rem; font-weight: 700; color: #78350f;
+    background: #fef3c7; border: 1px solid #f59e0b; border-radius: 0.3rem;
+    padding: 0.2rem 0.55rem;
+  }
+  .se-a3-run-meta { font-size: 0.7rem; color: #475569; }
+  .se-block.is-a3-page {
+    margin: 0.85rem 0 0;
+    padding: 0.2rem 0 0.35rem;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+  }
+  .se-block.is-a3-page:first-child,
+  .se-a3-run > .se-block.is-a3-page:first-of-type { margin-top: 0.35rem; }
+  .se-block.is-a3-page:hover,
+  .se-block.is-a3-page.is-active {
+    background: rgb(255 255 255 / 0.35);
+    border-color: transparent;
+  }
+  .se-a3-break {
+    display: flex; align-items: center; justify-content: center; gap: 0.65rem;
+    margin: 0.15rem 0 0.55rem; color: #334155; font-size: 0.72rem; font-weight: 600;
+    letter-spacing: 0.02em;
+    width: 420mm;
+    max-width: 100%;
+  }
+  .se-a3-break::before,
+  .se-a3-break::after {
+    content: ""; flex: 1; height: 0;
+    border-top: 2px dashed #64748b;
+  }
+  .se-a3-break span {
+    flex-shrink: 0;
+    padding: 0.2rem 0.7rem;
+    border-radius: 999px;
+    background: #0f172a;
+    color: #f8fafc;
+    font-size: 0.68rem;
+  }
+  .se-a3-break.is-after { margin: 0.55rem 0 0.15rem; }
+  .se-a3-break.is-after span { background: #334155; }
+  .se-a3-cont {
+    display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+    margin: 0.55rem 0 0.15rem; font-size: 0.68rem; color: #64748b; font-weight: 600;
+  }
+  .se-a3-cont::before,
+  .se-a3-cont::after {
+    content: ""; flex: 1; max-width: 8rem; height: 0;
+    border-top: 1px dashed #94a3b8;
+  }
+  .se-a3-sheet {
+    position: relative;
+    width: 420mm;
+    height: 297mm;
+    max-width: none;
+    margin: 0 auto;
+    background: #fff;
+    box-shadow:
+      0 1px 2px rgb(15 23 42 / 0.06),
+      0 12px 32px rgb(15 23 42 / 0.16),
+      0 0 0 1px #cbd5e1;
+    display: flex;
+    flex-direction: column;
+    /* 与 main.tex geometry 一致：上下 26mm、左右 28mm */
+    padding: 26mm 28mm;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+  .se-a3-sheet-label {
+    position: absolute;
+    top: 8mm; right: 10mm;
+    z-index: 2;
+    font-size: 0.68rem; font-weight: 700;
+    letter-spacing: 0.04em;
+    color: #92400e;
+    background: #fef3c7;
+    border: 1px solid #f59e0b;
+    border-radius: 0.3rem;
+    padding: 0.18rem 0.45rem;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
+  }
+  .se-a3-sheet-chrome {
+    flex-shrink: 0;
+    display: flex; justify-content: space-between; gap: 1rem;
+    font-size: 0.72rem; color: #64748b; line-height: 1.3;
+    padding-bottom: 0.35rem; margin-bottom: 0.45rem;
+    border-bottom: 1px dotted #cbd5e1;
+  }
+  .se-a3-sheet-body {
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 0.45rem;
+  }
+  .se-a3-sheet-body .se-img-preview {
+    width: 100% !important; max-width: 100% !important; max-height: 100%;
+    margin: 0; border-radius: 0; background: #f8fafc;
+    object-fit: contain;
+  }
+  .se-a3-sheet-body .se-float-caption {
+    margin: 0.15rem 0 0; font-size: 0.85rem;
+  }
+  .se-a3-controls {
+    width: 420mm;
+    max-width: none;
+    margin: 0.55rem auto 0;
+    padding: 0.55rem 0.7rem;
+    background: #fffbeb;
+    border: 1px solid #fcd34d;
+    border-radius: 0.4rem;
+    box-sizing: border-box;
+  }
+  .se-a3-controls .se-img-a3-badge {
+    font-size: 0.8rem; font-weight: 600; color: #78350f; margin: 0 0 0.25rem;
+  }
+  .se-a3-controls .se-img-width-hint {
+    text-align: left; color: #92400e; margin: 0 0 0.35rem;
+  }
+  .se-a3-run > .se-gap { margin: 0.15rem 0; }
+  .se-xref {
+    display: inline; padding: 0 0.15rem; border-radius: 0.2rem;
+    background: #eff6ff; color: #1d4ed8; font-weight: 600; cursor: default;
+    border-bottom: 1px dotted #93c5fd; white-space: nowrap;
+  }
+  .se-flow {
+    margin: 0.75rem 0; padding: 0.85rem 0.6rem; border: 1px solid #ddd; border-radius: 0;
+    background: #fff; display: flex; flex-direction: column; align-items: stretch; gap: 0;
+    cursor: pointer; color: #111;
+  }
+  .se-flow-rich { width: 100%; }
+  .se-flow-unit,
+  .se-flow-vlink {
+    display: grid;
+    grid-template-columns: minmax(5.5rem, 1fr) minmax(9rem, 11.5rem) minmax(7rem, 1.15fr);
+    column-gap: 0.35rem;
+    align-items: center;
+    width: 100%;
+  }
+  .se-flow-side { font-size: 0.7rem; color: #222; line-height: 1.35; }
+  .se-flow-side.left { text-align: right; padding-right: 0.15rem; }
+  .se-flow-side.right {
+    text-align: left; padding-left: 0.1rem;
+    display: flex; flex-direction: column; align-items: flex-start; gap: 0.25rem;
+  }
+  .se-flow-main { display: flex; justify-content: center; }
+  .se-flow-step {
+    border: 1px solid #111; border-radius: 0; background: #fff; color: #111;
+    padding: 0.4rem 0.55rem; width: 100%; max-width: 11.5rem;
+    text-align: center; font-size: 0.8rem; line-height: 1.35;
+  }
+  .se-flow-step.side {
+    font-size: 0.72rem; max-width: 7.5rem; width: auto; min-width: 4.5rem;
+    padding: 0.3rem 0.45rem;
+  }
+  .se-flow-note { font-size: 0.68rem; color: #222; line-height: 1.35; }
+  .se-flow-note.near { margin: 0; }
+  .se-flow-h-branch {
+    display: flex; align-items: center; gap: 0.15rem; margin-top: 0.05rem;
+  }
+  .se-flow-h-edge {
+    position: relative; display: flex; align-items: center;
+    min-width: 2.4rem; height: 1.1rem; margin-right: 0.1rem;
+  }
+  .se-flow-h-edge .se-flow-edge-lab {
+    position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%);
+    white-space: nowrap; font-size: 0.65rem; line-height: 1; margin-bottom: 0.05rem;
+  }
+  .se-flow-hline {
+    display: block; height: 0; flex: 1; min-width: 1.6rem;
+    border-top: 1.5px solid #111;
+  }
+  .se-flow-arrowhead-h {
+    display: block; width: 0; height: 0; flex-shrink: 0;
+    border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+    border-left: 7px solid #111;
+  }
+  .se-flow-vlink { min-height: 1.35rem; align-items: stretch; }
+  .se-flow-vlink-mid {
+    display: flex; flex-direction: column; align-items: center; position: relative;
+  }
+  .se-flow-vshaft {
+    position: relative; display: flex; justify-content: center;
+    width: 100%; min-height: 0.55rem;
+  }
+  .se-flow-vshaft.tip { min-height: 0.7rem; }
+  .se-flow-vline {
+    display: block; width: 0; border-left: 1.5px solid #111; min-height: 0.55rem;
+  }
+  .se-flow-vshaft.tip .se-flow-vline { min-height: 0.45rem; }
+  .se-flow-arrowhead {
+    position: absolute; left: 50%; bottom: 0; transform: translateX(-50%);
+    width: 0; height: 0;
+    border-left: 4px solid transparent; border-right: 4px solid transparent;
+    border-top: 7px solid #111;
+  }
+  .se-flow-pass {
+    position: absolute; left: calc(50% + 0.45rem); top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.65rem; color: #111; white-space: nowrap; line-height: 1;
+  }
+  .se-flow-mid-branch {
+    display: flex; align-items: center; align-self: stretch;
+    width: calc(50% + min(7.5rem, 42vw)); margin-left: 50%;
+    gap: 0.15rem; min-height: 1.6rem; padding: 0.1rem 0;
+  }
+  .se-flow-mid-branch .se-flow-hline { min-width: 2.2rem; flex: 1; }
+  .se-flow-mid-branch .se-flow-edge-lab {
+    font-size: 0.65rem; white-space: nowrap;
+  }
+  .se-flow-edge-lab { font-size: 0.65rem; color: #111; }
+  .se-flow-wrap { margin: 0.75rem 0; }
+  .se-flow-wrap .bar {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem; gap: 0.5rem;
+  }
+  .se-pagebreak {
+    margin: 1rem 0; border-top: 2px dashed #94a3b8; position: relative; height: 1.5rem;
+  }
+  .se-pagebreak span {
+    position: absolute; left: 50%; top: -0.7rem; transform: translateX(-50%);
+    background: #fff; padding: 0 0.5rem; font-size: 0.7rem; color: #64748b;
+  }
+  .se-minipage {
+    margin: 0.75rem 0; padding: 0.65rem; border: 1px dashed #a5b4fc; border-radius: 0.4rem;
+    background: #eef2ff44;
+  }
+  .se-table-wrap {
+    margin: 0.85rem 0; padding: 0.65rem; border: 1px solid #e2e8f0; border-radius: 0.5rem; background: #f8fafc;
+    overflow-x: auto;
+  }
+  .se-table-wrap .bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.45rem; gap: 0.5rem; }
+  #se-status { font-size: 0.75rem; color: #94a3b8; }
+  #se-status.ok { color: #6ee7b7; }
+  #se-status.err { color: #fca5a5; }
+  .se-insert-hint { font-size: 0.7rem; color: #94a3b8; }
+  .se-gap {
+    position: relative; height: 0.55rem; margin: 0.05rem 0;
+  }
+  .se-gap button {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    opacity: 0; z-index: 4;
+    width: 1.4rem; height: 1.4rem; border-radius: 999px; border: 1px solid #c7d2fe;
+    background: #eef2ff; color: #4338ca; font-size: 0.9rem; line-height: 1; cursor: pointer;
+    padding: 0;
+  }
+  .se-gap:hover { height: 1.1rem; }
+  .se-gap:hover button { opacity: 1; }
+  .se-gap button:hover { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+  .se-formula-preview {
+    cursor: pointer;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  .se-formula-preview:hover {
+    background: #eef2ff;
+    border-radius: 0.2rem;
+  }
+  .se-formula-preview.is-empty {
+    color: #94a3b8; font-size: 0.85rem; padding: 0.15rem 0.35rem;
+  }
+  /* 独立公式：居中渲染，无边框大框 */
+  .se-block[data-block-type="formula"][data-formula-mode="display"] {
+    margin: 0.55rem 0; padding-top: 0.25rem; padding-bottom: 0.25rem;
+  }
+  .se-block[data-block-type="formula"][data-formula-mode="display"]:hover,
+  .se-block[data-block-type="formula"][data-formula-mode="display"].is-active {
+    background: transparent;
+  }
+  .se-block[data-block-type="formula"][data-formula-mode="display"].is-active {
+    box-shadow: inset 3px 0 0 #c7d2fe;
+  }
+  .se-block[data-block-type="formula"][data-formula-mode="display"] .se-formula-preview {
+    display: block; text-align: center; padding: 0.15rem 0.25rem;
+  }
+  /* 行内公式块：紧凑贴合正文行高 */
+  .se-block[data-block-type="formula"][data-formula-mode="inline"] {
+    margin: 0.1rem 0; padding-top: 0.05rem; padding-bottom: 0.05rem;
+  }
+  .se-block[data-block-type="formula"][data-formula-mode="inline"]:hover,
+  .se-block[data-block-type="formula"][data-formula-mode="inline"].is-active {
+    background: transparent;
+  }
+  .se-block[data-block-type="formula"][data-formula-mode="inline"].is-active {
+    box-shadow: inset 3px 0 0 #c7d2fe;
+  }
+  .se-block[data-block-type="formula"][data-formula-mode="inline"] .se-formula-preview {
+    display: inline; vertical-align: baseline; padding: 0 0.1rem;
+  }
+  .se-block[data-block-type="formula"][data-formula-mode="inline"] .se-formula-preview > .katex {
+    font-size: 1em; line-height: 1; display: inline; vertical-align: baseline;
+  }
+  .se-math {
+    display: inline; padding: 0; margin: 0;
+    border-bottom: 1px dashed transparent; cursor: pointer;
+    vertical-align: baseline; line-height: inherit;
+  }
+  .se-math:hover {
+    background: #eef2ff; border-radius: 0.15rem;
+    border-bottom-color: #a5b4fc;
+  }
+  /* 压缩 KaTeX 行内公式高度，避免撑开行距、与正文脱节 */
+  .se-math > .katex {
+    font-size: 1em; line-height: 1; white-space: nowrap;
+    display: inline; vertical-align: baseline;
+  }
+  .se-math > .katex .katex-html {
+    white-space: nowrap;
+  }
+  .se-math > .katex .base {
+    display: inline; white-space: nowrap;
+  }
+  .se-prose .se-math,
+  .se-preview-table .se-math {
+    margin: 0; padding: 0;
+  }
+  .se-math-err { color: #b91c1c; font-size: 0.8em; font-family: ui-monospace, monospace; }
+  .fe-modal-mask {
+    display: none; position: fixed; inset: 0; z-index: 100;
+    background: rgb(15 23 42 / 0.45); align-items: center; justify-content: center;
+    padding: 1.25rem;
+  }
+  .fe-modal-mask.open { display: flex; }
+  .fe-modal {
+    width: min(720px, 100%); max-height: min(86vh, 640px);
+    background: #fff; border-radius: 0.75rem; box-shadow: 0 20px 50px rgb(0 0 0 / 0.25);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .fe-modal-hd {
+    display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+    padding: 0.75rem 1rem; border-bottom: 1px solid #e2e8f0; background: #f8fafc;
+  }
+  .fe-modal-hd h3 { font-size: 0.95rem; font-weight: 600; color: #0f172a; margin-right: auto; }
+  .fe-modal-hd select {
+    border: 1px solid #e2e8f0; border-radius: 0.35rem; padding: 0.3rem 0.45rem; font-size: 0.78rem;
+  }
+  .fe-modal-hd button {
+    font-size: 0.78rem; padding: 0.35rem 0.7rem; border-radius: 0.4rem; border: 1px solid #e2e8f0;
+    background: #fff; cursor: pointer; color: #334155;
+  }
+  .fe-modal-hd button.primary { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+  .fe-modal-bd {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; padding: 0.85rem 1rem 1rem;
+    min-height: 0; flex: 1; overflow: hidden;
+  }
+  @media (max-width: 700px) { .fe-modal-bd { grid-template-columns: 1fr; } }
+  .fe-modal-bd label { font-size: 0.75rem; color: #64748b; display: block; margin-bottom: 0.35rem; }
+  .fe-modal-bd textarea {
+    width: 100%; height: 220px; resize: vertical; border: 1px solid #cbd5e1; border-radius: 0.5rem;
+    padding: 0.65rem 0.75rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.88rem; line-height: 1.5;
+  }
+  .fe-modal-preview {
+    height: 220px; border: 1px solid #cbd5e1; border-radius: 0.5rem; background: #f8fafc;
+    display: flex; align-items: center; justify-content: center; padding: 1rem; overflow: auto;
+  }
+  .fe-modal-preview .err { color: #b91c1c; font-size: 0.82rem; white-space: pre-wrap; }
+  #fe-modal-status { font-size: 0.75rem; color: #94a3b8; }
+  #fe-modal-status.ok { color: #059669; } #fe-modal-status.err { color: #b91c1c; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="se-page" id="se-app"
+     data-chapter="{{ current.key }}"
+     data-chapter-no="{{ chapter_no }}"
+     data-front="{{ is_front|yesno:'1,0' }}"
+     data-save-url="{{ save_url }}"
+     data-template-mode="{% if template_mode %}1{% else %}0{% endif %}"
+     data-template-name="{{ latex_template_name|default:''|escape }}"
+     data-upload-url="{{ upload_url }}"
+     data-table-edit-url="{{ table_edit_url }}"
+     data-formula-edit-url="{{ formula_edit_url }}"
+     data-flowchart-edit-url="{{ flowchart_edit_url }}"
+     data-next-url="{% if template_mode %}{{ back_url }}{% else %}{% url 'evaluation_report_attachments' report.pk %}{% endif %}"
+     data-media-base="{{ media_base }}"
+     data-csrf="{{ csrf_token }}">
+
+  {% if not template_mode and pdf_ready and pdf_view_url %}
+  <div class="se-pdf-banner" id="se-pdf-banner">
+    <strong>报告 PDF 已生成</strong>
+    <span>可预览或下载；如需调整附件，请先到「材料上传」完成后再重新生成。</span>
+    <a href="{{ pdf_view_url }}?v={{ report.updated_at|date:'U' }}" target="_blank" rel="noopener">预览 PDF</a>
+    <a class="secondary" href="{{ pdf_download_url }}">下载</a>
+    <button type="button" class="dismiss" id="se-pdf-dismiss">关闭</button>
+  </div>
+  {% endif %}
+
+  <div class="se-toolbar">
+    <div class="se-tb-row nav">
+      {% if template_mode %}
+      <a href="{{ back_url }}" title="返回模板选择">&larr; 模板列表</a>
+      <div class="se-sep"></div>
+      <span style="color:#94a3b8;font-size:0.8rem;white-space:nowrap">模板 · {{ latex_template_name }}</span>
+      {% else %}
+      <a href="{% url 'evaluation_report_attachments' report.pk %}" title="上传/管理附件材料">&larr; 附件管理</a>
+      {% endif %}
+      <div class="se-sep"></div>
+      <select id="se-chapter-jump" title="切换章节">
+        {% for group, items in chapter_groups.items %}
+        <optgroup label="{{ group }}">
+          {% for ch in items %}
+          <option value="{{ ch.key }}" {% if ch.key == current.key %}selected{% endif %}>{{ ch.title }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endfor %}
+      </select>
+      {% if not template_mode %}
+      <div class="se-sep"></div>
+      <a href="{{ keywords_url }}">项目信息</a>
+      <a href="{% url 'evaluation_report_attachments' report.pk %}" title="先上传附件再导出 PDF">上传附件</a>
+      {% if report.output_pdf %}
+      <a href="{% url 'evaluation_report_pdf_view' report.pk %}?v={{ report.updated_at|date:'U' }}"
+         target="_blank" rel="noopener" title="预览已生成的 PDF">预览 PDF</a>
+      {% endif %}
+      {% endif %}
+      <div style="flex:1"></div>
+      <span id="se-status"></span>
+      {% if template_mode %}
+      <button type="button" class="template" id="se-save" title="保存到 LaTeX 模板库 (Ctrl+S)">保存模板</button>
+      {% else %}
+      <button type="button" class="primary" id="se-save" title="保存 (Ctrl+S)">保存</button>
+      <button type="button" class="success" id="se-next-attachments" title="保存当前章节并进入附件管理">保存并进入附件</button>
+      {% endif %}
+    </div>
+    <div class="se-tb-row format">
+      <span class="se-insert-hint" id="se-insert-hint">插入：选中块下方</span>
+      <button type="button" id="se-insert-pos" title="切换插入到选中块上方/下方">下方</button>
+      <div class="se-sep"></div>
+      <div class="se-grp">
+        <span class="se-grp-label">字体</span>
+        <button type="button" class="b" data-fmt="bold" title="加粗">B</button>
+        <button type="button" class="i" data-fmt="italic" title="斜体">I</button>
+        <button type="button" class="u" data-fmt="underline" title="下划线">U</button>
+        <select id="se-zihao" title="字号">
+          <option value="">字号</option>
+          <option value="5">五号</option>
+          <option value="-4">小四</option>
+          <option value="4">四号</option>
+          <option value="-3">小三</option>
+          <option value="3">三号</option>
+          <option value="2">二号</option>
+        </select>
+      </div>
+      <div class="se-sep"></div>
+      <div class="se-grp">
+        <span class="se-grp-label">样式</span>
+        <button type="button" data-add="heading" data-level="chapter" title="插入章标题">章</button>
+        <button type="button" data-add="heading" data-level="section" title="插入节标题">节</button>
+        <button type="button" data-add="heading" data-level="subsection" title="插入小节">小节</button>
+        <button type="button" data-add="text" title="插入段落">正文</button>
+      </div>
+      <div class="se-sep"></div>
+      <div class="se-grp">
+        <span class="se-grp-label">插入</span>
+        <button type="button" data-add="table">表格</button>
+        <button type="button" data-add="formula">公式</button>
+        <button type="button" data-add="image">图片</button>
+        <button type="button" id="se-xref" title="插入图表交叉引用">引用图表</button>
+        <button type="button" data-add="pagebreak" title="换页 clearpage">换页</button>
+        <button type="button" data-add="minipage" title="插入 minipage">分栏框</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="se-body">
+    <aside class="se-nav">
+      {% for group, items in chapter_groups.items %}
+      <div class="grp">{{ group }}</div>
+      {% for ch in items %}
+      <a href="?chapter={{ ch.key }}" class="{% if ch.key == current.key %}active{% endif %}">{{ ch.title }}</a>
+      {% endfor %}
+      {% endfor %}
+    </aside>
+    <div class="se-canvas-wrap">
+      <div class="se-doc">
+        <div class="se-page-chrome-head" id="se-chrome-head" hidden>
+          <div data-side="l"></div><div data-side="r"></div>
+        </div>
+        <div class="se-doc-title">{{ current.title }}</div>
+        <div class="se-doc-hint">选中文字后可用顶栏格式；段落默认首行缩进。需要（1）（2）时直接写在正文里，中间可再插入表格/图片。插入表格/图片会插在<strong>当前光标所在块之后</strong>（先点一下目标位置）。<strong>行内公式</strong>嵌在光标处正文中，<strong>独立公式</strong>单独成段；单击公式可再编辑。</div>
+        <div id="se-blocks"></div>
+        <div class="se-page-chrome-foot" id="se-chrome-foot" hidden>
+          <div data-side="l"></div><div data-side="r"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="se-build-overlay" class="eval-build-overlay" aria-live="polite">
+  <div class="eval-build-panel">
+    <div class="eval-build-spinner" role="status"></div>
+    <p style="font-weight:600;margin:0">正在生成 PDF…</p>
+    <p style="font-size:0.85rem;color:#64748b;margin:0.5rem 0 0">已自动保存当前章节，请勿关闭页面</p>
+  </div>
+</div>
+
+<style>
+.eval-build-overlay {
+  position: fixed; inset: 0; z-index: 9999; display: none;
+  align-items: center; justify-content: center;
+  background: rgba(15, 23, 42, 0.5); backdrop-filter: blur(2px);
+}
+.eval-build-overlay.is-active { display: flex; }
+.eval-build-panel {
+  min-width: 260px; padding: 1.75rem 2rem; border-radius: 1rem;
+  background: #fff; text-align: center;
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.35);
+}
+.eval-build-spinner {
+  width: 2.75rem; height: 2.75rem; margin: 0 auto 0.85rem;
+  border: 4px solid #e0e7ff; border-top-color: #4f46e5; border-radius: 50%;
+  animation: se-build-spin 0.8s linear infinite;
+}
+@keyframes se-build-spin { to { transform: rotate(360deg); } }
+</style>
+
+<div class="fe-modal-mask" id="fe-modal-mask" aria-hidden="true">
+  <div class="fe-modal" role="dialog" aria-modal="true" aria-labelledby="fe-modal-title">
+    <div class="fe-modal-hd">
+      <h3 id="fe-modal-title">编辑公式</h3>
+      <select id="fe-mode" title="快捷切换定界符（也可直接改左侧代码）">
+        <option value="inline">行内 $...$</option>
+        <option value="display">独立 \[...\]</option>
+        <option value="display2">独立 $$...$$</option>
+        <option value="equation">equation</option>
+        <option value="equation*">equation*</option>
+        <option value="align">align</option>
+        <option value="align*">align*</option>
+      </select>
+      <span id="fe-modal-status"></span>
+      <button type="button" id="fe-cancel">取消</button>
+      <button type="button" class="primary" id="fe-ok">确定</button>
+    </div>
+    <div class="fe-modal-bd">
+      <div>
+        <label>LaTeX 代码（含定界符；$...$ / $$...$$ / \[...\] / \begin{align}...\end{align}）</label>
+        <textarea id="fe-code" spellcheck="false" placeholder="例如：$\dot{H}_{c} \le 2.5$&#10;或：\[\n E = mc^2\n\]"></textarea>
+      </div>
+      <div>
+        <label>渲染预览 <span id="fe-mode-hint" style="font-weight:400;color:#94a3b8"></span></label>
+        <div class="fe-modal-preview"><div id="fe-preview"></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="fe-modal-mask" id="xref-modal-mask" aria-hidden="true">
+  <div class="fe-modal" role="dialog" aria-modal="true" style="max-width:32rem">
+    <div class="fe-modal-hd">
+      <h3>插入图表引用</h3>
+      <button type="button" id="xref-cancel">取消</button>
+    </div>
+    <div class="fe-modal-bd">
+      <p style="font-size:0.8rem;color:#64748b;margin:0 0 0.75rem">插入到当前光标处；编号由编译时自动生成（表/图~\ref{…}）。</p>
+      <div id="xref-list" style="display:flex;flex-direction:column;gap:0.4rem;max-height:20rem;overflow:auto"></div>
+    </div>
+  </div>
+</div>
+
+<script id="se-blocks-data" type="application/json">{{ blocks_json|safe }}</script>
+<script id="se-preamble-data" type="application/json">{{ preamble_json|safe }}</script>
+<script id="se-original-data" type="application/json">{{ original_json|safe }}</script>
+<script id="se-chrome-data" type="application/json">{{ page_chrome_json|safe }}</script>
+<script>
+(function () {
+  const app = document.getElementById('se-app');
+  const root = document.getElementById('se-blocks');
+  const statusEl = document.getElementById('se-status');
+  const chapter = app.dataset.chapter;
+  const chapterNo = parseInt(app.dataset.chapterNo || '0', 10) || 0;
+  const isFront = app.dataset.front === '1';
+  const saveUrl = app.dataset.saveUrl;
+  const uploadUrl = app.dataset.uploadUrl;
+  const tableEditUrl = app.dataset.tableEditUrl;
+  const formulaEditUrl = app.dataset.formulaEditUrl;
+  const flowchartEditUrl = app.dataset.flowchartEditUrl || '';
+  const mediaBase = app.dataset.mediaBase || '';
+  const csrf = app.dataset.csrf;
+  let preamble = '', original = '', blocks = [];
+  let pageChrome = { show: false };
+  try { preamble = JSON.parse(document.getElementById('se-preamble-data').textContent || '""'); } catch (e) {}
+  try { original = JSON.parse(document.getElementById('se-original-data').textContent || '""'); } catch (e) {}
+  try { blocks = JSON.parse(document.getElementById('se-blocks-data').textContent || '[]'); } catch (e) {}
+  try { pageChrome = JSON.parse(document.getElementById('se-chrome-data').textContent || '{}'); } catch (e) {}
+
+  (function applyPageChrome() {
+    if (!pageChrome || !pageChrome.show) return;
+    const head = document.getElementById('se-chrome-head');
+    const foot = document.getElementById('se-chrome-foot');
+    if (head) {
+      head.hidden = false;
+      const l = head.querySelector('[data-side="l"]');
+      const r = head.querySelector('[data-side="r"]');
+      if (l) l.textContent = pageChrome.lhead || '';
+      if (r) r.textContent = pageChrome.rhead || '';
+    }
+    if (foot) {
+      foot.hidden = false;
+      const l = foot.querySelector('[data-side="l"]');
+      const r = foot.querySelector('[data-side="r"]');
+      if (l) l.textContent = pageChrome.lfoot || '';
+      if (r) r.textContent = pageChrome.rfoot || '';
+    }
+  })();
+
+  function uid() { return 'b' + Math.random().toString(36).slice(2, 9); }
+  function emptyBlockFields() {
+    return { title: '', text: '', items: [], rows: [], caption: '', path: '', latex: '', label: '', page: '', source_input: '', table_model: {}, preview_html: '' };
+  }
+  /** Legacy list blocks → plain text with （1） / • prefixes (no list environment). */
+  function expandLegacyListBlocks(arr) {
+    const out = [];
+    (arr || []).forEach(b => {
+      if (!b || b.type !== 'list') {
+        out.push(b);
+        return;
+      }
+      const ordered = b.level !== 'itemize';
+      const items = (b.items && b.items.length) ? b.items : [''];
+      const paras = items.map((it, i) => {
+        const body = String(it || '').trim();
+        if (ordered) return body ? ('（' + (i + 1) + '）' + body) : ('（' + (i + 1) + '）');
+        return body ? ('• ' + body) : '•';
+      });
+      out.push(Object.assign({}, emptyBlockFields(), {
+        id: b.id || uid(),
+        type: 'text',
+        text: paras.join('\n\n'),
+        source_input: b.source_input || '',
+      }));
+    });
+    return out;
+  }
+  /** Standalone inline formula blocks → embed as $...$ in adjacent / new text. */
+  function expandInlineFormulaBlocks(arr) {
+    const out = [];
+    (arr || []).forEach(b => {
+      if (!b || b.type !== 'formula' || b.level !== 'inline') {
+        out.push(b);
+        return;
+      }
+      const snip = '$' + String(b.text || '').trim() + '$';
+      const last = out.length ? out[out.length - 1] : null;
+      if (last && last.type === 'text') {
+        last.text = (last.text || '') + snip;
+      } else {
+        out.push(Object.assign({}, emptyBlockFields(), {
+          id: b.id || uid(),
+          type: 'text',
+          text: snip,
+          source_input: b.source_input || '',
+        }));
+      }
+    });
+    return out;
+  }
+  blocks = expandInlineFormulaBlocks(expandLegacyListBlocks(blocks));
+  function escapeAttr(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  }
+  function escapeHtml(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+  function autosize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.max(el.scrollHeight, 28) + 'px';
+  }
+
+  /** Compute display numbers matching main.tex: chapter ``2.`` / section ``2.1`` / … */
+  function computeHeadingNumbers(list) {
+    const map = {};
+    let sec = 0, sub = 0, ssub = 0;
+    const ch = chapterNo > 0 ? chapterNo : 0;
+    list.forEach(b => {
+      if (!b || b.type !== 'heading') return;
+      const lv = b.level || 'section';
+      if (lv === 'chapter') {
+        sec = 0; sub = 0; ssub = 0;
+        // \@makechapterhead: \thechapter.\,#1
+        map[b.id] = ch ? (ch + '.') : '';
+      } else if (lv === 'section') {
+        sec += 1; sub = 0; ssub = 0;
+        // \thesection = \thechapter.\arabic{section}
+        map[b.id] = ch ? (ch + '.' + sec) : String(sec);
+      } else if (lv === 'subsection') {
+        if (!sec) sec = 1;
+        sub += 1; ssub = 0;
+        map[b.id] = ch ? (ch + '.' + sec + '.' + sub) : (sec + '.' + sub);
+      } else if (lv === 'subsubsection') {
+        if (!sec) sec = 1;
+        if (!sub) sub = 1;
+        ssub += 1;
+        map[b.id] = ch
+          ? (ch + '.' + sec + '.' + sub + '.' + ssub)
+          : (sec + '.' + sub + '.' + ssub);
+      }
+    });
+    return map;
+  }
+
+  /**
+   * Float labels matching main.tex captionsetup:
+   * 表~\thesection-\arabic{table} / 图~\thesection-\arabic{figure}
+   * Counters reset at each \\section.
+   */
+  function computeFloatNumbers(list) {
+    const map = {};
+    const byLabel = {};
+    let sec = 0;
+    let tableN = 0;
+    let figN = 0;
+    const ch = chapterNo > 0 ? chapterNo : 0;
+    const sectionTag = () => (ch ? (ch + '.' + sec) : String(sec));
+
+    list.forEach(b => {
+      if (!b) return;
+      if (b.type === 'heading') {
+        const lv = b.level || 'section';
+        if (lv === 'chapter') {
+          sec = 0; tableN = 0; figN = 0;
+        } else if (lv === 'section') {
+          sec += 1; tableN = 0; figN = 0;
+        }
+        return;
+      }
+      if (b.type === 'table') {
+        if (!sec && ch) sec = 0; // allow 2.0-n before first section
+        tableN += 1;
+        const disp = '表 ' + sectionTag() + '-' + tableN;
+        map[b.id] = disp;
+        if ((b.label || '').trim()) byLabel[String(b.label).trim()] = disp;
+      } else if (b.type === 'image' || b.type === 'flowchart') {
+        figN += 1;
+        const disp = '图 ' + sectionTag() + '-' + figN;
+        map[b.id] = disp;
+        if ((b.label || '').trim()) byLabel[String(b.label).trim()] = disp;
+      }
+    });
+    return { map, byLabel };
+  }
+
+  function floatCaptionHtml(label, caption, position, latexLabel) {
+    const pos = position === 'below' ? 'below' : 'above';
+    return '<div class="se-float-caption ' + pos + '">' +
+      '<span class="se-float-label">' + escapeHtml(label || '') + '</span>' +
+      '<input data-f="caption" class="se-caption" value="' + escapeAttr(caption || '') +
+      '" placeholder="' + (pos === 'above' ? '表题' : '图题') + '">' +
+      '<input data-f="label" type="hidden" value="' + escapeAttr(latexLabel || '') + '">' +
+      '</div>';
+  }
+
+  /** Strip baked-in <caption> from table preview HTML. */
+  function stripTableCaptionHtml(html) {
+    return String(html || '').replace(/<caption\b[^>]*>[\s\S]*?<\/caption>/gi, '');
+  }
+
+  /** Map LaTeX includegraphics width to CSS (e.g. 0.85\\linewidth → 85%). */
+  function latexImgWidthToCss(w) {
+    let s = String(w || '').trim();
+    if (!s) return '85%';
+    // unescape doubled backslashes from JSON
+    s = s.replace(/\\\\/g, '\\');
+    let m = s.match(/^([\d.]+)\s*\\(?:linewidth|textwidth|columnwidth)$/i);
+    if (m) {
+      const pct = Math.max(5, Math.min(100, parseFloat(m[1]) * 100));
+      return pct + '%';
+    }
+    m = s.match(/^([\d.]+)\s*(cm|mm|in|pt)$/i);
+    if (m) return m[1] + m[2].toLowerCase();
+    m = s.match(/^([\d.]+)\s*%$/);
+    if (m) return m[1] + '%';
+    return '85%';
+  }
+
+  function latexImgWidthLabel(w) {
+    let s = String(w || '').trim();
+    if (!s) s = '0.85\\linewidth';
+    return s.replace(/\\\\/g, '\\');
+  }
+
+  const ZIHAO_SIZE = {'5':'0.85em','-4':'0.95em','4':'1.05em','-3':'1.15em','3':'1.25em','2':'1.45em'};
+
+  function mathSpanHtml(latex, idx) {
+    return '<span class="se-math" contenteditable="false" data-latex="' + escapeAttr(String(latex || '').trim()) +
+      '" data-idx="' + idx + '" title="点击编辑公式"></span>';
+  }
+
+  function xrefChipHtml(kind, lab, byLabel) {
+    const k = kind === 'tab' ? 'tab' : (kind === 'fig' ? 'fig' : 'ref');
+    let disp = (byLabel && byLabel[lab]) || '';
+    if (!disp) {
+      if (k === 'tab' || String(lab).startsWith('tab:')) disp = '表…';
+      else if (k === 'fig' || String(lab).startsWith('fig:')) disp = '图…';
+      else disp = '引用';
+    }
+    return '<span class="se-xref" contenteditable="false" data-kind="' + k +
+      '" data-ref="' + escapeAttr(lab) + '" title="' + escapeAttr(lab) + '">' +
+      escapeHtml(disp) + '</span>';
+  }
+
+  function inlineRichToHtml(text, startIdx, byLabel) {
+    let idx = startIdx || 0;
+    const raw = String(text || '');
+    const tokens = [];
+    const mathRe = /\$([^$]+)\$/g;
+    let cursor = 0, m;
+    while ((m = mathRe.exec(raw))) {
+      if (m.index > cursor) tokens.push({t:'text', v: raw.slice(cursor, m.index)});
+      tokens.push({t:'math', v: m[1].trim(), i: idx++});
+      cursor = m.index + m[0].length;
+    }
+    if (cursor < raw.length) tokens.push({t:'text', v: raw.slice(cursor)});
+
+    function fmtPlain(t) {
+      let x = escapeHtml(t);
+      x = x.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      x = x.replace(/__(.+?)__/g, '<u>$1</u>');
+      x = x.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
+      return x;
+    }
+    function renderTextChunk(t) {
+      const out = [];
+      const combined = /§(?:tabref|figref|ref)\{([^}]+)\}§|§zihao\{([^}]+)\}§([\s\S]*?)§\/zihao§/g;
+      let c = 0, zm;
+      while ((zm = combined.exec(t))) {
+        if (zm.index > c) out.push(fmtPlain(t.slice(c, zm.index)));
+        if (zm[0].startsWith('§tabref')) {
+          out.push(xrefChipHtml('tab', zm[1], byLabel));
+        } else if (zm[0].startsWith('§figref')) {
+          out.push(xrefChipHtml('fig', zm[1], byLabel));
+        } else if (zm[0].startsWith('§ref')) {
+          out.push(xrefChipHtml('ref', zm[1], byLabel));
+        } else {
+          const size = ZIHAO_SIZE[zm[2]] || '1em';
+          out.push('<span class="se-zihao" data-zihao="' + escapeAttr(zm[2]) + '" style="font-size:' + size + '">' +
+            fmtPlain(zm[3]) + '</span>');
+        }
+        c = zm.index + zm[0].length;
+      }
+      if (c < t.length) out.push(fmtPlain(t.slice(c)));
+      return out.join('');
+    }
+
+    const html = tokens.map(tok => {
+      if (tok.t === 'math') return mathSpanHtml(tok.v, tok.i);
+      return renderTextChunk(tok.v).replace(/\n/g, '<br>');
+    }).join('');
+    return { html, nextIdx: idx };
+  }
+
+  function textToProseHtml(text, byLabel) {
+    const paras = String(text || '').split(/\n\n+/);
+    let globalIdx = 0;
+    return paras.map(para => {
+      const r = inlineRichToHtml(para, globalIdx, byLabel);
+      globalIdx = r.nextIdx;
+      return '<p>' + (r.html || '<br>') + '</p>';
+    }).join('');
+  }
+
+  function htmlToRichText(el) {
+    function walk(node) {
+      if (node.nodeType === 3) return node.textContent || '';
+      if (node.nodeType !== 1) return '';
+      if (node.classList && node.classList.contains('se-math')) {
+        return '$' + (node.getAttribute('data-latex') || '') + '$';
+      }
+      if (node.classList && node.classList.contains('se-xref')) {
+        const lab = node.getAttribute('data-ref') || '';
+        const kind = node.getAttribute('data-kind') || 'ref';
+        if (kind === 'tab') return '§tabref{' + lab + '}§';
+        if (kind === 'fig') return '§figref{' + lab + '}§';
+        return '§ref{' + lab + '}§';
+      }
+      if (node.classList && node.classList.contains('se-zihao')) {
+        const z = node.getAttribute('data-zihao') || '-4';
+        let inner = '';
+        node.childNodes.forEach(ch => { inner += walk(ch); });
+        return '§zihao{' + z + '}§' + inner + '§/zihao§';
+      }
+      if (node.tagName === 'BR') return '\n';
+      let inner = '';
+      node.childNodes.forEach(ch => { inner += walk(ch); });
+      if (node.tagName === 'STRONG' || node.tagName === 'B') return '**' + inner + '**';
+      if (node.tagName === 'EM' || node.tagName === 'I') return '*' + inner + '*';
+      if (node.tagName === 'U') return '__' + inner + '__';
+      return inner;
+    }
+    return walk(el).replace(/\u00a0/g, ' ').trim();
+  }
+
+  function isProseBlockEl(node) {
+    if (!node || node.nodeType !== 1) return false;
+    const t = node.tagName;
+    return t === 'P' || t === 'DIV' || t === 'LI' || t === 'BLOCKQUOTE' ||
+      t === 'H1' || t === 'H2' || t === 'H3' || t === 'H4' || t === 'H5' || t === 'H6' || t === 'PRE';
+  }
+
+  /** Collect editable prose → rich text, preserving paragraph breaks (p/div/br). */
+  function proseElToText(el) {
+    if (!el) return '';
+    const kids = [...el.childNodes];
+    const blockKids = [...el.children].filter(isProseBlockEl);
+    // Chrome often uses <div> for Enter; treat each block child as a paragraph.
+    if (blockKids.length && kids.every(n =>
+      n.nodeType === 3 ? !(n.textContent || '').trim() : (n.nodeType !== 1 || isProseBlockEl(n) || n.tagName === 'BR')
+    )) {
+      return blockKids.map(p => htmlToRichText(p)).join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
+    }
+    // Mixed inline + br: split on BR / block boundaries
+    const parts = [];
+    let buf = '';
+    function flushBuf() {
+      const t = buf.replace(/\u00a0/g, ' ').replace(/[ \t]+\n/g, '\n').trim();
+      if (t) parts.push(t);
+      buf = '';
+    }
+    kids.forEach(node => {
+      if (isProseBlockEl(node)) {
+        flushBuf();
+        const t = htmlToRichText(node);
+        if (t) parts.push(t);
+      } else if (node.nodeType === 1 && node.tagName === 'BR') {
+        buf += '\n';
+      } else {
+        buf += node.nodeType === 3 ? (node.textContent || '') : htmlToRichText(node);
+      }
+    });
+    flushBuf();
+    return parts.join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  function hydrateMath(rootEl) {
+    rootEl.querySelectorAll('.se-math').forEach(span => {
+      const latex = (span.getAttribute('data-latex') || '').trim().replace(/\s{2,}/g, ' ');
+      if (!latex) return;
+      span.setAttribute('data-latex', latex);
+      if (typeof katex === 'undefined') {
+        span.textContent = '$' + latex + '$';
+        return;
+      }
+      try {
+        katex.render(latex, span, {
+          throwOnError: false,
+          displayMode: false,
+          strict: 'ignore',
+        });
+      } catch (e) {
+        span.innerHTML = '<span class="se-math-err">' + escapeHtml(latex) + '</span>';
+      }
+    });
+    rootEl.querySelectorAll('.se-formula-preview').forEach(box => {
+      const latex = (box.getAttribute('data-latex') || '').trim();
+      const display = box.getAttribute('data-display') !== '0';
+      if (!latex) {
+        box.classList.add('is-empty');
+        box.innerHTML = display ? '（点击编辑公式）' : '（公式）';
+        return;
+      }
+      box.classList.remove('is-empty');
+      if (typeof katex === 'undefined') {
+        box.textContent = display ? ('\\[' + latex + '\\]') : ('$' + latex + '$');
+        return;
+      }
+      try {
+        katex.render(latex, box, { throwOnError: false, displayMode: display, strict: 'ignore' });
+      } catch (e) {
+        box.innerHTML = '<span class="se-math-err">' + escapeHtml(latex) + '</span>';
+      }
+    });
+  }
+
+  function whenKatex(fn) {
+    if (typeof katex !== 'undefined') { fn(); return; }
+    let n = 0;
+    const t = setInterval(() => {
+      n++;
+      if (typeof katex !== 'undefined' || n > 100) {
+        clearInterval(t);
+        fn();
+      }
+    }, 50);
+  }
+
+  document.getElementById('se-chapter-jump').addEventListener('change', function () {
+    location.search = '?chapter=' + encodeURIComponent(this.value);
+  });
+
+  function headingClass(level) {
+    return ({chapter:'se-h-chapter', section:'se-h-section', subsection:'se-h-subsection', subsubsection:'se-h-subsubsection'})[level] || 'se-h-section';
+  }
+
+  function formulaEditHref(blockId, extra) {
+    const q = new URLSearchParams(Object.assign({
+      chapter: chapter,
+      block: blockId,
+    }, extra || {}));
+    return formulaEditUrl + '?' + q.toString();
+  }
+
+  /* ---- formula modal ---- */
+  let feState = null; // { kind:'block'|'inline'|'insert', ... }
+  let feSyncingMode = false;
+  const feMask = document.getElementById('fe-modal-mask');
+  const feCode = document.getElementById('fe-code');
+  const feMode = document.getElementById('fe-mode');
+  const fePreview = document.getElementById('fe-preview');
+  const feStatus = document.getElementById('fe-modal-status');
+  const feModeHint = document.getElementById('fe-mode-hint');
+  const FE_MATH_ENVS = ['equation', 'equation*', 'align', 'align*', 'gather', 'gather*', 'multline', 'multline*'];
+
+  function wrapFormulaSource(body, mode) {
+    const bare = String(body || '').trim();
+    if (mode === 'inline') return '$' + bare + '$';
+    if (mode === 'display2') return '$$\n' + bare + '\n$$';
+    if (FE_MATH_ENVS.indexOf(mode) >= 0) {
+      return '\\begin{' + mode + '}\n' + bare + '\n\\end{' + mode + '}';
+    }
+    return '\\[\n' + bare + '\n\\]';
+  }
+
+  /** Parse full LaTeX with delimiters → { mode, body, display, selectValue }. */
+  function parseFormulaSource(src) {
+    let s = String(src || '').trim();
+    if (!s) return { mode: 'display', body: '', display: true, selectValue: 'display' };
+
+    let m = s.match(/^\$\$([\s\S]*?)\$\$$/);
+    if (m) {
+      return { mode: 'display', body: m[1].trim(), display: true, selectValue: 'display2' };
+    }
+    m = s.match(/^\$([^$\n]+)\$$/);
+    if (m) {
+      return { mode: 'inline', body: m[1].trim(), display: false, selectValue: 'inline' };
+    }
+    m = s.match(/^\\\[([\s\S]*?)\\\]$/);
+    if (m) {
+      return { mode: 'display', body: m[1].trim(), display: true, selectValue: 'display' };
+    }
+    m = s.match(/^\\begin\{(equation\*?|align\*?|gather\*?|multline\*)\}([\s\S]*?)\\end\{\1\}$/);
+    if (m) {
+      return { mode: m[1], body: m[2].trim(), display: true, selectValue: m[1] };
+    }
+    // 无定界符：按当前下拉或默认独立
+    return { mode: 'display', body: s, display: true, selectValue: 'display', bare: true };
+  }
+
+  function formulaSourceForKatex(parsed) {
+    if (!parsed.body) return '';
+    if (FE_MATH_ENVS.indexOf(parsed.mode) >= 0) {
+      return '\\begin{' + parsed.mode + '}' + parsed.body + '\\end{' + parsed.mode + '}';
+    }
+    return parsed.body;
+  }
+
+  function syncModeFromCode() {
+    const parsed = parseFormulaSource(feCode.value);
+    if (feModeHint) {
+      const label = parsed.mode === 'inline' ? '行内' : (parsed.mode === 'display' ? '独立' : parsed.mode);
+      feModeHint.textContent = '· 识别为 ' + label;
+    }
+    if (feMode.value !== parsed.selectValue) {
+      feSyncingMode = true;
+      feMode.value = parsed.selectValue;
+      feSyncingMode = false;
+    }
+    return parsed;
+  }
+
+  function feRenderPreview() {
+    const parsed = syncModeFromCode();
+    fePreview.innerHTML = '';
+    if (!parsed.body) {
+      fePreview.innerHTML = '<span class="err">请输入公式</span>';
+      return;
+    }
+    if (typeof katex === 'undefined') {
+      fePreview.textContent = parsed.body;
+      return;
+    }
+    try {
+      katex.render(formulaSourceForKatex(parsed), fePreview, {
+        throwOnError: false,
+        displayMode: parsed.display,
+        strict: 'ignore',
+      });
+    } catch (err) {
+      fePreview.innerHTML = '<span class="err">' + String(err) + '</span>';
+    }
+  }
+
+  function openFormulaModal(opts) {
+    feState = opts || {};
+    const mode = opts.mode || (opts.kind === 'inline' ? 'inline' : 'display');
+    const bare = String(opts.body || '').trim();
+    // 若传入已是带定界符的完整源码，原样展示
+    const looksWrapped = /^\$|\\\[|\\begin\{/.test(bare);
+    feCode.value = looksWrapped ? bare : wrapFormulaSource(bare, mode === 'display' ? 'display' : mode);
+    feSyncingMode = true;
+    feMode.value = parseFormulaSource(feCode.value).selectValue;
+    feSyncingMode = false;
+    feStatus.textContent = '';
+    feStatus.className = '';
+    feMask.classList.add('open');
+    feMask.setAttribute('aria-hidden', 'false');
+    whenKatex(feRenderPreview);
+    setTimeout(() => {
+      feCode.focus();
+      // 光标放到定界符内侧
+      const v = feCode.value;
+      const start = v.indexOf('\n') >= 0 && (v.startsWith('\\[') || v.startsWith('$$') || v.startsWith('\\begin'))
+        ? v.indexOf('\n') + 1
+        : (v.startsWith('$') && !v.startsWith('$$') ? 1 : 0);
+      const end = v.lastIndexOf('\n') > start ? v.lastIndexOf('\n') : (v.endsWith('$') && !v.endsWith('$$') ? v.length - 1 : v.length);
+      try { feCode.setSelectionRange(start, Math.max(start, end)); } catch (e) {}
+    }, 50);
+  }
+
+  function closeFormulaModal(cancelled) {
+    // insert 流程未预先建块；block 新建空块在取消时删掉
+    if (cancelled && feState && feState.isNew && feState.kind === 'block') {
+      const id = feState.blockId;
+      const b = blocks.find(x => x.id === id);
+      if (b && !(b.text || '').trim()) {
+        blocks = blocks.filter(x => x.id !== id);
+        if (activeId === id) activeId = null;
+        renderAll();
+      }
+    }
+    feMask.classList.remove('open');
+    feMask.setAttribute('aria-hidden', 'true');
+    feState = null;
+  }
+
+  function replaceNthMath(text, n, newBody) {
+    const re = /\$[^$]+\$/g;
+    let i = 0, m, out = '', last = 0;
+    const s = String(text || '');
+    while ((m = re.exec(s))) {
+      if (i === n) {
+        out += s.slice(last, m.index) + '$' + newBody + '$';
+        last = m.index + m[0].length;
+        out += s.slice(last);
+        return out;
+      }
+      i++;
+    }
+    return s;
+  }
+
+  function removeNthMath(text, n) {
+    const re = /\$[^$]+\$/g;
+    let i = 0, m, out = '', last = 0;
+    const s = String(text || '');
+    while ((m = re.exec(s))) {
+      if (i === n) {
+        out += s.slice(last, m.index);
+        last = m.index + m[0].length;
+        out += s.slice(last);
+        return out.replace(/[ \t]+\n/g, '\n').replace(/\n[ \t]+/g, '\n');
+      }
+      i++;
+    }
+    return s;
+  }
+
+  /** Capture caret in text/minipage for embedding inline math (includes end-of-block). */
+  function captureTextCaretContext() {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !sel.isCollapsed) return null;
+    const node = sel.anchorNode;
+    const el = node && (node.nodeType === 1 ? node : node.parentElement);
+    const prose = el && el.closest ? el.closest('[data-f=text].se-prose') : null;
+    if (!prose) return null;
+    const card = prose.closest('[data-block-id]');
+    if (!card) return null;
+    const id = card.getAttribute('data-block-id');
+    const bi = blocks.findIndex(b => b.id === id);
+    if (bi < 0) return null;
+    const b = blocks[bi];
+    if (b.type !== 'text' && b.type !== 'minipage') return null;
+
+    const range = sel.getRangeAt(0);
+    const pre = document.createRange();
+    pre.selectNodeContents(prose);
+    pre.setEnd(range.startContainer, range.startOffset);
+    const post = document.createRange();
+    post.selectNodeContents(prose);
+    post.setStart(range.startContainer, range.startOffset);
+    const beforeWrap = document.createElement('div');
+    beforeWrap.appendChild(pre.cloneContents());
+    const afterWrap = document.createElement('div');
+    afterWrap.appendChild(post.cloneContents());
+    return {
+      index: bi,
+      parentId: id,
+      before: fragToRichText(beforeWrap),
+      after: fragToRichText(afterWrap),
+      blockType: b.type,
+      level: b.level || '',
+    };
+  }
+
+  function placeInlineMathSnippet(snippet, caret, preferAt) {
+    if (caret && caret.parentId) {
+      const p = blocks.find(b => b.id === caret.parentId);
+      if (p && (p.type === 'text' || p.type === 'minipage')) {
+        p.text = (caret.before || '') + snippet + (caret.after || '');
+        return p.id;
+      }
+    }
+    const active = activeId ? blocks.find(b => b.id === activeId) : null;
+    if (active && (active.type === 'text' || active.type === 'minipage')) {
+      active.text = (active.text || '') + snippet;
+      return active.id;
+    }
+    // 前一个正文块末尾追加
+    let at = typeof preferAt === 'number' ? preferAt : insertIndex();
+    for (let i = at - 1; i >= 0; i--) {
+      if (blocks[i].type === 'text' || blocks[i].type === 'minipage') {
+        blocks[i].text = (blocks[i].text || '') + snippet;
+        return blocks[i].id;
+      }
+    }
+    const nb = Object.assign({}, emptyBlockFields(), { id: uid(), type: 'text', text: snippet });
+    blocks.splice(Math.max(0, at), 0, nb);
+    return nb.id;
+  }
+
+  function convertFormulaBlockToInline(blockId, body) {
+    const bi = blocks.findIndex(x => x.id === blockId);
+    const snippet = '$' + body + '$';
+    if (bi < 0) {
+      return placeInlineMathSnippet(snippet, null, insertIndex());
+    }
+    blocks.splice(bi, 1);
+    const prev = bi > 0 ? blocks[bi - 1] : null;
+    if (prev && (prev.type === 'text' || prev.type === 'minipage')) {
+      prev.text = (prev.text || '') + snippet;
+      return prev.id;
+    }
+    const next = blocks[bi];
+    if (next && (next.type === 'text' || next.type === 'minipage')) {
+      next.text = snippet + (next.text || '');
+      return next.id;
+    }
+    const nb = Object.assign({}, emptyBlockFields(), { id: blockId || uid(), type: 'text', text: snippet });
+    blocks.splice(bi, 0, nb);
+    return nb.id;
+  }
+
+  async function confirmFormulaModal() {
+    const parsed = parseFormulaSource(feCode.value);
+    const body = parsed.body;
+    if (!body) {
+      feStatus.textContent = '公式不能为空';
+      feStatus.className = 'err';
+      return;
+    }
+    // 存储用规范 mode：$$ 与 \[\] 都记为 display
+    const mode = parsed.mode;
+    const isInlineMode = mode === 'inline';
+    collectFromDom();
+    if (!feState) return;
+
+    if (feState.kind === 'inline') {
+      const parent = blocks.find(b => b.id === feState.parentId);
+      if (!parent) {
+        feStatus.textContent = '找不到对应段落';
+        feStatus.className = 'err';
+        return;
+      }
+      const idx = Number(feState.idx) || 0;
+      if (isInlineMode) {
+        if (parent.type === 'text' || parent.type === 'minipage') {
+          parent.text = replaceNthMath(parent.text || '', idx, body);
+        }
+        activeId = parent.id;
+      } else {
+        // 行内改独立：从段落去掉，在段后插入公式块
+        if (parent.type === 'text' || parent.type === 'minipage') {
+          parent.text = removeNthMath(parent.text || '', idx);
+        }
+        const pi = blocks.findIndex(b => b.id === parent.id);
+        const fb = Object.assign({}, emptyBlockFields(), {
+          id: uid(), type: 'formula', level: mode, text: body,
+        });
+        blocks.splice(pi + 1, 0, fb);
+        activeId = fb.id;
+      }
+    } else if (feState.kind === 'insert') {
+      if (isInlineMode) {
+        activeId = placeInlineMathSnippet('$' + body + '$', feState.caret, feState.at);
+      } else {
+        const caret = feState.caret;
+        let at = typeof feState.at === 'number' ? feState.at : insertIndex();
+        if (caret && caret.after) {
+          const p = blocks.find(b => b.id === caret.parentId);
+          if (p) p.text = caret.before || '';
+          at = (caret.index != null ? caret.index : at) + 1;
+          const fb = Object.assign({}, emptyBlockFields(), {
+            id: uid(), type: 'formula', level: mode, text: body,
+          });
+          const afterHalf = Object.assign({}, emptyBlockFields(), {
+            id: uid(), type: caret.blockType || 'text', level: caret.level || '',
+            text: caret.after || '',
+          });
+          blocks.splice(at, 0, fb, afterHalf);
+          activeId = fb.id;
+        } else {
+          const fb = Object.assign({}, emptyBlockFields(), {
+            id: uid(), type: 'formula', level: mode, text: body,
+          });
+          blocks.splice(at, 0, fb);
+          activeId = fb.id;
+        }
+      }
+    } else {
+      // kind === 'block'：编辑已有独立公式块
+      if (isInlineMode) {
+        activeId = convertFormulaBlockToInline(feState.blockId, body);
+      } else {
+        let b = blocks.find(x => x.id === feState.blockId);
+        if (!b) {
+          b = Object.assign({}, emptyBlockFields(), {
+            id: feState.blockId || uid(), type: 'formula', level: mode, text: body,
+          });
+          blocks.splice(insertIndex(), 0, b);
+        }
+        b.type = 'formula';
+        b.text = body;
+        b.level = mode;
+        b.latex = '';
+        activeId = b.id;
+      }
+    }
+    closeFormulaModal();
+    renderAll();
+    statusEl.textContent = '公式已更新（记得保存）';
+    statusEl.className = 'ok';
+  }
+
+  feCode.addEventListener('input', feRenderPreview);
+  feMode.addEventListener('change', () => {
+    if (feSyncingMode) return;
+    const parsed = parseFormulaSource(feCode.value);
+    feCode.value = wrapFormulaSource(parsed.body, feMode.value);
+    feRenderPreview();
+  });
+  document.getElementById('fe-cancel').addEventListener('click', () => closeFormulaModal(true));
+  document.getElementById('fe-ok').addEventListener('click', confirmFormulaModal);
+  feMask.addEventListener('click', (e) => { if (e.target === feMask) closeFormulaModal(true); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && feMask.classList.contains('open')) closeFormulaModal(true);
+  });
+
+  function collectFromDom() {
+    const out = [];
+    root.querySelectorAll('[data-block-id]').forEach(card => {
+      const id = card.getAttribute('data-block-id');
+      const type = card.getAttribute('data-block-type');
+      const base = blocks.find(b => b.id === id) || {id, type};
+      const next = Object.assign({}, base, {id, type});
+      next.source_input = card.getAttribute('data-source-input') || base.source_input || '';
+      if (type === 'heading') {
+        next.level = card.getAttribute('data-level') || 'section';
+        next.title = card.querySelector('[data-f=title]').value;
+      } else if (type === 'text' || type === 'minipage') {
+        const el = card.querySelector('[data-f=text]');
+        if (el && el.isContentEditable) next.text = proseElToText(el);
+        else next.text = el?.value || '';
+        if (type === 'minipage') next.level = next.level || '0.45\\textwidth';
+      } else if (type === 'formula') {
+        // keep text/level from base (edited on formula page)
+      } else if (type === 'image' || type === 'flowchart' || type === 'table') {
+        next.caption = card.querySelector('[data-f=caption]')?.value || '';
+        next.label = (card.querySelector('[data-f=label]')?.value || '').trim();
+        if (type === 'image') {
+          next.path = card.querySelector('[data-f=path]')?.value || next.path || '';
+          const a3 = card.querySelector('[data-f=a3page]');
+          const fromDom = a3 && a3.checked;
+          const fromAttr = card.getAttribute('data-page') === 'a3landscape';
+          next.page = (fromDom || fromAttr) ? 'a3landscape' : '';
+          if (next.page) card.setAttribute('data-page', 'a3landscape');
+          else card.removeAttribute('data-page');
+          const wEl = card.querySelector('[data-f=width]');
+          if (wEl && !next.page) {
+            next.level = (wEl.value || '').trim() || next.level || '0.85\\linewidth';
+          } else if (!next.level) {
+            next.level = '0.85\\linewidth';
+          }
+        }
+        if (type === 'table' && next.table_model && typeof next.table_model === 'object') {
+          next.table_model = Object.assign({}, next.table_model, { caption: next.caption });
+        }
+      }
+      out.push(next);
+    });
+    blocks = out;
+    return out;
+  }
+
+  function renderBlock(block, headingNums, floatNums, byLabel, a3Opts) {
+    const wrap = document.createElement('div');
+    wrap.className = 'se-block';
+    wrap.setAttribute('data-block-id', block.id);
+    wrap.setAttribute('data-block-type', block.type);
+    if (block.type === 'heading') wrap.setAttribute('data-level', block.level || 'section');
+    if (block.source_input) wrap.setAttribute('data-source-input', block.source_input);
+    if (block.type === 'image' && (block.page || '') === 'a3landscape') {
+      wrap.setAttribute('data-page', 'a3landscape');
+      wrap.classList.add('is-a3-page');
+    }
+    a3Opts = a3Opts || {};
+
+    let body = '';
+    if (block.type === 'heading') {
+      const lv = block.level || 'section';
+      const num = (headingNums && headingNums[block.id]) || '';
+      const hc = headingClass(lv);
+      body = '<div class="se-h-row">' +
+        (num ? '<span class="se-h-num lv-' + lv + '" contenteditable="false" aria-hidden="true">' +
+          escapeHtml(num) + '</span>' : '') +
+        '<input data-f="title" class="' + hc + '" value="' + escapeAttr(block.title || '') +
+          '" placeholder="标题文案">' +
+        '</div>';
+    } else if (block.type === 'text') {
+      body = '<div data-f="text" class="se-prose" contenteditable="true" spellcheck="false">' +
+        textToProseHtml(block.text || '', byLabel) + '</div>';
+    } else if (block.type === 'table') {
+      const preview = stripTableCaptionHtml(block.preview_html || '') ||
+        '<p class="text-xs text-slate-400">空表格</p>';
+      const editHref = tableEditUrl
+        ? (tableEditUrl + '?chapter=' + encodeURIComponent(chapter) + '&block=' + encodeURIComponent(block.id))
+        : '';
+      const label = (floatNums && floatNums[block.id]) || '表';
+      body = '<div class="se-table-wrap">' +
+        '<div class="bar"><span class="text-xs text-slate-500">表格</span>' +
+        (editHref
+          ? '<a class="text-xs rounded bg-indigo-600 text-white px-2.5 py-1" href="' + editHref + '">编辑表格</a>'
+          : '<span class="text-xs text-slate-400">模板模式可改表题/结构后保存</span>') +
+        '</div>' +
+        floatCaptionHtml(label, block.caption || '', 'above', block.label || '') +
+        preview +
+        '</div>';
+    } else if (block.type === 'flowchart') {
+      const flow = (block.preview_html || '<div class="se-flow"><div class="se-flow-step">流程图</div></div>')
+        .replace(/<div class="se-flow-caption"[^>]*>[\s\S]*?<\/div>/gi, '');
+      const label = (floatNums && floatNums[block.id]) || '图';
+      const editHref = flowchartEditUrl
+        ? (flowchartEditUrl + '?chapter=' + encodeURIComponent(chapter) +
+          '&block=' + encodeURIComponent(block.id))
+        : '';
+      body = '<div class="se-flow-wrap" data-flowchart-block="' + escapeAttr(block.id) + '">' +
+        '<div class="bar"><span class="text-xs text-slate-500">流程图' + (editHref ? '（双击编辑）' : '') + '</span>' +
+        (editHref
+          ? '<a class="text-xs rounded bg-indigo-600 text-white px-2.5 py-1" href="' + editHref + '">编辑流程图</a>'
+          : '') +
+        '</div>' +
+        flow + floatCaptionHtml(label, block.caption || '', 'below', block.label || '') +
+        '</div>';
+    } else if (block.type === 'pagebreak') {
+      body = '<div class="se-pagebreak"><span>换页 \\' + (block.level === 'clearpage' ? 'clearpage' : 'newpage') + '</span></div>';
+    } else if (block.type === 'minipage') {
+      body = '<div class="se-minipage"><div class="text-xs text-slate-500 mb-1">minipage · ' +
+        escapeAttr(block.level || '0.45\\\\textwidth') + '</div>' +
+        '<div data-f="text" class="se-prose" contenteditable="true">' + textToProseHtml(block.text || '', byLabel) + '</div></div>';
+    } else if (block.type === 'formula') {
+      const isInline = block.level === 'inline';
+      wrap.setAttribute('data-formula-mode', isInline ? 'inline' : 'display');
+      const emptyCls = !(block.text || '').trim() ? ' is-empty' : '';
+      body = '<div class="se-formula-preview' + emptyCls + '" data-latex="' +
+        escapeAttr(block.text || '') +
+        '" data-display="' + (isInline ? '0' : '1') +
+        '" title="单击编辑公式"></div>';
+    } else if (block.type === 'image') {
+      const src = block.path ? (mediaBase + String(block.path).replace(/^\/+/, '')) : '';
+      const label = (floatNums && floatNums[block.id]) || '图';
+      const isA3 = (block.page || '') === 'a3landscape';
+      const widthLatex = isA3
+        ? '\\textwidth (A3 整页)'
+        : (block.level || '0.85\\linewidth');
+      const widthCss = isA3 ? '100%' : latexImgWidthToCss(block.level || '0.85\\linewidth');
+      const imgHtml = src
+        ? '<img class="se-img-preview" style="width:' + escapeAttr(widthCss) + ';max-width:100%;height:auto" src="' +
+          escapeAttr(src) + '" alt="' + escapeAttr(block.caption||'') +
+          '" onerror="this.style.display=\'none\';this.nextElementSibling&&(this.nextElementSibling.style.display=\'block\')">' +
+          '<div class="text-xs text-red-500 py-4 text-center" style="display:none">图片加载失败：' + escapeHtml(block.path||'') + '</div>'
+        : '<div class="text-xs text-slate-400 py-6 text-center">暂无图片，请上传</div>';
+      const controlsHtml =
+        '<label class="se-img-a3-badge"><input type="checkbox" data-f="a3page"' +
+        (isA3 ? ' checked' : '') + '> 独占一页 · 横置 A3（页眉页脚边距不变）</label>' +
+        '<div class="se-img-width-hint">' +
+        (isA3
+          ? '导出时：本页纸张改为 A3 横向（420×297mm），图片铺满版心；前后页仍为 A4。'
+          : ('预览宽度按 LaTeX：width=' + escapeHtml(latexImgWidthLabel(widthLatex)) +
+             ' → ' + escapeHtml(widthCss))) +
+        '</div>' +
+        '<div class="flex flex-wrap gap-2 items-center mt-2">' +
+        '<input data-f="width" class="se-img-meta" style="max-width:11rem' +
+        (isA3 ? ';opacity:0.45' : '') + '" value="' +
+        escapeAttr(isA3 ? '0.85\\linewidth' : latexImgWidthLabel(block.level || '0.85\\linewidth')) +
+        '" title="includegraphics 的 width" placeholder="0.85\\linewidth"' +
+        (isA3 ? ' disabled' : '') + '>' +
+        '<input data-f="path" class="se-img-meta flex-1" value="' + escapeAttr(block.path||'') + '">' +
+        '<input type="file" accept="image/*" data-f="file" class="text-xs">' +
+        '<button type="button" data-act="upload" class="text-xs rounded bg-slate-800 text-white px-2 py-1">上传</button></div>';
+
+      if (isA3) {
+        const idxLabel = a3Opts.index && a3Opts.total
+          ? (' · 第 ' + a3Opts.index + '/' + a3Opts.total + ' 张')
+          : '';
+        const cont = a3Opts.showCont
+          ? '<div class="se-a3-cont"><span>下一张 A3 横置</span></div>'
+          : '';
+        body =
+          cont +
+          '<div class="se-a3-sheet" title="A3 横向纸张 420×297mm">' +
+            '<div class="se-a3-sheet-label">A3 横置 · 420×297 mm' + idxLabel + '</div>' +
+            '<div class="se-a3-sheet-chrome"><span>页眉（边距同正文）</span><span>报告编号</span></div>' +
+            '<div class="se-a3-sheet-body">' +
+              imgHtml +
+              floatCaptionHtml(label, block.caption || '', 'below', block.label || '') +
+            '</div>' +
+          '</div>' +
+          '<div class="se-a3-controls">' + controlsHtml + '</div>';
+      } else {
+        body = '<div class="se-img-wrap">' +
+          imgHtml +
+          floatCaptionHtml(label, block.caption || '', 'below', block.label || '') +
+          controlsHtml +
+          '</div>';
+      }
+    } else {
+      body = '';
+    }
+
+    wrap.innerHTML = (block.type === 'text' ? '' : (
+      '<div class="se-ops">' +
+      '<button type="button" data-act="up">上</button>' +
+      '<button type="button" data-act="down">下</button>' +
+      '<button type="button" data-act="del">删</button></div>'
+    )) + body;
+    return wrap;
+  }
+
+  let activeId = null;
+  let insertPos = 'after'; // after | before —— 相对选中块
+
+  function setActive(id) {
+    activeId = id;
+    root.querySelectorAll('.se-block.is-active').forEach(el => el.classList.remove('is-active'));
+    if (!id) return;
+    const el = root.querySelector('[data-block-id="' + id + '"]');
+    if (el) el.classList.add('is-active');
+    updateInsertHint();
+  }
+
+  function updateInsertHint() {
+    const hint = document.getElementById('se-insert-hint');
+    const btn = document.getElementById('se-insert-pos');
+    if (!hint || !btn) return;
+    btn.textContent = insertPos === 'before' ? '上方' : '下方';
+    if (!activeId) {
+      hint.textContent = '插入→文末';
+    } else {
+      hint.textContent = '插入→选中块' + (insertPos === 'before' ? '上方' : '下方');
+    }
+  }
+
+  function focusNewBlock(id) {
+    const el = root.querySelector('[data-block-id="' + id + '"]');
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const focusable = el.querySelector('input,textarea,[contenteditable]');
+    if (focusable) {
+      focusable.focus();
+      if (focusable.select) try { focusable.select(); } catch (e) {}
+    }
+  }
+
+  function applyFormat(cmd) {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const node = sel.anchorNode;
+    const editable = node && (node.nodeType === 1 ? node : node.parentElement)?.closest('[contenteditable=true]');
+    if (!editable) {
+      statusEl.textContent = '请先在正文中选中文字';
+      statusEl.className = 'err';
+      return;
+    }
+    editable.focus();
+    document.execCommand(cmd, false, null);
+  }
+
+  function applyZihao(z) {
+    if (!z) return;
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed) {
+      statusEl.textContent = '请先选中要改字号的文字';
+      statusEl.className = 'err';
+      return;
+    }
+    const range = sel.getRangeAt(0);
+    const editable = (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement)
+      ?.closest('[contenteditable=true]');
+    if (!editable) return;
+    const span = document.createElement('span');
+    span.className = 'se-zihao';
+    span.dataset.zihao = z;
+    span.style.fontSize = ZIHAO_SIZE[z] || '1em';
+    try {
+      span.appendChild(range.extractContents());
+      range.insertNode(span);
+      sel.removeAllRanges();
+      const r = document.createRange();
+      r.selectNodeContents(span);
+      sel.addRange(r);
+    } catch (e) {
+      statusEl.textContent = '字号应用失败';
+      statusEl.className = 'err';
+    }
+  }
+
+  function insertIndex() {
+    const cur = activeId ? blocks.findIndex(b => b.id === activeId) : -1;
+    if (cur < 0) return blocks.length;
+    return insertPos === 'before' ? cur : cur + 1;
+  }
+
+  function isA3ImageBlock(b) {
+    return b && b.type === 'image' && (b.page || '') === 'a3landscape';
+  }
+
+  function makeA3Break(kind) {
+    const el = document.createElement('div');
+    el.className = 'se-a3-break' + (kind === 'after' ? ' is-after' : '');
+    el.innerHTML = kind === 'after'
+      ? '<span>A3 横置结束 · 换回 A4 正文</span>'
+      : '<span>A4 正文到此换页 · 进入 A3 横置</span>';
+    return el;
+  }
+
+  function renderAll() {
+    root.innerHTML = '';
+    const visible = blocks.filter(b => b.type !== 'raw');
+    const gap = (afterId) => {
+      const g = document.createElement('div');
+      g.className = 'se-gap';
+      g.innerHTML = '<button type="button" title="在此处插入段落">+</button>';
+      g.querySelector('button').addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (afterId) {
+          activeId = afterId;
+          insertPos = 'after';
+          updateInsertHint();
+        } else {
+          activeId = null;
+          // 插到最前：临时用 before on first
+        }
+        if (!afterId) {
+          // 顶部 gap：插到第一个之前
+          collectFromDom();
+          const b = {
+            id: uid(), type: 'text', level: '', title: '', text: '', items: [''],
+            rows: [], caption: '', path: '', latex: '', table_model: {}, preview_html: ''
+          };
+          blocks.splice(0, 0, b);
+          activeId = b.id;
+          renderAll();
+          focusNewBlock(b.id);
+          return;
+        }
+        insertBlock('text', '');
+      });
+      return g;
+    };
+    root.appendChild(gap(null));
+    const headingNums = computeHeadingNumbers(visible);
+    const floatInfo = computeFloatNumbers(visible);
+    const floatNums = floatInfo.map;
+    const byLabel = floatInfo.byLabel;
+
+    let i = 0;
+    while (i < visible.length) {
+      const b = visible[i];
+      if (isA3ImageBlock(b)) {
+        let j = i;
+        while (j < visible.length && isA3ImageBlock(visible[j])) j++;
+        const run = visible.slice(i, j);
+        const group = document.createElement('div');
+        group.className = 'se-a3-run';
+        const head = document.createElement('div');
+        head.className = 'se-a3-run-head';
+        head.innerHTML =
+          '<span class="se-a3-run-title">A3 横置独占区</span>' +
+          '<span class="se-a3-run-meta">' + run.length + ' 页连续 · 每页 420×297 mm</span>';
+        group.appendChild(makeA3Break('before'));
+        group.appendChild(head);
+        run.forEach((ab, k) => {
+          if (k > 0) {
+            // 连续 A3 之间不插 A4 转换，仅保留可插入空隙
+            group.appendChild(gap(run[k - 1].id));
+          }
+          group.appendChild(renderBlock(ab, headingNums, floatNums, byLabel, {
+            index: k + 1,
+            total: run.length,
+            showCont: k > 0,
+          }));
+        });
+        group.appendChild(makeA3Break('after'));
+        root.appendChild(group);
+        root.appendChild(gap(run[run.length - 1].id));
+        i = j;
+        continue;
+      }
+      root.appendChild(renderBlock(b, headingNums, floatNums, byLabel));
+      root.appendChild(gap(b.id));
+      i += 1;
+    }
+    root.querySelectorAll('textarea').forEach(t => { autosize(t); t.addEventListener('input', () => autosize(t)); });
+    whenKatex(() => hydrateMath(root));
+    if (activeId) setActive(activeId);
+    else updateInsertHint();
+  }
+
+  async function persistBlocks(overrideBlocks) {
+    const payload = {
+      chapter, preamble, original,
+      blocks: overrideBlocks || collectFromDom(),
+      front: isFront,
+    };
+    const resp = await fetch(saveUrl, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json', 'X-CSRFToken': csrf},
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || '保存失败');
+    return data;
+  }
+
+  function fragToRichText(wrap) {
+    const ps = [...wrap.querySelectorAll(':scope > p')];
+    if (ps.length) return ps.map(p => htmlToRichText(p)).join('\n\n').trim();
+    return htmlToRichText(wrap).trim();
+  }
+
+  /** If caret is inside a text/minipage, return split before/after rich text. */
+  function peekTextSplitAtCaret() {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !sel.isCollapsed) return null;
+    const node = sel.anchorNode;
+    const el = node && (node.nodeType === 1 ? node : node.parentElement);
+    const prose = el && el.closest ? el.closest('[data-f=text].se-prose') : null;
+    if (!prose) return null;
+    const card = prose.closest('[data-block-id]');
+    if (!card) return null;
+    const id = card.getAttribute('data-block-id');
+    const bi = blocks.findIndex(b => b.id === id);
+    if (bi < 0) return null;
+    const b = blocks[bi];
+    if (b.type !== 'text' && b.type !== 'minipage') return null;
+
+    const range = sel.getRangeAt(0);
+    const pre = document.createRange();
+    pre.selectNodeContents(prose);
+    pre.setEnd(range.startContainer, range.startOffset);
+    const post = document.createRange();
+    post.selectNodeContents(prose);
+    post.setStart(range.startContainer, range.startOffset);
+    const beforeWrap = document.createElement('div');
+    beforeWrap.appendChild(pre.cloneContents());
+    const afterWrap = document.createElement('div');
+    afterWrap.appendChild(post.cloneContents());
+    const before = fragToRichText(beforeWrap);
+    const after = fragToRichText(afterWrap);
+    if (!before && !after) return null;
+    if (!after) return null; // caret at end → normal insert after block
+    return { index: bi, before, after, blockType: b.type, level: b.level || '' };
+  }
+
+  async function insertBlock(type, level) {
+    const sel = window.getSelection();
+    const focusEl = sel && sel.anchorNode
+      ? (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement)
+      : null;
+    const focusCard = focusEl && focusEl.closest ? focusEl.closest('[data-block-id]') : null;
+    if (focusCard) setActive(focusCard.getAttribute('data-block-id'));
+
+    // 公式：先记光标位置，弹窗确认后再决定行内嵌入或独立成块
+    if (type === 'formula') {
+      const caret = captureTextCaretContext();
+      const at = insertIndex();
+      collectFromDom();
+      // collectFromDom 可能打乱选区；caret 已按确认前 DOM 取好
+      openFormulaModal({
+        kind: 'insert',
+        isNew: true,
+        allowModeSwitch: true,
+        caret: caret,
+        at: at,
+        body: '',
+        mode: caret ? 'inline' : 'display',
+      });
+      return;
+    }
+
+    const canSplit = ['table', 'image', 'pagebreak', 'minipage', 'heading', 'text']
+      .includes(type);
+    const splitInfo = canSplit ? peekTextSplitAtCaret() : null;
+
+    collectFromDom();
+
+    let at = insertIndex();
+    let afterHalf = null;
+    if (splitInfo) {
+      // collectFromDom 会读回未拆分的 DOM，需覆盖为光标前半段
+      blocks[splitInfo.index].text = splitInfo.before;
+      at = splitInfo.index + 1;
+      afterHalf = {
+        id: uid(), type: splitInfo.blockType, level: splitInfo.level,
+        ...emptyBlockFields(), text: splitInfo.after,
+      };
+      activeId = blocks[splitInfo.index].id;
+      insertPos = 'after';
+    }
+
+    if (type === 'table') {
+      if (!tableEditUrl) {
+        statusEl.textContent = '模板编辑暂不支持独立表格页：请在正文中调整含表格的章节结构后点「保存模板」';
+        statusEl.className = 'err';
+        return;
+      }
+      if (afterHalf) blocks.splice(at, 0, afterHalf);
+      const q = new URLSearchParams({
+        chapter: chapter,
+        block: uid(),
+        new: '1',
+        after: splitInfo ? blocks[splitInfo.index].id : (at > 0 ? blocks[at - 1].id : ''),
+        pos: (splitInfo || at > 0) ? 'after' : 'start',
+      });
+      statusEl.textContent = '保存当前位置…';
+      statusEl.className = '';
+      try {
+        await persistBlocks(blocks);
+      } catch (err) {
+        statusEl.textContent = '请先保存成功再插入：' + err;
+        statusEl.className = 'err';
+        return;
+      }
+      location.href = tableEditUrl + '?' + q.toString();
+      return;
+    }
+
+    const make = (extra) => ({ id: uid(), ...emptyBlockFields(), ...extra });
+    let b = null;
+    if (type === 'pagebreak') {
+      b = make({ type: 'pagebreak', level: 'clearpage', latex: '\\clearpage' });
+    } else if (type === 'minipage') {
+      b = make({ type: 'minipage', level: '0.45\\textwidth' });
+    } else if (type === 'image') {
+      b = make({ type: 'image', level: '0.85\\linewidth' });
+    } else {
+      if (type === 'list') type = 'text';
+      b = make({
+        type,
+        level: level || (type === 'heading' ? 'section' : ''),
+        title: type === 'heading' ? '新标题' : '',
+        text: type === 'text' ? '' : '',
+        items: [],
+      });
+    }
+    blocks.splice(at, 0, b);
+    if (afterHalf) blocks.splice(at + 1, 0, afterHalf);
+    activeId = b.id;
+    renderAll();
+    if (type !== 'pagebreak') {
+      focusNewBlock(b.id);
+    }
+  }
+
+  document.getElementById('se-insert-pos').addEventListener('click', () => {
+    insertPos = insertPos === 'after' ? 'before' : 'after';
+    updateInsertHint();
+  });
+
+  document.getElementById('se-zihao')?.addEventListener('change', function () {
+    if (this.value) applyZihao(this.value);
+    this.value = '';
+  });
+
+  const xrefMask = document.getElementById('xref-modal-mask');
+  const xrefList = document.getElementById('xref-list');
+  function ensureFloatLabel(b) {
+    if ((b.label || '').trim()) return b.label.trim();
+    const prefix = b.type === 'table' ? 'tab' : 'fig';
+    const auto = prefix + ':' + String(b.id || uid()).replace(/[^a-zA-Z0-9_-]/g, '');
+    b.label = auto;
+    return auto;
+  }
+  function openXrefModal() {
+    collectFromDom();
+    const floats = blocks.filter(b =>
+      (b.type === 'table' || b.type === 'image' || b.type === 'flowchart') &&
+      ((b.caption || '').trim() || (b.label || '').trim() || b.path)
+    );
+    xrefList.innerHTML = '';
+    if (!floats.length) {
+      xrefList.innerHTML = '<p style="font-size:0.85rem;color:#94a3b8">本章暂无表格/图片，请先插入。</p>';
+    } else {
+      const floatInfo = computeFloatNumbers(blocks);
+      floats.forEach(b => {
+        const kind = b.type === 'table' ? '表' : '图';
+        const lab = ensureFloatLabel(b);
+        const disp = floatInfo.map[b.id] || kind;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.style.cssText = 'text-align:left;padding:0.5rem 0.65rem;border:1px solid #cbd5e1;border-radius:0.4rem;background:#fff;cursor:pointer;font-size:0.85rem';
+        btn.innerHTML = '<strong>' + escapeHtml(disp) + '</strong> ' +
+          escapeHtml(b.caption || '(无题)');
+        btn.addEventListener('click', () => {
+          const snippet = (kind === '表' ? '§tabref{' : '§figref{') + lab + '}§';
+          insertXrefAtCaret(snippet);
+          xrefMask.classList.remove('open');
+          xrefMask.setAttribute('aria-hidden', 'true');
+          statusEl.textContent = '已插入引用（记得保存）';
+          statusEl.className = 'ok';
+        });
+        xrefList.appendChild(btn);
+      });
+    }
+    xrefMask.classList.add('open');
+    xrefMask.setAttribute('aria-hidden', 'false');
+  }
+  function insertXrefAtCaret(snippet) {
+    // Insert marker then re-render so it becomes a blue “表 2.2-1” chip.
+    collectFromDom();
+    let target = blocks.find(b => b.id === activeId && (b.type === 'text' || b.type === 'minipage'));
+    if (target) {
+      target.text = (target.text || '') + snippet;
+    } else {
+      const b = { id: uid(), ...emptyBlockFields(), type: 'text', text: snippet };
+      const at = insertIndex();
+      blocks.splice(at, 0, b);
+      activeId = b.id;
+    }
+    renderAll();
+  }
+  document.getElementById('se-xref')?.addEventListener('click', openXrefModal);
+  document.getElementById('xref-cancel')?.addEventListener('click', () => {
+    xrefMask.classList.remove('open');
+    xrefMask.setAttribute('aria-hidden', 'true');
+  });
+  xrefMask?.addEventListener('click', (e) => {
+    if (e.target === xrefMask) {
+      xrefMask.classList.remove('open');
+      xrefMask.setAttribute('aria-hidden', 'true');
+    }
+  });
+
+  document.querySelector('.se-toolbar').addEventListener('click', (e) => {
+    const fmt = e.target.closest('[data-fmt]');
+    if (fmt) {
+      e.preventDefault();
+      applyFormat(fmt.getAttribute('data-fmt'));
+      return;
+    }
+    const btn = e.target.closest('[data-add]');
+    if (!btn) return;
+    insertBlock(btn.getAttribute('data-add'), btn.getAttribute('data-level') || '');
+  });
+
+  root.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.se-gap')) return;
+    const card = e.target.closest('[data-block-id]');
+    if (card) setActive(card.getAttribute('data-block-id'));
+  });
+
+  root.addEventListener('change', (e) => {
+    const a3 = e.target.closest('[data-f=a3page]');
+    if (!a3) return;
+    const card = a3.closest('[data-block-id]');
+    if (!card) return;
+    if (a3.checked) card.setAttribute('data-page', 'a3landscape');
+    else card.removeAttribute('data-page');
+    const id = card.getAttribute('data-block-id');
+    const b = blocks.find(x => x.id === id);
+    if (b) b.page = a3.checked ? 'a3landscape' : '';
+    collectFromDom();
+    renderAll();
+    setActive(id);
+  });
+
+  root.addEventListener('input', (e) => {
+    const wEl = e.target.closest('[data-f=width]');
+    if (!wEl) return;
+    const wrap = wEl.closest('.se-img-wrap');
+    if (!wrap) return;
+    const img = wrap.querySelector('img.se-img-preview');
+    const hint = wrap.querySelector('.se-img-width-hint');
+    const css = latexImgWidthToCss(wEl.value);
+    if (img) {
+      img.style.width = css;
+      img.style.maxWidth = '100%';
+      img.style.height = 'auto';
+    }
+    if (hint) {
+      hint.textContent = '预览宽度按 LaTeX：width=' + latexImgWidthLabel(wEl.value) + ' → ' + css;
+    }
+  });
+
+  root.addEventListener('dblclick', (e) => {
+    const flowWrap = e.target.closest('[data-flowchart-block], .se-flow, .se-flow-rich');
+    if (!flowWrap) return;
+    e.preventDefault();
+    const card = flowWrap.closest('[data-block-id]');
+    if (!card || card.getAttribute('data-block-type') !== 'flowchart') return;
+    if (!flowchartEditUrl) return;
+    const id = card.getAttribute('data-block-id');
+    location.href = flowchartEditUrl + '?chapter=' + encodeURIComponent(chapter) +
+      '&block=' + encodeURIComponent(id);
+  });
+
+  root.addEventListener('paste', (e) => {
+    const prose = e.target && e.target.closest ? e.target.closest('[data-f=text].se-prose') : null;
+    if (!prose) return;
+    const plain = (e.clipboardData || window.clipboardData).getData('text/plain');
+    if (plain == null || plain === '') return;
+    e.preventDefault();
+    // 纯文本粘贴：空行分段，单行换行保留为软换行（（1）行会在保存时自动分段）
+    const html = plain.replace(/\r\n/g, '\n').split(/\n\n+/).map(para => {
+      const inner = escapeHtml(para).replace(/\n/g, '<br>');
+      return '<p>' + (inner || '<br>') + '</p>';
+    }).join('');
+    document.execCommand('insertHTML', false, html);
+  });
+
+  root.addEventListener('click', async (e) => {
+    const math = e.target.closest('.se-math');
+    if (math) {
+      e.preventDefault();
+      e.stopPropagation();
+      const card = math.closest('[data-block-id]');
+      if (!card) return;
+      collectFromDom();
+      // Table cell math: edit only inside the table editor
+      if (card.getAttribute('data-block-type') === 'table' || math.closest('.se-preview-table, .se-table-wrap')) {
+        if (!tableEditUrl) return;
+        const id = card.getAttribute('data-block-id');
+        location.href = tableEditUrl + '?chapter=' + encodeURIComponent(chapter) +
+          '&block=' + encodeURIComponent(id);
+        return;
+      }
+      openFormulaModal({
+        kind: 'inline',
+        parentId: card.getAttribute('data-block-id'),
+        idx: math.getAttribute('data-idx') || '0',
+        body: math.getAttribute('data-latex') || '',
+        mode: 'inline',
+        allowModeSwitch: true,
+      });
+      return;
+    }
+    const preview = e.target.closest('.se-formula-preview');
+    if (preview) {
+      e.preventDefault();
+      const card = preview.closest('[data-block-id]');
+      if (!card) return;
+      collectFromDom();
+      const id = card.getAttribute('data-block-id');
+      const b = blocks.find(x => x.id === id);
+      if (b && b.type === 'formula') {
+        openFormulaModal({
+          kind: 'block', blockId: id, isNew: false,
+          body: b.text || '', mode: b.level || 'display',
+        });
+      }
+      return;
+    }
+    const btn = e.target.closest('[data-act]');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const act = btn.getAttribute('data-act');
+    const card = btn.closest('[data-block-id]');
+    if (!card) return;
+    const id = card.getAttribute('data-block-id');
+    collectFromDom();
+    const idx = blocks.findIndex(b => b.id === id);
+    if (idx < 0) return;
+    if (act === 'del') {
+      blocks.splice(idx, 1);
+      activeId = blocks[Math.min(idx, blocks.length - 1)]?.id || null;
+      renderAll();
+    } else if (act === 'up' && idx > 0) {
+      const t = blocks[idx-1]; blocks[idx-1]=blocks[idx]; blocks[idx]=t;
+      activeId = id;
+      renderAll();
+    } else if (act === 'down' && idx < blocks.length-1) {
+      const t = blocks[idx+1]; blocks[idx+1]=blocks[idx]; blocks[idx]=t;
+      activeId = id;
+      renderAll();
+    } else if (act === 'upload') {
+      const fileInput = card.querySelector('[data-f=file]');
+      if (!fileInput.files?.[0]) { alert('请先选择图片'); return; }
+      const fd = new FormData(); fd.append('file', fileInput.files[0]);
+      const resp = await fetch(uploadUrl, { method:'POST', headers:{'X-CSRFToken': csrf}, body: fd });
+      const data = await resp.json();
+      if (!data.ok) { statusEl.textContent = data.error||'上传失败'; statusEl.className='err'; return; }
+      blocks[idx].path = data.path; statusEl.textContent = '已上传'; statusEl.className='ok'; renderAll();
+    }
+  });
+
+  async function saveChapter() {
+    const payload = { chapter, preamble, original, blocks: collectFromDom(), front: isFront };
+    statusEl.textContent = '保存中…'; statusEl.className = '';
+    const resp = await fetch(saveUrl, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json', 'X-CSRFToken': csrf},
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+    if (typeof data.content === 'string' && data.content) {
+      original = data.content;
+    }
+    statusEl.textContent = (data.message || (app.dataset.templateMode === '1' ? '已保存模板' : '已保存'));
+    statusEl.className = 'ok';
+    return data;
+  }
+
+  document.getElementById('se-save').addEventListener('click', async () => {
+    try {
+      await saveChapter();
+    } catch (err) {
+      statusEl.textContent = '失败：' + err; statusEl.className = 'err';
+    }
+  });
+
+  // Ctrl+S / Cmd+S 保存（阻止浏览器另存为）
+  document.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.key !== 's' && e.key !== 'S') return;
+    e.preventDefault();
+    document.getElementById('se-save')?.click();
+  });
+
+  document.getElementById('se-next-attachments')?.addEventListener('click', async () => {
+    try {
+      statusEl.textContent = '导出前先保存…'; statusEl.className = '';
+      await saveChapter();
+      statusEl.textContent = '正在生成 PDF…'; statusEl.className = 'ok';
+      location.href = app.dataset.nextUrl;
+    } catch (err) {
+      statusEl.textContent = '无法导出：' + err; statusEl.className = 'err';
+    }
+  });
+
+  renderAll();
+  document.getElementById('se-pdf-dismiss')?.addEventListener('click', () => {
+    document.getElementById('se-pdf-banner')?.remove();
+    if (history.replaceState) {
+      const u = new URL(location.href);
+      u.searchParams.delete('pdf');
+      history.replaceState({}, '', u.pathname + u.search + u.hash);
+    }
+  });
+})();
+</script>
+{% endblock %}

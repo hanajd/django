@@ -1,0 +1,14 @@
+\documentclass[a4paper]{article}
+\usepackage[fontset=windows]{ctex}
+\usepackage{array}
+\makeatletter
+\newcommand{\erpTabInput}[1]{\@@input#1 }
+\makeatother
+\begin{document}
+\begin{tabular}{|c|c|c|}
+\hline
+工作岗位 & 定岗人数 & 具体职责 \\
+\hline
+\erpTabInput{files/staffDuties.tex}
+\end{tabular}
+\end{document}

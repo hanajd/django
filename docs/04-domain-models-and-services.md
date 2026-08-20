@@ -8,8 +8,9 @@
 
 | 模型 | 业务含义 |
 |------|----------|
-| `Role` | 角色及默认权限位（11 项 `perm_*`） |
+| `Role` | 角色及默认权限位（含文件库、管线、HTMLPDF、台账、`perm_f1_eval`、`perm_evaluation_report` 等） |
 | `UserProfile` | 用户扩展：角色、`perm_overrides` 个性化、文件库配额 |
+| `UserInviteToken` | 邀请注册/入职用令牌 |
 | `Menu` | 动态菜单树，M2M `roles` |
 
 ### 1.2 文件库体系
@@ -47,6 +48,7 @@
 | `InspectionSubmissionInstrument` | 提交与仪器快照 |
 | `LibraryProjectWorkflowMember` | 项目流程五岗成员 |
 | `InspectionCaseWorkflowState` | 案件流程状态（SITE_FILL → … → ISSUED） |
+| `CaseReportSignatureRecord` | 报告编制/审核/授权签字叠印留痕（可按导出版本分槽） |
 
 ### 1.5 仪器台账
 
@@ -55,7 +57,31 @@
 | `InstrumentCatalog` | 仪器主数据；`code` 全局唯一；`checkout_project_ids` |
 | `InstrumentCheckoutLog` | 出库/入库审计流水 |
 
-### 1.6 关系示意
+### 1.6 签名、操作日志与销售产品
+
+| 模型 | 业务含义 |
+|------|----------|
+| `UserSignature` / `UserSignatureEvent` | 用户签名图与变更事件（账号页 `/account/signatures/`） |
+| `BizOperationLog` | 业务操作审计日志 |
+| `SalesProductCategory` / `SalesProductLine` / `SalesProduct` | 销售产品目录（分类 / 产品线 / 产品） |
+| `LibraryProjectProduct` / `LibraryProjectProductEquipment` | 项目挂载销售产品及关联设备 |
+
+产品管理页：`/files/hospital-info/products/`。详见 [医院信息-产品管理说明.md](医院信息-产品管理说明.md)。
+
+### 1.7 评价报告书（`apps/evaluation_report/models.py`）
+
+| 模型 | 业务含义 |
+|------|----------|
+| `EvaluationLatexTemplate` | 内置/上传 LaTeX 模板 |
+| `EvaluationReport` | 评价报告书实例与工作区、输出 PDF |
+| `EvaluationKeywordSchema` / `EvaluationReportKeyword` | 通用映射与项目关键词 |
+| `EvaluationReportUpload` / `EvaluationReportUploadFile` | 材料槽位与附件文件；后者含 `page_mode` / `rotate` / `width_percent` |
+
+详见 [评价报告书-LaTeX功能说明.md](评价报告书-LaTeX功能说明.md)。
+
+> **F.1 评价报告表**：主站数据以 `media/f1_eval/` 工作区文件为主，**不在** `models.py` 建完整 ORM；见 [评价报告表-F1功能说明.md](评价报告表-F1功能说明.md)。
+
+### 1.8 关系示意
 
 ```
 LibraryProject ──M2M── LibraryTask
@@ -115,16 +141,36 @@ InspectionCase → InspectionSubmission / SiteRecord / Report
 | `instrument_inventory_service.py` | 仪器出库/入库、派工自动分配 |
 | `workflow_service.py` | 案件流程环节顺序、退回上一环节 |
 | `pipeline_service.py` | 文档管线入口与配置 |
+| `workflow_hub_service.py` | 报告流程枢纽（现场→生成→审核→下载）页数据 |
 | `db_backup_service.py` | SQLite 在线备份/恢复 |
 
-### 3.5 演示与测试
+### 3.5 评价报告书（`apps/evaluation_report/`）
+
+| 文件 | 职责 |
+|------|------|
+| `services.py` | 基础报告生成、PDF 编译与工作区 |
+| `keywords_service.py` | 关键词 schema、file-backed、DB↔磁盘 |
+| `appendix_service.py` / `upload_staging.py` | 附录注入与附件暂存 |
+| `structured_blocks.py` 等 | 章节解析与个性化 `§kw` 标记 |
+
+详见 [评价报告书-LaTeX功能说明.md](评价报告书-LaTeX功能说明.md)。
+
+### 3.6 F.1 评价报告表（`apps/core/`）
+
+| 文件 | 职责 |
+|------|------|
+| `f1_eval_views.py` 等 `f1_eval_*.py` | 工作台、章节/表格/附件 API、生成与下载 |
+
+详见 [评价报告表-F1功能说明.md](评价报告表-F1功能说明.md)。
+
+### 3.7 演示与测试
 
 | 文件 | 职责 |
 |------|------|
 | `library_test_account.py` | 演示/测试账号辅助 |
 | `usage_workflow_tour.py` | 使用说明「流程练习」数据生命周期 |
 
-### 3.6 API 侧服务（`apps/api/`）
+### 3.8 API 侧服务（`apps/api/`）
 
 | 文件 | 职责 |
 |------|------|
@@ -136,5 +182,5 @@ InspectionCase → InspectionSubmission / SiteRecord / Report
 
 ## 4. 迁移
 
-- 路径：`apps/core/migrations/`  
-- 改模型后务必生成迁移并在多环境执行；SQLite 与 PostgreSQL 行为差异在大表/并发写入时需额外验证。
+- `apps/core/migrations/`、`apps/evaluation_report/migrations/`  
+- 改模型后生成迁移并在多环境执行；SQLite 与 PostgreSQL 在大表/并发写入时需额外验证。

@@ -1,0 +1,495 @@
+{% extends "base.html" %}
+{% block title %}附件管理 | {{ report.title }}{% endblock %}
+
+{% block content %}
+<style>
+.attachment-grid { display: flex; flex-wrap: wrap; gap: .75rem; }
+.attachment-grid.sortable .attachment-card { cursor: grab; }
+.attachment-grid .sortable-ghost { opacity: .4; }
+.attachment-card {
+    width: 14.5rem; flex: 0 0 14.5rem; overflow: hidden;
+    border: 1px solid #e2e8f0; border-radius: .5rem; background: #fff;
+}
+.attachment-card.is-local { border-style: dashed; border-color: #c7d2fe; background: #f8fafc; }
+.attachment-preview {
+    position: relative; display: flex; aspect-ratio: 4/3;
+    align-items: center; justify-content: center; overflow: hidden; background: #f8fafc;
+}
+.attachment-preview img {
+    width: 100%; height: 100%; object-fit: contain; background: #fff;
+    transition: transform .2s ease;
+}
+.attachment-preview i { font-size: 2rem; color: #94a3b8; }
+.attachment-index {
+    position: absolute; top: .25rem; left: .25rem; z-index: 1;
+    min-width: 1.25rem; height: 1.25rem; border-radius: .25rem;
+    background: rgb(15 23 42 / .75); color: #fff; font-size: .65rem;
+    line-height: 1.25rem; text-align: center;
+}
+.attachment-meta { border-top: 1px solid #f1f5f9; padding: .45rem .5rem .55rem; }
+.attachment-name {
+    display: block; overflow: hidden; color: #475569; font-size: .65rem;
+    line-height: 1.3; text-overflow: ellipsis; white-space: nowrap;
+}
+.attachment-actions { display: flex; gap: .25rem; margin-top: .35rem; }
+.attachment-actions a, .attachment-actions button {
+    flex: 1; border: 1px solid #e2e8f0; border-radius: .25rem;
+    background: #fff; padding: .2rem; color: #475569; font-size: .65rem; text-align: center;
+}
+.attachment-actions button { border-color: #fecaca; color: #dc2626; }
+.attachment-display {
+    display: grid; gap: .3rem; margin-top: .45rem;
+    padding-top: .4rem; border-top: 1px dashed #e2e8f0;
+}
+.attachment-display label {
+    display: flex; align-items: center; justify-content: space-between; gap: .35rem;
+    color: #64748b; font-size: .62rem;
+}
+.attachment-display select, .attachment-display input[type="range"] {
+    width: 7.2rem; max-width: 58%; font-size: .62rem;
+}
+.attachment-display select {
+    border: 1px solid #e2e8f0; border-radius: .25rem; background: #fff;
+    padding: .1rem .2rem; color: #334155;
+}
+.attachment-display .size-value { min-width: 2.2rem; text-align: right; color: #475569; }
+.attachment-display.disabled { opacity: .45; pointer-events: none; }
+.local-pick-panel { display: none; }
+.local-pick-panel.is-open { display: block; }
+</style>
+
+<div class="mx-auto max-w-6xl space-y-5">
+    <header class="flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+            <a href="{% url 'evaluation_report_structured_edit' report.pk %}" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; 返回正文编辑</a>
+            <h1 class="mt-2 text-2xl font-semibold text-slate-900">附件上传与微调</h1>
+            <p class="mt-1 text-sm text-slate-600">{{ report.title }} · 已确认 {{ progress.done }}/{{ progress.total }} 个材料栏目</p>
+        </div>
+        <span class="inline-flex self-start rounded-md bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-800">流程 4 / 6</span>
+    </header>
+
+    <nav class="flex flex-wrap items-center gap-2 text-sm" aria-label="报告制作流程">
+        <a href="{% url 'evaluation_report_evaluation_form' report.pk %}" class="rounded-md bg-emerald-50 px-3 py-2 text-emerald-900">1. 评价信息表</a>
+        <span class="text-slate-300">&rarr;</span>
+        <a href="{% url 'evaluation_report_upload_preview' report.pk 'evaluation_form' %}?view=markdown" class="rounded-md bg-emerald-50 px-3 py-2 text-emerald-900">2. 基础报告</a>
+        <span class="text-slate-300">&rarr;</span>
+        <a href="{% url 'evaluation_report_structured_edit' report.pk %}" class="rounded-md bg-emerald-50 px-3 py-2 text-emerald-900">3. 正文编辑</a>
+        <span class="text-slate-300">&rarr;</span>
+        <span class="rounded-md bg-indigo-600 px-3 py-2 font-medium text-white">4. 附件管理</span>
+        <span class="text-slate-300">&rarr;</span>
+        <span class="rounded-md bg-slate-100 px-3 py-2 text-slate-500">5. 生成 PDF</span>
+    </nav>
+
+    <div class="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+        选择文件后会立刻在本栏目显示预览。加入待上传后可调整顺序、旋转、宽度与 A3 横置；确认上传后这些设置会写入附录。
+    </div>
+
+    <section class="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        <ul class="divide-y divide-slate-100">
+            {% for row in attachment_rows %}
+            <li id="slot-{{ row.slot.slot_key }}" class="scroll-mt-4 px-5 py-5">
+                <div class="space-y-4">
+                    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div class="min-w-0">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <span class="inline-flex h-6 w-6 items-center justify-center rounded-full {% if row.uploaded %}bg-emerald-100 text-emerald-700{% else %}bg-slate-100 text-slate-400{% endif %}">
+                                    <i class="{% if row.uploaded %}ri-check-line{% else %}ri-subtract-line{% endif %}"></i>
+                                </span>
+                                <h2 class="font-medium text-slate-900">{{ row.slot.label }}</h2>
+                                {% if row.slot.required %}<span class="text-xs text-red-600">必填</span>{% endif %}
+                                {% if row.staging_count %}<span class="text-xs text-indigo-600">待上传 {{ row.staging_count }} 个</span>{% endif %}
+                                {% if row.files %}<span class="text-xs text-slate-500">已上传 {{ row.files|length }} 个</span>{% endif %}
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <form method="post" enctype="multipart/form-data"
+                                  action="{% url 'evaluation_report_upload_stage' report.pk row.slot.slot_key %}"
+                                  class="attachment-stage-form inline-flex items-center gap-2"
+                                  data-slot-key="{{ row.slot.slot_key }}">
+                                {% csrf_token %}
+                                <input type="file" name="file" multiple
+                                       accept="image/*,.pdf,.png,.jpg,.jpeg,.gif,.webp,.bmp,.tif,.tiff"
+                                       class="attachment-file-input hidden">
+                                <button type="button" class="attachment-pick rounded-md border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50">
+                                    <i class="ri-add-line"></i> 选择文件
+                                </button>
+                                <button type="submit" class="attachment-stage-submit rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-indigo-200" disabled>加入待上传</button>
+                            </form>
+                            {% if row.staging_count %}
+                            <form method="post" action="{% url 'evaluation_report_upload_staging_commit' report.pk row.slot.slot_key %}">
+                                {% csrf_token %}
+                                <button type="submit" class="rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-800">确认上传 ({{ row.staging_count }})</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="local-pick-panel rounded-lg border border-dashed border-violet-200 bg-violet-50/40 p-3"
+                         data-local-panel="{{ row.slot.slot_key }}">
+                        <div class="mb-2 flex items-center justify-between gap-2">
+                            <p class="text-xs font-medium text-violet-900">
+                                已选择 <span class="local-pick-count">0</span> 个文件（尚未加入待上传，可先核对）
+                            </p>
+                            <button type="button" class="local-pick-clear text-xs text-violet-700 hover:underline">清空选择</button>
+                        </div>
+                        <div class="attachment-grid local-pick-grid"></div>
+                    </div>
+
+                    {% if row.staging_files %}
+                    <div class="rounded-lg border border-dashed border-indigo-200 bg-indigo-50/50 p-3">
+                        <p class="mb-2 text-xs font-medium text-indigo-900">待上传文件：可拖动排序，图片可调旋转 / 宽度 / A3 横置</p>
+                        <div class="attachment-grid{% if row.staging_files|length > 1 %} sortable{% endif %}"
+                             {% if row.staging_files|length > 1 %}data-reorder-url="{% url 'evaluation_report_upload_staging_reorder' report.pk row.slot.slot_key %}"{% endif %}>
+                            {% for f in row.staging_files %}
+                            <div class="attachment-card" data-file-id="{{ f.id }}"
+                                 data-page-mode="{{ f.page_mode }}"
+                                 data-rotate="{{ f.rotate }}"
+                                 data-width-percent="{{ f.width_percent }}">
+                                <div class="attachment-preview">
+                                    <span class="attachment-index">{{ forloop.counter }}</span>
+                                    {% if f.preview_kind == 'image' %}<img src="{{ f.media_url }}" alt="{{ f.filename }}" loading="lazy" style="transform: rotate({{ f.rotate }}deg);">
+                                    {% elif f.preview_kind == 'pdf' %}<i class="ri-file-pdf-2-line text-red-500"></i>
+                                    {% else %}<i class="ri-file-line"></i>{% endif %}
+                                </div>
+                                <div class="attachment-meta">
+                                    <span class="attachment-name" title="{{ f.filename }}">{{ f.filename }}</span>
+                                    {% if f.preview_kind == 'image' %}
+                                    <div class="attachment-display"
+                                         data-display-url="{% url 'evaluation_report_upload_staging_display' report.pk row.slot.slot_key %}"
+                                         data-file-id="{{ f.id }}">
+                                        <label>旋转
+                                            <select name="rotate" data-field="rotate">
+                                                <option value="0" {% if f.rotate == 0 %}selected{% endif %}>0°</option>
+                                                <option value="90" {% if f.rotate == 90 %}selected{% endif %}>90°</option>
+                                                <option value="180" {% if f.rotate == 180 %}selected{% endif %}>180°</option>
+                                                <option value="270" {% if f.rotate == 270 %}selected{% endif %}>270°</option>
+                                            </select>
+                                        </label>
+                                        <label>纸张
+                                            <select name="page_mode" data-field="page_mode">
+                                                <option value="" {% if not f.page_mode %}selected{% endif %}>A4 随文</option>
+                                                <option value="a3landscape" {% if f.page_mode == 'a3landscape' %}selected{% endif %}>A3 横置</option>
+                                            </select>
+                                        </label>
+                                        <label class="{% if f.page_mode == 'a3landscape' %}opacity-40{% endif %}">宽度
+                                            <span style="display:inline-flex;align-items:center;gap:.25rem;">
+                                                <input type="range" min="30" max="100" step="5" value="{{ f.width_percent }}" data-field="width_percent" {% if f.page_mode == 'a3landscape' %}disabled{% endif %}>
+                                                <span class="size-value">{{ f.width_percent }}%</span>
+                                            </span>
+                                        </label>
+                                    </div>
+                                    {% endif %}
+                                    <div class="attachment-actions">
+                                        <form method="post" action="{% url 'evaluation_report_upload_staging_delete' report.pk row.slot.slot_key %}" onsubmit="return confirm('确定移除这个待上传文件吗？');">
+                                            {% csrf_token %}<input type="hidden" name="file_id" value="{{ f.id }}"><button type="submit">移除</button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    {% if row.files %}
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <p class="mb-2 text-xs font-medium text-slate-700">已上传文件：可拖动排序；图片可调旋转 / 宽度 / A3 横置（立即同步附录）</p>
+                        <div class="attachment-grid{% if row.files|length > 1 %} sortable{% endif %}"
+                             {% if row.files|length > 1 %}data-reorder-url="{% url 'evaluation_report_upload_file_reorder' report.pk row.slot.slot_key %}"{% endif %}>
+                            {% for f in row.files %}
+                            <div class="attachment-card" data-file-id="{{ f.id }}"
+                                 data-page-mode="{{ f.page_mode }}"
+                                 data-rotate="{{ f.rotate }}"
+                                 data-width-percent="{{ f.width_percent }}">
+                                <a href="{% url 'evaluation_report_upload_preview' report.pk row.slot.slot_key %}?file_id={{ f.id }}" class="attachment-preview" title="预览 {{ f.filename }}">
+                                    <span class="attachment-index">{{ forloop.counter }}</span>
+                                    {% if f.preview_kind == 'image' %}<img src="{{ f.media_url }}" alt="{{ f.filename }}" loading="lazy" style="transform: rotate({{ f.rotate }}deg);">
+                                    {% elif f.preview_kind == 'pdf' %}<i class="ri-file-pdf-2-line text-red-500"></i>
+                                    {% else %}<i class="ri-file-line"></i>{% endif %}
+                                </a>
+                                <div class="attachment-meta">
+                                    <span class="attachment-name" title="{{ f.filename }}">{{ f.filename }}</span>
+                                    {% if f.preview_kind == 'image' %}
+                                    <div class="attachment-display"
+                                         data-display-url="{% url 'evaluation_report_upload_file_display' report.pk row.slot.slot_key f.id %}"
+                                         data-file-id="{{ f.id }}">
+                                        <label>旋转
+                                            <select name="rotate" data-field="rotate">
+                                                <option value="0" {% if f.rotate == 0 %}selected{% endif %}>0°</option>
+                                                <option value="90" {% if f.rotate == 90 %}selected{% endif %}>90°</option>
+                                                <option value="180" {% if f.rotate == 180 %}selected{% endif %}>180°</option>
+                                                <option value="270" {% if f.rotate == 270 %}selected{% endif %}>270°</option>
+                                            </select>
+                                        </label>
+                                        <label>纸张
+                                            <select name="page_mode" data-field="page_mode">
+                                                <option value="" {% if not f.page_mode %}selected{% endif %}>A4 随文</option>
+                                                <option value="a3landscape" {% if f.page_mode == 'a3landscape' %}selected{% endif %}>A3 横置</option>
+                                            </select>
+                                        </label>
+                                        <label class="{% if f.page_mode == 'a3landscape' %}opacity-40{% endif %}">宽度
+                                            <span style="display:inline-flex;align-items:center;gap:.25rem;">
+                                                <input type="range" min="30" max="100" step="5" value="{{ f.width_percent }}" data-field="width_percent" {% if f.page_mode == 'a3landscape' %}disabled{% endif %}>
+                                                <span class="size-value">{{ f.width_percent }}%</span>
+                                            </span>
+                                        </label>
+                                    </div>
+                                    {% endif %}
+                                    <div class="attachment-actions">
+                                        <a href="{% url 'evaluation_report_upload_preview' report.pk row.slot.slot_key %}?file_id={{ f.id }}">预览</a>
+                                        <form method="post" action="{% url 'evaluation_report_upload_file_delete' report.pk row.slot.slot_key f.id %}" onsubmit="return confirm('确定删除这个已上传文件吗？');">
+                                            {% csrf_token %}<button type="submit">删除</button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% elif not row.staging_files %}
+                    <p class="pl-8 text-xs text-slate-400 empty-slot-hint">该栏目尚未上传附件</p>
+                    {% endif %}
+                </div>
+            </li>
+            {% empty %}
+            <li class="px-5 py-8 text-center text-sm text-slate-500">当前报告模板没有附件栏目。</li>
+            {% endfor %}
+        </ul>
+    </section>
+
+    <div class="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <p class="text-sm text-slate-500">附件微调完成后，返回报告详情确认生成 PDF。</p>
+        <a href="{% url 'evaluation_report_detail' report.pk %}#build-pdf"
+           class="inline-flex items-center justify-center gap-2 rounded-md bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700">
+            下一步：确认生成 PDF <i class="ri-arrow-right-line"></i>
+        </a>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script>
+(function () {
+    function getCookie(name) {
+        var match = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
+        return match ? decodeURIComponent(match[1]) : '';
+    }
+    var csrfToken = getCookie('csrftoken');
+
+    function isImageFile(file) {
+        if (!file) return false;
+        if (file.type && file.type.indexOf('image/') === 0) return true;
+        return /\.(png|jpe?g|gif|webp|bmp|tif|tiff)$/i.test(file.name || '');
+    }
+
+    function isPdfFile(file) {
+        if (!file) return false;
+        if (file.type === 'application/pdf') return true;
+        return /\.pdf$/i.test(file.name || '');
+    }
+
+    function revokeUrls(urls) {
+        (urls || []).forEach(function (u) {
+            try { URL.revokeObjectURL(u); } catch (e) {}
+        });
+    }
+
+    function renderLocalPicks(form) {
+        var slotKey = form.getAttribute('data-slot-key');
+        var input = form.querySelector('.attachment-file-input');
+        var submit = form.querySelector('.attachment-stage-submit');
+        var panel = document.querySelector('[data-local-panel="' + slotKey + '"]');
+        if (!panel) return;
+        var grid = panel.querySelector('.local-pick-grid');
+        var countEl = panel.querySelector('.local-pick-count');
+        var hint = form.closest('li').querySelector('.empty-slot-hint');
+
+        revokeUrls(form._localUrls);
+        form._localUrls = [];
+        grid.innerHTML = '';
+
+        var files = input.files ? Array.from(input.files) : [];
+        submit.disabled = !files.length;
+        if (!files.length) {
+            panel.classList.remove('is-open');
+            countEl.textContent = '0';
+            return;
+        }
+
+        panel.classList.add('is-open');
+        countEl.textContent = String(files.length);
+        if (hint) hint.style.display = 'none';
+
+        files.forEach(function (file, index) {
+            var card = document.createElement('div');
+            card.className = 'attachment-card is-local';
+            var preview = document.createElement('div');
+            preview.className = 'attachment-preview';
+            var badge = document.createElement('span');
+            badge.className = 'attachment-index';
+            badge.textContent = String(index + 1);
+            preview.appendChild(badge);
+
+            if (isImageFile(file)) {
+                var url = URL.createObjectURL(file);
+                form._localUrls.push(url);
+                var img = document.createElement('img');
+                img.src = url;
+                img.alt = file.name;
+                preview.appendChild(img);
+            } else if (isPdfFile(file)) {
+                var pdfIcon = document.createElement('i');
+                pdfIcon.className = 'ri-file-pdf-2-line text-red-500';
+                preview.appendChild(pdfIcon);
+            } else {
+                var fileIcon = document.createElement('i');
+                fileIcon.className = 'ri-file-line';
+                preview.appendChild(fileIcon);
+            }
+
+            var meta = document.createElement('div');
+            meta.className = 'attachment-meta';
+            var name = document.createElement('span');
+            name.className = 'attachment-name';
+            name.title = file.name;
+            name.textContent = file.name;
+            var tip = document.createElement('p');
+            tip.style.cssText = 'margin:.35rem 0 0;color:#7c3aed;font-size:.62rem;line-height:1.3;';
+            tip.textContent = '加入待上传后可调旋转 / 宽度 / A3';
+            meta.appendChild(name);
+            meta.appendChild(tip);
+            card.appendChild(preview);
+            card.appendChild(meta);
+            grid.appendChild(card);
+        });
+    }
+
+    document.querySelectorAll('.attachment-stage-form').forEach(function (form) {
+        var input = form.querySelector('.attachment-file-input');
+        var pick = form.querySelector('.attachment-pick');
+        var slotKey = form.getAttribute('data-slot-key');
+        var panel = document.querySelector('[data-local-panel="' + slotKey + '"]');
+        form._localUrls = [];
+
+        pick.addEventListener('click', function () { input.click(); });
+        input.addEventListener('change', function () { renderLocalPicks(form); });
+
+        if (panel) {
+            var clearBtn = panel.querySelector('.local-pick-clear');
+            clearBtn.addEventListener('click', function () {
+                input.value = '';
+                renderLocalPicks(form);
+            });
+        }
+    });
+
+    function syncPreviewRotate(card) {
+        var img = card.querySelector('.attachment-preview img');
+        if (!img) return;
+        var rotate = card.getAttribute('data-rotate') || '0';
+        img.style.transform = 'rotate(' + rotate + 'deg)';
+    }
+
+    function syncWidthUi(panel) {
+        var pageMode = panel.querySelector('[data-field="page_mode"]');
+        var widthInput = panel.querySelector('[data-field="width_percent"]');
+        var widthLabel = widthInput ? widthInput.closest('label') : null;
+        var isA3 = pageMode && pageMode.value === 'a3landscape';
+        if (widthInput) {
+            widthInput.disabled = !!isA3;
+            if (widthLabel) widthLabel.classList.toggle('opacity-40', !!isA3);
+        }
+    }
+
+    function saveDisplay(panel) {
+        var url = panel.getAttribute('data-display-url');
+        if (!url) return;
+        var card = panel.closest('.attachment-card');
+        var fileId = panel.getAttribute('data-file-id') || '';
+        var pageMode = panel.querySelector('[data-field="page_mode"]');
+        var rotate = panel.querySelector('[data-field="rotate"]');
+        var width = panel.querySelector('[data-field="width_percent"]');
+        var body = new URLSearchParams();
+        if (fileId && url.indexOf('/files/') === -1) {
+            body.set('file_id', fileId);
+        }
+        body.set('page_mode', pageMode ? pageMode.value : '');
+        body.set('rotate', rotate ? rotate.value : '0');
+        body.set('width_percent', width ? width.value : '100');
+
+        if (card) {
+            card.setAttribute('data-page-mode', pageMode ? pageMode.value : '');
+            card.setAttribute('data-rotate', rotate ? rotate.value : '0');
+            card.setAttribute('data-width-percent', width ? width.value : '100');
+            syncPreviewRotate(card);
+        }
+        syncWidthUi(panel);
+
+        fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRFToken': csrfToken,
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: body.toString()
+        }).then(function (res) {
+            return res.json().then(function (data) {
+                if (!res.ok || !data.ok) {
+                    throw new Error((data && data.error) || '保存失败');
+                }
+            });
+        }).catch(function (err) {
+            alert(err.message || '保存显示设置失败，请刷新后重试。');
+        });
+    }
+
+    document.querySelectorAll('.attachment-display').forEach(function (panel) {
+        syncWidthUi(panel);
+        panel.querySelectorAll('[data-field]').forEach(function (el) {
+            var eventName = el.tagName === 'INPUT' ? 'change' : 'change';
+            el.addEventListener(eventName, function () {
+                if (el.getAttribute('data-field') === 'width_percent') {
+                    var label = panel.querySelector('.size-value');
+                    if (label) label.textContent = el.value + '%';
+                }
+                saveDisplay(panel);
+            });
+            if (el.getAttribute('data-field') === 'width_percent') {
+                el.addEventListener('input', function () {
+                    var label = panel.querySelector('.size-value');
+                    if (label) label.textContent = el.value + '%';
+                });
+            }
+        });
+    });
+
+    document.querySelectorAll('.attachment-grid.sortable').forEach(function (grid) {
+        if (typeof Sortable === 'undefined') return;
+        new Sortable(grid, {
+            animation: 180,
+            draggable: '.attachment-card',
+            ghostClass: 'sortable-ghost',
+            onEnd: function () {
+                var cards = Array.from(grid.querySelectorAll('.attachment-card'));
+                cards.forEach(function (card, index) {
+                    var badge = card.querySelector('.attachment-index');
+                    if (badge) badge.textContent = String(index + 1);
+                });
+                var url = grid.getAttribute('data-reorder-url');
+                if (!url) return;
+                var ids = cards.map(function (card) { return card.getAttribute('data-file-id'); }).filter(Boolean);
+                fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-CSRFToken': csrfToken,
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: 'order=' + encodeURIComponent(ids.join(','))
+                }).catch(function () { alert('保存附件顺序失败，请刷新页面后重试。'); });
+            }
+        });
+    });
+})();
+</script>
+{% endblock %}

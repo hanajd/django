@@ -716,11 +716,31 @@ def _insert_radiation_table_at(
 
 
 def _page_looks_like_toc_compact(compact: str) -> bool:
-    if "目录" not in compact:
+    """
+    识别目录页。模板目录含「一、项目基本情况」；重绘后可能是「一、设备名（型号：…）」+ 1.1。
+    不可把目录页当成「三、检测结果」正文，否则仅防护导出会删掉真·检测结果首页。
+    """
+    if "目录" not in compact and "目録" not in compact:
         return False
-    if "受检编号" in compact and ("质量控制" in compact or "检测点" in compact):
+    # 检测结果首页：受检编号 + 设备信息表
+    if "受检编号" in compact and (
+        "设备名称" in compact or "主要检测仪器" in compact or "三、检测结果" in compact
+    ):
         return False
-    return "一、项目基本情况" in compact or "三、检测结果" in compact
+    if compact.count("·") >= 6 or compact.count("…") >= 3:
+        return True
+    if "一、项目基本情况" in compact or "三、检测结果" in compact:
+        return True
+    # 设备名目录：有一级标题与小节线索，且无受检编号表体
+    if "受检编号" not in compact and re.search(r"[一二三四五六七八九十]+、", compact):
+        if (
+            "1.1" in compact
+            or "质量控制" in compact
+            or "放射防护" in compact
+            or "型号" in compact
+        ):
+            return True
+    return False
 
 
 def _find_first_results_body_page(doc: fitz.Document) -> Optional[int]:
@@ -1253,6 +1273,7 @@ def try_enrich_report_pdf_with_radiation_table(
             manual_device_count=manual_device_count,
             has_radiation_protection=False,
             include_qc_content=True,
+            ordered_submit_payloads=ordered_submit_payloads,
         )
 
     if variant == REPORT_EXPORT_VARIANT_RP:
@@ -1281,6 +1302,7 @@ def try_enrich_report_pdf_with_radiation_table(
             has_radiation_protection=True,
             toc_skip_qc_minors=True,
             include_qc_content=False,
+            ordered_submit_payloads=ordered_submit_payloads,
         )
 
     if has_radiation_protection and isinstance(source_payload, dict) and source_payload:
@@ -1308,6 +1330,7 @@ def try_enrich_report_pdf_with_radiation_table(
         task_no=task_no,
         manual_device_count=manual_device_count,
         has_radiation_protection=has_radiation_protection,
+        ordered_submit_payloads=ordered_submit_payloads,
     )
 
 

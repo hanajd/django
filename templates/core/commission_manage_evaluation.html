@@ -83,7 +83,48 @@
         {% endif %}
     </div>
 
-    <p class="text-xs text-slate-400 text-center">评价报告书上线后将并入本表。</p>
+    <div class="rounded-2xl border border-indigo-100 bg-white shadow-sm overflow-hidden">
+        <div class="px-4 py-3 border-b border-indigo-50 bg-indigo-50/50 flex flex-wrap items-center justify-between gap-2">
+            <div>
+                <h2 class="text-sm font-semibold text-indigo-950">评价报告书</h2>
+                <p class="text-xs text-indigo-800/80 mt-0.5">共 {{ overview.book_count|default:0 }} 份</p>
+            </div>
+            <a href="{% url 'evaluation_report_create' %}" class="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">新建报告书</a>
+        </div>
+        {% if book_projects %}
+        <div class="overflow-x-auto">
+            <table class="min-w-full text-sm">
+                <thead class="bg-slate-50 text-left text-xs text-slate-500">
+                    <tr>
+                        <th class="px-4 py-3 font-medium">标题</th>
+                        <th class="px-4 py-3 font-medium">医院</th>
+                        <th class="px-4 py-3 font-medium">类型</th>
+                        <th class="px-4 py-3 font-medium">状态</th>
+                        <th class="px-4 py-3 font-medium">操作</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for proj in book_projects %}
+                    <tr class="hover:bg-slate-50/80">
+                        <td class="px-4 py-3 font-medium text-slate-900">{{ proj.name }}</td>
+                        <td class="px-4 py-3 text-slate-600">{{ proj.hospital_label }}</td>
+                        <td class="px-4 py-3 text-slate-600">{{ proj.report_subtype_label }}</td>
+                        <td class="px-4 py-3 text-slate-600">{{ proj.status_label }}</td>
+                        <td class="px-4 py-3">
+                            <a href="{{ proj.open_url }}" class="text-teal-700 hover:underline text-xs font-medium">打开</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="px-5 py-10 text-center text-sm text-slate-500">
+            暂无评价报告书。
+            <a href="{% url 'evaluation_report_list' %}" class="text-indigo-700 underline font-medium">进入报告书工作区</a>
+        </p>
+        {% endif %}
+    </div>
 </div>
 {% if selected_project_id %}
 <script>

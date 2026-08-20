@@ -285,9 +285,7 @@ def _coerce_scalar_for_field_date_part_slots(field: dict, raw_sp: object) -> str
 
 
 def _test_date_ymd_slot_part_for_field(field: dict) -> str | None:
-    """
-    现场记录表头「检测日期」拆为三格：slotNo 1=年、2=月、3=日（或 f3/f4/f5、检测日期_年月日*）。
-    """
+    """现场记录表头「检测日期」拆为三格：slotNo 1=年、2=月、3=日，或语义名 检测日期_年月日*。"""
     if not isinstance(field, dict):
         return None
     table = field.get("table") if isinstance(field.get("table"), dict) else {}
@@ -301,19 +299,14 @@ def _test_date_ymd_slot_part_for_field(field: dict) -> str | None:
         return "month"
     if slot_no == 3:
         return "day"
-    fid = str(field.get("id") or field.get("pdfFieldId") or field.get("fieldId") or "").strip()
-    if fid == "f3" or fid == "检测日期_年月日":
-        return "year"
-    if fid == "f4" or fid == "检测日期_年月日2":
-        return "month"
-    if fid == "f5" or fid == "检测日期_年月日3":
-        return "day"
+    fid = str(field.get("id") or field.get("fieldId") or "").strip()
     label = str(field.get("label") or field.get("hierarchyKey") or "").strip()
-    if "年月日3" in label:
+    blob = f"{fid} {label}"
+    if "年月日3" in blob or fid == "检测日期_年月日3":
         return "day"
-    if "年月日2" in label:
+    if "年月日2" in blob or fid == "检测日期_年月日2":
         return "month"
-    if "年月日" in label and "检测日期" in label:
+    if fid == "检测日期_年月日" or ("年月日" in blob and "检测日期" in blob):
         return "year"
     return None
 
@@ -332,7 +325,7 @@ def _assembled_test_date_from_header_slots(
     source_data: dict,
     value_mapping: dict | None = None,
 ) -> datetime | None:
-    """现场记录表头检测日期三格（f3/f4/f5 或 检测日期_年月日*）组装为 datetime。"""
+    """现场记录表头检测日期三格（检测日期_年月日* / 年/月/日语义键）组装为 datetime。"""
     if not isinstance(source_data, dict):
         return None
     dd = source_data.get("dynamicData") if isinstance(source_data.get("dynamicData"), dict) else {}
@@ -349,9 +342,9 @@ def _assembled_test_date_from_header_slots(
                     return str(raw).strip()
         return ""
 
-    y = _part("year", "f3", "检测日期_年月日", "检测日期_年", "检测年")
-    m = _part("month", "f4", "检测日期_年月日2", "检测日期_月", "检测月")
-    d = _part("day", "f5", "检测日期_年月日3", "检测日期_日", "检测日")
+    y = _part("year", "检测日期_年月日", "检测日期_年", "检测年")
+    m = _part("month", "检测日期_年月日2", "检测日期_月", "检测月")
+    d = _part("day", "检测日期_年月日3", "检测日期_日", "检测日")
     if not (y and m and d):
         return None
     iso_slots = sum(
@@ -405,7 +398,6 @@ def _resolve_test_date_datetime(source_data: dict, value_mapping: dict | None = 
     vm = value_mapping if isinstance(value_mapping, dict) else {}
     ri = source_data.get("reportInfo") if isinstance(source_data.get("reportInfo"), dict) else {}
     tr = source_data.get("testResult") if isinstance(source_data.get("testResult"), dict) else {}
-    dd = source_data.get("dynamicData") if isinstance(source_data.get("dynamicData"), dict) else {}
 
     dt_asm = _assembled_test_date_from_header_slots(source_data, vm)
     if dt_asm is not None:
@@ -433,14 +425,6 @@ def _resolve_test_date_datetime(source_data: dict, value_mapping: dict | None = 
             )
         except (TypeError, ValueError):
             pass
-    f4_raw = dd.get("f4")
-    f5_raw = dd.get("f5")
-    f3_only = f4_raw in (None, "", "/") and f5_raw in (None, "", "/")
-    if f3_only:
-        for raw in (dd.get("f3"), ri.get("f3"), vm.get("f3")):
-            dt = _parse_loose_datetime_for_submit(raw)
-            if dt is not None:
-                return dt
     return _parse_source_updated_at(source_data)
 
 
@@ -458,7 +442,7 @@ def _pick_test_date_table_slot_value(
 
 
 def _inject_test_date_split_pdf_field_aliases(value_mapping: dict, source_data: dict) -> None:
-    """将检测日期拆入 f3/f4/f5 及派生键，供基本信息章按语义/pdfFieldId 读取。"""
+    """将检测日期拆入年/月/日语义键，供基本信息章按标题读取。"""
     if not isinstance(value_mapping, dict) or not isinstance(source_data, dict):
         return
     dt = _resolve_test_date_datetime(source_data, value_mapping)
@@ -470,9 +454,9 @@ def _inject_test_date_split_pdf_field_aliases(value_mapping: dict, source_data: 
         "day": _format_test_date_ymd_slot_part("day", dt),
     }
     slot_keys = {
-        "year": ("f3", "检测日期_年月日", "检测日期_年", "检测年"),
-        "month": ("f4", "检测日期_年月日2", "检测日期_月", "检测月"),
-        "day": ("f5", "检测日期_年月日3", "检测日期_日", "检测日"),
+        "year": ("检测日期_年月日", "检测日期_年", "检测年"),
+        "month": ("检测日期_年月日2", "检测日期_月", "检测月"),
+        "day": ("检测日期_年月日3", "检测日期_日", "检测日"),
     }
     for part, keys in slot_keys.items():
         val = parts.get(part) or ""
@@ -488,7 +472,7 @@ def _inject_report_test_date_pdf_field_aliases(
     source_data: dict,
     report_template_fields: list | None = None,
 ) -> None:
-    """报告「三、检测结果」等处的检测日期：用现场表头 f3/f4/f5 解析值覆盖误映射的 f 槽。"""
+    """报告「检测日期」栏：按当前报告模板字段标题写入该栏自己的 pdfFieldId。"""
     if not isinstance(value_mapping, dict) or not isinstance(source_data, dict):
         return
     dt = _resolve_test_date_datetime(source_data, value_mapping)
@@ -541,8 +525,6 @@ def _normalize_iso_strings_in_test_date_part_slots(value_mapping: dict) -> None:
                 value_mapping[sk] = str(dt.day)
 
 
-_PREFERRED_INSPECTED_UNIT_PDF_FIELD_IDS = ("f6", "f5", "f4", "f2")
-_PREFERRED_INSPECTED_ADDRESS_PDF_FIELD_IDS = ("f8", "f9", "f10", "f3", "f22")
 _NON_ADDRESS_LITERALS = frozenset(
     {
         "委托单位",
@@ -562,18 +544,12 @@ def _scalar_submit_text_value(v: object) -> str:
     return str(v).strip()
 
 
-def _inspected_unit_from_pdf_field_slots(blob: dict, *, preferred_ids: tuple[str, ...]) -> str:
-    """App/模拟提交常把受检单位写在 hospitalInfo/dynamicData 的 pdfFieldId 槽（如 f6）。"""
+def _inspected_unit_from_pdf_field_slots(blob: dict, *, template_pids: Sequence[str] | None = None) -> str:
+    """仅使用现场模板标注为「受检单位」的 pdfFieldId，不按固定 f 号猜测。"""
     if not isinstance(blob, dict):
         return ""
-    for pid in preferred_ids:
+    for pid in template_pids or ():
         s = _scalar_submit_text_value(blob.get(pid))
-        if s and _is_plausible_inspected_unit_name(s):
-            return s
-    for k in sorted(blob.keys()):
-        if not isinstance(k, str) or not re.fullmatch(r"f\d+", k, flags=re.IGNORECASE):
-            continue
-        s = _scalar_submit_text_value(blob.get(k))
         if s and _is_plausible_inspected_unit_name(s):
             return s
     return ""
@@ -606,7 +582,7 @@ def _hospital_info_inspected_unit_name(hi: dict) -> str:
             s = str(v).strip()
             if s:
                 return s
-    return _inspected_unit_from_pdf_field_slots(hi, preferred_ids=_PREFERRED_INSPECTED_UNIT_PDF_FIELD_IDS)
+    return ""
 
 
 def _resolve_inspected_unit_name_from_submit(
@@ -623,7 +599,7 @@ def _resolve_inspected_unit_name_from_submit(
             if _is_plausible_inspected_unit_name(s):
                 return s
     for blob in (dd, hi):
-        for key in ("受检单位", "受检单位名称", "f6", "f7", "f5", "f4", "f2", "f3"):
+        for key in ("受检单位", "受检单位名称"):
             v = blob.get(key)
             if isinstance(v, str) and v.strip():
                 s = v.strip()
@@ -661,17 +637,11 @@ def _is_plausible_inspected_unit_address(text: str) -> bool:
     return len(s) >= 6
 
 
-def _inspected_address_from_pdf_field_slots(blob: dict, *, preferred_ids: tuple[str, ...]) -> str:
+def _inspected_address_from_pdf_field_slots(blob: dict, *, template_pids: Sequence[str] | None = None) -> str:
     if not isinstance(blob, dict):
         return ""
-    for pid in preferred_ids:
+    for pid in template_pids or ():
         s = _scalar_submit_text_value(blob.get(pid))
-        if s and _is_plausible_inspected_unit_address(s):
-            return s
-    for k in sorted(blob.keys()):
-        if not isinstance(k, str) or not re.fullmatch(r"f\d+", k, flags=re.IGNORECASE):
-            continue
-        s = _scalar_submit_text_value(blob.get(k))
         if s and _is_plausible_inspected_unit_address(s):
             return s
     return ""
@@ -730,13 +700,7 @@ def _commission_org_mode_is_custom(source_data: dict) -> bool:
         return True
     if mode == "sameInspection":
         return False
-    same_checked = _truthy_checkbox_value(hi.get("f94")) or _truthy_checkbox_value(dd.get("f94"))
-    custom_checked = _truthy_checkbox_value(hi.get("f95")) or _truthy_checkbox_value(dd.get("f95"))
-    if custom_checked and not same_checked:
-        return True
-    if same_checked and not custom_checked:
-        return False
-    return custom_checked
+    return False
 
 
 def _resolve_commission_organization_from_submit(source_data: dict) -> str:
@@ -752,7 +716,6 @@ def _resolve_commission_organization_from_submit(source_data: dict) -> str:
         if not isinstance(blob, dict):
             continue
         for key in (
-            "f937",
             "commissionOrganization",
             "commissionName",
             "entrustOrganization",
@@ -783,7 +746,7 @@ def _resolve_commission_contact_from_submit(source_data: dict) -> tuple[str, str
         return split_contact_name_phone(s, "")
 
     for blob in (dd, hi):
-        for key in ("f4", "委托单位联系人/电话", "委托单位联系人电话"):
+        for key in ("委托单位联系人/电话", "委托单位联系人电话"):
             raw = blob.get(key) if isinstance(blob, dict) else None
             if raw in (None, ""):
                 continue
@@ -874,8 +837,6 @@ _DR1_REPORT_BASIC_INFO_SLOT_SEMANTICS: dict[str, tuple[str, ...]] = {
     "f11": ("主要检测人员", "testman"),
     "f12": ("委托单位名称", "commissionOrganization", "委托单位_委托单位名称"),
 }
-_REPORT_BASIC_INFO_CONTACT_PIDS = frozenset({"f4", "f5", "f23", "f24"})
-_REPORT_BASIC_INFO_ADDRESS_PIDS = frozenset({"f3", "f22"})
 _REPORT_BASIC_INFO_RED_FIELD_LABELS = frozenset(
     {
         "委托编号",
@@ -938,12 +899,9 @@ def _basic_info_slot_semantics_for_task(task_obj) -> dict[str, tuple[str, ...]]:
     allowed = tuple(prof.htmlpdf_basic_info_pdf_field_ids or ())
     if allowed:
         allowed_set = frozenset(str(pid).strip().lower() for pid in allowed if str(pid).strip())
-        filtered = {
+        return {
             pid: keys for pid, keys in base.items() if str(pid).strip().lower() in allowed_set
         }
-        if "f7" in base and "f7" not in filtered:
-            filtered["f7"] = base["f7"]
-        return filtered
     return base
 
 
@@ -979,7 +937,7 @@ def _reconcile_report_basic_info_value_mapping(
 
     prof = get_report_template_profile(task_obj)
     slot_semantics = _basic_info_slot_semantics_for_task(task_obj)
-    contact_pids = tuple(prof.contact_pdf_field_ids or _REPORT_BASIC_INFO_CONTACT_PIDS)
+    contact_pids = tuple(prof.contact_pdf_field_ids or ())
 
     commission_pids = {
         pid for pid, keys in slot_semantics.items() if "委托单位名称" in keys
@@ -1039,10 +997,6 @@ def _reconcile_report_basic_info_value_mapping(
             decorative_pids.add(pid)
             value_mapping.pop(pid, None)
 
-    site_f7 = value_mapping.get("f7")
-    if site_f7 not in (None, "") and _looks_like_contact_cell_text(str(site_f7)):
-        value_mapping.pop("f7", None)
-
     for pid, sem_keys in slot_semantics.items():
         if pid in decorative_pids:
             continue
@@ -1051,10 +1005,10 @@ def _reconcile_report_basic_info_value_mapping(
         val = _semantic_text_from_value_mapping(value_mapping, sem_keys)
         is_address_slot = any("地址" in str(k) for k in sem_keys)
         if not val:
-            if is_address_slot or pid in _REPORT_BASIC_INFO_ADDRESS_PIDS:
+            if is_address_slot:
                 value_mapping.pop(pid, None)
             continue
-        if is_address_slot or pid in _REPORT_BASIC_INFO_ADDRESS_PIDS:
+        if is_address_slot:
             if not _is_plausible_inspected_unit_address(val):
                 value_mapping.pop(pid, None)
                 continue
@@ -1102,9 +1056,7 @@ def _hospital_info_inspected_unit_address(hi: dict) -> str:
             s = str(v).strip()
             if s:
                 return s
-    return _inspected_address_from_pdf_field_slots(
-        hi, preferred_ids=_PREFERRED_INSPECTED_ADDRESS_PDF_FIELD_IDS
-    )
+    return ""
 
 
 def _resolve_inspected_unit_address_from_submit(source_data: dict) -> str:
@@ -1203,42 +1155,34 @@ def _resolve_inspection_type_display(
     from_task = _inspection_type_from_report_task(report_task)
     if from_task:
         explicit_type_keys = (
-            "f501",
-            "f502",
-            "f503",
-            "f504",
-            "f609",
-            "f610",
-            "f42",
-            "f43",
             "检测类型_状态检测",
             "状态检测",
             "检测类型_验收检测",
             "验收检测",
+            "检测类型_定期检测",
+            "定期检测",
         )
         if not any(_inspection_type_radio_truthy(b.get(k)) for b in (hi, dd) for k in explicit_type_keys):
             return from_task
 
     blobs = (hi, dd)
-    if any(_truthy(b.get("f613")) for b in blobs):
-        return "定期检测"
     status_keys = (
-        "f501",
-        "f502",
-        "f609",
-        "f42",
         "检测类型_状态检测",
         "状态检测",
     )
     accept_keys = (
-        "f504",
-        "f610",
-        "f43",
         "检测类型_验收检测",
         "验收检测",
     )
+    periodic_keys = (
+        "检测类型_定期检测",
+        "定期检测",
+    )
     status_hit = any(_truthy(b.get(k)) for b in blobs for k in status_keys)
     accept_hit = any(_truthy(b.get(k)) for b in blobs for k in accept_keys)
+    periodic_hit = any(_truthy(b.get(k)) for b in blobs for k in periodic_keys)
+    if periodic_hit and not status_hit and not accept_hit:
+        return "定期检测"
     if status_hit and not accept_hit:
         return "状态检测"
     if accept_hit and not status_hit:
@@ -1248,7 +1192,7 @@ def _resolve_inspection_type_display(
         if from_task:
             return from_task
     for blob in blobs:
-        tt = str(blob.get("testType") or blob.get("f504") or "").strip().lower()
+        tt = str(blob.get("testType") or "").strip().lower()
         if tt in {"acceptance", "验收", "验收检测"}:
             return "验收检测"
         if tt in {"status", "状态", "状态检测"}:
@@ -1257,8 +1201,8 @@ def _resolve_inspection_type_display(
         ri.get("inspectionType"),
         ri.get("reportType"),
         hi.get("testType"),
-        dd.get("f86"),
         dd.get("检测类型"),
+        dd.get("testType"),
     ):
         t = str(raw or "").strip()
         if not t:
@@ -2080,11 +2024,11 @@ def _equipment_semantics_from_pdf_slots(
             "序列号",
             "产品编号",
         )
-        or _pick("serialNo", "noDevice", "f15")
+        or _pick("serialNo", "noDevice")
     )
     mfr = (
         _pick_ei_value_by_site_field_semantics(ei, site_template_parsed, "生产厂家", "制造商", "生产厂")
-        or _pick("manufacturer", "manufacturerProduction", "f16")
+        or _pick("manufacturer", "manufacturerProduction")
     )
     kv_s = (
         _pick_ei_value_by_site_field_semantics(ei, site_template_parsed, "额定参数_kV", "额定kV")
@@ -2112,7 +2056,7 @@ def _equipment_semantics_from_pdf_slots(
         "serialNo": serial,
         "manufacturer": mfr,
         "ratedParams": rated,
-        "location": _pick("location", "f17"),
+        "location": _pick("location"),
         "kv": kv_s,
         "ma": ma_s,
     }
@@ -2175,9 +2119,6 @@ def _reconcile_rated_params_value_mapping(
         return
     value_mapping["额定参数"] = composed
     value_mapping["额定"] = composed
-    existing_f14 = str(value_mapping.get("f14") or "").strip()
-    if not existing_f14 or existing_f14 == "/":
-        value_mapping["f14"] = composed
 
 
 def _is_report_preserve_original_pdf_field(field: dict, *, task_obj=None) -> bool:
@@ -2937,15 +2878,57 @@ def _backfill_use_strict_pdf_field_id_only(task_obj=None, field: dict | None = N
     return False
 
 
+def _submit_scalar_to_pdf_text(picked) -> str:
+    """
+    平板提交值写成 PDF 文本：字符串原样保留，不经 float() 再格式化。
+    JSON 里的整型浮点（129.0）按整数写出，避免自作主张变成 129.0。
+    """
+    if picked is None or isinstance(picked, bool):
+        return "" if picked is None else str(picked)
+    if isinstance(picked, str):
+        return picked.strip()
+    if isinstance(picked, int) and not isinstance(picked, bool):
+        return str(picked)
+    if isinstance(picked, float):
+        if picked != picked or picked in (float("inf"), float("-inf")):
+            return str(picked)
+        if picked == 0:
+            return "0"
+        if picked.is_integer():
+            return str(int(picked))
+        text = format(picked, ".15g")
+        return text if text else str(picked)
+    return str(picked).strip()
+
+
+def _pdf_field_is_checkbox(field: dict | None) -> bool:
+    """勾选格以控件类型判定（fieldType=check / type=boolean），不用 f 号猜测。"""
+    if not isinstance(field, dict):
+        return False
+    if str(field.get("fieldType") or "").strip().lower() == "check":
+        return True
+    if str(field.get("type") or "").strip().lower() in {"boolean", "bool", "checkbox"}:
+        return True
+    src = field.get("source") if isinstance(field.get("source"), dict) else {}
+    return str(src.get("anchorType") or "").strip().lower() == "check"
+
+
+def _submit_value_is_numeric_measurement(val) -> bool:
+    """测量读数（int/float）；布尔勾选与枚举串不算。"""
+    if val is None or isinstance(val, (bool, dict, list, str)):
+        return False
+    return isinstance(val, (int, float))
+
+
 def _format_protection_numeric_pdf_text(field: dict, picked, *, task_obj=None) -> str:
     """
     现场记录 PDF 数值展示：
     - 第五章防护表：按热更新小数精度规则（可在调试设置关闭「回填套用精度」）
-    - 其余 number/computed 公式栏：小数位不超过 precision / 全局默认
+    - 其余栏位：保持提交原样（字符串不转 double）
     """
     if picked is None or isinstance(picked, bool):
         return "" if picked is None else str(picked)
-    text = picked if isinstance(picked, str) else str(picked)
+    text = picked if isinstance(picked, str) else _submit_scalar_to_pdf_text(picked)
     text = text.strip()
     if not text or text == "/":
         return text
@@ -2958,29 +2941,13 @@ def _format_protection_numeric_pdf_text(field: dict, picked, *, task_obj=None) -
         from radiation_detection_report.chapter5_field_sync import (
             field_is_protection_chapter_numeric_cell,
             format_protection_cell_display,
-            format_protection_numeric_display,
-            resolve_field_number_precision,
         )
 
-        # 调试开关：回填不套用精度 → 前端提交什么就写什么
         if not get_decimal_precision_runtime_config().apply_on_backfill:
             return text
-
-        ftype = str(field.get("type") or "").strip().lower()
-        is_protection = field_is_protection_chapter_numeric_cell(field)
-        is_formula_numeric = ftype in ("number", "computed") or bool(
-            str(field.get("formula") or field.get("fieldExpression") or "").strip()
-        )
-        if not is_protection and not is_formula_numeric:
+        if not field_is_protection_chapter_numeric_cell(field):
             return text
-        if is_protection:
-            return format_protection_cell_display(text, field, fixed=True)
-        prec = resolve_field_number_precision(field)
-        # 公式/数值格按 precision 固定位输出（如 R²=0.9967→1.00），避免 fixed=False
-        # 把 1.00 收成「1」或剥掉末尾 0 后丢失约定小数位。
-        return format_protection_numeric_display(
-            text, precision=prec, fixed=True
-        )
+        return format_protection_cell_display(text, field, fixed=True)
     except ImportError:
         return text
 
@@ -3466,12 +3433,16 @@ def _apply_computed_fields_from_steps_to_mapping(
             elif isinstance(res, (int, float)):
                 try:
                     from radiation_detection_report.chapter5_field_sync import (
+                        field_is_protection_chapter_numeric_cell,
                         format_protection_cell_display,
                     )
 
-                    out_val = format_protection_cell_display(res, f, fixed=True)
+                    if field_is_protection_chapter_numeric_cell(f):
+                        out_val = format_protection_cell_display(res, f, fixed=True)
+                    else:
+                        out_val = _submit_scalar_to_pdf_text(res)
                 except ImportError:
-                    out_val = str(res)
+                    out_val = _submit_scalar_to_pdf_text(res)
             else:
                 out_val = str(res)
             value_mapping[fid] = out_val
@@ -3565,6 +3536,7 @@ def instrument_catalog_to_payload_dict(inst: InstrumentCatalog) -> dict:
         "name": inst.name,
         "model": inst.model or "",
         "certificateNo": inst.certificate_no or "",
+        "calibrationOrg": inst.calibration_org or "",
         "validUntil": vu,
         "enabled": True,
     }
@@ -3752,6 +3724,59 @@ def _root_instruments_list_from_submit(source_data: dict | None) -> list:
     ins = source_data.get("instruments")
     if isinstance(ins, list) and ins:
         return ins
+    nested = _flatten_nested_instrument_groups(
+        (source_data.get("rawPayload") or {}).get("instruments")
+        if isinstance(source_data.get("rawPayload"), dict)
+        else ins if isinstance(ins, dict) else None
+    )
+    return nested
+
+
+def _flatten_nested_instrument_groups(raw: Any) -> list[dict]:
+    """把 rawPayload.instruments 的质控/防护分组（数组或单条）摊成根级列表。"""
+    if not isinstance(raw, dict):
+        return []
+    if any(k in raw for k in ("instrumentId", "identifier", "name")) and not any(
+        k in raw for k in _INSTRUMENT_SCOPES
+    ):
+        return []
+    rows: list[dict] = []
+    for scope in _INSTRUMENT_SCOPES:
+        block = raw.get(scope)
+        if isinstance(block, list):
+            for it in block:
+                if not isinstance(it, dict) or _instrument_submit_dict_is_empty(it):
+                    continue
+                rows.append(it if _scope_for_instrument_item(it) else _instrument_item_with_scope(it, scope))
+        else:
+            entry = _coerce_instrument_entry(block, scope=scope)
+            if entry:
+                rows.append(entry)
+    return rows
+
+
+def _frontend_submitted_instrument_rows(
+    instruments_raw: Any = None,
+    *,
+    raw_payload: dict | None = None,
+) -> list[dict]:
+    """前端提交的仪器全套；有内容则以此为准，不用项目派工覆盖。"""
+    if isinstance(instruments_raw, list):
+        rows = [
+            it
+            for it in instruments_raw
+            if isinstance(it, dict) and not _instrument_submit_dict_is_empty(it)
+        ]
+        if rows:
+            return rows
+    if isinstance(instruments_raw, dict):
+        nested = _flatten_nested_instrument_groups(instruments_raw)
+        if nested:
+            return nested
+    if isinstance(raw_payload, dict):
+        nested = _flatten_nested_instrument_groups(raw_payload.get("instruments"))
+        if nested:
+            return nested
     return []
 
 
@@ -4086,11 +4111,25 @@ def coerce_submit_instruments(
     project_obj=None,
     task_obj=None,
     equipment_link_id: int | None = None,
+    prefill_from_dispatch: bool = False,
 ) -> SubmitInstrumentsBundle:
     """
     以根级 instruments[] 全套为准；台账 ``ledger_rows`` 按 id 去重。
-    优先顺序：根级列表 → raw_payload.instruments 嵌套 → 项目/模板绑定兜底。
+    默认只收前端已提交内容，不用项目派工补齐。
+    ``prefill_from_dispatch=True`` 仅用于前端首次打开编辑时的预填。
     """
+    frontend_rows = _frontend_submitted_instrument_rows(
+        instruments_raw, raw_payload=raw_payload
+    )
+    if frontend_rows:
+        scoped = _flat_instruments_by_scope(frontend_rows)
+        array_for_api = list(frontend_rows)
+        return SubmitInstrumentsBundle(
+            scoped, array_for_api, dedupe_instrument_payload_items(array_for_api)
+        )
+    if not prefill_from_dispatch:
+        return SubmitInstrumentsBundle({}, [], [])
+
     if equipment_link_id is None and project_obj is not None and task_obj is not None:
         eq_info = None
         if isinstance(raw_payload, dict):
@@ -4158,15 +4197,16 @@ def coerce_submit_instruments(
 def apply_submit_instruments_bundle(payload: dict | None, bundle: SubmitInstrumentsBundle) -> dict:
     """写入根级 instruments[] 全套；rawPayload.instruments 按 scope 存数组副本。"""
     out = dict(payload or {})
-    full_list = out.get("instruments")
-    if not isinstance(full_list, list) or not full_list:
+    raw_in = out.get("rawPayload") if isinstance(out.get("rawPayload"), dict) else None
+    submitted = _frontend_submitted_instrument_rows(out.get("instruments"), raw_payload=raw_in)
+    if submitted:
+        full_list = list(submitted)
+    elif bundle.array_for_api:
         full_list = list(bundle.array_for_api)
-    out["instruments"] = list(full_list)
-    raw = out.get("rawPayload")
-    if not isinstance(raw, dict):
-        raw = {}
     else:
-        raw = dict(raw)
+        full_list = []
+    out["instruments"] = list(full_list)
+    raw = dict(raw_in or {})
     raw["instruments"] = _scoped_instrument_lists_from_items(full_list)
     out["rawPayload"] = raw
     return out
@@ -4288,41 +4328,19 @@ def finalize_submit_instruments_in_payload(
     template_steps: list | None = None,
 ) -> tuple[dict, SubmitInstrumentsBundle]:
     """
-    提交落库前统一仪器块：
-    - instruments[]：现场记录所需全套仪器（质控+防护，按 scope 标记）；
-    - rawPayload.instruments：与根级同内容的 scope 分组数组（非主选单行）；
-    - 清理 dynamicData/testResult 中非 instrument_select 槽位上的仪器列表误写。
+    提交落库前统一仪器块：只收前端提交的 instruments[] / rawPayload.instruments。
+    不再用项目派工或模板种类补齐；派工预填只发生在前端打开编辑时。
     """
-    out = merge_task_template_bound_instruments_into_payload(
-        dict(payload or {}), task_obj, project_obj=project_obj
-    )
-    raw_rp = out.get("rawPayload") if isinstance(out.get("rawPayload"), dict) else None
-    eq_info = out.get("equipmentInfo") if isinstance(out.get("equipmentInfo"), dict) else None
-    equipment_link_id = None
-    if project_obj is not None and task_obj is not None and isinstance(eq_info, dict):
-        from apps.core.instrument_inventory_service import resolve_equipment_link_id_for_submit
-
-        equipment_link_id = resolve_equipment_link_id_for_submit(
-            project_obj, task_obj, eq_info
-        )
-    bundle = coerce_submit_instruments(
-        out.get("instruments"),
-        raw_payload=raw_rp,
-        project_obj=project_obj,
-        task_obj=task_obj,
-        equipment_link_id=equipment_link_id,
-    )
-    out = apply_submit_instruments_bundle(out, bundle)
-    binding = _resolve_instrument_binding_dict(
-        project_obj, task_obj, equipment_link_id=equipment_link_id
-    )
-    full_rows = instruments_full_set_rows_from_binding(
-        project_obj, task_obj, binding=binding
-    )
-    if not full_rows and task_obj is not None:
-        full_rows = instruments_full_set_rows_from_task_kinds(task_obj)
-    if full_rows:
-        out["instruments"] = full_rows
+    del project_obj  # 提交路径不用派工结果
+    src = dict(payload or {})
+    raw0 = src.get("rawPayload") if isinstance(src.get("rawPayload"), dict) else None
+    frontend_rows = _frontend_submitted_instrument_rows(src.get("instruments"), raw_payload=raw0)
+    bundle = coerce_submit_instruments(frontend_rows, raw_payload=raw0)
+    out = apply_submit_instruments_bundle(src, bundle)
+    out["instruments"] = list(frontend_rows)
+    raw = dict(out.get("rawPayload") or {})
+    raw["instruments"] = _scoped_instrument_lists_from_items(frontend_rows)
+    out["rawPayload"] = raw
     out = _attach_instrument_kinds_metadata(out, task_obj)
     steps = template_steps
     if steps is None and task_obj is not None:
@@ -4343,29 +4361,13 @@ def instruments_effective_list(
     task_obj=None,
 ) -> list:
     """
-    PDF/占位符用 instruments[]：优先使用提交根级 instruments（含 instrumentScope 的多台清单）；
-    否则再回退项目绑定全套。两栏主选见 rawPayload.instruments / instrumentsByScope。
+    PDF/占位符用 instruments[]：只用提交里的仪器。
+    项目派工不在回填阶段补齐。
     """
+    del project_obj, task_obj
     if not isinstance(source_data, dict):
         return []
-    ins = _root_instruments_list_from_submit(source_data)
-    if ins:
-        return list(ins)
-    full = instruments_full_set_rows_from_binding(project_obj, task_obj)
-    if full:
-        return full
-    if task_obj is not None:
-        kind_rows = instruments_full_set_rows_from_task_kinds(task_obj)
-        if kind_rows:
-            return kind_rows
-    raw_payload = source_data.get("rawPayload") if isinstance(source_data.get("rawPayload"), dict) else None
-    bundle = coerce_submit_instruments(
-        source_data.get("instruments"),
-        raw_payload=raw_payload,
-        project_obj=project_obj,
-        task_obj=task_obj,
-    )
-    return list(bundle.array_for_api)
+    return list(_root_instruments_list_from_submit(source_data))
 
 
 def normalize_submit_instruments_for_project(
@@ -4379,43 +4381,32 @@ def normalize_submit_instruments_for_project(
 
 
 def merge_task_template_bound_instruments_into_payload(
-    payload: dict | None, task_obj, project_obj=None
+    payload: dict | None, task_obj, project_obj=None, *, prefill_from_dispatch: bool = True
 ) -> dict:
     """
-    检测仪器优先级：
-    1）项目 ``assigned_instrument_ids``（质控/防护各一套，与两栏输入框一致）；
-    2）前端已提交：按 scope 合并质控/防护，写入 ``instruments[]`` 与 ``rawPayload.instruments``；
-    3）任务模板 ``bindingMode=kinds``：写入 ``instrumentKinds`` 与种类行（无台账编号，不出库）。
+    前端打开编辑时：若 payload 还没有仪器，用项目派工套件预填。
+    已有前端提交的 instruments 时原样保留，不用派工覆盖。
     """
     out = dict(payload or {})
     if task_obj is None:
         return out
     raw_payload = out.get("rawPayload") if isinstance(out.get("rawPayload"), dict) else None
     cur = out.get("instruments")
-    has_submit = bool(cur) or bool(
-        isinstance(raw_payload, dict) and raw_payload.get("instruments")
-    )
-    binding = _resolve_instrument_binding_dict(project_obj, task_obj)
-    if has_submit:
-        bundle = coerce_submit_instruments(
-            cur,
-            raw_payload=raw_payload,
-            project_obj=project_obj,
-            task_obj=task_obj,
-        )
+    frontend_rows = _frontend_submitted_instrument_rows(cur, raw_payload=raw_payload)
+    if frontend_rows:
+        bundle = coerce_submit_instruments(frontend_rows, raw_payload=raw_payload)
         out = apply_submit_instruments_bundle(out, bundle)
-        submit_list = out.get("instruments")
-        if isinstance(submit_list, list) and _submit_instruments_list_has_scope_tags(submit_list):
-            return _attach_instrument_kinds_metadata(out, task_obj)
-        full_rows = instruments_full_set_rows_from_binding(
-            project_obj, task_obj, binding=binding
-        )
-        if not full_rows:
-            full_rows = instruments_full_set_rows_from_task_kinds(task_obj)
-        if full_rows:
-            out["instruments"] = full_rows
+        out["instruments"] = list(frontend_rows)
+        raw = dict(out.get("rawPayload") or {})
+        raw["instruments"] = _scoped_instrument_lists_from_items(frontend_rows)
+        out["rawPayload"] = raw
+        return _attach_instrument_kinds_metadata(out, task_obj)
+    if not prefill_from_dispatch:
+        if not isinstance(out.get("instruments"), list):
+            out["instruments"] = []
         return _attach_instrument_kinds_metadata(out, task_obj)
 
+    binding = _resolve_instrument_binding_dict(project_obj, task_obj)
     scoped = _scoped_from_project_binding(binding)
     full_rows = (
         instruments_full_set_rows_from_binding(project_obj, task_obj, binding=binding)
@@ -4708,56 +4699,6 @@ def _collect_instrument_slot_lines_from_table_instruments(source_data: dict, raw
     return out
 
 
-_JS001_INSTRUMENT_FALLBACK_F_SLOT_KEYS: tuple[tuple[str, ...], ...] = (
-    ("f19", "f20", "f23", "f24"),
-    ("f21", "f22", "f139", "f140"),
-)
-
-
-def _try_fill_instrument_slots_from_dd_f_key_rows(
-    out: dict[int, str], dd: dict, max_idx: int, source_data: dict
-) -> None:
-    """
-    instruments[] / testInstrument 皆缺时，从 App 常见「四联 f 号」解析多台仪器主键（须命中 InstrumentCatalog，避免质控数值误认）。
-    """
-    if not isinstance(out, dict) or not isinstance(dd, dict) or not isinstance(source_data, dict):
-        return
-    guard = _instrument_guard_scalar_tokens(source_data)
-
-    def _slot_line_is_usable(idx: int) -> bool:
-        t = (out.get(idx) or "").strip()
-        return bool(t) and t not in guard
-
-    usable = sum(1 for j in range(1, max_idx + 1) if _slot_line_is_usable(j))
-    if usable >= 2:
-        return
-    for tup in _JS001_INSTRUMENT_FALLBACK_F_SLOT_KEYS:
-        cand: dict[int, str] = {}
-        for i, fk in enumerate(tup, start=1):
-            if i > max_idx:
-                break
-            if dd.get(f"instrument{i}Enabled") is False:
-                continue
-            v = dd.get(fk)
-            if isinstance(v, float) and v.is_integer():
-                v = int(v)
-            if not isinstance(v, int) or v < 1:
-                continue
-            if not InstrumentCatalog.objects.filter(pk=v).exists():
-                continue
-            rs = str(v)
-            line = (_resolve_instrument_id_display(source_data, rs) or "").strip()
-            if line:
-                cand[i] = line
-        if len(cand) < 2:
-            continue
-        for i, ln in cand.items():
-            cur = (out.get(i) or "").strip()
-            if (not cur) or cur in guard:
-                out[i] = ln
-        return
-
-
 def _collect_instrument_slot_lines_from_submit(
     source_data: dict,
     site_steps_merged: list | None = None,
@@ -4854,7 +4795,6 @@ def _collect_instrument_slot_lines_from_submit(
             prev = (out.get(si) or "").strip()
             if not prev:
                 out[si] = ln
-    _try_fill_instrument_slots_from_dd_f_key_rows(out, dd, max_idx, source_data)
     return out
 
 
@@ -4916,30 +4856,33 @@ def _build_instrument_bindings_for_task(
 
 
 def build_instruments_root_for_frontend_export(
-    *, task_obj=None, project_obj=None, payload: dict | None = None
+    *, task_obj=None, project_obj=None, payload: dict | None = None, prefill_from_dispatch: bool = True
 ) -> dict:
     """
-    前端导出 JSON 根级 ``instruments[]`` + ``instrumentKinds``：
-    项目派工编号优先；否则回退任务模板种类绑定（无出库）。
-    下拉全库请前端走登记/台账 API；不再写 instrumentsByScope / instrumentSetsByScope / instrumentBindings。
+    前端编辑用根级 instruments[]：payload 里已有提交仪器则原样返回；
+    否则（首次打开）用项目派工套件预填。
     """
+    src = payload if isinstance(payload, dict) else {}
+    raw_payload = src.get("rawPayload") if isinstance(src.get("rawPayload"), dict) else None
+    frontend_rows = _frontend_submitted_instrument_rows(src.get("instruments"), raw_payload=raw_payload)
+    kind_bundle = instrument_kinds_bundle_for_export(task_obj)
+    if frontend_rows:
+        result: dict = {"instruments": list(frontend_rows)}
+        if kind_bundle:
+            result["instrumentKinds"] = kind_bundle
+        return result
+    if not prefill_from_dispatch:
+        result = {"instruments": list(src.get("instruments") or []) if isinstance(src.get("instruments"), list) else []}
+        if kind_bundle:
+            result["instrumentKinds"] = kind_bundle
+        return result
     binding = _resolve_instrument_binding_dict(project_obj, task_obj)
     instruments = instruments_full_set_rows_from_binding(
         project_obj, task_obj, binding=binding
     )
-    kind_bundle = instrument_kinds_bundle_for_export(task_obj)
     if not instruments and task_obj is not None:
         instruments = instruments_full_set_rows_from_task_kinds(task_obj)
-    if not instruments:
-        merged = merge_task_template_bound_instruments_into_payload(
-            dict(payload or {}), task_obj, project_obj=project_obj
-        )
-        instruments = instruments_effective_list(
-            merged, project_obj=project_obj, task_obj=task_obj
-        )
-        if not kind_bundle and isinstance(merged.get("instrumentKinds"), dict):
-            kind_bundle = merged["instrumentKinds"]
-    result: dict = {"instruments": list(instruments or [])}
+    result = {"instruments": list(instruments or [])}
     if kind_bundle:
         result["instrumentKinds"] = kind_bundle
     return result
@@ -4987,20 +4930,12 @@ def _build_instrument_text_aliases_from_submit(
     为 PDF 占位符补缺：检测仪器1/仪器1…，以及「检测仪器列表」「检测仪器汇总」合并串（中文分号，二者同文）。
     仅产出非空串；由 _merge_mapping_fill_empty 写入，不覆盖已有映射。
     下标与模板槽位一致，见 _collect_instrument_slot_lines_from_submit。
-    instruments 为空时按任务模板 bound_instrument_ids 合并主数据（与 merge_task_template_bound_instruments_into_payload 一致）。
+    只用提交里的仪器，不用任务模板 / 项目派工补齐。
     """
     out: dict[str, str] = {}
     if not isinstance(source_data, dict):
         return out
     sd: dict = source_data
-    if task_obj is not None:
-        raw_ins = instruments_effective_list(source_data)
-        if not raw_ins:
-            merged = merge_task_template_bound_instruments_into_payload(dict(source_data), task_obj)
-            inst2 = instruments_effective_list(merged)
-            if inst2:
-                sd = dict(source_data)
-                sd["instruments"] = inst2
     fp = fill_font_pt if fill_font_pt is not None else _htmlpdf_fill_font_pt(task_obj)
     slot_lines = _collect_instrument_slot_lines_from_submit(
         sd, site_steps_merged, fill_font_pt=fp
@@ -5250,7 +5185,7 @@ def _inject_hospital_equipment_cn_aliases(value_mapping: dict, source_data: dict
 
 def _inject_radio_enum_slug_checkbox_aliases(value_mapping: dict, source_data: dict) -> None:
     """
-    互斥 radio 的枚举 value 常只在 dynamicData（如 f86、f84）或根 hospitalInfo 中；
+    互斥 radio 的枚举 value 常在 hospitalInfo.testType / commissionOrgMode；
     为报告占位 keyword 补缺「验收检测/状态检测」「同受检单位」等布尔键（不覆盖已有非空）。
 
     同时写入「检测类型_状态检测 / 检测类型_验收检测」完整键，避免勾选框只能靠父键
@@ -5260,7 +5195,12 @@ def _inject_radio_enum_slug_checkbox_aliases(value_mapping: dict, source_data: d
         return
     hi = source_data.get("hospitalInfo") if isinstance(source_data.get("hospitalInfo"), dict) else {}
     dd = source_data.get("dynamicData") if isinstance(source_data.get("dynamicData"), dict) else {}
-    tt = str(hi.get("testType") or dd.get("f86") or "").strip().lower()
+    raw_tt = hi.get("testType")
+    if raw_tt in (None, "") or _submit_value_is_numeric_measurement(raw_tt):
+        raw_tt = dd.get("testType")
+    if _submit_value_is_numeric_measurement(raw_tt):
+        raw_tt = ""
+    tt = str(raw_tt or "").strip().lower()
     if tt == "acceptance":
         for k, v in (
             ("验收检测", True),
@@ -5277,7 +5217,12 @@ def _inject_radio_enum_slug_checkbox_aliases(value_mapping: dict, source_data: d
             ("检测类型_状态检测", True),
         ):
             value_mapping.setdefault(k, v)
-    com_lc = str(hi.get("commissionOrgMode") or dd.get("f84") or "").strip().lower().replace(" ", "")
+    raw_com = hi.get("commissionOrgMode")
+    if raw_com in (None, "") or _submit_value_is_numeric_measurement(raw_com):
+        raw_com = dd.get("commissionOrgMode")
+    if _submit_value_is_numeric_measurement(raw_com):
+        raw_com = ""
+    com_lc = str(raw_com or "").strip().lower().replace(" ", "")
     if com_lc == "customcommission":
         value_mapping.setdefault("同受检单位", False)
     elif com_lc == "sameinspection":
@@ -5689,22 +5634,18 @@ def _qc_row_prefix_strip_unit_parens(s: str) -> str:
 
 
 def _truthy_checkbox_value(v) -> bool:
-    if v is True or v == 1:
+    """勾选真值：boolean True，或显式勾选串。不得把测量值 1.0 当成勾上。"""
+    if v is True:
         return True
+    if isinstance(v, int) and not isinstance(v, bool) and v == 1:
+        return True
+    if isinstance(v, float) or _submit_value_is_numeric_measurement(v):
+        return False
     s = str(v).strip().lower()
-    return s in {"1", "true", "yes", "on", "是"}
+    return s in {"true", "yes", "on", "是"}
 
 
-# 库报告 JS-001 等：典型值/最大值「单位」互斥三勾在 PDF 上为 f93–f95、f97–f99…，
-# 提交 dynamicData 常在每行「首格」写整组 radio 枚举（如仅 f93），须向同组空键复制供按 pdfFieldId 取值。
-_DOSE_RATE_UNIT_LIB_PDF_MUTEX_TRIPLETS: tuple[tuple[str, str, str], ...] = (
-    ("f93", "f94", "f95"),
-    ("f97", "f98", "f99"),
-    ("f103", "f104", "f105"),
-    ("f117", "f118", "f119"),
-)
-
-_F_PDF_FIELD_ID_NUM = re.compile(r"^f(\d+)$", re.I)
+# 库报告 JS-001 等：典型值/最大值「单位」互斥勾选组由当前模板 radio.pdfFieldIds 提供，不再写死 f 号。
 
 _KERMA_MAX_HIGH_DOSE_MODE_PDF_YES = (
     "透视受检者入射体表空气比释动能率最大/(mGy/min)（仅验收检测）_高剂量率模式_是"
@@ -5713,7 +5654,7 @@ _KERMA_MAX_HIGH_DOSE_MODE_PDF_NO = (
     "透视受检者入射体表空气比释动能率最大/(mGy/min)（仅验收检测）_高剂量率模式_否"
 )
 
-# 库 JS-001 PDF：统一表单用 f122 / f124 单选 yesNo，库模板为「是/否」或「有/无」双勾且 f 号与前端签名图等可能冲突，用长 id + 空闲 f 槽补缺。
+# 库 JS-001 PDF：统一表单 DSA/伪影 yesNo 与库模板「是/否」「有/无」双勾对齐，只写长 id。
 _LIB_JS001_DSA_SECTION_YES = "以下仅为DSA设备检测项目_是"
 _LIB_JS001_DSA_SECTION_NO = "以下仅为DSA设备检测项目_否"
 _LIB_JS001_ARTIFACT_NO = "伪影_检测结果_减影中是否有各种明显伪影_无"
@@ -5732,19 +5673,12 @@ def _yesno_pick_is_no(sl: str) -> bool:
     return sl in ("no", "n", "否", "0", "false", "off", "无")
 
 
-def _pdf_f_slot_likely_image_payload(val) -> bool:
-    if not isinstance(val, str):
-        return False
-    t = val.strip()
-    return bool(t.startswith("iVBOR") or t.startswith("/9j"))
-
-
 def _inject_unified_yesno_to_library_dsa_artifact_pdf_aliases(
     value_mapping: dict, source_data: dict
 ) -> None:
     """
-    统一表单 `testResult.dsaEquipmentSectionApplicable` / `yesnoP3R0` 或 dynamicData f122、f124
-    与库 PDF 双勾 id 对齐；避免 f122=yes 被当成剂量单位 slug 导致整组单位勾全亮，并修复伪影有/无同勾。
+    统一表单 testResult.dsaEquipmentSectionApplicable / yesnoP3R0
+    与库 PDF 长 id 双勾对齐；不写死 f122/f127 等槽位。
     """
     if not isinstance(value_mapping, dict) or not isinstance(source_data, dict):
         return
@@ -5752,36 +5686,24 @@ def _inject_unified_yesno_to_library_dsa_artifact_pdf_aliases(
     dd = source_data.get("dynamicData") if isinstance(source_data.get("dynamicData"), dict) else {}
 
     raw_dsa = tr.get("dsaEquipmentSectionApplicable")
-    if raw_dsa in (None, ""):
-        raw_dsa = dd.get("f122")
-    if raw_dsa in (None, ""):
-        raw_dsa = value_mapping.get("f122")
-    if raw_dsa not in (None, ""):
+    if raw_dsa in (None, "") or _submit_value_is_numeric_measurement(raw_dsa):
+        raw_dsa = dd.get("dsaEquipmentSectionApplicable")
+    if raw_dsa not in (None, "") and not _submit_value_is_numeric_measurement(raw_dsa):
         sl = _yesno_sl_norm(raw_dsa)
         if _yesno_pick_is_yes(sl) or _yesno_pick_is_no(sl):
             yes = _yesno_pick_is_yes(sl)
             value_mapping.setdefault(_LIB_JS001_DSA_SECTION_YES, "yes" if yes else "no")
             value_mapping.setdefault(_LIB_JS001_DSA_SECTION_NO, "yes" if yes else "no")
-            if not _pdf_f_slot_likely_image_payload(value_mapping.get("f127")):
-                value_mapping.setdefault("f127", "yes" if yes else "no")
-            if not _pdf_f_slot_likely_image_payload(value_mapping.get("f128")):
-                value_mapping.setdefault("f128", "yes" if yes else "no")
 
     raw_art = tr.get("yesnoP3R0")
-    if raw_art in (None, ""):
-        raw_art = dd.get("f124")
-    if raw_art in (None, ""):
-        raw_art = value_mapping.get("f124")
-    if raw_art not in (None, ""):
+    if raw_art in (None, "") or _submit_value_is_numeric_measurement(raw_art):
+        raw_art = dd.get("yesnoP3R0")
+    if raw_art not in (None, "") and not _submit_value_is_numeric_measurement(raw_art):
         sl = _yesno_sl_norm(raw_art)
         if _yesno_pick_is_yes(sl) or _yesno_pick_is_no(sl):
             yes = _yesno_pick_is_yes(sl)
             value_mapping.setdefault(_LIB_JS001_ARTIFACT_YES, "yes" if yes else "no")
             value_mapping.setdefault(_LIB_JS001_ARTIFACT_NO, "yes" if yes else "no")
-            if not _pdf_f_slot_likely_image_payload(value_mapping.get("f129")):
-                value_mapping.setdefault("f129", "yes" if yes else "no")
-            if not _pdf_f_slot_likely_image_payload(value_mapping.get("f130")):
-                value_mapping.setdefault("f130", "yes" if yes else "no")
 
 
 def _dose_rate_submit_value_to_enum_slug(raw: object) -> str | None:
@@ -5807,13 +5729,10 @@ def _dose_rate_submit_value_to_enum_slug(raw: object) -> str | None:
     return None
 
 
-def _iter_dose_rate_unit_mutex_triplets_from_steps(site_steps_merged: list | None) -> list[tuple[str, str, str]]:
-    """
-    从统一表单 steps 中 enumRef=doseRateUnit 的 radio 取首格 pdfFieldId（如 f103），
-    假定同格三勾在 PDF 上为连续 fN、fN+1、fN+2（与 htmlpdf 坐标 boxing 一致）。
-    """
-    out: list[tuple[str, str, str]] = []
-    seen: set[tuple[str, str, str]] = set()
+def _iter_dose_rate_unit_mutex_triplets_from_steps(site_steps_merged: list | None) -> list[tuple[str, ...]]:
+    """从当前模板 doseRateUnit radio 的 pdfFieldIds 收集同组勾选槽，不假设连续 f 号。"""
+    out: list[tuple[str, ...]] = []
+    seen: set[tuple[str, ...]] = set()
     if not site_steps_merged:
         return out
     for fld in _flatten_unified_form_steps_to_fields_deep(site_steps_merged):
@@ -5824,12 +5743,19 @@ def _iter_dose_rate_unit_mutex_triplets_from_steps(site_steps_merged: list | Non
         if str(fld.get("enumRef") or "").strip() != "doseRateUnit":
             continue
         src = fld.get("source") if isinstance(fld.get("source"), dict) else {}
-        pid = str(src.get("pdfFieldId") or fld.get("pdfFieldId") or "").strip()
-        m = _F_PDF_FIELD_ID_NUM.match(pid)
-        if not m:
+        ids: list[str] = []
+        raw_ids = src.get("pdfFieldIds") or fld.get("pdfFieldIds")
+        if isinstance(raw_ids, list):
+            for x in raw_ids:
+                pid = str(x or "").strip()
+                if pid and pid not in ids:
+                    ids.append(pid)
+        pid0 = str(src.get("pdfFieldId") or fld.get("pdfFieldId") or "").strip()
+        if pid0 and pid0 not in ids:
+            ids.insert(0, pid0)
+        if len(ids) < 2:
             continue
-        n = int(m.group(1))
-        tup = (f"f{n}", f"f{n + 1}", f"f{n + 2}")
+        tup = tuple(ids)
         if tup not in seen:
             seen.add(tup)
             out.append(tup)
@@ -5875,57 +5801,59 @@ def _inject_dose_rate_unit_mutex_pdf_aliases(
     value_mapping: dict,
     source_data: dict,
     *,
-    extra_triplets: Sequence[tuple[str, str, str]] | None = None,
+    extra_triplets: Sequence[tuple[str, ...]] | None = None,
 ) -> None:
-    """互斥单位三勾：提交只写首 pdfFieldId 时，向同组另两格补缺同一枚举字符串（不覆盖已有非空）。"""
+    """互斥单位勾选：提交只写组内一格时，向同组空格补缺同一枚举（组来自当前模板 pdfFieldIds）。"""
     if not isinstance(value_mapping, dict) or not isinstance(source_data, dict):
         return
     dd = source_data.get("dynamicData") if isinstance(source_data.get("dynamicData"), dict) else {}
-    merged_rows: list[tuple[str, str, str]] = []
-    seen_row: set[tuple[str, str, str]] = set()
-    for row in tuple(extra_triplets or ()) + _DOSE_RATE_UNIT_LIB_PDF_MUTEX_TRIPLETS:
-        if row not in seen_row:
+    merged_rows: list[tuple[str, ...]] = []
+    seen_row: set[tuple[str, ...]] = set()
+    for row in tuple(extra_triplets or ()):
+        if row and row not in seen_row:
             seen_row.add(row)
             merged_rows.append(row)
-    for a, b, c in merged_rows:
-        v = value_mapping.get(a)
-        if v in (None, ""):
-            v = dd.get(a)
+    for group in merged_rows:
+        v = None
+        for pid in group:
+            v = value_mapping.get(pid)
+            if v in (None, ""):
+                v = dd.get(pid)
+            if v not in (None, ""):
+                break
         if v in (None, ""):
             continue
         s = str(v).strip()
         if _dose_rate_submit_value_to_enum_slug(s) is None:
             continue
-        if value_mapping.get(b) in (None, "") and _pdf_field_slot_eligible_for_dose_rate_unit_enum_mirror(
-            b, dd, value_mapping
-        ):
-            value_mapping[b] = s
-        if value_mapping.get(c) in (None, "") and _pdf_field_slot_eligible_for_dose_rate_unit_enum_mirror(
-            c, dd, value_mapping
-        ):
-            value_mapping[c] = s
+        for pid in group:
+            if value_mapping.get(pid) in (None, "") and _pdf_field_slot_eligible_for_dose_rate_unit_enum_mirror(
+                pid, dd, value_mapping
+            ):
+                value_mapping[pid] = s
 
 
 def _inject_kerma_max_high_dose_mode_pdf_aliases(value_mapping: dict, source_data: dict) -> None:
     """
-    库 PDF「透视…最大…（仅验收检测）」行：高剂量率模式 是/否 常为 f101、f102；
-    统一表单多把 yes/no 写在 f101。补缺 f102 及长 id 键，避免「否」格或长占位符落空。
+    库 PDF「透视…最大…高剂量率模式」是/否：只写长 id 语义键。
+    取值来自 testResult / 已有语义键，不读写死 f101/f102。
     """
     if not isinstance(value_mapping, dict) or not isinstance(source_data, dict):
         return
+    tr = source_data.get("testResult") if isinstance(source_data.get("testResult"), dict) else {}
     dd = source_data.get("dynamicData") if isinstance(source_data.get("dynamicData"), dict) else {}
-    raw = dd.get("f101")
-    if raw in (None, ""):
-        raw = value_mapping.get("f101")
-    if raw in (None, ""):
+    raw = tr.get("highDoseRateMode")
+    if raw in (None, "") or _submit_value_is_numeric_measurement(raw):
+        raw = dd.get("highDoseRateMode")
+    if raw in (None, "") or _submit_value_is_numeric_measurement(raw):
+        raw = value_mapping.get(_KERMA_MAX_HIGH_DOSE_MODE_PDF_YES)
+    if raw in (None, "") or _submit_value_is_numeric_measurement(raw):
         return
     sl = re.sub(r"\s+", "", str(raw).strip().lower())
-    yes = sl in ("yes", "y", "是", "1", "true", "on")
-    no = sl in ("no", "n", "否", "0", "false", "off")
+    yes = sl in ("yes", "y", "是", "true", "on")
+    no = sl in ("no", "n", "否", "false", "off")
     if not yes and not no:
         return
-    if dd.get("f102") in (None, "") and value_mapping.get("f102") in (None, ""):
-        value_mapping.setdefault("f102", "no" if yes else "yes")
     if yes:
         value_mapping.setdefault(_KERMA_MAX_HIGH_DOSE_MODE_PDF_YES, "yes")
         value_mapping.setdefault(_KERMA_MAX_HIGH_DOSE_MODE_PDF_NO, "yes")
@@ -5960,6 +5888,55 @@ def _dose_rate_unit_checkbox_pair_coerce(cp: dict | None, sl: str) -> bool | Non
     return None
 
 
+_KAP_AREA_SLUG_TO_TAIL = {
+    "mGy_cm2": "mGycm^2",
+    "mGy_m2": "mGym^2",
+    "uGy_m2": "μGym^2",
+    "uGy_cm2": "μGycm^2",
+}
+
+
+def _kap_area_unit_slug_from_value(val) -> str:
+    if val is None or isinstance(val, bool) or isinstance(val, (dict, list)):
+        return ""
+    if isinstance(val, (int, float)):
+        return ""
+    vs = str(val).strip()
+    return vs if vs in _KAP_AREA_SLUG_TO_TAIL else ""
+
+
+def _value_is_kap_checkbox_marker(val) -> bool:
+    """KAP 勾选槽位上的真值；不得把测量值 1 / 1.0 当成勾选。"""
+    if val is True:
+        return True
+    if isinstance(val, str) and val.strip().lower() in {"true", "yes", "on"}:
+        return True
+    return False
+
+
+def _kap_slug_from_picked_str(raw_s: str) -> str | None:
+    t = str(raw_s or "").strip()
+    if not t:
+        return None
+    tl = re.sub(r"\s+", "", t.lower().replace("μ", "u").replace("µ", "u"))
+    for sk in _KAP_AREA_SLUG_TO_TAIL:
+        if tl == re.sub(r"\s+", "", sk.lower().replace("μ", "u").replace("µ", "u")):
+            return sk
+    return None
+
+
+def _kap_tail_in_blob(blob: str, tail: str) -> bool:
+    b0 = blob.replace("μ", "u").replace("µ", "u")
+    t0 = tail.replace("μ", "u").replace("µ", "u")
+    if tail in blob or t0 in b0:
+        return True
+    if "^2" in tail:
+        alt = tail.replace("^2", "²")
+        if alt in blob or alt.replace("μ", "u").replace("µ", "u") in b0:
+            return True
+    return False
+
+
 def _coerce_picked_value_for_pdf_checkbox(field: dict, picked) -> bool:
     """
     报告 PDF 勾框回填：不得对任意非空字符串做 bool()（否则 controlMode 枚举如 auto/manual 均为 True，
@@ -5968,9 +5945,15 @@ def _coerce_picked_value_for_pdf_checkbox(field: dict, picked) -> bool:
     前端互斥 radio 常提交枚举 value（acceptance/status、yes/no、auto/manual、mGyPerMin 等），
     与 PDF 占位「验收检测」「是/否」「μGy/min」等对齐；其中 yes/no 须在将「no」判为假之前按域语义处理。
     """
-    if picked is True or picked == 1:
+    if picked is True:
         return True
-    if picked is False or picked in (0, None):
+    if isinstance(picked, int) and not isinstance(picked, bool) and picked == 1:
+        return True
+    if picked is False or picked is None:
+        return False
+    if isinstance(picked, int) and not isinstance(picked, bool) and picked == 0:
+        return False
+    if _submit_value_is_numeric_measurement(picked):
         return False
     s = str(picked).strip()
     if not s:
@@ -6070,49 +6053,20 @@ def _coerce_picked_value_for_pdf_checkbox(field: dict, picked) -> bool:
     if sl in {"1", "true", "yes", "on", "是", "开"}:
         return True
     # KAP 面积乘积单位：提交常为枚举串，PDF 为四个独立勾选项。
-    # 1) blob 仅有 pdfFieldId、无「KAP指示偏离」长 id 时，用 f55–f58 与枚举直接对齐；
-    # 2) 长 id 存在时仍按尾部 mGycm^2 / mGym^2 等与提交 slug 比对（兼容 ² 与 ^2）。
-    pid_kap = str(field.get("pdfFieldId") or src_d.get("pdfFieldId") or "").strip().lower()
-    kap_fid_to_slug = {"f55": "mGy_cm2", "f56": "mGy_m2", "f57": "uGy_m2", "f58": "uGy_cm2"}
-    kap_slug_to_tail = {
-        "mGy_cm2": "mGycm^2",
-        "mGy_m2": "mGym^2",
-        "uGy_m2": "μGym^2",
-        "uGy_cm2": "μGycm^2",
-    }
-
-    def _kap_slug_from_picked_str(raw_s: str) -> str | None:
-        t = str(raw_s or "").strip()
-        if not t:
-            return None
-        tl = re.sub(r"\s+", "", t.lower().replace("μ", "u").replace("µ", "u"))
-        for sk in kap_slug_to_tail:
-            if tl == re.sub(r"\s+", "", sk.lower().replace("μ", "u").replace("µ", "u")):
-                return sk
-        return None
-
-    def _kap_tail_in_blob(tail: str) -> bool:
-        b0 = blob.replace("μ", "u").replace("µ", "u")
-        t0 = tail.replace("μ", "u").replace("µ", "u")
-        if tail in blob or t0 in b0:
-            return True
-        if "^2" in tail:
-            alt = tail.replace("^2", "²")
-            if alt in blob or alt.replace("μ", "u").replace("µ", "u") in b0:
-                return True
-        return False
-
-    if pid_kap in kap_fid_to_slug:
-        exp_slug = kap_fid_to_slug[pid_kap]
+    # 按标签尾部 mGycm^2 / mGym^2 等与提交 slug 比对（兼容 ² 与 ^2），不按写死 f 号对齐。
+    kap_blob = "KAP指示偏离" in blob or "kapareaproductunit" in blob_lc or "面积乘积" in blob
+    if kap_blob:
         ps_res = _kap_slug_from_picked_str(str(picked).strip()) if not isinstance(picked, bool) else None
         if ps_res is not None:
-            return ps_res == exp_slug
+            for slug_key, tail in _KAP_AREA_SLUG_TO_TAIL.items():
+                if ps_res == slug_key:
+                    return _kap_tail_in_blob(blob, tail)
+            return False
     if "KAP指示偏离" in blob and "检测结果" in blob:
         ps = str(picked).strip()
-        psn = _kap_slug_from_picked_str(ps) or (ps if ps in kap_slug_to_tail else None)
-        if psn and psn in kap_slug_to_tail:
-            tail = kap_slug_to_tail[psn]
-            return _kap_tail_in_blob(tail)
+        psn = _kap_slug_from_picked_str(ps) or (ps if ps in _KAP_AREA_SLUG_TO_TAIL else None)
+        if psn and psn in _KAP_AREA_SLUG_TO_TAIL:
+            return _kap_tail_in_blob(blob, _KAP_AREA_SLUG_TO_TAIL[psn])
     return _truthy_checkbox_value(picked)
 
 
@@ -6122,7 +6076,7 @@ def _value_mapping_scalar_str(value_mapping: dict, key: str) -> str:
     v = value_mapping.get(key)
     if v in (None, "") or isinstance(v, (dict, list, bool)):
         return ""
-    return str(v).strip()
+    return _submit_scalar_to_pdf_text(v)
 
 
 def _report_kerma_typical_vs_max_prefix_ok(report_base: str, site_pfx: str) -> bool:
@@ -6609,43 +6563,65 @@ def _pick_site_row_composed_condition_or_primary_result(
     return None
 
 
-_KAP_AREA_SLUG_TO_TAIL = {
-    "mGy_cm2": "mGycm^2",
-    "mGy_m2": "mGym^2",
-    "uGy_m2": "μGym^2",
-    "uGy_cm2": "μGycm^2",
-}
+def _iter_kap_checkbox_pid_slug_from_template(
+    template_fields: list | None,
+    template_steps: list | None,
+) -> list[tuple[str, str]]:
+    """当前模板 KAP 勾选格：(pdfFieldId, slug)，slug 由标签尾 mGycm^2 等判定。"""
+    rows: list = []
+    if isinstance(template_fields, list):
+        flat: list = []
+        _walk_template_field_dicts(template_fields, flat)
+        rows.extend(flat)
+    if isinstance(template_steps, list):
+        rows.extend(_flatten_unified_form_steps_to_fields_deep(template_steps))
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for field in rows:
+        if not isinstance(field, dict) or not _pdf_field_is_checkbox(field):
+            continue
+        blob = " ".join(_field_semantic_candidate_keys(field))
+        blob_lc = blob.lower()
+        if "KAP指示偏离" not in blob and "kapareaproductunit" not in blob_lc and "面积乘积" not in blob:
+            continue
+        pid = _field_pdf_id(field)
+        if not pid:
+            continue
+        slug = ""
+        for sk, tail in _KAP_AREA_SLUG_TO_TAIL.items():
+            if _kap_tail_in_blob(blob, tail):
+                slug = sk
+                break
+        if not slug:
+            continue
+        key = pid.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((pid, slug))
+    return out
 
-# 统一表单 / PDF 与 kapAreaProductUnit 枚举同槽的 f55–f58（见库 JS-117 等模板）。
-_KAP_PDF_FIELD_ID_TO_SLUG: dict[str, str] = {
-    "f55": "mGy_cm2",
-    "f56": "mGy_m2",
-    "f57": "uGy_m2",
-    "f58": "uGy_cm2",
-}
 
-
-def _slug_from_kap_pdf_slot_values(value_mapping: dict, dynamic_data: dict) -> str:
+def _slug_from_kap_template_checkbox_slots(
+    value_mapping: dict,
+    dynamic_data: dict,
+    template_fields: list | None,
+    template_steps: list | None,
+) -> str:
     """
-    落库提交常无 steps，testResult 亦可能为 null，但 dynamicData.f56 等槽位会存整组单选的枚举串（如 mGy_m2）。
+    无 testResult.kapAreaProductUnit 时，从当前模板 KAP 勾选格的 pdfFieldId 读提交值推断枚举。
     """
     vm = value_mapping if isinstance(value_mapping, dict) else {}
     dd = dynamic_data if isinstance(dynamic_data, dict) else {}
-    for m in (vm, dd):
-        for fid in _KAP_PDF_FIELD_ID_TO_SLUG:
-            v = m.get(fid)
-            if v is None or v == "":
-                continue
-            if isinstance(v, str):
-                vs = v.strip()
-                if vs in _KAP_AREA_SLUG_TO_TAIL:
-                    return vs
-    for m in (vm, dd):
-        for fid, expected in _KAP_PDF_FIELD_ID_TO_SLUG.items():
-            v = m.get(fid)
-            if v is True or v == 1:
-                return expected
-            if isinstance(v, str) and v.strip().lower() in {"true", "yes", "on", "1"}:
+    pairs = _iter_kap_checkbox_pid_slug_from_template(template_fields, template_steps)
+    for pid, _expected in pairs:
+        for bag in (vm, dd):
+            slug = _kap_area_unit_slug_from_value(bag.get(pid))
+            if slug:
+                return slug
+    for pid, expected in pairs:
+        for bag in (vm, dd):
+            if _value_is_kap_checkbox_marker(bag.get(pid)):
                 return expected
     return ""
 
@@ -6691,38 +6667,42 @@ def _reject_commission_org_enum_as_textfield_value(field: dict, ft: str, val) ->
     return False
 
 
-def _inject_kap_area_product_unit_checkbox_aliases(value_mapping: dict, source_data: dict | None = None) -> None:
+def _inject_kap_area_product_unit_checkbox_aliases(
+    value_mapping: dict,
+    source_data: dict | None = None,
+    *,
+    template_fields: list | None = None,
+    template_steps: list | None = None,
+) -> None:
     """
-    KAP 指示偏离：前端单选 testResult.kapAreaProductUnit（mGy_cm2 / mGy_m2 / uGy_m2 / uGy_cm2）；
-    PDF 模板仍为四个勾选项（KAP指示偏离_检测结果_*），回填时只应勾选一个。
+    KAP 指示偏离：前端单选 testResult.kapAreaProductUnit；
+    PDF 勾选项只写「KAP指示偏离_检测结果_*」语义键，不改写任何写死 f 槽。
     """
     slug = ""
     tr: dict = {}
     dd: dict = {}
     if isinstance(source_data, dict):
         tr = source_data.get("testResult") if isinstance(source_data.get("testResult"), dict) else {}
-        slug = str(tr.get("kapAreaProductUnit") or "").strip()
+        raw_slug = tr.get("kapAreaProductUnit")
+        slug = "" if _submit_value_is_numeric_measurement(raw_slug) else str(raw_slug or "").strip()
         raw_dd = source_data.get("dynamicData")
         if isinstance(raw_dd, dict):
             dd = raw_dd
     if not slug:
-        slug = str(value_mapping.get("testResult.kapAreaProductUnit") or "").strip()
-    if (not slug or slug not in _KAP_AREA_SLUG_TO_TAIL) and tr:
-        legacy_keys = (("field58", "mGy_cm2"), ("field55", "mGy_m2"), ("field56", "uGy_m2"), ("field57", "uGy_cm2"))
-        for fk, s in legacy_keys:
-            v = tr.get(fk)
-            if v is True or v == 1 or str(v).strip().lower() in {"1", "true", "yes", "on"}:
-                slug = s
-                break
+        mapped_slug = value_mapping.get("testResult.kapAreaProductUnit")
+        slug = "" if _submit_value_is_numeric_measurement(mapped_slug) else str(mapped_slug or "").strip()
     if not slug or slug not in _KAP_AREA_SLUG_TO_TAIL:
-        slug = _slug_from_kap_pdf_slot_values(value_mapping if isinstance(value_mapping, dict) else {}, dd)
+        slug = _slug_from_kap_template_checkbox_slots(
+            value_mapping if isinstance(value_mapping, dict) else {},
+            dd,
+            template_fields,
+            template_steps,
+        )
     if not slug or slug not in _KAP_AREA_SLUG_TO_TAIL:
         return
     prefix = "KAP指示偏离_检测结果_"
     for s, tail in _KAP_AREA_SLUG_TO_TAIL.items():
         value_mapping[prefix + tail] = s == slug
-    for fid, s in _KAP_PDF_FIELD_ID_TO_SLUG.items():
-        value_mapping[fid] = s == slug
     value_mapping["testResult.kapAreaProductUnit"] = slug
 
 
@@ -8199,7 +8179,7 @@ def _coerce_submit_image_value_to_pdf_base64(val: object) -> str:
 
 def _pick_dynamic_image_for_pdf_field(field: dict, source_data: dict) -> str:
     """
-    非签名类 image 域（如平面布局示意图 f689）：从 dynamicData 或 submitPath 取落盘路径/平面图 JSON。
+    非签名类 image 域（如平面布局示意图）：从 dynamicData 当前格 pid 或 submitPath 取落盘路径/平面图 JSON。
     """
     if not isinstance(field, dict) or not isinstance(source_data, dict):
         return ""
@@ -8216,9 +8196,9 @@ def _pick_dynamic_image_for_pdf_field(field: dict, source_data: dict) -> str:
         raw_candidates.append(
             _nested_get_for_submit_with_rated_fallback(source_data, submit_path)
         )
-    sec_key = str(field.get("templateSectionKey") or "").strip()
-    if sec_key == "site_layout_diagram" or pid == "f689":
-        raw_candidates.append(dd.get("f686"))
+    if str(field.get("templateSectionKey") or "").strip() == "site_layout_diagram":
+        for key in ("floorPlanDiagram", "平面布局示意图"):
+            raw_candidates.append(dd.get(key))
     for raw in raw_candidates:
         b64 = _coerce_submit_image_value_to_pdf_base64(raw)
         if b64:
@@ -8773,7 +8753,12 @@ def _fill_template_fields_with_submit_enhanced(
             template_lookup_tables if isinstance(template_lookup_tables, dict) else {}
         ),
     )
-    _inject_kap_area_product_unit_checkbox_aliases(value_mapping, source_data)
+    _inject_kap_area_product_unit_checkbox_aliases(
+        value_mapping,
+        source_data,
+        template_fields=template_fields if isinstance(template_fields, list) else None,
+        template_steps=report_template_steps if isinstance(report_template_steps, list) else None,
+    )
     signature_map = {}
     if isinstance(bindings, dict):
         raw_sig_map = bindings.get("signature_map")
@@ -9169,7 +9154,7 @@ def _fill_template_fields_with_submit_enhanced(
         无提交值时不得把 PDF 整段原文写入 content（否则整页像占位符）。
         picked 可能为 int/float（value_mapping 数值），须先转 str。
         """
-        picked_s = "" if picked is None else str(picked).strip()
+        picked_s = "" if picked is None or isinstance(picked, bool) else _submit_scalar_to_pdf_text(picked)
         if not task_obj or task_obj.output_target != LibraryTask.OUTPUT_REPORT:
             return picked_s
         if _field_semantic_text_has_circled_number(field):
@@ -9449,8 +9434,8 @@ def _fill_template_fields_with_submit_enhanced(
                     picked = ""
                 if isinstance(picked, bool):
                     picked = ""
-                elif picked is not None and not isinstance(picked, str):
-                    picked = str(picked).strip()
+                else:
+                    picked = _submit_scalar_to_pdf_text(picked)
                 picked = _format_protection_numeric_pdf_text(field, picked, task_obj=task_obj)
                 picked = _sanitize_submit_text_for_pdf_stamp(picked, field)
                 if (
@@ -9739,7 +9724,9 @@ def _build_filled_template_fields_for_task(
     template_bindings = _merged_bindings_for_report_task(
         task_obj, project, task_no, template_bindings if isinstance(template_bindings, dict) else {}
     )
-    payload_eff = merge_task_template_bound_instruments_into_payload(payload, task_obj)
+    payload_eff = merge_task_template_bound_instruments_into_payload(
+        payload, task_obj, project_obj=project, prefill_from_dispatch=False
+    )
     source_pdf_path = _resolve_library_template_pdf_path(source_pdf_template_id)
     return (
         _fill_template_fields_with_submit(
@@ -10147,20 +10134,12 @@ def _prepare_backfill_value_mapping(
     _ins_merged = (inst_aliases.get("检测仪器列表") or inst_aliases.get("检测仪器汇总") or "").strip()
     if _ins_merged:
         value_mapping["检测仪器"] = _ins_merged
-    # 与检测仪器同槽 f1 时，仪器合并串可能写入 f1，覆盖委托编号；用提交中的委托编号恢复。
-    # 报告模板 f1 为「报告编号」（赣检测院FJ-ZK/FJ-FH），不得写入委托编号。
+    # 报告模板 f1 为「报告编号」（赣检测院FJ-ZK/FJ-FH）时由 profile.f1_slot 写入；现场记录不把委托编号硬写到 f1。
     ri0 = source_data.get("reportInfo") if isinstance(source_data.get("reportInfo"), dict) else {}
-    dd0 = source_data.get("dynamicData") if isinstance(source_data.get("dynamicData"), dict) else {}
-    com_fill = str(ri0.get("commissionNo") or ri0.get("f1") or dd0.get("f1") or "").strip()
+    com_fill = str(ri0.get("commissionNo") or "").strip()
     if com_fill and "；" not in com_fill:
         value_mapping.setdefault("委托编号", com_fill)
         value_mapping.setdefault("commissionNo", com_fill)
-        if not is_report_output:
-            vf1 = str(value_mapping.get("f1") or "").strip()
-            if not vf1:
-                value_mapping["f1"] = com_fill
-            elif vf1 != com_fill and ("；" in vf1 or len(vf1) > len(com_fill) + 8):
-                value_mapping["f1"] = com_fill
     if is_report_output:
         from utils.pdf_merge import format_gan_jcy_institute_report_no
 
@@ -10184,7 +10163,6 @@ def _prepare_backfill_value_mapping(
                 value_mapping["f1"] = report_no
             elif _prof.f1_slot == "commission_no" and com_fill:
                 value_mapping["f1"] = com_fill
-    # KAP 单位：须在 value_mapping 全部合并后再注入，避免后续 _merge 或步骤别名用 f56 串值覆盖布尔/长键。
     _normalize_iso_strings_in_test_date_part_slots(value_mapping)
     if is_report_output:
         _strip_report_summary_overlay_keys_from_mapping(value_mapping)
@@ -10309,6 +10287,7 @@ def _normalize_fields_for_htmlpdf(fields, *, task_obj=None):
             "fieldId",
             "pdfFieldId",
             "displayFormat",
+            "instrumentScope",
         ):
             v = f.get(k)
             if isinstance(v, str) and v.strip():

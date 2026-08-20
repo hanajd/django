@@ -1,21 +1,39 @@
 # Runtime target: Python 3.12.x
+# 核心 Web/API 在 3.10+ 一般可跑；MinerU / 部分原生依赖建议用 3.12。
+#
+# 安装：
+#   pip install -r requirements.txt
+# 可选（公式叠印 / 流程练习前端包）：
+#   npm install
+
+# ---------- Django / API ----------
 Django==4.2.16
 djangorestframework==3.14.0
 djangorestframework-simplejwt==5.3.1
 django-cors-headers==4.3.1
 django-filter==23.5
-Pillow==10.2.0
 python-decouple==3.8
 
-# AI / document processing
-mineru>=3.1.2
-ollama>=0.6.1
-outlines>=1.2.12
+# ---------- PDF / 图像 / 办公文档 ----------
+# 检测报告回填、合并、HTMLPDF、F.1、评价报告书转换等
+Pillow>=10.2.0,<12
+pymupdf>=1.24.0
 pypdf>=4.0.0
 PyPDF2>=3.0.0
 pdf2image>=1.17.0
-pymupdf>=1.24.0
 openpyxl>=3.1.0
+python-docx>=1.1.0
+lxml>=5.0.0
 
-# Ollama model is configured by env var:
-# EQUIPMENT_MODEL_NAME=qwen3:14b-q4_K_M
+# ---------- AI / 文档识别管线（可选） ----------
+# 未安装时：文件库、检测提交、报告导出、评价业务仍可用；
+# OCR 管线 / Ollama 抽取 / 辅助生成前端模板不可用。
+# mineru 2.7.x 与当前默认 MINERU_BACKEND=pipeline 已验证；升级 3.x 请自行核对引擎与 CUDA。
+mineru>=2.7.0
+ollama>=0.6.1
+outlines>=1.2.12
+
+# Ollama 模型由环境变量配置，例如：
+#   EQUIPMENT_MODEL_NAME=qwen3:14b-q4_K_M
+#   OLLAMA_HOST=http://127.0.0.1:11434
+#   MINERU_BACKEND=pipeline

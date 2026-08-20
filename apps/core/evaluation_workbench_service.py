@@ -16,7 +16,7 @@ from apps.core.library_access import (
 
 
 DOC_TYPE_FORM = "eval_form"  # 评价报告表
-DOC_TYPE_BOOK = "eval_book"  # 评价报告书（后期）
+DOC_TYPE_BOOK = "eval_book"  # 评价报告书
 
 
 def evaluation_doc_type_labels() -> List[Dict[str, str]]:
@@ -30,10 +30,60 @@ def evaluation_doc_type_labels() -> List[Dict[str, str]]:
         {
             "key": DOC_TYPE_BOOK,
             "label": "评价报告书",
-            "available": False,
-            "hint": "功能建设中，后续将在此展示评价报告书项目。",
+            "available": True,
+            "hint": "上传评价信息表与附件，结构化编辑后编译 PDF（后装/加速器 · 预评/控评）。",
+            "open_url": reverse("evaluation_report_list"),
+            "create_url": reverse("evaluation_report_create"),
         },
     ]
+
+
+def _book_open_url(report_id: int) -> str:
+    return reverse("evaluation_report_detail", kwargs={"pk": int(report_id)})
+
+
+def list_evaluation_book_rows(user=None) -> List[Dict[str, Any]]:
+    """评价报告书列表（供委托管理 / 项目工作台展示）。"""
+    from apps.core.library_access import library_user_may_access_evaluation_report
+    from apps.evaluation_report.models import EvaluationReport
+
+    if user is not None and not library_user_may_access_evaluation_report(user):
+        return []
+    rows: List[Dict[str, Any]] = []
+    qs = (
+        EvaluationReport.objects.select_related("hospital", "created_by")
+        .order_by("-updated_at", "-id")[:200]
+    )
+    for r in qs:
+        hospital_name = ""
+        if r.hospital_id:
+            hospital_name = (r.hospital.name or "").strip()
+        has_pdf = bool(r.output_pdf)
+        rows.append(
+            {
+                "id": f"book-{r.pk}",
+                "report_id": r.pk,
+                "name": (r.title or "").strip() or f"评价报告书 #{r.pk}",
+                "doc_type": DOC_TYPE_BOOK,
+                "doc_type_label": "评价报告书",
+                "hospital_id": r.hospital_id,
+                "hospital_name": hospital_name,
+                "hospital_label": hospital_name or "未挂载医院",
+                "report_subtype": r.report_subtype or "",
+                "report_subtype_label": r.report_subtype_label,
+                "status": r.status,
+                "status_label": r.get_status_display() if hasattr(r, "get_status_display") else r.status,
+                "is_completed": has_pdf or str(r.status or "") == "compiled",
+                "is_dispatched": True,
+                "dispatch_label": "—",
+                "creator_label": getattr(r.created_by, "username", None) or "—",
+                "updated_at": r.updated_at,
+                "open_url": _book_open_url(r.pk),
+                "edit_url": reverse("evaluation_report_structured_edit", kwargs={"pk": r.pk}),
+            }
+        )
+    return rows
+
 
 
 def _f1_open_url(project_id: str = "") -> str:
@@ -431,6 +481,7 @@ def build_evaluation_workbench_context(
             "hospitals": [],
             "ungrouped": [],
             "projects": [],
+            "book_projects": [],
             "selected_project": None,
             "hospital_options": [],
             "assignable_users": [],
@@ -446,6 +497,8 @@ def build_evaluation_workbench_context(
             },
             "capabilities": empty_caps,
             "f1_workbench_url": reverse("f1_eval_workbench"),
+            "evaluation_report_list_url": reverse("evaluation_report_list"),
+            "evaluation_report_create_url": reverse("evaluation_report_create"),
         }
 
     ws = svc.ensure_workspace(user.pk)
@@ -490,29 +543,34 @@ def build_evaluation_workbench_context(
     caps["can_delete"] = library_user_may_manage_f1_eval_projects(user)
     caps["can_assign"] = library_user_may_assign_f1_eval_projects(user)
 
+    book_rows = list_evaluation_book_rows(user)
     dispatched = sum(1 for p in items if p.get("is_dispatched"))
     completed = sum(1 for p in items if p.get("is_completed"))
+    book_completed = sum(1 for p in book_rows if p.get("is_completed"))
 
     return {
         "doc_types": evaluation_doc_type_labels(),
         "hospitals": hospitals,
         "ungrouped": ungrouped,
         "projects": items,
+        "book_projects": book_rows,
         "selected_project": selected,
         "selected_project_id": sel_id,
         "hospital_options": _hospital_options(),
         "assignable_users": _assignable_user_options(user) if caps["can_assign"] else [],
         "overview": {
-            "total": len(items),
+            "total": len(items) + len(book_rows),
             "form_count": len(items),
-            "book_count": 0,
+            "book_count": len(book_rows),
             "hospital_count": len(hospitals),
             "dispatched": dispatched,
             "undispatched": max(0, len(items) - dispatched),
-            "completed": completed,
-            "incomplete": max(0, len(items) - completed),
+            "completed": completed + book_completed,
+            "incomplete": max(0, len(items) - completed) + max(0, len(book_rows) - book_completed),
         },
         "capabilities": caps,
         "f1_workbench_url": reverse("f1_eval_workbench"),
+        "evaluation_report_list_url": reverse("evaluation_report_list"),
+        "evaluation_report_create_url": reverse("evaluation_report_create"),
     }
 

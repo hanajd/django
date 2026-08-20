@@ -88,6 +88,11 @@ class Role(models.Model):
         verbose_name=_('评价报告表'),
         help_text=_('使用侧栏「评价报告表」制作预评价报告（独立工作区，不写业务库）'),
     )
+    perm_evaluation_report = models.BooleanField(
+        default=False,
+        verbose_name=_('评价报告书'),
+        help_text=_('使用侧栏「评价报告书」制作预评价/控制效果评价报告书（LaTeX）'),
+    )
     created_at = models.DateTimeField(
         auto_now_add=True,
         verbose_name=_('创建时间')
@@ -324,6 +329,7 @@ class LibraryFile(models.Model):
     CATEGORY_REPORT = 'report'
     CATEGORY_ATTACHMENT = 'attachment'
     CATEGORY_INSPECTION_SUBMIT = 'inspection_submit'
+    CATEGORY_EVALUATION_FORM = 'evaluation_form'
     CATEGORY_CHOICES = (
         (CATEGORY_UPLOAD, _('OCR文件')),
         (CATEGORY_JSON, _('JSON 文件')),
@@ -332,6 +338,7 @@ class LibraryFile(models.Model):
         (CATEGORY_REPORT, _('报告')),
         (CATEGORY_ATTACHMENT, _('附件')),
         (CATEGORY_INSPECTION_SUBMIT, _('检测提交')),
+        (CATEGORY_EVALUATION_FORM, _('评价信息表')),
         (CATEGORY_TEMP, _('临时文件')),
     )
 
@@ -339,6 +346,7 @@ class LibraryFile(models.Model):
     LINK_ENTITY_INSPECTION_CASE = 'inspection_case'
     LINK_ENTITY_SITE_RECORD = 'site_record'
     LINK_ENTITY_REPORT = 'report'
+    LINK_ENTITY_EVALUATION_REPORT = 'evaluation_report'
 
     original_name = models.CharField(max_length=255, verbose_name=_('原始文件名'))
     relative_path = models.CharField(max_length=512, verbose_name=_('库内相对路径'))

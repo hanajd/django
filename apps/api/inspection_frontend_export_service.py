@@ -191,6 +191,7 @@ def build_runtime_frontend_for_inspection_export(
     project_public_id = _InspectionTaskAccessMixin._project_public_id(project)
 
     submission = None
+    has_saved_submit = False
     if task_obj.output_target == LibraryTask.OUTPUT_SITE_RECORD:
         scoped_payload, submission = resolve_submit_payload_for_site_export(
             case,
@@ -202,6 +203,7 @@ def build_runtime_frontend_for_inspection_export(
             payload = dict(scoped_payload)
             payload["taskNo"] = api_task_no
             payload["projectId"] = payload.get("projectId") or project_public_id
+            has_saved_submit = True
         else:
             payload = _empty_submit_payload(
                 submission_task_no=api_task_no,
@@ -220,8 +222,14 @@ def build_runtime_frontend_for_inspection_export(
             project_public_id=project_public_id,
             now_iso=now_iso,
         )
+        has_saved_submit = submission is not None
 
-    payload = merge_task_template_bound_instruments_into_payload(payload, task_obj, project_obj=project)
+    payload = merge_task_template_bound_instruments_into_payload(
+        payload,
+        task_obj,
+        project_obj=project,
+        prefill_from_dispatch=not has_saved_submit,
+    )
     prefill_hi = build_site_hospital_info_prefill(case)
     hi_block = payload.get("hospitalInfo") if isinstance(payload.get("hospitalInfo"), dict) else {}
     payload["hospitalInfo"] = merge_hospital_info_prefill(hi_block, prefill_hi)
@@ -312,4 +320,5 @@ def build_runtime_frontend_for_inspection_export(
         inspected_display_no=display_inspected_no_for_fill(case, project, api_task_no),
         task_obj=task_obj,
         project_obj=project,
+        prefill_instruments_from_dispatch=not has_saved_submit,
     )

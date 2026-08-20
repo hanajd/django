@@ -74,6 +74,40 @@
         });
     </script>
     {% block extra_head %}{% endblock %}
+    <style>
+      /* 评价报告全屏编辑器：隐藏主区顶栏「仪表盘」，去掉内容区内边距，避免 100vh 被顶栏裁切 */
+      body:has(#se-app) #admin-page-header,
+      body:has(#fe-app) #admin-page-header,
+      body:has(#te-app) #admin-page-header,
+      body:has(#fl-app) #admin-page-header {
+        display: none !important;
+      }
+      body:has(#se-app) main,
+      body:has(#fe-app) main,
+      body:has(#te-app) main,
+      body:has(#fl-app) main {
+        overflow: hidden !important;
+      }
+      body:has(#se-app) #admin-page-body,
+      body:has(#fe-app) #admin-page-body,
+      body:has(#te-app) #admin-page-body,
+      body:has(#fl-app) #admin-page-body {
+        padding: 0 !important;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+      }
+      body:has(#se-app) #se-app,
+      body:has(#fe-app) #fe-app,
+      body:has(#te-app) #te-app,
+      body:has(#fl-app) #fl-app {
+        height: 100% !important;
+        max-height: 100%;
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+    </style>
     {% if user.is_authenticated and usage_site_tour_manifest %}
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/driver.js@1.3.1/dist/driver.css" crossorigin="anonymous">
     {% include "core/guide/partials/tour_driver_theme.html" %}
@@ -174,13 +208,27 @@
                         <span>评价报告表</span>
                     </a>
                     {% endif %}
+                    {% if ui_sidebar_show_evaluation_report %}
+                    <a id="sidebar-link-evaluation-report" href="{% url 'evaluation_report_list' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
+                        <i class="ri-book-2-line text-lg"></i>
+                        <span>评价报告书</span>
+                    </a>
+                    {% endif %}
                 </div>
-                {% elif ui_sidebar_show_f1_eval %}
+                {% elif ui_sidebar_show_f1_eval or ui_sidebar_show_evaluation_report %}
                 <div class="px-2 pb-3 mb-2 border-b border-slate-700/60 space-y-0.5">
+                    {% if ui_sidebar_show_f1_eval %}
                     <a id="sidebar-link-f1-eval" href="{% url 'f1_eval_workbench' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
                         <i class="ri-file-list-2-line text-lg"></i>
                         <span>评价报告表</span>
                     </a>
+                    {% endif %}
+                    {% if ui_sidebar_show_evaluation_report %}
+                    <a id="sidebar-link-evaluation-report" href="{% url 'evaluation_report_list' %}" class="sidebar-item flex items-center space-x-3 px-4 py-2.5 text-gray-300 hover:text-white rounded-r-lg">
+                        <i class="ri-book-2-line text-lg"></i>
+                        <span>评价报告书</span>
+                    </a>
+                    {% endif %}
                 </div>
                 {% endif %}
                 <div class="px-2 pb-3 mb-2 border-b border-slate-700/60 space-y-0.5">

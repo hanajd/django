@@ -1,10 +1,10 @@
 {
   "enabled": true,
-  "version": "0.1.26",
-  "build_number": 26,
-  "filename": "放射安全检测报告-v0.1.26-build26.apk",
+  "version": "0.1.28",
+  "build_number": 28,
+  "filename": "放射安全检测报告-v0.1.28-build28.apk",
   "file_size": 88351459,
-  "sha256": "68dc32559a9421a0a7fefcaae00437f501e5427e0fb9a0374bbe5d417962ce2a",
-  "release_notes": "优化平面布局图直线组件默认显示空字符串",
+  "sha256": "ca7e0ece8f2eb8ef17cc7991e3222391f70d758e352430f874f9393d12888da4",
+  "release_notes": "feat: 支持旧模板响应均匀性字段通过拟合引擎反算 X 值",
   "force_update": false
 }

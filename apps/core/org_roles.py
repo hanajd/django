@@ -113,6 +113,7 @@ _ORG_STAFF_PERMS: Dict[str, bool] = {
     "perm_create_library_project": False,
     "perm_biz_registry": False,
     "perm_f1_eval": False,
+    "perm_evaluation_report": False,
 }
 
 # 检测部主任：派工 + 业务登记 + 用户管理
@@ -127,9 +128,10 @@ _ORG_DIRECTOR_PERMS: Dict[str, bool] = {
     "perm_create_library_project": False,
     "perm_biz_registry": True,
     "perm_f1_eval": False,
+    "perm_evaluation_report": False,
 }
 
-# 评价部主任：本部门用户 + 评价报告表；医院信息只读；不开检测派工/仪器台账/建项
+# 评价部主任：本部门用户 + 评价报告表/书；医院信息只读；不开检测派工/仪器台账/建项
 _ORG_EVAL_DIRECTOR_PERMS: Dict[str, bool] = {
     **_ORG_STAFF_PERMS,
     "perm_manage_users": True,
@@ -141,12 +143,14 @@ _ORG_EVAL_DIRECTOR_PERMS: Dict[str, bool] = {
     "perm_create_library_project": False,
     "perm_biz_registry": False,
     "perm_f1_eval": True,
+    "perm_evaluation_report": True,
 }
 
-# 评价部员工：低权 + 评价报告表
+# 评价部员工：低权 + 评价报告表/书
 _ORG_EVAL_STAFF_PERMS: Dict[str, bool] = {
     **_ORG_STAFF_PERMS,
     "perm_f1_eval": True,
+    "perm_evaluation_report": True,
 }
 
 _ORG_ADMIN_PERMS: Dict[str, bool] = {
