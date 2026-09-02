@@ -122,6 +122,8 @@ python manage.py runserver 0.0.0.0:11223   # 端口与 settings 习惯一致
 
 评价报告书编译还需本机安装 TeX 发行版（含中文字体与 `latex/` 模板依赖宏包）。
 
+**外部依赖（Ollama / MinerU / TeX）命令级安装与验收**：见 [外部依赖安装-Ollama-MinerU-LaTeX.md](外部依赖安装-Ollama-MinerU-LaTeX.md)。生产整机流程见 [部署流程-从零安装与源码保护评估.md](部署流程-从零安装与源码保护评估.md)。
+
 ---
 
 ## 5. URL 挂载总览

@@ -104,20 +104,24 @@
 - 整除：写法 **`~/`**（勿与范围符 `~` 混淆）。
 - 三元：推荐 `if(条件, 真值, 假值)`（后端将 `if(` 预处理为 `__if__(`）。
 
-### 2.2 范围输出（`a~b`）
+### 2.2 范围 / 连接输出（`a~b`、`a;b`）
 
-用于「输出范围：最小值~最大值」类栏位，**整条公式**可写：
+用于「一个栏位输出两段结果」的公式，**整条公式**可写：
 
 ```text
 min(f1,f2,f3)~max(f1,f2,f3)
 round(min(f1,f2),1)~round(max(f1,f2),1)
+round(avg(f1,f2,f3),2);round(std(f1,f2,f3),2)
 ```
 
 **语义：**
 
-- 在**顶层**（括号外）用 **`~`** 或全角 **`～`** 连接左右两段。
-- 左右**分别求值**，结果格式化为字符串后用 **`~`** 拼接，例如 `1.2~5.6`。
+- 在**顶层**（括号外）用连接符把左右两段拼在一起：
+  - **`~`** 或全角 **`～`**：范围连接，结果形如 `1.2~5.6`
+  - **`;`** 或全角 **`；`**：分号连接，结果形如 `10.26;0.15`
+- 左右**分别求值**，结果格式化为字符串后再用对应连接符拼接。
 - **`~/`** 仍为整除运算符，不会被当作范围分隔符。
+- **`/`** 仍为除法，不能当作连接符。
 
 后端实现：`utils/dynamic_form_expression.py` 中 `_split_top_level_range_token` + `evaluate_expression`。
 
@@ -344,16 +348,18 @@ if(f12>=f13, f4*f5, if(f12<f13, avg(f1,f2,f3), ""))
 | 块 | 说明 |
 |----|------|
 | `meanFormula` | 各行测量均值：`mode: per_row_avg` 时导出前端 JSON 仅在对应均值栏位 `pdfFieldId` 下补 `fieldExpression`（如 `avg(f10,f11,f12)`），不改其它键 |
-| `reportValueRules` | **章节级**报出值公式。根级始终保留完整规则（含 `{mean}`）。**`condition` 非空** → 导出时编译进各行报出值 `fieldExpression`（自动判定）；**`condition` 为空** → 不写入栏位公式，由前端工作人员**人工点选**适用哪条 |
+| `reportValueRules` | **章节级**报出值公式。根级始终保留完整规则（含 `{mean}` / `{mean2}`）。**`condition` 非空** → 导出时编译进各行报出值 `fieldExpression`（自动判定）；**`condition` 为空** → 不写入栏位公式，由前端工作人员**人工点选**适用哪条 |
+| `annualDoseRules` | **章节级**年剂量/估算 mSv 公式。可用 `{report}` / `{report2}`（同行第一/二组报出值），导出时与 `{mean}` 同样替换为行内 `f` 号并写入年剂量栏位 |
 
 **章节公式 vs 单元格公式（勿混用）：**
 
 | 编辑入口 | 写入位置 | 作用范围 |
 |----------|----------|----------|
-| 「第五章章节公式」按钮 | `radiationProtectionChapter.reportValueRules` | 全表各行报出值**默认**公式 |
+| 「第五章章节公式」→ 报出值 | `radiationProtectionChapter.reportValueRules` | 全表各行报出值**默认**公式 |
+| 「第五章章节公式」→ 估算 mSv | `radiationProtectionChapter.annualDoseRules` | 全表各行年剂量列（`{report}`→同行报出值） |
 | 某一栏「公式/判定」按钮 | 该栏 `formulaRules` / `fieldExpression` | **仅该单元格**（如「本底水平」报出值） |
 
-导出时：若某栏位**已有**单元格级公式（`fieldExpression` / `formula` / `formulaRules` / `source.pdfFieldExpression` 等），则**不再**套用章节公式覆盖该栏（均值列与报出值列均适用）。
+导出时：若某栏位**已有**单元格级公式（`fieldExpression` / `formula` / `formulaRules` / `source.pdfFieldExpression` 等），则**不再**套用章节公式覆盖该栏（均值列、报出值列与年剂量列均适用）。
 
 **运行态导出 JSON 存放位置（Flutter 必读）：**
 
@@ -362,7 +368,7 @@ if(f12>=f13, f4*f5, if(f12<f13, avg(f1,f2,f3), ""))
 | 编辑器落盘模板（`unified_form_template/v2`） | `formSchema.radiationProtectionChapter` |
 | 现场运行态导出（`frontend_form_schema/v1`） | **根级** `radiationProtectionChapter`（`formSchema` 会被剥离） |
 
-导出前端 JSON 时（**兜底**，在 ``finalize_runtime_frontend_export`` 收尾执行）：从 `pdf.fields` 反推绑定，为均值栏位补 `avg(f*,f*,f*)`；根级 **原样保留** 模板中的 `reportValueRules`（含 `{mean}`、`formula`/`expression` 双字段，供编辑器维护）。`fieldBindings` **不导出**；各报出值栏位写入编译后的条件公式（见下表）。
+导出前端 JSON 时（**兜底**，在 ``finalize_runtime_frontend_export`` 收尾执行）：从 `pdf.fields` 反推绑定，为均值栏位补 `avg(f*,f*,f*)`；根级 **原样保留** 模板中的 `reportValueRules` / `annualDoseRules`（含 `{mean}` / `{report}` 等占位，供编辑器维护）。`fieldBindings` **不导出**；各报出值与年剂量栏位写入编译后的条件公式（见下表）。
 
 **报出值：`condition` 决定自动还是人工（核心语义，勿改）：**
 
@@ -471,7 +477,7 @@ if(f12>=f13, f4*f5, if(f12<f13, avg(f1,f2,f3), ""))
    - 命中则用对应 `expression`；
    - 存在空 `condition` 的多条备选 → UI 让人工选一条再算；
    - 仅一条且无 `condition` → 直接算 `expression`。
-3. **表达式求值**：与 `dynamic_form_expression.evaluate_expression` 行为对齐（含 `a~b` 范围、`if()`、统计函数）。
+3. **表达式求值**：与 `dynamic_form_expression.evaluate_expression` 行为对齐（含 `a~b` 范围、`a;b` 连接、`if()`、统计函数）。
 4. **判定**：标准串中替换 `fNN` → 调 `verdict_from_measurement` 等价逻辑 → 合格/不合格/待判定。
 
 ### 7.3 与报告的关系
@@ -488,7 +494,7 @@ if(f12>=f13, f4*f5, if(f12<f13, avg(f1,f2,f3), ""))
 |------|------|
 | 单行公式 | `fieldExpression`，只存等号右边 |
 | 条件公式列表 | 增删规则项：`label` + `condition` + `expression`；可选兜底公式 |
-| 范围 | 工具栏可插入 `~`；示例 `min(f1,f2)~max(f1,f2)` |
+| 范围 / 连接 | 工具栏可插入 `~`、`;`；示例 `min(f1,f2)~max(f1,f2)`、`round(f1,2);round(f2,2)` |
 | 判定 | 验收/状态各一行；可插入 `且` `或` `( )` |
 | 防护第五章 | 「第五章章节公式」弹窗：第 1 节说明测量均值自动 `avg`（不列逐行公式）；第 2 节编辑 `reportValueRules`（报出值） |
 | PDF 选栏位 | 点击 PDF 插入 `f` 号 |
@@ -510,7 +516,7 @@ if(f12>=f13, f4*f5, if(f12<f13, avg(f1,f2,f3), ""))
 | 变更类型 | 需同步 |
 |----------|--------|
 | 新判定句式 | `utils/verdict_from_criterion.py` + 本文 §4 |
-| 新公式函数 / `~` 范围 | `utils/dynamic_form_expression.py` + 本文 §2 |
+| 新公式函数 / `~` 范围 / `;` 连接 | `utils/dynamic_form_expression.py` + 本文 §2 |
 | 条件公式 JSON 形态 | `utils/conditional_field_rules.py` + 本文 §3 |
 | 防护章节 | `radiation_detection_report/chapter5_field_sync.py` + 本文 §5 |
 | 编辑器 UX | `htmlpdf/templates/index.html` + 本文 §8 |

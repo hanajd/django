@@ -1,77 +1,137 @@
 {% extends 'base.html' %}
 
+{% block title %}登录 | 放射卫生检测与评价报告{% endblock %}
+
 {% block login_content %}
-<div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
-    <div class="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md">
-        <div class="text-center mb-8">
-            <div class="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <i class="ri-dashboard-line text-3xl text-white"></i>
+<div class="min-h-screen flex flex-col lg:flex-row">
+    <div class="hidden lg:flex lg:w-1/2 min-h-screen bg-gradient-to-br from-slate-900 to-indigo-800 relative items-center justify-center p-12 overflow-hidden">
+        <div class="absolute top-20 left-20 w-64 h-64 bg-white rounded-full opacity-10"></div>
+        <div class="absolute bottom-20 right-20 w-64 h-64 bg-indigo-400 rounded-full opacity-10"></div>
+        <div class="relative z-10 max-w-md text-white">
+            <div class="w-20 h-20 bg-blue-600 rounded-2xl flex items-center justify-center mb-8">
+                <i class="ri-dashboard-line text-5xl"></i>
             </div>
-            <h1 class="text-2xl font-bold text-gray-800">平板 App 后台管理系统</h1>
-            <p class="text-gray-500 mt-2">请登录您的账户</p>
+            <h2 class="text-4xl font-bold mb-4">放射卫生检测与评价报告</h2>
+            <p class="text-lg text-slate-300">专业、准确、可追溯的放射卫生管理平台</p>
         </div>
-        
-        <form method="post">
-            {% csrf_token %}
-            
-            {% if request.GET.reason == 'web_elsewhere' %}
-            <div class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                此账号已在其它浏览器登录后台，当前会话已关闭。若您仍在使用原浏览器，请忽略；若非本人操作，请及时修改密码。
+    </div>
+
+    <div class="w-full lg:w-1/2 min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6 lg:p-12">
+        <div class="lg:hidden mb-8 text-center">
+            <div class="w-14 h-14 bg-indigo-600 rounded-xl flex items-center justify-center mx-auto mb-3">
+                <i class="ri-dashboard-line text-2xl text-white"></i>
+            </div>
+            <h1 class="text-xl font-bold text-slate-800">放射卫生检测与评价报告</h1>
+        </div>
+
+        <div class="w-full max-w-md bg-white p-8 rounded-2xl shadow-xl border border-slate-100">
+            <div class="mb-8 text-center">
+                <h2 class="text-2xl font-bold text-slate-800">欢迎回来</h2>
+                <p class="text-slate-500 mt-2">请登录您的账户</p>
+            </div>
+
+            <form method="post" id="login-form">
+                {% csrf_token %}
+
+                {% if request.GET.reason == 'web_elsewhere' %}
+                <div class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    此账号已在其它浏览器登录后台，当前会话已关闭。若您仍在使用原浏览器，请忽略；若非本人操作，请及时修改密码。
+                </div>
+                {% endif %}
+
+                <div class="mb-5">
+                    <label for="username" class="block text-slate-700 text-sm font-medium mb-2">用户名</label>
+                    <div class="relative">
+                        <i class="ri-user-line absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400"></i>
+                        <input
+                            type="text"
+                            name="username"
+                            id="username"
+                            placeholder="请输入用户名"
+                            value="{{ request.POST.username|default_if_none:'' }}"
+                            class="w-full pl-10 pr-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                            required
+                        >
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <label for="password" class="block text-slate-700 text-sm font-medium mb-2">密码</label>
+                    <div class="relative">
+                        <i class="ri-lock-line absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400"></i>
+                        <input
+                            type="password"
+                            name="password"
+                            id="password"
+                            placeholder="请输入密码"
+                            class="w-full pl-10 pr-10 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                            required
+                        >
+                        <button
+                            type="button"
+                            id="toggle-password"
+                            class="absolute right-3 top-1/2 transform -translate-y-1/2 w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-600 focus:outline-none"
+                            aria-label="切换密码可见性"
+                        >
+                            <i id="toggle-password-icon" class="ri-eye-line"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <button
+                    type="submit"
+                    id="login-submit"
+                    class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-3 px-4 rounded-lg hover:from-blue-700 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all font-medium shadow-md cursor-pointer disabled:cursor-not-allowed"
+                >
+                    <span id="submit-text">登录</span>
+                </button>
+            </form>
+
+            {% if messages %}
+            <div class="mt-6 space-y-3" role="alert">
+                {% for message in messages %}
+                <div class="px-4 py-3 rounded-lg bg-red-50 text-red-700 border border-red-200 flex items-start space-x-2">
+                    <i class="ri-error-warning-line shrink-0"></i>
+                    <span>{{ message }}</span>
+                </div>
+                {% endfor %}
             </div>
             {% endif %}
-            
-            <div class="mb-6">
-                <label for="username" class="block text-gray-700 text-sm font-medium mb-2">用户名</label>
-                <div class="relative">
-                    <i class="ri-user-line absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
-                    <input 
-                        type="text" 
-                        name="username" 
-                        id="username" 
-                        placeholder="请输入用户名"
-                        class="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                        required
-                    >
-                </div>
-            </div>
-            
-            <div class="mb-6">
-                <label for="password" class="block text-gray-700 text-sm font-medium mb-2">密码</label>
-                <div class="relative">
-                    <i class="ri-lock-line absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
-                    <input 
-                        type="password" 
-                        name="password" 
-                        id="password" 
-                        placeholder="请输入密码"
-                        class="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                        required
-                    >
-                </div>
-            </div>
-            
-            <button 
-                type="submit" 
-                class="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all font-medium"
-            >
-                登录
-            </button>
-        </form>
-        
-        {% if messages %}
-        <div class="mt-6">
-            {% for message in messages %}
-            <div class="px-4 py-3 rounded-lg bg-red-50 text-red-700 border border-red-200 flex items-center space-x-2">
-                <i class="ri-error-warning-line"></i>
-                <span>{{ message }}</span>
-            </div>
-            {% endfor %}
         </div>
-        {% endif %}
-        
-        <div class="mt-6 text-center text-sm text-gray-500">
-            <p> 2024 平板 App 后台管理系统</p>
+
+        <div class="mt-8 text-center text-sm text-slate-400">
+            <p>&copy; 2026 放射卫生检测与评价报告</p>
         </div>
     </div>
 </div>
+
+<script>
+(function() {
+    const passwordInput = document.getElementById('password');
+    const toggleBtn = document.getElementById('toggle-password');
+    const toggleIcon = document.getElementById('toggle-password-icon');
+    const loginForm = document.getElementById('login-form');
+    const submitBtn = document.getElementById('login-submit');
+    const submitText = document.getElementById('submit-text');
+
+    if (toggleBtn && passwordInput && toggleIcon) {
+        toggleBtn.addEventListener('click', function() {
+            if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                toggleIcon.className = 'ri-eye-off-line';
+            } else {
+                passwordInput.type = 'password';
+                toggleIcon.className = 'ri-eye-line';
+            }
+        });
+    }
+
+    if (loginForm && submitBtn && submitText) {
+        loginForm.addEventListener('submit', function() {
+            submitBtn.disabled = true;
+            submitText.innerHTML = '<i class="ri-loader-4-line animate-spin mr-2"></i>登录中...';
+        });
+    }
+})();
+</script>
 {% endblock %}

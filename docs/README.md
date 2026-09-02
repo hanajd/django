@@ -2,7 +2,7 @@
 
 本目录是 **Tablet 检测后台 / REST API / 评价业务** 的维护文档。目标：新人按本文阅读顺序走完后，能独立定位代码、改业务、排障与部署。
 
-**以代码与迁移为准**；文档描述当前仓库结构（整理日期：2026-08-20）。大改后请同步更新本索引与 [07-features-catalog.md](07-features-catalog.md)。
+**以代码与迁移为准**；文档描述当前仓库结构（整理日期：2026-08-21）。大改后请同步更新本索引与 [07-features-catalog.md](07-features-catalog.md)。
 
 ---
 
@@ -29,18 +29,30 @@
 
 ## 1. 建议阅读路径（掌握全项目）
 
-### 路径 A：新同事（约 1～2 天）
+### 路径 A：新同事（约 2～3 天，求「完全掌握」）
 
 1. **本文**（索引与边界）  
 2. [00-overview.md](00-overview.md) — 目录地图、技术栈、如何跑起来  
 3. [07-features-catalog.md](07-features-catalog.md) — **功能总览**（先建立全局菜单）  
-4. [01-configuration.md](01-configuration.md) — settings / 媒体路径 / 环境变量  
-5. [04-domain-models-and-services.md](04-domain-models-and-services.md) — 核心模型  
-6. 按职责二选一深入：  
+4. [01-configuration.md](01-configuration.md) — settings / 媒体路径 / **环境变量全表**  
+5. [外部依赖安装-Ollama-MinerU-LaTeX.md](外部依赖安装-Ollama-MinerU-LaTeX.md) — **Ollama / MinerU / TeX 安装与验收**（装机必读）  
+6. [04-domain-models-and-services.md](04-domain-models-and-services.md) — 核心模型  
+7. 按职责深入：  
    - Web → [02-web-ui-core.md](02-web-ui-core.md)  
    - API → [03-rest-api.md](03-rest-api.md)  
-7. [05-utils-and-pipelines.md](05-utils-and-pipelines.md) + [06-scripts-and-admin.md](06-scripts-and-admin.md)  
-8. 业务专题（按下表「主路径」各读一篇）
+8. [05-utils-and-pipelines.md](05-utils-and-pipelines.md) + [06-scripts-and-admin.md](06-scripts-and-admin.md)  
+9. 业务专题（按下表「主路径」各读一篇）  
+10. 部署演练：[打包与新设备安装说明.md](打包与新设备安装说明.md) + [部署流程-从零安装与源码保护评估.md](部署流程-从零安装与源码保护评估.md)
+
+**掌握自检（读完应能独立回答）：**
+
+- [ ] 三条「报告」分别是什么入口、权限、产物目录？  
+- [ ] 现场提交如何变成检测 PDF？（`inspection_report_make` 链路）  
+- [ ] 公式 `a~b` 与 `a;b` 各表示什么？`/` 为什么不能当连接符？  
+- [ ] 不装 Ollama/MinerU/TeX 时，哪些仍可用、哪些失败？失败表现是什么？  
+- [ ] 如何从零装齐 Ollama、确认 `mineru`、安装 TeX 并编译评价报告书？  
+- [ ] 整机搬迁要拷哪些目录（db、media、两套 fonts、`.ollama`、模型缓存）？  
+- [ ] 生产必须改哪些环境变量（`SECRET_KEY`、`DEBUG`、`ALLOWED_HOSTS`）？
 
 ### 路径 B：按业务域（改功能时）
 
@@ -55,6 +67,7 @@
 | 医院 / 产品 | [医院信息-产品管理说明.md](医院信息-产品管理说明.md) |
 | App OTA | [ANDROID_OTA_UPDATE_SPEC.md](ANDROID_OTA_UPDATE_SPEC.md)、[APK_PACKAGE_GUIDE.md](APK_PACKAGE_GUIDE.md) |
 | 打包 / 新设备安装 | [打包与新设备安装说明.md](打包与新设备安装说明.md)（全量：db+media+依赖） |
+| Ollama / MinerU / LaTeX | [外部依赖安装-Ollama-MinerU-LaTeX.md](外部依赖安装-Ollama-MinerU-LaTeX.md) |
 | 生产部署与加固 | [部署流程-从零安装与源码保护评估.md](部署流程-从零安装与源码保护评估.md) |
 | 演示账号 | [组织主任账号说明.md](组织主任账号说明.md) |
 
@@ -74,10 +87,11 @@
 | [02-web-ui-core.md](02-web-ui-core.md) | Web 路由与功能域（含 hub / F.1 / 评价报告书） |
 | [03-rest-api.md](03-rest-api.md) | `/api/v1`·`v2`、检测接口、OTA |
 | [04-domain-models-and-services.md](04-domain-models-and-services.md) | 模型与 `apps/core`·`evaluation_report` 服务 |
-| [05-utils-and-pipelines.md](05-utils-and-pipelines.md) | `utils/`、MinerU/Ollama、PDF 工具 |
+| [05-utils-and-pipelines.md](05-utils-and-pipelines.md) | `utils/`、管线目录与失败语义 |
 | [06-scripts-and-admin.md](06-scripts-and-admin.md) | `manage.py` 命令、Admin、运维清单 |
 | [07-features-catalog.md](07-features-catalog.md) | **功能总览**（用户可见能力 + 端点索引） |
-| [评价报告书-LaTeX功能说明.md](评价报告书-LaTeX功能说明.md) | 评价报告书全流程 |
+| [外部依赖安装-Ollama-MinerU-LaTeX.md](外部依赖安装-Ollama-MinerU-LaTeX.md) | **Ollama / MinerU / TeX 安装、验收、排障** |
+| [评价报告书-LaTeX功能说明.md](评价报告书-LaTeX功能说明.md) | 评价报告书业务全流程 |
 | [评价报告表-F1功能说明.md](评价报告表-F1功能说明.md) | F.1 工作台与生成包 |
 | [打包与新设备安装说明.md](打包与新设备安装说明.md) | **全量迁移**：代码 + db + media + 依赖环境 |
 | [部署流程-从零安装与源码保护评估.md](部署流程-从零安装与源码保护评估.md) | 生产 systemd/Nginx、验收、源码保护 |

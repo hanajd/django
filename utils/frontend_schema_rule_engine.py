@@ -2291,8 +2291,10 @@ def _compact_single_form_field(
             out.pop("displayFormat", None)
             out["formula"] = ""
             out["fieldExpression"] = ""
-        elif not str(out.get("displayFormat") or "").strip():
-            out["displayFormat"] = "latex"
+        else:
+            from utils.pdf_field_formulas import apply_fit_equation_display_format
+
+            apply_fit_equation_display_format(out)
         out.pop("fitConfigRef", None)
 
     try:
@@ -4868,7 +4870,7 @@ def _apply_conditional_field_rules_globally(payload: Dict[str, Any]) -> Dict[str
 
 def _apply_radiation_protection_chapter_formulas(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    规则引擎阶段仅保留轻量均值兜底；完整章节公式（含 reportValueRules 编译、pdf.fields 绑定）
+    规则引擎阶段仅保留轻量均值兜底；完整章节公式（含 reportValueRules / annualDoseRules 编译、pdf.fields 绑定）
     在 ``finalize_runtime_frontend_export`` 中执行（此时 pdf.fields 可用且不会覆盖根级章节配置）。
     """
     if not isinstance(payload, dict):
@@ -5373,11 +5375,12 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
                 field_obj["fieldExpression"] = ""
                 field_obj["defaultValue"] = None
             else:
-                dfmt = str(item.get("displayFormat") or field_obj.get("displayFormat") or "latex").strip()
-                field_obj["displayFormat"] = dfmt or "latex"
-                # 拟合由 fitBinding + formulaRules 中的 fit(y=...) 驱动
+                from utils.pdf_field_formulas import apply_fit_equation_display_format
+
+                # 拟合由 fitBinding + formulaRules 中的 fit(y=...) 驱动；仅主格保留 latex
                 if not str(field_obj.get("formula") or "").strip():
                     field_obj["formula"] = "fit(y=a*x+b)"
+                apply_fit_equation_display_format(field_obj)
             field_obj["dependsOn"] = list(field_obj.get("dependsOn") or [])
         # 条件公式 / 单条公式：覆盖 testResult→number，强制 type=computed
         elif (isinstance(rules, list) and rules) or str(

@@ -47,23 +47,18 @@ def extract_tex_from_submit(value: Any) -> str:
 
 
 def looks_like_mathjax_equation(value: Any, field: Optional[Mapping[str, Any]] = None) -> bool:
-    """True when content should be MathJax-stamped instead of plain text."""
-    if isinstance(field, Mapping):
-        disp = str(field.get("displayFormat") or "").strip().lower()
-        if not disp:
-            src = field.get("source")
-            if isinstance(src, Mapping):
-                disp = str(src.get("displayFormat") or "").strip().lower()
-        if disp == "latex":
-            return bool(extract_tex_from_submit(value) or str(value or "").strip())
+    """True when content should be MathJax-stamped instead of plain text.
+
+    仅当提交值为整段 ``$$...$$``（拟合主格方程）时走公式图叠印。
+    不再根据模板 ``displayFormat: latex`` 或裸 TeX 命令触发——否则 R² / 普通数值
+    也会被当成公式图放大贴进格子。
+    ``field`` 保留以兼容调用方，当前不参与判定。
+    """
+    _ = field
     s = str(value or "").strip()
-    if not s:
+    if not s or len(s) < 4:
         return False
-    if s.startswith("$$") and s.endswith("$$") and len(s) >= 4:
-        return True
-    if "\\ln" in s or "\\rm" in s or "\\mathrm" in s or "^{" in s:
-        return True
-    return False
+    return s.startswith("$$") and s.endswith("$$")
 
 
 def _rgb_tuple_to_hex(color: Sequence[float] | None) -> str:

@@ -99,8 +99,14 @@ def _format_range_part(val: Any) -> str:
     return str(val).strip()
 
 
-def _split_top_level_range_token(expr: str) -> Optional[Tuple[str, str]]:
-    """顶层 a~b：输出范围字符串，左右各自求值后用 ~ 连接（非 ~/ 整除）。"""
+def _split_top_level_range_token(expr: str) -> Optional[Tuple[str, str, str]]:
+    """顶层连接：a~b / a;b。
+
+    - ``~`` / ``～``：范围连接（非 ``~/`` 整除），输出用 ``~``
+    - ``;`` / ``；``：分号连接，输出用 ``;``
+
+    返回 ``(left, right, join)``；左右各自求值后再用 ``join`` 拼接。
+    """
     s = str(expr or "").strip()
     if not s:
         return None
@@ -127,12 +133,20 @@ def _split_top_level_range_token(expr: str) -> Optional[Tuple[str, str]]:
         if ch == ")":
             depth = max(0, depth - 1)
             continue
-        if depth == 0 and ch in ("~", "～") and (i + 1 >= len(s) or s[i + 1] != "/"):
-            left = s[:i].strip()
-            right = s[i + 1 :].strip()
-            if left and right:
-                return left, right
-            return None
+        if depth != 0:
+            continue
+        join: Optional[str] = None
+        if ch in ("~", "～") and (i + 1 >= len(s) or s[i + 1] != "/"):
+            join = "~"
+        elif ch in (";", "；"):
+            join = ";"
+        if join is None:
+            continue
+        left = s[:i].strip()
+        right = s[i + 1 :].strip()
+        if left and right:
+            return left, right, join
+        return None
     return None
 
 
@@ -603,8 +617,9 @@ def evaluate_expression(
 ) -> Any:
     range_parts = _split_top_level_range_token(expr)
     if range_parts:
-        left_py = _frontend_expr_to_python(range_parts[0])
-        right_py = _frontend_expr_to_python(range_parts[1])
+        left_expr, right_expr, join = range_parts
+        left_py = _frontend_expr_to_python(left_expr)
+        right_py = _frontend_expr_to_python(right_expr)
         left_val = _evaluate_python_expr(
             left_py,
             value_mapping,
@@ -625,7 +640,7 @@ def evaluate_expression(
         right_txt = _format_range_part(right_val)
         if not left_txt and not right_txt:
             return ""
-        return f"{left_txt}~{right_txt}"
+        return f"{left_txt}{join}{right_txt}"
 
     py = _frontend_expr_to_python(expr)
     if not py:

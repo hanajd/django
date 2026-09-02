@@ -914,7 +914,7 @@ def accumulate_inspection_payloads_ordered_merge(ordered_payloads: Sequence[dict
     - **dynamicData**：同键不得后勾覆盖先勾（不同模板下 f1、f2… 语义不同，覆盖会整表串位）；后份仅追加先份没有的键。
     - **reportInfo / hospitalInfo / equipmentInfo**：先份非空优先，后份只补缺，与 taskNo 锚定第一份一致。
     - **testResult**：嵌套 dict 仍按后勾覆盖先勾，便于拼多段检测结果。
-    - **signatures / conclusion / instruments**：后勾覆盖先勾。
+    - **signatures / conclusion**：后勾覆盖先勾；**instruments** 按 scope 与仪器标识合并去重。
     - 其余顶层键仍按深度合并、后勾优先。
     - 合并完成后写回第一份 **taskNo / projectId**，以及 **templateId / templateVersion / reportType / steps**（避免模板身份被最后一份覆盖）。
     """
@@ -1006,6 +1006,49 @@ def _merge_payload_test_result(base_tr, incoming_tr):
     return copy.deepcopy(incoming_tr)
 
 
+def _instrument_payload_merge_key(item: dict) -> tuple[str, str] | None:
+    scope = str(item.get("instrumentScope") or "").strip()
+    if not scope:
+        try:
+            slot = int(item.get("registrySlot") or 0)
+        except (TypeError, ValueError):
+            slot = 0
+        if slot == 1:
+            scope = "qualityControl"
+        elif slot == 2:
+            scope = "radiationProtection"
+    identity = str(
+        item.get("instrumentId")
+        or item.get("id")
+        or item.get("identifier")
+        or item.get("code")
+        or ""
+    ).strip()
+    return (scope, identity) if identity else None
+
+
+def _merge_instrument_payload_lists(base: object, incoming: object) -> list:
+    out: list = []
+    positions: dict[tuple[str, str], int] = {}
+    for raw in list(base) if isinstance(base, list) else []:
+        item = copy.deepcopy(raw)
+        out.append(item)
+        if isinstance(item, dict):
+            key = _instrument_payload_merge_key(item)
+            if key is not None:
+                positions.setdefault(key, len(out) - 1)
+    for raw in list(incoming) if isinstance(incoming, list) else []:
+        item = copy.deepcopy(raw)
+        key = _instrument_payload_merge_key(item) if isinstance(item, dict) else None
+        if key is not None and key in positions and isinstance(out[positions[key]], dict):
+            out[positions[key]] = _deep_merge_payload_dicts(out[positions[key]], item)
+            continue
+        out.append(item)
+        if key is not None:
+            positions[key] = len(out) - 1
+    return out
+
+
 def _merge_inspection_payload_for_report_accumulator(base: dict, incoming: dict) -> dict:
     """
     将后一份检测提交并入已累积的 merged（第一份已整体拷贝在 base 中）。
@@ -1022,7 +1065,7 @@ def _merge_inspection_payload_for_report_accumulator(base: dict, incoming: dict)
             out[blk] = _deep_merge_dicts_fill_missing(cur, incoming[blk])
     if "testResult" in incoming:
         out["testResult"] = _merge_payload_test_result(out.get("testResult"), incoming["testResult"])
-    for blk in ("signatures", "conclusion", "instruments"):
+    for blk in ("signatures", "conclusion"):
         if blk not in incoming:
             continue
         bi = incoming[blk]
@@ -1035,6 +1078,19 @@ def _merge_inspection_payload_for_report_accumulator(base: dict, incoming: dict)
                 out[blk] = copy.deepcopy(bi)
         elif bi not in (None, "") or blk not in out:
             out[blk] = copy.deepcopy(bi)
+    if "instruments" in incoming:
+        instruments = incoming["instruments"]
+        if isinstance(instruments, list):
+            out["instruments"] = _merge_instrument_payload_lists(
+                out.get("instruments"), instruments
+            )
+        elif isinstance(instruments, dict):
+            current = out.get("instruments")
+            out["instruments"] = _deep_merge_payload_dicts(
+                current if isinstance(current, dict) else {}, instruments
+            )
+        elif instruments not in (None, "") or "instruments" not in out:
+            out["instruments"] = copy.deepcopy(instruments)
     skip = {
         "dynamicData",
         "reportInfo",

@@ -66,16 +66,17 @@
 > `label` 里的中文（如「出束时间≥…」）**不等于** `condition`。  
 > 若 `condition` 为空，前端不会做自动条件判断，只会在「多条空 condition」时弹出选择。
 
-### 2.2 `{mean}` / `{mean2}` / `{report}`
+### 2.2 `{mean}` / `{mean2}` / `{report}` / `{report2}`
 
 | 阶段 | 形态 |
 |------|------|
-| 章节配置 `radiationProtectionChapter.reportValueRules` | 可保留占位符 `{mean}`、`{mean2}`、`{report}`、`{report2}` |
-| 编辑器点「完成」写入各行报出值（仅内存） | 换成该行均值/报出值 `pdfFieldId`（如 `f223`） |
-| 导出给 Flutter 的栏位 `formulaRules[].expression` | **不应再含** `{mean}`；应为行内 `f` 号 |
+| 章节配置 `reportValueRules` | 可保留 `{mean}`、`{mean2}`（报出值相对测量均值） |
+| 章节配置 `annualDoseRules` | 可保留 `{report}`、`{report2}`（年剂量相对同行报出值） |
+| 编辑器点「完成」写入各行（仅内存） | 换成该行均值/报出值 `pdfFieldId`（如 `f223`） |
+| 导出给 Flutter 的栏位 `formulaRules[].expression` / `fieldExpression` | **不应再含**占位符；应为行内 `f` 号 |
 | Flutter 解析 | 仍兼容模板侧占位符（若偶发残留） |
 
-章节「完成」只改编辑器内存；**磁盘 JSON 仅在「保存坐标模板 JSON」时更新**。
+章节「完成」只改编辑器内存；**磁盘 JSON 仅在「保存坐标模板 JSON」时更新**。运行态导出也会把 `annualDoseRules` 中的 `{report}` / `{report2}` 编译进年剂量栏位（与 `{mean}` 进报出值栏位对称）。
 
 ---
 

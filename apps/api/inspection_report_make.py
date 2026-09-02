@@ -1813,13 +1813,9 @@ def _fill_template_fields_with_submit_legacy(
             field["content"] = value_mapping.get(field_key, "")
             continue
         if field_type == "check":
-            raw = value_mapping.get(field_key, False)
-            if isinstance(raw, bool):
-                field["checked"] = raw
-            elif raw in (0, 1):
-                field["checked"] = bool(raw)
-            else:
-                field["checked"] = _coerce_picked_value_for_pdf_checkbox(field, raw)
+            field["checked"] = _checkbox_checked_from_submit_strict(
+                field, source_data, value_mapping
+            )
             continue
         if field_type == "image":
             sig_key = signature_map.get(field_key) if isinstance(signature_map, dict) else None
@@ -2144,6 +2140,13 @@ def _is_report_output_task(task_obj) -> bool:
     return (
         task_obj is not None
         and getattr(task_obj, "output_target", None) == LibraryTask.OUTPUT_REPORT
+    )
+
+
+def _is_site_record_output_task(task_obj) -> bool:
+    return (
+        task_obj is not None
+        and getattr(task_obj, "output_target", None) == LibraryTask.OUTPUT_SITE_RECORD
     )
 
 
@@ -2729,6 +2732,9 @@ def _apply_template_field_sources_to_mapping(
             if pdf_field_id_only is not None
             else _field_use_strict_pdf_field_id_only(f, task_obj)
         )
+        # 勾选框绝不写入语义长键（重复 id 会广播到多个框）；只保留 pdfFieldId。
+        if _field_is_pdf_checkbox(f):
+            field_strict = True
         pid = _field_pdf_id(f)
         if pid:
             coerced_pid = _coerce_iso_datetime_value_for_date_part_key(pid, val)
@@ -2955,26 +2961,16 @@ def _format_protection_numeric_pdf_text(field: dict, picked, *, task_obj=None) -
 def _sanitize_submit_text_for_pdf_stamp(text, field: dict | None = None) -> str:
     """
     规范化提交文本空白/减号。
-    对 MathJax / displayFormat=latex / ``$$...$$``：保留定界符与正文，供 PDF 叠印时渲染公式图；
-    仅做空白与 Unicode 减号规范化，不再剥成纯文本（避免公式碎行乱版）。
+    仅整段 ``$$...$$``（拟合主格）保留定界符供 MathJax 叠印；其它一律当普通文本
+    ``field`` 保留参数兼容调用方；判定只看文本形态。
     """
+    _ = field
     if text is None or isinstance(text, bool):
         return "" if text is None else str(text)
     s = text if isinstance(text, str) else str(text)
     s = s.strip()
     if not s:
         return s
-
-    disp = ""
-    if isinstance(field, dict):
-        disp = str(field.get("displayFormat") or "").strip().lower()
-        src = field.get("source")
-        if not disp and isinstance(src, dict):
-            disp = str(src.get("displayFormat") or "").strip().lower()
-
-    is_math = disp == "latex" or (
-        len(s) >= 4 and s.startswith("$$") and s.endswith("$$")
-    ) or ("\\ln" in s or "\\rm" in s or "\\mathrm" in s)
 
     s = (
         s.replace("\u00a0", " ")
@@ -2985,17 +2981,13 @@ def _sanitize_submit_text_for_pdf_stamp(text, field: dict | None = None) -> str:
         .replace("\u2013", "-")
         .replace("\u2014", "-")
     )
-    if is_math:
-        # 保留 $$…$$；内部压成单行便于 MathJax
-        if len(s) >= 4 and s.startswith("$$") and s.endswith("$$"):
-            inner = re.sub(r"[ \t\n\r]+", " ", s[2:-2].strip())
-            return f"$${inner}$$"
-        return re.sub(r"[ \t\n\r]+", " ", s).strip()
-
-    # 非公式：历史兼容，剥掉误带的 $$ 以免纯文本叠印碎行
+    # 拟合主格：保留 $$…$$；内部压成单行便于 MathJax
     if len(s) >= 4 and s.startswith("$$") and s.endswith("$$"):
-        s = s[2:-2].strip()
-    elif len(s) >= 2 and s.startswith("$") and s.endswith("$") and s.count("$") == 2:
+        inner = re.sub(r"[ \t\n\r]+", " ", s[2:-2].strip())
+        return f"$${inner}$$"
+
+    # 非公式：剥掉误带的 $ / $$，按普通文字叠印
+    if len(s) >= 2 and s.startswith("$") and s.endswith("$") and s.count("$") == 2:
         s = s[1:-1].strip()
     s = re.sub(r"[ \t]+", " ", s).strip()
     return s
@@ -5643,6 +5635,107 @@ def _truthy_checkbox_value(v) -> bool:
         return False
     s = str(v).strip().lower()
     return s in {"true", "yes", "on", "是"}
+
+
+_SUBMIT_CHECKBOX_BUCKETS = (
+    "dynamicData",
+    "hospitalInfo",
+    "testResult",
+    "equipmentInfo",
+    "reportInfo",
+    "conclusion",
+)
+
+
+def _field_is_pdf_checkbox(field: dict | None) -> bool:
+    if not isinstance(field, dict):
+        return False
+    if str(field.get("fieldType") or "").strip().lower() == "check":
+        return True
+    if str(field.get("type") or "").strip().lower() in {"boolean", "bool", "checkbox"}:
+        return True
+    src = field.get("source") if isinstance(field.get("source"), dict) else {}
+    return str(src.get("anchorType") or "").strip().lower() == "check"
+
+
+def _lookup_submit_checkbox_raw(field: dict, source_data: dict):
+    """
+    仅从提交 JSON 取勾选原值（严格）：
+    1) field.source.submitPath / field.submitPath
+    2) pdfFieldId 在 dynamicData / hospitalInfo / testResult / equipmentInfo 等桶及顶层
+    不使用 placeholder、语义 id（如「检测类型_状态检测」）做广播匹配。
+    """
+    if not isinstance(field, dict) or not isinstance(source_data, dict):
+        return None
+    src = field.get("source") if isinstance(field.get("source"), dict) else {}
+    sp = str(src.get("submitPath") or field.get("submitPath") or "").strip()
+    if sp:
+        raw = _nested_get_for_submit_with_rated_fallback(source_data, sp)
+        if raw is False:
+            return False
+        if raw not in (None, "") and not isinstance(raw, (dict, list)):
+            return raw
+    pid = _field_pdf_id(field)
+    if not pid:
+        return None
+    pid_l = pid.lower()
+    for bucket in _SUBMIT_CHECKBOX_BUCKETS:
+        block = source_data.get(bucket)
+        if not isinstance(block, dict):
+            continue
+        if pid in block:
+            raw = block.get(pid)
+        else:
+            raw = None
+            for k, v in block.items():
+                if str(k).strip().lower() == pid_l:
+                    raw = v
+                    break
+        if raw not in (None, "") and not isinstance(raw, (dict, list)):
+            return raw
+        if raw is False:
+            return False
+    if pid in source_data:
+        raw = source_data.get(pid)
+        if raw not in (None, "") and not isinstance(raw, (dict, list)):
+            return raw
+        if raw is False:
+            return False
+    return None
+
+
+def _checkbox_checked_from_submit_strict(
+    field: dict,
+    source_data: dict,
+    value_mapping: dict | None = None,
+) -> bool:
+    """
+    fieldType=check：严格按前端提交 JSON 判定是否勾选。
+    - 只认 submitPath / pdfFieldId（f 号）上的显式真值
+    - 不把 acceptance/status 等枚举、也不把重复语义 id 广播到其它勾选框
+    """
+    raw = _lookup_submit_checkbox_raw(field, source_data)
+    if raw is None and isinstance(value_mapping, dict):
+        pid = _field_pdf_id(field)
+        # 仅允许 value_mapping 中的 f 号键（由 dynamicData / submitPath 写入），禁止语义长键。
+        if pid and re.match(r"^f\d+$", pid, re.I):
+            if pid in value_mapping:
+                raw = value_mapping.get(pid)
+            else:
+                pid_l = pid.lower()
+                for k, v in value_mapping.items():
+                    if str(k).strip().lower() == pid_l:
+                        raw = v
+                        break
+    if raw is None:
+        return False
+    if raw is False:
+        return False
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw in (0, 1):
+        return raw == 1
+    return _truthy_checkbox_value(raw)
 
 
 # 库报告 JS-001 等：典型值/最大值「单位」互斥勾选组由当前模板 radio.pdfFieldIds 提供，不再写死 f 号。
@@ -8721,9 +8814,13 @@ def _fill_template_fields_with_submit_enhanced(
         _sig_template_obj, payload=source_data if isinstance(source_data, dict) else None
     )
     _signature_pdf_ids = set(_sig_pdf_to_role.keys())
-    na_skip_pdf_ids = _collect_na_region_skip_pdf_field_ids(
-        source_data if isinstance(source_data, dict) else None,
-        ordered_submit_payloads,
+    na_skip_pdf_ids = (
+        _collect_na_region_skip_pdf_field_ids(
+            source_data if isinstance(source_data, dict) else None,
+            ordered_submit_payloads,
+        )
+        if _is_site_record_output_task(task_obj)
+        else frozenset()
     )
     value_mapping = _prepare_backfill_value_mapping(
         source_data,
@@ -8848,6 +8945,9 @@ def _fill_template_fields_with_submit_enhanced(
         if _is_report_preserve_original_pdf_field(field, task_obj=task_obj):
             return ""
         ft = (field.get("fieldType") or "text").lower()
+        # 勾选框：严格按提交 JSON 的 pdfFieldId / submitPath，禁止语义广播与枚举猜测。
+        if ft == "check":
+            return _checkbox_checked_from_submit_strict(field, source_data, value_mapping)
         deferred_raw_sp = None
         candidates = _field_semantic_candidate_keys(field)
         joined_for_cond = " ".join([k for k in candidates if k]).replace("（", "(").replace("）", ")")
@@ -9014,6 +9114,23 @@ def _fill_template_fields_with_submit_enhanced(
             composed_rated = _compose_rated_params_display(value_mapping, source_data)
             if composed_rated:
                 return composed_rated
+        if not use_strict:
+            pid_early = _field_pdf_id(field)
+            if pid_early:
+                got_early = _scalar_fillable(
+                    value_mapping.get(pid_early), allow_bool=(ft == "check")
+                )
+                if got_early is not None and not _value_is_field_label_echo(
+                    field, got_early
+                ):
+                    if not _reject_commission_org_enum_as_textfield_value(
+                        field, ft, got_early
+                    ):
+                        if ft == "check" and isinstance(got_early, str):
+                            return _coerce_picked_value_for_pdf_checkbox(
+                                field, got_early
+                            )
+                        return got_early
         for k in candidates:
             if k and k in value_mapping:
                 got = _scalar_fillable(value_mapping.get(k), allow_bool=(ft == "check"))
@@ -9458,8 +9575,8 @@ def _fill_template_fields_with_submit_enhanced(
                 field["content"] = picked or ""
             continue
         if field_type == "check":
-            field["checked"] = _coerce_picked_value_for_pdf_checkbox(
-                field, _pick_value_for_field(field)
+            field["checked"] = _checkbox_checked_from_submit_strict(
+                field, source_data, value_mapping
             )
             continue
         if field_type == "image":
@@ -9483,6 +9600,7 @@ def _fill_template_fields_with_submit_enhanced(
             else:
                 picked_img = _pick_dynamic_image_for_pdf_field(field, source_data)
             field["imageData"] = picked_img
+        continue
     for field in flat_report_fields:
         if not isinstance(field, dict):
             continue
@@ -10526,11 +10644,9 @@ def build_exported_inspection_pdf_original_name(
 ) -> str:
     """
     用户可读导出 PDF 文件名。
-    - 现场记录：规范名 {委托编号}{医院}{设备类型}{检测类型}原始记录.pdf
-    - 报告：仍以任务模板名称为主（并补「报告」后缀）
+    - 现场记录：{委托编号}{医院}{设备类型}{检测类型}原始记录.pdf
+    - 报告：{委托编号}{委托单位}放射诊疗设备（设备简称）{质量控制检测|工作场所放射防护检测|…}.pdf
     """
-    from apps.core.library_file_service import sanitize_library_original_filename_fragment
-
     if output_category == LibraryFile.CATEGORY_SITE_RECORD:
         return build_standardized_site_record_pdf_original_name(
             project,
@@ -10540,6 +10656,17 @@ def build_exported_inspection_pdf_original_name(
             case=case,
         )
 
+    if output_category == LibraryFile.CATEGORY_REPORT:
+        return build_standardized_report_pdf_original_name(
+            project,
+            task_obj,
+            task_no,
+            source_payload=source_payload,
+            case=case,
+        )
+
+    from apps.core.library_file_service import sanitize_library_original_filename_fragment
+
     raw = ""
     if task_obj is not None:
         raw = (getattr(task_obj, "name", "") or "").strip()
@@ -10547,10 +10674,125 @@ def build_exported_inspection_pdf_original_name(
             raw = (getattr(task_obj, "code", "") or "").strip()
     if not raw:
         raw = (task_no or "").strip().replace("/", "_") or "unknown"
-    if output_category == LibraryFile.CATEGORY_REPORT:
-        if "报告" not in raw and not raw.lower().endswith("report"):
-            raw = f"{raw}_报告"
     base = sanitize_library_original_filename_fragment(raw, max_len=200)
+    if base.lower().endswith(".pdf"):
+        return base[:255]
+    return f"{base}.pdf"
+
+
+def build_standardized_report_pdf_original_name(
+    project,
+    task_obj=None,
+    task_no: str = "",
+    *,
+    source_payload: dict | None = None,
+    case=None,
+) -> str:
+    """
+    报告 PDF 规范文件名：
+    {委托编号}{委托单位}放射诊疗设备（{设备简称}）{检测种类}.pdf
+
+    例：
+    - 220999张三医院放射诊疗设备（DR）质量控制检测.pdf
+    - 250954西湖瑞禾口腔门诊部放射诊疗设备（口腔CBCT）工作场所放射防护检测.pdf
+    """
+    from apps.core.library_file_service import sanitize_library_original_filename_fragment
+
+    parts = resolve_site_record_pdf_name_parts(
+        project,
+        task_obj,
+        task_no,
+        source_payload=source_payload,
+        case=case,
+    )
+    commission_no = _sanitize_concat_name_part(parts.get("commission_no") or "", 48)
+
+    org = ""
+    if isinstance(source_payload, dict):
+        try:
+            org = (_resolve_commission_organization_from_submit(source_payload) or "").strip()
+            if org and not _is_plausible_commission_organization_name(org):
+                org = ""
+        except Exception:
+            org = ""
+    if not org and project is not None:
+        org = (getattr(project, "commission_organization", None) or "").strip()
+        if not org:
+            try:
+                corg = getattr(project, "commission_org", None)
+                if corg is not None:
+                    root = corg.hospital_root()
+                    org = (getattr(root, "name", None) or getattr(corg, "name", None) or "").strip()
+            except Exception:
+                org = ""
+    if not org:
+        org = (parts.get("hospital_name") or "").strip()
+    org = _sanitize_concat_name_part(org, 64)
+
+    device_type = (parts.get("device_type") or "").strip()
+    report_template_name = ""
+    if task_obj is not None:
+        report_template_name = (getattr(task_obj, "name", None) or "").strip() or (
+            getattr(task_obj, "code", None) or ""
+        ).strip()
+    title_for_abbr = device_type or report_template_name
+    if isinstance(source_payload, dict):
+        ei = source_payload.get("equipmentInfo")
+        if isinstance(ei, dict):
+            for key in ("deviceType", "device_type", "设备类型", "deviceName", "name", "设备名称"):
+                v = ei.get(key)
+                if isinstance(v, str) and v.strip():
+                    title_for_abbr = title_for_abbr or v.strip()
+                    break
+    ab = (
+        extract_modality_abbr_from_title(title_for_abbr)
+        or device_type
+        or (title_for_abbr or "设备").strip()[:32]
+        or "设备"
+    )
+
+    has_radiation_protection = False
+    try:
+        from radiation_detection_report.report_pdf_integrator import (
+            probe_has_radiation_protection_from_submit,
+        )
+        from radiation_detection_report.report_pdf_postprocess import (
+            report_task_is_qc_performance_overlay,
+            resolve_report_overlay_radiation_protection,
+        )
+
+        if isinstance(source_payload, dict):
+            has_radiation_protection = probe_has_radiation_protection_from_submit(
+                source_payload,
+                project=project,
+                case=case,
+                report_task=task_obj,
+                task_no=task_no,
+            )
+        has_radiation_protection = resolve_report_overlay_radiation_protection(
+            task_obj, has_radiation_protection
+        )
+        qc_task = report_task_is_qc_performance_overlay(task_obj)
+        qc_with_rp = bool(has_radiation_protection) and bool(qc_task)
+    except Exception:
+        has_radiation_protection = False
+        qc_with_rp = False
+
+    cover_line = build_single_report_cover_title_line(
+        ab,
+        has_radiation_protection=has_radiation_protection,
+        qc_with_radiation_protection=qc_with_rp,
+    )
+    cover_line = _sanitize_concat_name_part(cover_line, 96)
+
+    core = f"{commission_no}{org}{cover_line}".strip()
+    if not core:
+        fallback = report_template_name or str(task_no or "报告").strip()
+        core = _sanitize_concat_name_part(fallback, 120) or "报告"
+    max_stem = 180
+    if len(core) > max_stem:
+        core = core[:max_stem]
+    base = sanitize_library_original_filename_fragment(core, max_len=200)
     if base.lower().endswith(".pdf"):
         return base[:255]
     return f"{base}.pdf"
@@ -10886,8 +11128,10 @@ def _persist_filled_pdf_from_submit(
         task_obj = _resolve_library_task_for_task_no(task_no, project)
     _sync_site_record_rp_sequence_before_export(filled_fields, source_payload, task_obj)
     # 不适用划线区：导出前再次清空 affectedPdfFieldIds，避免任何路径残留回填值
-    na_skip_pdf_ids = _collect_na_region_skip_pdf_field_ids(
-        source_payload, ordered_submit_payloads
+    na_skip_pdf_ids = (
+        _collect_na_region_skip_pdf_field_ids(source_payload, ordered_submit_payloads)
+        if _is_site_record_output_task(task_obj)
+        else frozenset()
     )
     if na_skip_pdf_ids:
         flat_clear: list = []
@@ -10949,11 +11193,12 @@ def _persist_filled_pdf_from_submit(
             fill_font_pt=_htmlpdf_fill_font_pt(task_obj),
         )
         # 现场记录：叠印 pdfRenderMarks（如不适用区域左下→右上划线）
-        render_marks = _collect_pdf_render_marks_from_payloads(
-            source_payload, ordered_submit_payloads
-        )
-        if render_marks:
-            pdf_bytes = _apply_pdf_render_marks_to_pdf_bytes(pdf_bytes, render_marks)
+        if _is_site_record_output_task(task_obj):
+            render_marks = _collect_pdf_render_marks_from_payloads(
+                source_payload, ordered_submit_payloads
+            )
+            if render_marks:
+                pdf_bytes = _apply_pdf_render_marks_to_pdf_bytes(pdf_bytes, render_marks)
         variant_pdfs: list[tuple[str, bytes]] = []
         if (
             task_obj is not None

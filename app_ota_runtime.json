@@ -1,10 +1,10 @@
 {
   "enabled": true,
-  "version": "0.1.28",
-  "build_number": 28,
-  "filename": "放射安全检测报告-v0.1.28-build28.apk",
-  "file_size": 88351459,
-  "sha256": "ca7e0ece8f2eb8ef17cc7991e3222391f70d758e352430f874f9393d12888da4",
-  "release_notes": "feat: 支持旧模板响应均匀性字段通过拟合引擎反算 X 值",
+  "version": "0.1.36",
+  "build_number": 36,
+  "filename": "放射安全检测报告-v0.1.36-build36.apk",
+  "file_size": 88482875,
+  "sha256": "706dd8bca0fa670fcede3f463ed449ef0833b9a4c842aa24f5baa4d1a5fcacc5",
+  "release_notes": "fix: 新建文字标记时编辑器默认为空标签",
   "force_update": false
 }

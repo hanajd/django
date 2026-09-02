@@ -155,7 +155,43 @@ def _instrument_items_for_scope(payload: Mapping[str, Any] | dict, scope: str) -
                 if item_scope == want or (want == _SCOPE_QC and not item_scope):
                     flat_scoped.append(it)
     # 优先结构化 bags（rawPayload.instruments.{scope}），否则用扁平列表按 scope 过滤
-    picked = scoped or flat_scoped
+    if not scoped:
+        return [it for it in flat_scoped if it.get("enabled") is not False]
+    flat_by_identity: dict[str, dict] = {}
+    flat_without_identity: list[dict] = []
+    for it in flat_scoped:
+        identity = str(
+            it.get("instrumentId")
+            or it.get("id")
+            or it.get("identifier")
+            or it.get("code")
+            or ""
+        ).strip()
+        if identity:
+            flat_by_identity.setdefault(identity, it)
+        else:
+            flat_without_identity.append(it)
+    picked: list[dict] = []
+    seen: set[str] = set()
+    for it in scoped:
+        identity = str(
+            it.get("instrumentId")
+            or it.get("id")
+            or it.get("identifier")
+            or it.get("code")
+            or ""
+        ).strip()
+        merged = dict(flat_by_identity.get(identity) or {})
+        for key, value in it.items():
+            if value not in (None, "") or key not in merged:
+                merged[key] = value
+        picked.append(merged)
+        if identity:
+            seen.add(identity)
+    for identity, it in flat_by_identity.items():
+        if identity not in seen:
+            picked.append(it)
+    picked.extend(flat_without_identity)
     return [it for it in picked if it.get("enabled") is not False]
 
 

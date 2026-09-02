@@ -5,7 +5,7 @@
 {% block content %}
 <div class="mx-auto max-w-7xl space-y-8">
     <!-- 欢迎区 -->
-    <section class="rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50/80 to-blue-50/40 p-6 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-8">
+    <section class="rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50/80 to-blue-50/40 p-6 shadow-sm sm:p-8">
         <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
                 <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">工作台</p>
@@ -34,7 +34,7 @@
     <section>
         <h2 class="mb-4 text-sm font-semibold uppercase tracking-wider text-slate-500">文件与记录</h2>
         <div class="grid gap-4 sm:grid-cols-2">
-            <a href="{% url 'file_library' %}?tab=ocr" class="group flex items-stretch justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ring-1 ring-slate-900/[0.04] transition hover:border-emerald-200 hover:shadow-md">
+            <a href="{% url 'file_library' %}?tab=ocr" class="group flex items-stretch justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-emerald-200 hover:shadow-md">
                 <div class="min-w-0">
                     <p class="text-sm font-medium text-slate-500">文件库 · 待识别</p>
                     <p class="mt-2 text-3xl font-semibold tabular-nums text-slate-900">{{ library_upload_count }}</p>
@@ -47,7 +47,7 @@
                 </div>
             </a>
             {% if ui_dashboard_site_record_focus %}
-            <a href="{% url 'file_library' %}?tab=site_record" class="group flex items-stretch justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ring-1 ring-slate-900/[0.04] transition hover:border-sky-200 hover:shadow-md">
+            <a href="{% url 'file_library' %}?tab=site_record" class="group flex items-stretch justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-sky-200 hover:shadow-md">
                 <div class="min-w-0">
                     <p class="text-sm font-medium text-slate-500">文件库 · 现场记录</p>
                     <p class="mt-2 text-lg font-semibold text-slate-900">填写、上传与校核</p>
@@ -60,7 +60,7 @@
                 </div>
             </a>
             {% elif not ui_dashboard_hide_json_tile %}
-            <a href="{% url 'file_library' %}?tab=json" class="group flex items-stretch justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ring-1 ring-slate-900/[0.04] transition hover:border-amber-200 hover:shadow-md">
+            <a href="{% url 'file_library' %}?tab=json" class="group flex items-stretch justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-amber-200 hover:shadow-md">
                 <div class="min-w-0">
                     <p class="text-sm font-medium text-slate-500">文件库 · 数据文件</p>
                     <p class="mt-2 text-3xl font-semibold tabular-nums text-slate-900">{{ library_json_count }}</p>
@@ -83,7 +83,7 @@
         <h2 class="mb-4 text-sm font-semibold uppercase tracking-wider text-slate-500">系统概览</h2>
         <div class="grid gap-4 sm:grid-cols-3">
             {% if role_perm.perm_manage_users %}
-            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ring-1 ring-slate-900/[0.04]">
+            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div class="flex items-start justify-between gap-3">
                     <div>
                         <p class="text-sm text-slate-500">用户总数</p>
@@ -97,7 +97,7 @@
             </div>
             {% endif %}
             {% if role_perm.perm_manage_roles %}
-            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ring-1 ring-slate-900/[0.04]">
+            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div class="flex items-start justify-between gap-3">
                     <div>
                         <p class="text-sm text-slate-500">角色数量</p>
@@ -111,7 +111,7 @@
             </div>
             {% endif %}
             {% if role_perm.perm_manage_menus %}
-            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ring-1 ring-slate-900/[0.04]">
+            <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div class="flex items-start justify-between gap-3">
                     <div>
                         <p class="text-sm text-slate-500">菜单数量</p>
@@ -129,7 +129,7 @@
     {% endif %}
 
     <!-- 快捷操作 -->
-    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-8">
+    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
         <div class="mb-6 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
             <div>
                 <h2 class="text-lg font-semibold text-slate-900">快捷操作</h2>
@@ -138,7 +138,7 @@
         </div>
         <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {% if role_perm.perm_file_library %}
-            <a href="{% url 'file_library' %}?tab=ocr" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-emerald-200 hover:bg-emerald-50/50">
+            <a href="{% url 'file_library' %}?tab=ocr" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-white p-4 transition hover:border-emerald-200">
                 <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm">
                     <i class="ri-folder-2-line text-lg"></i>
                 </span>
@@ -149,7 +149,7 @@
             </a>
             {% endif %}
             {% if ui_sidebar_show_project_management %}
-            <a href="{% url 'library_projects' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-violet-200 hover:bg-violet-50/50">
+            <a href="{% url 'library_projects' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-white p-4 transition hover:border-violet-200">
                 <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-white shadow-sm">
                     <i class="ri-layout-grid-line text-lg"></i>
                 </span>
@@ -160,7 +160,7 @@
             </a>
             {% endif %}
             {% if role_perm.perm_process_pipeline and not hide_process_pipeline %}
-            <a href="{% url 'process_pipeline' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-cyan-200 hover:bg-cyan-50/50">
+            <a href="{% url 'process_pipeline' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-white p-4 transition hover:border-cyan-200">
                 <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-cyan-600 text-white shadow-sm">
                     <i class="ri-cpu-line text-lg"></i>
                 </span>
@@ -171,7 +171,7 @@
             </a>
             {% endif %}
             {% if role_perm.perm_htmlpdf or role_perm.perm_process_pipeline %}
-            <a href="{% url 'htmlpdf_editor' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-indigo-200 hover:bg-indigo-50/50">
+            <a href="{% url 'htmlpdf_editor' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-white p-4 transition hover:border-indigo-200">
                 <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm">
                     <i class="ri-file-pdf-2-line text-lg"></i>
                 </span>
@@ -182,7 +182,7 @@
             </a>
             {% endif %}
             {% if show_library_task_nav %}
-            <a href="{% url 'library_task_management' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-rose-200 hover:bg-rose-50/50">
+            <a href="{% url 'library_task_management' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-white p-4 transition hover:border-rose-200">
                 <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-rose-600 text-white shadow-sm">
                     <i class="ri-stack-line text-lg"></i>
                 </span>
@@ -193,7 +193,7 @@
             </a>
             {% elif role_perm.perm_file_library and not ui_sidebar_show_project_management %}
             {# 与侧栏一致：侧栏已展示「项目工作台」时快捷区不再重复 #}
-            <a href="{% url 'library_projects' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-orange-200 hover:bg-orange-50/50">
+            <a href="{% url 'library_projects' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-white p-4 transition hover:border-orange-200">
                 <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-600 text-white shadow-sm">
                     <i class="ri-layout-grid-line text-lg"></i>
                 </span>
@@ -204,7 +204,7 @@
             </a>
             {% endif %}
             {% if can_access_instrument_database %}
-            <a href="{% url 'database_device_list' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-slate-300 hover:bg-white">
+            <a href="{% url 'database_device_list' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-white p-4 transition hover:border-slate-300">
                 <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-700 text-white shadow-sm">
                     <i class="ri-database-2-line text-lg"></i>
                 </span>
@@ -215,7 +215,7 @@
             </a>
             {% endif %}
             {% if ui_sidebar_show_user_management %}
-            <a href="{% url 'user_list' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-blue-200 hover:bg-blue-50/50">
+            <a href="{% url 'user_list' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-white p-4 transition hover:border-blue-200">
                 <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
                     <i class="ri-user-line text-lg"></i>
                 </span>
@@ -226,7 +226,7 @@
             </a>
             {% endif %}
             {% if can_access_instrument_database and not ui_sidebar_show_user_management and role_perm.perm_manage_users %}
-            <a href="{% url 'user_list' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-blue-200 hover:bg-blue-50/50">
+            <a href="{% url 'user_list' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-white p-4 transition hover:border-blue-200">
                 <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
                     <i class="ri-user-line text-lg"></i>
                 </span>
@@ -237,7 +237,7 @@
             </a>
             {% endif %}
             {% if role_perm.perm_manage_roles %}
-            <a href="{% url 'role_list' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-emerald-200 hover:bg-emerald-50/50">
+            <a href="{% url 'role_list' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-white p-4 transition hover:border-emerald-200">
                 <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm">
                     <i class="ri-shield-line text-lg"></i>
                 </span>
@@ -248,7 +248,7 @@
             </a>
             {% endif %}
             {% if role_perm.perm_manage_menus %}
-            <a href="{% url 'menu_list' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-violet-200 hover:bg-violet-50/50">
+            <a href="{% url 'menu_list' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-white p-4 transition hover:border-violet-200">
                 <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-white shadow-sm">
                     <i class="ri-menu-line text-lg"></i>
                 </span>
@@ -259,7 +259,7 @@
             </a>
             {% endif %}
             {% if ui_show_system_debug_settings %}
-            <a href="{% url 'system_debug_settings' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-amber-200 hover:bg-amber-50/50">
+            <a href="{% url 'system_debug_settings' %}" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-white p-4 transition hover:border-amber-200">
                 <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-600 text-white shadow-sm">
                     <i class="ri-bug-line text-lg"></i>
                 </span>
@@ -270,7 +270,7 @@
             </a>
             {% endif %}
             {% if ui_dashboard_show_django_admin_tile %}
-            <a href="/admin/" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-slate-300 hover:bg-white">
+            <a href="/admin/" class="flex items-center gap-4 rounded-xl border border-slate-100 bg-white p-4 transition hover:border-slate-300">
                 <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-600 text-white shadow-sm">
                     <i class="ri-settings-3-line text-lg"></i>
                 </span>
@@ -284,36 +284,36 @@
     </section>
 
     <!-- 系统信息 -->
-    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-8">
+    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
         <h2 class="text-lg font-semibold text-slate-900">系统信息</h2>
         <p class="mt-1 text-sm text-slate-600">环境与当前会话摘要</p>
         <dl class="mt-6 grid gap-3 sm:grid-cols-2">
             <div class="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3">
                 <i class="ri-server-line text-xl text-slate-400"></i>
-                <div>
+                <div class="flex flex-1 items-center justify-between min-w-0">
                     <dt class="text-xs font-medium text-slate-500">运行端口</dt>
-                    <dd class="text-sm font-semibold text-slate-900">11223</dd>
+                    <dd class="text-sm font-semibold tabular-nums text-slate-900">11223</dd>
                 </div>
             </div>
             <div class="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3">
                 <i class="ri-database-line text-xl text-slate-400"></i>
-                <div>
+                <div class="flex flex-1 items-center justify-between min-w-0">
                     <dt class="text-xs font-medium text-slate-500">数据存储</dt>
-                    <dd class="text-sm font-semibold text-slate-900">本机内置库</dd>
+                    <dd class="text-sm font-semibold tabular-nums text-slate-900">本机内置库</dd>
                 </div>
             </div>
             <div class="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3">
                 <i class="ri-code-s-slash-line text-xl text-slate-400"></i>
-                <div>
+                <div class="flex flex-1 items-center justify-between min-w-0">
                     <dt class="text-xs font-medium text-slate-500">系统版本</dt>
-                    <dd class="text-sm font-semibold text-slate-900">当前部署实例</dd>
+                    <dd class="text-sm font-semibold tabular-nums text-slate-900">当前部署实例</dd>
                 </div>
             </div>
             <div class="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3">
                 <i class="ri-user-settings-line text-xl text-slate-400"></i>
-                <div>
+                <div class="flex flex-1 items-center justify-between min-w-0">
                     <dt class="text-xs font-medium text-slate-500">当前角色</dt>
-                    <dd class="text-sm font-semibold text-slate-900">{% if user.profile.role %}{{ user.profile.role.name }}{% else %}未分配{% endif %}</dd>
+                    <dd class="text-sm font-semibold tabular-nums text-slate-900">{% if user.profile.role %}{{ user.profile.role.name }}{% else %}未分配{% endif %}</dd>
                 </div>
             </div>
         </dl>

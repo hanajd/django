@@ -417,6 +417,8 @@ Web 发版：`/settings/app-ota/`。规格：[ANDROID_OTA_UPDATE_SPEC.md](ANDROI
 | [ANDROID_OTA_UPDATE_SPEC.md](ANDROID_OTA_UPDATE_SPEC.md) | App OTA |
 | [打包与新设备安装说明.md](打包与新设备安装说明.md) | 打包与新机安装 |
 | [部署流程-从零安装与源码保护评估.md](部署流程-从零安装与源码保护评估.md) | 从零安装与交付 |
+| [外部依赖安装-Ollama-MinerU-LaTeX.md](外部依赖安装-Ollama-MinerU-LaTeX.md) | Ollama / MinerU / TeX 安装验收 |
+| [打包与新设备安装说明.md](打包与新设备安装说明.md) | 整机迁移 |
 | [组织主任账号说明.md](组织主任账号说明.md) | 演示账号 |
 | [ADMIN_PERFORMANCE_OPTIMIZATION.md](ADMIN_PERFORMANCE_OPTIMIZATION.md) | 性能优化路线图 |
 

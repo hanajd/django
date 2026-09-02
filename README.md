@@ -34,6 +34,7 @@
 - PDF / 图像：PyMuPDF、pypdf、PyPDF2、Pillow、pdf2image  
 - 办公文档：openpyxl、python-docx、lxml（评价报告书转换等）  
 - 可选 OCR 管线：MinerU、Ollama SDK、outlines  
+- 评价报告书编译：本机 **TeX Live**（默认 `lualatex`）+ 项目根 `fonts/`  
 - 前端辅助（公式叠印 / 引导）：根目录 `package.json`（`mathjax-full`、`driver.js`）
 
 依赖安装：
@@ -43,6 +44,7 @@ pip install -r requirements.txt
 npm install   # 需要公式渲染或流程练习时
 ```
 
+**Ollama / MinerU / LaTeX 系统级安装与验收**（事无巨细）：[docs/外部依赖安装-Ollama-MinerU-LaTeX.md](docs/外部依赖安装-Ollama-MinerU-LaTeX.md)。  
 模板编辑器实验目录另有 `htmlpdf/requirements.txt`；**主站以根目录 `requirements.txt` 为准**。
 
 ---
@@ -125,12 +127,13 @@ python3 manage.py runserver 0.0.0.0:11223
 
 ### 5.3 文档识别管线（可选）
 
-`/files/process/` 或 API OCR；MinerU + Ollama，见 [docs/05-utils-and-pipelines.md](docs/05-utils-and-pipelines.md)。未安装时可降级，不影响日常文件库与报告导出。
+`/files/process/` 或 API OCR；MinerU + Ollama。  
+安装与验收：[docs/外部依赖安装-Ollama-MinerU-LaTeX.md](docs/外部依赖安装-Ollama-MinerU-LaTeX.md)；代码地图：[docs/05-utils-and-pipelines.md](docs/05-utils-and-pipelines.md)。未安装时可降级，不影响日常文件库与报告导出。
 
 ### 5.4 评价业务
 
 - F.1：[docs/评价报告表-F1功能说明.md](docs/评价报告表-F1功能说明.md)  
-- 评价报告书：[docs/评价报告书-LaTeX功能说明.md](docs/评价报告书-LaTeX功能说明.md)
+- 评价报告书：[docs/评价报告书-LaTeX功能说明.md](docs/评价报告书-LaTeX功能说明.md)（需本机 TeX，见外部依赖手册 §4）
 
 ---
 
@@ -165,10 +168,10 @@ python3 manage.py runserver 0.0.0.0:11223
 核对项目是否关联报告输出任务、模板绑定与现场记录/提交数据源。
 
 **OCR / 管线失败**  
-查 `media/file_library/temp`、`MINERU_BACKEND`、`OLLAMA_HOST`；无 GPU 时用默认 `pipeline` 后端。
+查 `media/file_library/temp`、`which mineru`、`MINERU_BACKEND`、`OLLAMA_HOST`；完整排障见 [docs/外部依赖安装-Ollama-MinerU-LaTeX.md](docs/外部依赖安装-Ollama-MinerU-LaTeX.md)。
 
 **评价报告书编译失败**  
-查本机 TeX、`latex/` 宏包、工作区 `media/evaluation_reports/` 权限。
+查本机 TeX（`which lualatex`）、`LATEX_ENGINE`、项目根 `fonts/`、工作区权限；同上外部依赖手册 §4。
 
 ---
 

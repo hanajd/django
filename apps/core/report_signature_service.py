@@ -866,15 +866,27 @@ def _is_exported_report_pdf_filename(name: str) -> bool:
     n = (name or "").strip()
     if not n.lower().endswith(".pdf"):
         return False
-    # 变体：…_报告（无防护结果）.pdf / …_报告（仅防护结果）.pdf
+    # 变体：…_报告（无防护结果）.pdf / …质量控制检测（无防护结果）.pdf
     if (
         "报告（无防护结果）" in n
         or "报告（仅防护结果）" in n
         or "报告(无防护结果)" in n
         or "报告(仅防护结果)" in n
+        or "（无防护结果）" in n
+        or "（仅防护结果）" in n
+        or "(无防护结果)" in n
+        or "(仅防护结果)" in n
     ):
         return True
-    return n.endswith("-报告.pdf") or n.endswith("_报告.pdf")
+    # 历史：{taskNo}-报告.pdf / {模板名}_报告.pdf
+    if n.endswith("-报告.pdf") or n.endswith("_报告.pdf"):
+        return True
+    # 规范名：{委托编号}{委托单位}放射诊疗设备（…）{质量控制检测|…}.pdf
+    if "放射诊疗设备（" in n and (
+        "质量控制检测" in n or "工作场所放射防护检测" in n
+    ):
+        return True
+    return False
 
 
 def find_latest_report_library_file(

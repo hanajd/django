@@ -54,12 +54,54 @@
 
 **说明**：Django 默认不会通过 URL 提供 `.py` 源码；防爬取与信息泄露主要依赖生产关闭 `DEBUG`、不暴露仓库与 `.env`、反向代理限流/WAF 及最小权限。IP 白名单在网关层配置通常更可靠，应用层校验可作为补充。
 
-## 6. 外部服务（可选能力）
+## 6. 外部服务与重量级依赖（默认值表）
 
-- **MinerU**：`MINERU_BACKEND` 等，注释见 `settings`（管线前会写入环境变量供子进程使用）。  
-- **Ollama**：`OLLAMA_HOST`、`OLLAMA_OPTIONS` 等，与 `utils/ollama_extract`、管线配合。
+> **安装命令与验收**：以 [外部依赖安装-Ollama-MinerU-LaTeX.md](外部依赖安装-Ollama-MinerU-LaTeX.md) 为准。  
+> **调用链**：见 [05-utils-and-pipelines.md](05-utils-and-pipelines.md)。
 
-具体调用链见 [05-utils-and-pipelines.md](05-utils-and-pipelines.md)。
+### 6.1 Ollama
+
+| 变量 / 项 | 默认 | 说明 |
+|-----------|------|------|
+| `OLLAMA_HOST` | `http://127.0.0.1:11434` | 无单独端口变量 |
+| `EQUIPMENT_MODEL_NAME` | `qwen3:14b-q4_K_M` | 须与 `ollama list` 一致 |
+| `OLLAMA_OPTIONS` | 不设时代码侧倾向 `{"num_gpu":999}` | JSON；非法则忽略 |
+| `ENABLE_LLM_FRONTEND_TEMPLATE_DRAFT` | `0`（关） | 为 `1` 才用 LLM 生成前端模板草稿 |
+| 运行时覆盖 | 根目录 `llm_runtime.json` | 调试页可改 provider/host/model |
+
+失败时：设备抽取返回空骨架、模板生成返回 `{}`，一般不拖垮整站。
+
+### 6.2 MinerU
+
+| 变量 / 项 | 默认 | 说明 |
+|-----------|------|------|
+| `MINERU_BACKEND` | `pipeline` | Django 管线会写入环境；慎用 `hybrid-auto-engine` |
+| `MINERU_TIMEOUT` | `600` | 秒 |
+| `MINERU_KEEP_OUTPUT` | 空=清空输出目录 | `1`/`true`/`yes` 保留便于排障 |
+| `MINERU_CUDA_VISIBLE_DEVICES` | 空=可自动选卡 | 见 `gpu_scheduler` |
+| CLI | `mineru`（venv PATH） | `mineru -p pdf -o out [-b backend]` |
+| 批次输出 | `media/file_library/temp/batches/<id>/mineru_output/` | |
+
+`torch` 为传递依赖，与 CUDA 强相关。未安装 CLI → 管线常见错误 `MinerU未生成MD`。
+
+### 6.3 LaTeX（评价报告书）
+
+| 变量 / 项 | 默认 | 说明 |
+|-----------|------|------|
+| `LATEX_TEMPLATE_ROOT` | `BASE_DIR/latex` | 内置工程 |
+| `LATEX_ENGINE` | `lualatex` | 可改 `xelatex` |
+| `LATEX_RUN_TIMES` | `2` | 编译遍数 |
+| `EVALUATION_REPORT_WORK_ROOT` | `media/evaluation_reports/work` | 每报告工作区 |
+| `EVALUATION_LATEX_TEMPLATE_ROOT` | `media/evaluation_reports/latex_templates` | 用户模板 |
+| `CONVERTER_KEYWORDS_CSV` | `converter/data/project_keywords.csv` | 关键词 |
+| 主文件 | 硬编码 `main.tex` | 主站无 `LATEX_MAIN_FILE` 配置项 |
+| 字体 | 项目根 `fonts/` | 另：检测 PDF 用 `htmlpdf/fonts/` |
+
+缺引擎 → 明确报错，报告 `FAILED`，无非 TeX 降级产物。
+
+### 6.4 GPU 调度（可选）
+
+见 `utils/gpu_scheduler.py`：`PIPELINE_GPU_AUTO_OLLAMA`、`PIPELINE_GPU_AUTO_MINERU`、`OLLAMA_PREFERRED_GPU_INDEX`、`PIPELINE_OLLAMA_NUM_CTX_*` 等。外部依赖手册 §5 有摘要。
 
 ## 7. 运行时 JSON（可选热更新）
 

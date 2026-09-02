@@ -20,10 +20,18 @@ Standalone 副本见 `evaluation_report_standalone/`（独立验证用）；主�
 
 配置（`tablet_backend/settings.py`）：
 
-- `LATEX_TEMPLATE_ROOT` → 仓库 `latex/`
-- `EVALUATION_REPORT_WORK_ROOT` → `media/evaluation_reports/work/`
-- `EVALUATION_LATEX_TEMPLATE_ROOT` → `media/evaluation_reports/latex_templates/`
-- `CONVERTER_KEYWORDS_CSV` → `converter/data/project_keywords.csv`
+| 配置 | 默认 | 说明 |
+|------|------|------|
+| `LATEX_TEMPLATE_ROOT` | 仓库 `latex/` | 内置工程 |
+| `EVALUATION_REPORT_WORK_ROOT` | `media/evaluation_reports/work/` | 每报告工作区 |
+| `EVALUATION_LATEX_TEMPLATE_ROOT` | `media/evaluation_reports/latex_templates/` | 用户上传模板 |
+| `CONVERTER_KEYWORDS_CSV` | `converter/data/project_keywords.csv` | 关键词表 |
+| `LATEX_ENGINE` | **`lualatex`** | 可改为 `xelatex` |
+| `LATEX_RUN_TIMES` | `2` | 连续编译遍数 |
+
+主文件在工作区内为 **`main.tex`**（编译器硬编码；主站无 `LATEX_MAIN_FILE` 配置项）。
+
+**系统安装（TeX Live、字体、验收）**：见 [外部依赖安装-Ollama-MinerU-LaTeX.md §4](外部依赖安装-Ollama-MinerU-LaTeX.md)。未安装引擎时编译失败，报告状态 `FAILED`，错误含 `LaTeX engine '…' not found in PATH`。
 
 ---
 
@@ -41,7 +49,7 @@ Standalone 副本见 `evaluation_report_standalone/`（独立验证用）；主�
 | ② 基础报告 | POST `<pk>/generate-base/` | 抽取关键词、拷贝模板到工作区；可跳过直接进编辑 |
 | ③ 正文编辑 | `<pk>/edit/` | 章节块编辑（文本/表/公式/图/流程图）；保存写回工作区 `.tex` |
 | ④ 附件 | `<pk>/attachments/` | 按附录栏目上传；见 §4 |
-| ⑤ 编译 | POST `<pk>/build/` | 注入关键词与附件后 XeLaTeX/LuaLaTeX 编译 |
+| ⑤ 编译 | POST `<pk>/build/` | 注入关键词与附件后按 `LATEX_ENGINE`（默认 **LuaLaTeX**）编译 `main.tex` |
 | PDF | `<pk>/pdf/`、`download/<kind>/` | 预览 / 下载 |
 
 辅助：
@@ -156,6 +164,9 @@ media/evaluation_reports/
 
 | 现象 | 排查 |
 |------|------|
+| `LaTeX engine not found` | 未装 TeX 或服务用户 PATH 无 `lualatex`；见外部依赖手册 §4 |
+| Missing 宏包 / sty | 补 `texlive-*` 或改用 `texlive-full`；核对 `ctex`/`tikz`/`pdfpages` |
+| 中文方框 / 缺字 | 工作区是否链到项目根 `fonts/`（`SIMSUN.TTC`、思源 Sans/Serif） |
 | 改了 `files/*.tex` 编译又变回去 | 关键词 DB 覆盖了磁盘；看 `apply_file_backed_keywords` 结构分与回写日志 |
 | 附件显示选项无效 | 确认已 migrate `0002`；已上传文件需走 `files/<id>/display/` 并重新 build |
 | 个性化只有括号、无蓝底 | 强刷编辑页；确认走结构化编辑而非纯源码预览 |
@@ -165,6 +176,7 @@ media/evaluation_reports/
 
 ## 8. 相关文档
 
+- **TeX / 字体安装**：[外部依赖安装-Ollama-MinerU-LaTeX.md](外部依赖安装-Ollama-MinerU-LaTeX.md)  
 - 功能总览：[07-features-catalog.md](07-features-catalog.md) §2.8  
 - Web 路由：[02-web-ui-core.md](02-web-ui-core.md) §2.7  
 - 评价部账号：[组织主任账号说明.md](组织主任账号说明.md)  

@@ -179,7 +179,7 @@ _DEFAULT_NOTES = [
     "1. 上表中检测结果未扣除本底值。",
     "2. 检测结果已按响应时间修正系数修正。",
 ]
-_ANNUAL_DOSE_NOTE_BODY = "年剂量估算=最大曝光时间×每周曝光次数×50"
+_ANNUAL_DOSE_NOTE_BODY = "年剂量估算=报出值×最大曝光时间×每周曝光次数×50"
 
 
 def _norm(s: Any) -> str:

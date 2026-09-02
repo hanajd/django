@@ -14,7 +14,7 @@
         </p>
     </div>
 
-    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-8">
+    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
         <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
                 <h2 class="text-lg font-semibold text-slate-900">当前发布状态</h2>
@@ -45,14 +45,14 @@
             {% endif %}
         </dl>
         {% endif %}
-        <p class="mt-4 text-[11px] text-slate-400">配置：{{ ota_config_path }} · 目录：{{ ota_apk_dir }}</p>
+        <p class="mt-4 text-xs text-slate-400">配置：{{ ota_config_path }} · 目录：{{ ota_apk_dir }}</p>
     </section>
 
     <form method="post" enctype="multipart/form-data" class="space-y-6">
         {% csrf_token %}
         <input type="hidden" name="action" value="publish">
 
-        <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04] sm:p-8">
+        <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
             <h2 class="text-lg font-semibold text-slate-900">发版</h2>
             <p class="mt-1 text-sm text-slate-600">
                 推荐上传
@@ -133,4 +133,145 @@
     </form>
     {% endif %}
 </div>
+
+<style>
+    .app-ota-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        align-items: center;
+        justify-content: center;
+        background-color: rgba(15, 23, 42, 0.6);
+    }
+    .app-ota-overlay.visible {
+        display: flex;
+    }
+    .app-ota-overlay .app-ota-spinner {
+        animation: otaSpin 1s linear infinite;
+    }
+    @keyframes otaSpin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+    .app-ota-hint {
+        margin-top: 0.25rem;
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        font-size: 0.75rem;
+        line-height: 1rem;
+    }
+</style>
+
+<script>
+    (function() {
+        var publishForm = document.querySelector('form[enctype="multipart/form-data"]');
+        var fileInput = document.querySelector('input[name="package_file"]');
+        var versionInput = document.querySelector('input[name="version"]');
+        var buildInput = document.querySelector('input[name="build_number"]');
+        var notesInput = document.querySelector('textarea[name="release_notes"]');
+        var submitBtn = publishForm ? publishForm.querySelector('button[type="submit"]') : null;
+
+        var overlay = document.createElement('div');
+        overlay.className = 'app-ota-overlay';
+        overlay.innerHTML = '<div class="flex flex-col items-center gap-3 rounded-2xl bg-white p-6 shadow-xl">' +
+                            '<i class="ri-loader-4-line app-ota-spinner text-3xl text-blue-600"></i>' +
+                            '<p class="text-sm font-medium text-slate-700">正在上传并发版，请稍候…</p>' +
+                            '</div>';
+        document.body.appendChild(overlay);
+
+        if (publishForm) {
+            publishForm.addEventListener('submit', function() {
+                overlay.classList.add('visible');
+                if (submitBtn) {
+                    submitBtn.innerHTML = '<i class="ri-loader-4-line animate-spin mr-2"></i>保存中…';
+                }
+            });
+        }
+
+        function ensureJSZip(callback) {
+            if (window.JSZip) return callback();
+            var s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js';
+            s.crossOrigin = 'anonymous';
+            s.onload = function() { callback(); };
+            s.onerror = function() { callback(new Error('加载 JSZip 失败')); };
+            document.body.appendChild(s);
+        }
+
+        function removeHint(container) {
+            var old = container.querySelector('.app-ota-hint');
+            if (old) old.remove();
+        }
+
+        function showHint(container, type, message) {
+            removeHint(container);
+            var hint = document.createElement('p');
+            hint.className = 'app-ota-hint';
+            var iconClass = type === 'success' ? 'ri-checkbox-circle-line text-emerald-600' :
+                            type === 'error' ? 'ri-error-warning-line text-amber-600' :
+                            'ri-loader-4-line animate-spin text-blue-600';
+            var colorClass = type === 'success' ? 'text-emerald-600' :
+                             type === 'error' ? 'text-amber-600' :
+                             'text-blue-600';
+            hint.innerHTML = '<i class="' + iconClass + '"></i>' +
+                             '<span class="' + colorClass + '">' + message + '</span>';
+            container.appendChild(hint);
+        }
+
+        if (fileInput) {
+            fileInput.addEventListener('change', function(e) {
+                var file = e.target.files && e.target.files[0];
+                if (!file) {
+                    removeHint(fileInput.parentElement);
+                    return;
+                }
+                if (!file.name.toLowerCase().endsWith('.zip')) {
+                    removeHint(fileInput.parentElement);
+                    showHint(fileInput.parentElement, 'error', '仅 zip 包可自动解析版本信息，请手动填写');
+                    return;
+                }
+
+                showHint(fileInput.parentElement, 'loading', '正在解析 zip 中的版本信息…');
+
+                var reader = new FileReader();
+                reader.onload = function(evt) {
+                    ensureJSZip(function(err) {
+                        if (err || !window.JSZip) {
+                            showHint(fileInput.parentElement, 'error', '无法加载 zip 解析库，请手动填写版本信息');
+                            return;
+                        }
+                        JSZip.loadAsync(evt.target.result).then(function(zip) {
+                            var baseName = file.name.replace(/\.zip$/i, '') + '.json';
+                            var jsonFile = zip.file(baseName);
+                            if (!jsonFile) {
+                                var jsonNames = Object.keys(zip.files).filter(function(name) {
+                                    return name.toLowerCase().endsWith('.json');
+                                });
+                                if (jsonNames.length) {
+                                    jsonFile = zip.file(jsonNames[0]);
+                                }
+                            }
+                            if (!jsonFile) throw new Error('zip 中未找到 json');
+                            return jsonFile.async('string');
+                        }).then(function(jsonText) {
+                            var data = JSON.parse(jsonText);
+                            if (versionInput && data.version) versionInput.value = data.version;
+                            if (buildInput && data.build_number != null) buildInput.value = String(data.build_number);
+                            if (notesInput && data.release_notes) notesInput.value = data.release_notes;
+                            showHint(fileInput.parentElement, 'success', '已从 zip 自动填入版本号 / 构建号 / 更新说明');
+                        }).catch(function() {
+                            showHint(fileInput.parentElement, 'error', '未从 zip 中解析到版本信息，请手动填写');
+                        });
+                    });
+                };
+                reader.onerror = function() {
+                    showHint(fileInput.parentElement, 'error', '读取文件失败，请重试');
+                };
+                reader.readAsArrayBuffer(file);
+            });
+        }
+    })();
+</script>
 {% endblock %}

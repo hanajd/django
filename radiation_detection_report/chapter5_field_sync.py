@@ -3750,10 +3750,10 @@ def report_value_rules_for_binding(
     report_group: int = 1,
 ) -> List[Dict[str, Any]]:
     """
-    章节报出值规则 → 栏位级 formulaRules。
+    章节报出值/年剂量规则 → 栏位级 formulaRules。
 
-    含 condition / 空 condition 全部保留；``{mean}/{mean2}`` 替换为该行均值 f 号，
-    供前端按条件自动匹配（勿再只留下编译后的嵌套 if）。
+    含 condition / 空 condition 全部保留；``{mean}/{mean2}/{report}/{report2}``
+    替换为该行对应 f 号，供前端按条件自动匹配（勿再只留下编译后的嵌套 if）。
     """
     rows: List[Dict[str, Any]] = []
     for rule in normalize_rule_list(rules):
@@ -3820,6 +3820,8 @@ def _write_manual_report_rules_to_field(
         )
         report_field.pop("formulaRules", None)
         report_field.pop("fieldExpressionRules", None)
+        if str(report_field.get("type") or "").lower() in ("", "number", "text"):
+            report_field["type"] = "computed"
         return
     report_field["formulaRules"] = copy.deepcopy(manual)
     report_field.pop("fieldExpressionRules", None)
@@ -3881,6 +3883,8 @@ def _write_report_value_rules_to_field(
         )
         report_field.pop("formulaRules", None)
         report_field.pop("fieldExpressionRules", None)
+        if str(report_field.get("type") or "").lower() in ("", "number", "text"):
+            report_field["type"] = "computed"
         return
 
     report_field["formulaRules"] = copy.deepcopy(field_rules)
@@ -4481,7 +4485,7 @@ def resolve_chapter_config_for_export(
     export_payload: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    导出前端 JSON 兜底：合并模板已有章节配置与默认 meanFormula/reportValueRules，
+    导出前端 JSON 兜底：合并模板已有章节配置与默认 meanFormula/reportValueRules/annualDoseRules，
     并从 pdf.fields 或 steps 反推 field_bindings（仅内部使用，不写入导出 JSON）。
     """
     base = copy.deepcopy(chapter) if isinstance(chapter, dict) else {}
@@ -4492,6 +4496,8 @@ def resolve_chapter_config_for_export(
     rules = state.get("reportValueRules")
     if not isinstance(rules, list) or not rules:
         state["reportValueRules"] = default_chapter_config()["reportValueRules"]
+    if not isinstance(state.get("annualDoseRules"), list):
+        state["annualDoseRules"] = []
     state["fieldBindings"] = resolve_chapter_field_bindings(
         state,
         pdf_fields=pdf_fields,
@@ -4511,13 +4517,19 @@ def apply_chapter_formulas_by_pdf_field_bindings(
     *,
     bindings: List[Mapping[str, Any]],
     report_value_rules: Optional[List[Mapping[str, Any]]] = None,
+    annual_dose_rules: Optional[List[Mapping[str, Any]]] = None,
     mean_mode: str = "per_row_avg",
 ) -> Dict[str, Any]:
-    """按 field_bindings 的 pdfFieldId 将章节均值/报出值公式写入导出 JSON 各栏位。"""
+    """按 field_bindings 的 pdfFieldId 将章节均值/报出值/年剂量公式写入导出 JSON 各栏位。
+
+    年剂量规则中的 ``{report}`` / ``{report2}`` 与报出值规则中的 ``{mean}`` / ``{mean2}``
+    一样，在写入栏位前替换为该行对应 ``pdfFieldId``。
+    """
     if not isinstance(payload, dict) or not bindings:
         return payload
     by_pid = index_export_fields_by_pdf_field_id(payload)
     rules = report_value_rules if isinstance(report_value_rules, list) else []
+    annual_rules = annual_dose_rules if isinstance(annual_dose_rules, list) else []
     dual_group = mean_mode == "per_row_avg_dual"
 
     for binding in bindings or []:
@@ -4550,6 +4562,19 @@ def apply_chapter_formulas_by_pdf_field_bindings(
                 binding,
                 report_group=group,
             )
+
+        if annual_rules:
+            annual_pid = _norm(binding.get("annual_dose_msv") or "")
+            if annual_pid and annual_pid in by_pid:
+                annual_field = by_pid[annual_pid]
+                if not is_background_range_pdf_field(annual_field):
+                    # 年剂量列共用一组规则；{report}/{report2} 分别指向第一/二组报出值
+                    apply_chapter_report_rules_to_field(
+                        annual_field,
+                        annual_rules,
+                        binding,
+                        report_group=1,
+                    )
 
     report_pids = {
         _norm(b.get(_binding_report_key(group=g)) or "")
@@ -4589,7 +4614,7 @@ def apply_chapter_formulas_to_export_payload(
     pdf_fields: Optional[List[Any]] = None,
 ) -> Dict[str, Any]:
     """
-    导出前端 JSON 收尾（兜底）：按 pdfFieldId 写入章节均值 avg(...) 与报出值公式。
+    导出前端 JSON 收尾（兜底）：按 pdfFieldId 写入章节均值 avg(...)、报出值与年剂量公式。
     模板无 ``radiationProtectionChapter`` 时仍从 pdf.fields / steps 反推绑定；
     栏位已有单元格公式（fieldExpression / formula / formulaRules 等）时不覆盖。
     导出 JSON 仅保留 ``radiationProtectionChapter`` 前端可见配置（不含 fieldBindings）。
@@ -4608,10 +4633,14 @@ def apply_chapter_formulas_to_export_payload(
     mean_cfg = chapter.get("meanFormula") if isinstance(chapter.get("meanFormula"), dict) else {}
     mean_mode = str(mean_cfg.get("mode") or "per_row_avg").strip()
     rules = chapter.get("reportValueRules") if isinstance(chapter.get("reportValueRules"), list) else []
+    annual_rules = (
+        chapter.get("annualDoseRules") if isinstance(chapter.get("annualDoseRules"), list) else []
+    )
     apply_chapter_formulas_by_pdf_field_bindings(
         payload,
         bindings=bindings,
         report_value_rules=rules,
+        annual_dose_rules=annual_rules,
         mean_mode=mean_mode,
     )
     export_fields = list(index_export_fields_by_pdf_field_id(payload).values())
@@ -4626,13 +4655,15 @@ def apply_chapter_formulas_to_export_payload(
         chapter=chapter,
         geometry_fields=pdf_fields if isinstance(pdf_fields, list) else None,
     )
-    # 根级章节配置：优先保留模板已保存的 reportValueRules（含 {mean} 占位），勿用默认空规则覆盖
-    src_rules = None
-    if isinstance(chapter_in, dict) and isinstance(chapter_in.get("reportValueRules"), list):
-        src_rules = chapter_in.get("reportValueRules")
+    # 根级章节配置：优先保留模板已保存的规则（含 {mean}/{report} 占位），勿用默认空规则覆盖
     exported = export_chapter_config_for_frontend(chapter)
-    if isinstance(src_rules, list) and src_rules:
-        exported["reportValueRules"] = export_formula_rules_list(src_rules)
+    if isinstance(chapter_in, dict):
+        src_rules = chapter_in.get("reportValueRules")
+        if isinstance(src_rules, list) and src_rules:
+            exported["reportValueRules"] = export_formula_rules_list(src_rules)
+        src_annual = chapter_in.get("annualDoseRules")
+        if isinstance(src_annual, list) and src_annual:
+            exported["annualDoseRules"] = export_formula_rules_list(src_annual)
     payload[SCHEMA_KEY] = exported
     return payload
 

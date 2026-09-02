@@ -1,48 +1,71 @@
-# 05 工具库与管线（utils + 管线集成）
+# 05 utils 与文档管线
 
-**整理日期**：2026-08-20
+> **安装 Ollama / MinerU / TeX**：见 [外部依赖安装-Ollama-MinerU-LaTeX.md](外部依赖安装-Ollama-MinerU-LaTeX.md)。  
+> **环境变量默认值**：见 [01-configuration.md](01-configuration.md) §6。
 
 ---
 
-## 1. `utils/` 目录清单
+## 1. `utils/` 模块地图（接手索引）
 
-与 Django App 解耦的共享库；Web/API 应优先经 `pipeline_service`、`htmlpdf_service`、`inspection_*` 等入口调用。
-
-| 模块 | 用途 |
-|------|------|
-| `document_pipeline.py` | 文档管线主逻辑（MinerU → 清洗 → 抽取） |
-| `pipeline_config.py` | 管线目录配置与 settings 同步 |
-| `mineru_ops.py` | MinerU 调用封装 |
+| 文件 / 区域 | 作用 |
+|-------------|------|
+| `document_pipeline.py` | 文档管线主逻辑（MinerU → 清洗 → Ollama 抽取） |
+| `pipeline_config.py` | 模型名、目录常量、`MAX_RETRIES` 等 |
+| `mineru_ops.py` | MinerU CLI 封装、超时、输出 MD 查找 |
 | `gpu_scheduler.py` | 多 GPU / 显存与 MinerU、Ollama 调度 |
-| `ollama_extract.py` | Ollama 辅助结构化抽取 |
-| `extract_frontend_template.py` | 从抽取结果辅助生成前端模板 |
-| `md_clean.py` / `json_utils.py` | Markdown / JSON 工具 |
-| `preview.py` | 预览相关 |
-| `frontend_schema_rule_engine.py` | PDF 坐标 → `frontend_form_schema/v1` |
-| `frontend_export_pipeline.py` / `frontend_runtime_export.py` | 前端 JSON 导出管线 / runtime 形态 |
-| `unified_template_fields.py` | 统一模板字段压缩与存储形态 |
-| `pdf_field_formulas.py` | PDF 字段公式合并 |
-| `dynamic_form_expression.py` | 动态表单表达式求值 |
-| `conditional_field_rules.py` | 条件字段规则 |
-| `fit_ref_eval.py` / `fit_ref_expand.py` | 拟合公式求值与展开 |
-| `verdict_from_criterion.py` | 判据 → 合格/不合格推断 |
-| `report_fill_helpers.py` | 报告填充辅助 |
-| `task_bound_instruments.py` | 任务绑定仪器辅助 |
-| `pdf_merge.py` | 多报告 PDF 合并 |
-| `pdf_compress.py` | PDF 压缩 |
-| `pymupdf_fonts.py` | PyMuPDF 字体注册 |
-| `mathjax_pdf_render.py` | MathJax 公式渲染进 PDF |
+| `ollama_extract.py` | Ollama 辅助结构化抽取（设备 JSON） |
+| `extract_frontend_template.py` | 可选 LLM 前端模板草稿 |
+| `dynamic_form_expression.py` | 现场公式安全求值（含 `a~b` / `a;b` 连接） |
+| `verdict_from_criterion.py` | 判定标准文本 → 合格/不合格 |
+| `pdf_merge.py` / 填报相关 | 检测报告 PDF 合并与叠印 |
+| `mathjax_pdf_render.py` | `$$…$$` 公式图（需 Node MathJax） |
+| `pdf_field_formulas.py` | 模板字段公式 / 拟合 latex 判定 |
+| `conditional_field_rules.py` | 条件公式规则 |
+| `frontend_schema_rule_engine.py` | 导出 schema 与规则 |
 
-公式 / schema 专题：[FRONTEND_FORM_SCHEMA.md](FRONTEND_FORM_SCHEMA.md)、[json公式说明.md](json公式说明.md)、[拟合公式前后端对接说明.md](拟合公式前后端对接说明.md)。
+Django 桥接：`apps/core/pipeline_service.py`（注入 `OLLAMA_HOST`、`MINERU_BACKEND` 等）。
 
 ---
 
-## 2. 管线（Pipeline）
+## 2. 管线（Pipeline）端到端
 
-- **入口**：Web `/files/process/`（`pipeline_service`）与 API `POST /library/files/ocr/`。  
-- **目录**：与 `settings` 中 `PIPELINE_*`、`FILE_LIBRARY_TEMP_*` 一致；批次落在 `media/file_library/temp`。  
-- **外部引擎**：MinerU（`MINERU_BACKEND`）、Ollama（`OLLAMA_HOST`）；未安装时功能降级。  
-- **演示账号**：`PARTY_A_DEMO_DISABLE_PIPELINE` 可禁独立管线页。
+```text
+上传 PDF
+   → media/file_library/temp/...
+   → mineru -p … -o …/batches/<batch>/mineru_output/
+   → 选取最大有效 .md
+   → 清洗
+   → Ollama 抽取设备 JSON（失败则空骨架）
+   → 写回业务 / 预览
+```
+
+| 项 | 说明 |
+|----|------|
+| Web 入口 | `/files/process/`（`perm_process_pipeline`） |
+| API | `POST .../library/files/ocr/` 等（见 [03-rest-api.md](03-rest-api.md)、[07-features-catalog.md](07-features-catalog.md)） |
+| 目录 | `settings` 中 `PIPELINE_*`、`FILE_LIBRARY_TEMP_*`；批次在 `media/file_library/temp` |
+| 外部引擎 | MinerU（`MINERU_BACKEND`）、Ollama（`OLLAMA_HOST`） |
+| 演示账号 | `PARTY_A_DEMO_DISABLE_PIPELINE` 可禁独立管线页 |
+
+### 2.1 失败语义（勿误解为「管线成功」）
+
+| 失败点 | 典型表现 |
+|--------|----------|
+| 无 `mineru` CLI | 日志未安装；错误常含 `MinerU未生成MD` |
+| MinerU 超时/崩 | 批次失败；可 `MINERU_KEEP_OUTPUT=1` 留目录 |
+| Ollama 不通 | 重试后仍返回**空字段设备**；主站其它功能正常 |
+| 模型名错误 | 抽取失败 / 空结果 |
+
+验收要看**结构化字段是否有内容**，不能只看 HTTP 200。
+
+### 2.2 关键目录（排障时打开）
+
+```text
+media/file_library/temp/
+  batches/<batch_id>/mineru_output/   # MinerU 原始输出
+  mineru_md/                          # 聚合 MD（配置名 PIPELINE_MINERU_MD）
+  preview_images/                     # 预览图
+```
 
 ---
 
@@ -50,18 +73,23 @@
 
 - 规则引擎 + 统一字段模块与 `htmlpdf_service`、编辑器 `api/*` 联动。  
 - 改导出 JSON 时同步考虑：**编辑器前端**、**文件库 template**、**App 填报** 是否同一 schema。  
-- 检测回填主路径在 `apps/api/inspection_report_make.py`，内部会用到本目录公式/合并工具。
+- 检测回填主路径在 `apps/api/inspection_report_make.py`，内部会用到本目录公式/合并工具。  
+- 公式连接符：`~`（范围）、`;`（分号连接）——见 [json公式说明.md](json公式说明.md) §2.2。
 
 ---
 
-## 4. 其它与 PDF 相关的仓库包
+## 4. 其它与 PDF / 报告相关的仓库包
 
 | 目录 | 说明 |
 |------|------|
-| `converter/` | 评价报告书 MD↔LaTeX、关键词、编译辅助（非 utils） |
-| `latex/` | 评价报告书 TeX 工程 |
+| `converter/` | 评价报告书 MD↔LaTeX、关键词、**`latex_compiler.py`** |
+| `latex/` | 评价报告书 TeX 工程（`yp250420` 等） |
+| `fonts/` | 评价报告书字体（工作区链接） |
+| `htmlpdf/fonts/` | 检测报告叠印字体 |
 | `f1_eval_report/` | F.1 表单 PDF 生成库 |
 | `radiation_detection_report/` | 可移植检测结果表包 |
+
+评价报告书业务步骤：[评价报告书-LaTeX功能说明.md](评价报告书-LaTeX功能说明.md)。
 
 ---
 
@@ -69,7 +97,8 @@
 
 | 现象 | 排查 |
 |------|------|
-| 管线失败 | `media/file_library/temp` 批次、`MINERU_BACKEND` / `OLLAMA_HOST`、GPU 调度日志 |
+| 管线失败 | `temp/batches`、`MINERU_BACKEND` / `OLLAMA_HOST`、`which mineru`、GPU 日志；对照外部依赖手册 |
 | 模板保存失败 | `library_file_service` 分类枚举与磁盘路径 |
 | 公式/判定不符 | `dynamic_form_expression`、`verdict_from_criterion`、现场同行「不合格」强制逻辑 |
 | 合并报告异常 | `pdf_merge` + [合并报告规则说明.md](合并报告规则说明.md) |
+| 评价书编译失败 | `LATEX_ENGINE`、TeX 宏包、工作区 `fonts/`、`.log` |

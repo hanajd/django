@@ -5986,13 +5986,14 @@
 
         /** 计算类公式中常见的中文/全角标点 → 建议半角（仅用于提示，不改写原文） */
         const FORMULA_FULLWIDTH_HINT_PAIRS = [
-            ['，', ','], ['。', '.'], ['；', ';'], ['：', ':'],
+            ['，', ','], ['。', '.'], ['：', ':'],
             ['（', '('], ['）', ')'], ['【', '['], ['】', ']'],
             ['［', '['], ['］', ']'], ['｛', '{'], ['｝', '}'],
             ['＋', '+'], ['－', '-'], ['−', '-'], ['＝', '='],
             ['＜', '<'], ['＞', '>'], ['＊', '*'], ['／', '/'],
             ['％', '%'], ['＆', '&'], ['｜', '|'], ['！', '!'],
-            ['×', '*'], ['÷', '/'], ['～', '~'], ['　', '空格']
+            // ～ / ； 可作为顶层连接符，不按全角运算符号报错
+            ['×', '*'], ['÷', '/'], ['　', '空格']
         ];
 
         function describeFormulaFullwidthIssues(expr) {
@@ -6014,6 +6015,7 @@
                 + '。文本与单位不必加引号。';
         }
 
+        /** 顶层连接：a~b（范围）或 a;b（分号）。返回 [left, right, join]，join 为 '~' 或 ';'。 */
         function splitTopLevelRangeFormula(expr) {
             const s = String(expr || '').trim();
             if (!s) return null;
@@ -6031,12 +6033,15 @@
                 if (ch === "'" || ch === '"') { inStr = ch; continue; }
                 if (ch === '(') { depth += 1; continue; }
                 if (ch === ')') { depth = Math.max(0, depth - 1); continue; }
-                if (depth === 0 && (ch === '~' || ch === '～') && s[i + 1] !== '/') {
-                    const left = s.slice(0, i).trim();
-                    const right = s.slice(i + 1).trim();
-                    if (left && right) return [left, right];
-                    return null;
-                }
+                if (depth !== 0) continue;
+                let join = null;
+                if ((ch === '~' || ch === '～') && s[i + 1] !== '/') join = '~';
+                else if (ch === ';' || ch === '；') join = ';';
+                if (!join) continue;
+                const left = s.slice(0, i).trim();
+                const right = s.slice(i + 1).trim();
+                if (left && right) return [left, right, join];
+                return null;
             }
             return null;
         }
@@ -6201,21 +6206,32 @@
             }
             const rangeParts = splitTopLevelRangeFormula(raw);
             if (rangeParts) {
+                const join = rangeParts[2] || '~';
+                const sideLabel = join === ';' ? '连接公式' : '范围公式';
                 const leftCheck = validateFormulaExpression(rangeParts[0], currentId);
                 const rightCheck = validateFormulaExpression(rangeParts[1], currentId);
                 if (leftCheck.level === 'error') {
-                    return { level: 'error', message: '范围公式左侧有误：' + leftCheck.message };
+                    return { level: 'error', message: sideLabel + '左侧有误：' + leftCheck.message };
                 }
                 if (rightCheck.level === 'error') {
-                    return { level: 'error', message: '范围公式右侧有误：' + rightCheck.message };
+                    return { level: 'error', message: sideLabel + '右侧有误：' + rightCheck.message };
                 }
                 if (leftCheck.level === 'warn' || rightCheck.level === 'warn') {
-                    return { level: 'warn', message: '范围公式 a~b：左右两侧分别求值后拼接为「左~右」，请确认两侧都已写完。' };
+                    return {
+                        level: 'warn',
+                        message: sideLabel + ' a' + join + 'b：左右两侧分别求值后拼接为「左' + join + '右」，请确认两侧都已写完。'
+                    };
+                }
+                if (join === ';') {
+                    return {
+                        level: 'ok',
+                        message: '连接公式：两侧分别计算后以 ; 连接输出，例如 round(avg(f1,f2),2);round(std(f1,f2),2)。'
+                    };
                 }
                 return { level: 'ok', message: '范围公式：两侧分别计算后以 ~ 连接输出，例如 min(f1,f2)~max(f1,f2)。' };
             }
-            if (/[+\-*/%~]\s*$/.test(raw.trim())) {
-                return { level: 'error', message: '公式末尾不能是 + - * / % ~，请补上后面的栏位、数字或函数。' };
+            if (/[+\-*/%~;；]\s*$/.test(raw.trim())) {
+                return { level: 'error', message: '公式末尾不能是 + - * / % ~ ;，请补上后面的栏位、数字或函数。' };
             }
             if (/,\s*$/.test(raw.trim())) {
                 return { level: 'warn', message: '公式以逗号结尾，可能尚未写完（例如函数里还缺参数）。' };
@@ -6453,6 +6469,8 @@
                     ['-', '-'],
                     ['×', '*'],
                     ['÷', '/'],
+                    ['~', '~'],
+                    [';', ';'],
                     ['( )', '()', -1]
                 ].forEach(([label, value, offset]) => {
                     const btn = document.createElement('button');
@@ -6841,7 +6859,7 @@
             let t1 = null;
             let activeFormulaExprInput = null;
             if (!isCheckField) {
-            const formulaSection = createFormulaSection(1, '计算公式', '支持条件公式、曲线拟合与范围输出。拟合：点选 X/Y，按条件选用线性/对数/指数；R² 另绑 number 格。');
+            const formulaSection = createFormulaSection(1, '计算公式', '支持条件公式、曲线拟合、范围（~）与分号（;）连接输出。拟合：点选 X/Y，按条件选用线性/对数/指数；R² 另绑 number 格。');
             const modeRow = document.createElement('div');
             modeRow.className = 'formula-mode-row';
             const inFitMode = isFitMasterField(f);
@@ -7481,7 +7499,7 @@
             const formulaRulesEditor = createConditionalRulesEditor({
                 rules: f.formulaRules,
                 expressionLabel: '公式',
-                expressionPlaceholder: '例：avg(f1,f2,f3)、min(f1,f2)~max(f1,f2)、round({mean},2)',
+                expressionPlaceholder: '例：avg(f1,f2,f3)、min(f1,f2)~max(f1,f2)、round(f1,2);round(f2,2)',
                 setActiveExpressionInput: (el) => { activeFormulaExprInput = el; },
                 commitHooks: panelCommitHooks,
                 onChange: () => {
@@ -7501,7 +7519,7 @@
             formulaLabel.appendChild(formulaLabelHint);
             t1 = document.createElement('textarea');
             t1.spellcheck = false;
-            t1.placeholder = '例：avg(f1,f2,f3)、min(f1,f2,f3)~max(f1,f2,f3)、round(avg(f1,f2,f3),2)';
+            t1.placeholder = '例：avg(f1,f2,f3)、min(f1,f2)~max(f1,f2)、round(f1,2);round(f2,2)';
             t1.value = String(f.fieldExpression || '');
             const preview = document.createElement('div');
             preview.className = 'formula-preview';
@@ -7550,6 +7568,7 @@
                 ['÷', '/'],
                 ['%', '%'],
                 ['范围 ~', '~'],
+                ['连接 ;', ';'],
                 ['( )', '()', -1]
             ].forEach(([label, value, offset]) => {
                 const btn = document.createElement('button');
@@ -7606,12 +7625,13 @@
                 + '<li><code>median(f1,f2,f3)</code>：中位数；<code>count(f1,f2)</code>：有效数值个数</li>'
                 + '<li><code>round(f1, 2)</code>：保留小数；<code>if(条件, 真, 假)</code>：按条件取值</li>'
                 + '<li><code>min(f1,f2)~max(f1,f2)</code>：范围输出，两侧分别求值后拼接为 <code>左~右</code></li>'
+                + '<li><code>round(f1,2);round(f2,2)</code>：分号连接，两侧分别求值后拼接为 <code>左;右</code>（不作除法）</li>'
                 + '<li><code>parseNum(f1)</code>：从带单位文字取数字</li>'
                 + '<li><code>fit_a(f源)</code> / <code>fit_b(f源)</code>：引用拟合源的系数 a、b</li>'
                 + '<li><code>fit_y(f源, x)</code> / <code>fit_x(f源, y)</code>：用拟合模型正算 / 反算</li>'
                 + '<li><code>fit_eq(f源)</code>：输出拟合方程字符串（整格使用）</li>'
                 + '</ul>'
-                + '<p class="formula-fn-note">栏位用 <code>f数字</code>；只写等号右边，例如 <code>f34+f35</code> 或 <code>min(f1,f3)~max(f1,f3)</code>。</p>';
+                + '<p class="formula-fn-note">栏位用 <code>f数字</code>；只写等号右边，例如 <code>f34+f35</code>、<code>min(f1,f3)~max(f1,f3)</code> 或 <code>avg(f1,f2);std(f1,f2)</code>。</p>';
             fnToggle.addEventListener('click', () => {
                 const open = fnHelp.style.display !== 'none';
                 fnHelp.style.display = open ? 'none' : 'block';

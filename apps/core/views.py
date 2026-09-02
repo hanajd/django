@@ -6655,6 +6655,7 @@ def _run_merged_report_export_from_submit_rows(
         task_obj=report_task,
         source_payload=source_payload,
         manual_device_count=manual_device_count,
+        ordered_submit_payloads=[p for _lf, _c, p in rows_ok],
         overwrite_file=overwrite_lf,
         export_variants=export_variants,
     )

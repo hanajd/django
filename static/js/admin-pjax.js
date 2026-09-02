@@ -99,6 +99,18 @@
     });
   }
 
+  function expandActiveMenu() {
+    document.querySelectorAll("aside nav a.sidebar-item.active, aside nav a[href].active").forEach(function (active) {
+      var children = active.closest(".menu-children");
+      if (!children) return;
+      children.classList.add("expanded");
+      var group = active.closest(".menu-group");
+      if (!group) return;
+      var arrow = group.querySelector(".menu-arrow");
+      if (arrow) arrow.classList.add("rotated");
+    });
+  }
+
   function navigate(href, push) {
     var body = document.getElementById(BODY_ID);
     if (!body || requiresFullPage(href) || currentPageRequiresFull()) {
@@ -136,6 +148,7 @@
           history.pushState({ adminPjax: true }, "", href);
         }
         setActiveSidebar(href);
+        expandActiveMenu();
         document.title = doc.title || document.title;
         window.dispatchEvent(new CustomEvent("admin-pjax:loaded", { detail: { href: href } }));
       })
@@ -160,5 +173,10 @@
     if (event.state && event.state.adminPjax) {
       navigate(window.location.href, false);
     }
+  });
+
+  document.addEventListener("DOMContentLoaded", function () {
+    setActiveSidebar(window.location.href);
+    expandActiveMenu();
   });
 })();

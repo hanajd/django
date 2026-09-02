@@ -86,6 +86,156 @@ def is_fit_model_expression(expression: str) -> bool:
     return bool(_FIT_MODEL_RE.match(raw))
 
 
+def _field_logic_name(field: Mapping[str, Any] | None) -> str:
+    if not isinstance(field, Mapping):
+        return ""
+    for key in ("label", "title", "id", "placeholder", "originalPlaceholder"):
+        s = str(field.get(key) or "").strip()
+        if s:
+            return s
+    return ""
+
+
+def _iter_field_logic_expressions(field: Mapping[str, Any] | None) -> list[str]:
+    """收集栏位上用于判定的公式串（含 formulaRules / source）。"""
+    if not isinstance(field, Mapping):
+        return []
+    out: list[str] = []
+    for key in ("fieldExpression", "formula"):
+        s = str(field.get(key) or "").strip()
+        if s:
+            out.append(s)
+    src = field.get("source")
+    if isinstance(src, Mapping):
+        for key in ("pdfFieldExpression", "fieldExpression", "formula"):
+            s = str(src.get(key) or "").strip()
+            if s:
+                out.append(s)
+        rules = src.get("formulaRules")
+    else:
+        rules = None
+    if not isinstance(rules, list):
+        rules = field.get("formulaRules")
+    if isinstance(rules, list):
+        for rule in rules:
+            if not isinstance(rule, Mapping):
+                continue
+            s = str(rule.get("expression") or rule.get("formula") or "").strip()
+            if s:
+                out.append(s)
+    return out
+
+
+def is_fit_equation_latex_field(field: Mapping[str, Any] | None) -> bool:
+    """
+    是否为「拟合主格」：应带 ``displayFormat: latex``，并由前端提交 ``$$...$$`` 方程。
+
+    仅识别输出拟合公式本身的输入框；R²、系数、响应均匀性等数值格返回 False。
+    PDF 叠印仍以提交值是否为 ``$$...$$`` 为准（见 ``looks_like_mathjax_equation``）。
+    """
+    if not isinstance(field, Mapping):
+        return False
+    name = _field_logic_name(field)
+    # R² / 检测结果数值格：即使误挂 fit 规则也不当 latex 主格
+    if re.search(r"2R|R\s*²|R2", name) and "拟合公式" not in name:
+        return False
+    if "检测结果" in name and "拟合公式" not in name:
+        return False
+
+    exprs = _iter_field_logic_expressions(field)
+    # 若 formulaRules 全部是 fit(y=...) 模型式，则以规则为准（忽略外层编译出的 if(...)）
+    src = field.get("source") if isinstance(field.get("source"), Mapping) else {}
+    rules = field.get("formulaRules")
+    if not isinstance(rules, list):
+        rules = src.get("formulaRules") if isinstance(src, Mapping) else None
+    if isinstance(rules, list) and rules:
+        rule_exprs = [
+            str(r.get("expression") or r.get("formula") or "").strip()
+            for r in rules
+            if isinstance(r, Mapping)
+        ]
+        rule_exprs = [e for e in rule_exprs if e]
+        if rule_exprs and all(
+            is_fit_model_expression(e) or e.lower().startswith("fit_eq(") for e in rule_exprs
+        ):
+            exprs = rule_exprs
+
+    if any(
+        re.search(r"round\s*\(\s*fit|fit_r2\s*\(|fit_[abxy]\s*\(", e, flags=re.I)
+        for e in exprs
+    ):
+        return False
+
+    if name == "拟合公式" or name.startswith("拟合公式"):
+        return True
+
+    eq_exprs = [e for e in exprs if is_fit_model_expression(e) or e.lower().startswith("fit_eq(")]
+    if not eq_exprs:
+        return False
+    # 混有 Pearson / 算术式与 fit(y=...) 时，不是「只输出方程」的主格
+    if len(eq_exprs) != len(exprs):
+        return False
+
+    fb = field.get("fitBinding")
+    if not isinstance(fb, Mapping):
+        fb = src.get("fitBinding") if isinstance(src, Mapping) else None
+    out_mode = ""
+    has_fb = False
+    if isinstance(fb, Mapping):
+        has_fb = bool(fb.get("x") or fb.get("y") or fb.get("r2FieldId"))
+        out_mode = str(fb.get("output") or "equation").strip().lower()
+        if out_mode in ("none", "source", "sourceonly", "r2", "coef", "coefficient"):
+            return False
+
+    # 明确主格名称
+    if name == "拟合公式" or name.startswith("拟合公式"):
+        return True
+
+    # 无名称的 source 子节点：即使挂了 fitBinding + fit(y=...)，也不单独判为主格
+    # （R² 格的 source 常误挂点列与三条模型式；主格由带「拟合公式」标签的父字段认定，
+    #  再经 apply_fit_equation_display_format 写回 source.displayFormat）
+    if not name:
+        return False
+
+    if has_fb and out_mode in ("", "equation", "eq", "latex", "formula"):
+        if "拟合" in name or "拟和公式" in name:
+            return "2R" not in name and "R²" not in name and "R2" not in name
+        if re.fullmatch(r"栏位\d+", name) or re.fullmatch(r"f\d+", name, flags=re.I):
+            return True
+        return False
+
+    return False
+
+
+def apply_fit_equation_display_format(field: dict) -> None:
+    """按主格判定设置或清除 ``displayFormat: latex``（就地修改）。"""
+    if not isinstance(field, dict):
+        return
+    if is_fit_equation_latex_field(field):
+        field["displayFormat"] = "latex"
+        src = field.get("source")
+        if isinstance(src, dict):
+            src["displayFormat"] = "latex"
+        return
+    # source 子对象（无 label、无嵌套 source）不要单独清 latex，交由父字段处理
+    name = _field_logic_name(field)
+    looks_like_source_stub = (
+        not name
+        and "source" not in field
+        and (
+            isinstance(field.get("formulaRules"), list)
+            or bool(str(field.get("pdfFieldId") or "").strip())
+        )
+    )
+    if looks_like_source_stub:
+        return
+    if str(field.get("displayFormat") or "").strip().lower() == "latex":
+        field.pop("displayFormat", None)
+    src = field.get("source")
+    if isinstance(src, dict) and str(src.get("displayFormat") or "").strip().lower() == "latex":
+        src.pop("displayFormat", None)
+
+
 def parse_fit_model_kind(expression: str) -> str:
     """
     从 ``fit(y=...)`` / 旧 ``fit_eq()`` / 旧 fitKind 兼容串解析内部 kind。
@@ -634,8 +784,6 @@ def embed_pdf_field_formulas_into_frontend_fields(
             fld["fitBinding"] = copy.deepcopy(fb)
             src["fitBinding"] = copy.deepcopy(fb)
             fld["type"] = "computed"
-            if not str(fld.get("displayFormat") or "").strip():
-                fld["displayFormat"] = str(extra.get("displayFormat") or "latex").strip() or "latex"
         r2_expr = str(extra.get("fieldExpression") or "").strip()
         r2_master = parse_fit_r2_master_pid(r2_expr) or resolve_fit_r2_master_pid(extra)
         if r2_master and not isinstance(fld.get("fitBinding"), dict):
@@ -650,6 +798,8 @@ def embed_pdf_field_formulas_into_frontend_fields(
         if display_format:
             fld["displayFormat"] = display_format
             src["displayFormat"] = display_format
+        # 仅拟合主格保留/写入 latex；R² 等数值格清掉误标
+        apply_fit_equation_display_format(fld)
         try:
             from utils.conditional_field_rules import apply_field_logic_connectors_for_frontend_export
 
