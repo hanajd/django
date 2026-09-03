@@ -135,6 +135,103 @@ def _resolve_report_template_profile(profile: Optional["ReportTemplateProfile"] 
     return profile if profile is not None else DEFAULT_REPORT_TEMPLATE_PROFILE
 
 
+# 通过模板字段 id/label 与 report_site_field_configs 推断叠印需要避让的取值 PID。
+# 当报告模板显式把某个 pdfFieldId 映射到现场基本字段（委托编号、受检单位地址等）时，
+# HTMLPDF 阶段会回填红字，终稿叠印不能再覆盖。
+_OVERLAY_PROTECTED_SITE_LABELS = frozenset(
+    {
+        "委托编号",
+        "受检单位",
+        "受检单位名称",
+        "受检单位地址",
+        "单位地址",
+        "联系人",
+        "联系电话",
+        "主要检测人员",
+        "委托单位",
+        "委托单位名称",
+        "委托单位联系人/电话",
+    }
+)
+_LEGACY_COMMISSION_PIDS = frozenset({"f1", "f3", "f5", "f6", "f20"})
+_LEGACY_ADDRESS_PIDS = frozenset({"f3", "f5", "f7", "f8", "f22"})
+
+
+def _basic_info_labels_from_site_mapping(parsed: Optional[dict]) -> dict[str, set[str]]:
+    """从 template_parsed 的 bindings 解析 report→site 映射，得到每个 report pdfFieldId 对应的现场标签集合。"""
+    out: dict[str, set[str]] = {}
+    if not isinstance(parsed, dict):
+        return out
+    bindings = parsed.get("bindings")
+    if not isinstance(bindings, dict):
+        return out
+    try:
+        from apps.core.htmlpdf_report_mapping_service import (
+            parse_report_site_field_configs_from_bindings,
+        )
+    except Exception:
+        return out
+    try:
+        for cfg in parse_report_site_field_configs_from_bindings(bindings):
+            if not isinstance(cfg, dict):
+                continue
+            report_pid = str(cfg.get("reportPdfFieldId") or "").strip()
+            if not report_pid:
+                continue
+            for src in cfg.get("sources") or []:
+                if not isinstance(src, dict):
+                    continue
+                site_label = str(src.get("label") or "").strip()
+                if site_label:
+                    out.setdefault(report_pid, set()).add(site_label)
+    except Exception:
+        pass
+    return out
+
+
+def _resolve_overlay_skip_and_target_pids(
+    parsed: Optional[dict],
+    *,
+    use_legacy_fallback: bool = True,
+) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
+    """返回 (skip_htmlpdf_pids, commission_pids, address_pids)。"""
+    fields = list(_iter_template_pdf_fields(parsed))
+    label_to_pids: dict[str, set[str]] = {}
+    pid_to_labels: dict[str, set[str]] = _basic_info_labels_from_site_mapping(parsed)
+    for f in fields:
+        pid = str(f.get("pdfFieldId") or "").strip()
+        if not pid:
+            continue
+        pid_l = pid.lower()
+        fid = str(f.get("id") or "").strip()
+        flabel = str(f.get("label") or f.get("title") or "").strip()
+        for lab in {fid, flabel}:
+            if lab:
+                label_to_pids.setdefault(lab, set()).add(pid_l)
+        # 模板字段自身 id/label 已说明语义时，也加入映射
+        if fid in _OVERLAY_PROTECTED_SITE_LABELS or flabel in _OVERLAY_PROTECTED_SITE_LABELS:
+            pid_to_labels.setdefault(pid, set()).add(fid or flabel)
+
+    skip_pids: set[str] = set()
+    commission_pids = set(label_to_pids.get("委托编号", set()))
+    address_pids = set(label_to_pids.get("受检单位地址", set()))
+    for pid, labels in pid_to_labels.items():
+        pid_l = pid.lower()
+        if labels & _OVERLAY_PROTECTED_SITE_LABELS:
+            skip_pids.add(pid_l)
+        if "委托编号" in labels:
+            commission_pids.add(pid_l)
+        if "受检单位地址" in labels:
+            address_pids.add(pid_l)
+
+    if use_legacy_fallback:
+        if not commission_pids:
+            commission_pids.update(_LEGACY_COMMISSION_PIDS)
+        if not address_pids:
+            address_pids.update(_LEGACY_ADDRESS_PIDS)
+    return frozenset(skip_pids), frozenset(commission_pids), frozenset(address_pids)
+
+
 def _merge_adjust_basic_info_device_count_write_rect(
     rect: Any,
     profile: Optional["ReportTemplateProfile"] = None,
@@ -352,6 +449,132 @@ def _cover_semantic_keys(fid: str, flabel: str, hierarchy_key: str = "") -> set[
     return keys
 
 
+# 新模板按标签语义定位封面槽位；老模板 pdfFieldId=f1/f2/f3/f4/f5 兜底时，
+# 以下标签明确说明该字段**不是**对应槽位，避免把联系人/电话等误当成报告编号。
+_NON_COVER_SLOT_LABELS: dict[str, frozenset[str]] = {
+    "cover_report_no": frozenset(
+        {
+            "联系人",
+            "联系电话",
+            "主要检测人员",
+            "受检单位",
+            "受检单位名称",
+            "受检单位地址",
+            "单位地址",
+            "地址",
+            "委托单位",
+            "委托单位名称",
+            "检测类别",
+            "检测项目",
+            "检测类型",
+            "报告日期",
+            "检测日期",
+            "项目名称",
+            "设备类型",
+        }
+    ),
+    "cover_project_name_org": frozenset(
+        {
+            "联系人",
+            "联系电话",
+            "主要检测人员",
+            "委托单位",
+            "委托单位名称",
+            "受检单位地址",
+            "单位地址",
+            "地址",
+            "报告编号",
+            "委托编号",
+            "报告日期",
+            "检测日期",
+            "项目名称",
+            "设备类型",
+            "检测类别",
+            "检测项目",
+        }
+    ),
+    "cover_project_name_title": frozenset(
+        {
+            "联系人",
+            "联系电话",
+            "主要检测人员",
+            "受检单位",
+            "受检单位名称",
+            "受检单位地址",
+            "单位地址",
+            "地址",
+            "委托单位",
+            "委托单位名称",
+            "报告编号",
+            "委托编号",
+            "报告日期",
+            "检测日期",
+            "项目名称",
+            "设备类型",
+            "检测类别",
+            "检测项目",
+        }
+    ),
+    "cover_report_date": frozenset(
+        {
+            "联系人",
+            "联系电话",
+            "主要检测人员",
+            "受检单位",
+            "受检单位名称",
+            "受检单位地址",
+            "单位地址",
+            "地址",
+            "委托单位",
+            "委托单位名称",
+            "报告编号",
+            "委托编号",
+            "检测类别",
+            "检测项目",
+            "检测类型",
+            "项目名称",
+            "设备类型",
+        }
+    ),
+    "cover_inspected_org": frozenset(
+        {
+            "联系人",
+            "联系电话",
+            "主要检测人员",
+            "委托单位",
+            "委托单位名称",
+            "受检单位地址",
+            "单位地址",
+            "地址",
+            "报告编号",
+            "委托编号",
+            "报告日期",
+            "检测日期",
+            "项目名称",
+            "设备类型",
+            "检测类别",
+            "检测项目",
+        }
+    ),
+}
+
+
+def _cover_field_label_fits_slot(field: dict, slot_key: str) -> bool:
+    """判断字段 id/label 是否允许作为老模板 pdfFieldId 兜底槽位。"""
+    if not isinstance(field, dict):
+        return True
+    fid = str(field.get("id") or "").strip()
+    flabel = str(field.get("label") or field.get("title") or "").strip()
+    # 标签明确匹配语义：直接放行，由 _cover_semantic_keys 处理
+    if fid in ("报告编号", "委托编号") and slot_key == "cover_report_no":
+        return True
+    # 字段无标签时走老模板 pdfFieldId 兜底
+    if not fid and not flabel:
+        return True
+    blocked = _NON_COVER_SLOT_LABELS.get(slot_key, frozenset())
+    return fid not in blocked and flabel not in blocked
+
+
 def _summary_device_count_label_needles() -> tuple[str, ...]:
     return ("受检设备台数", "受检工作场所")
 
@@ -361,7 +584,13 @@ def _line_has_summary_device_count_label(line) -> bool:
     return any(n in t for n in _summary_device_count_label_needles())
 
 
-def _summary_semantic_keys(fid: str, flabel: str) -> set[str]:
+def _summary_semantic_keys(
+    fid: str,
+    flabel: str,
+    *,
+    pid: str = "",
+    profile: Optional["ReportTemplateProfile"] = None,
+) -> set[str]:
     keys: set[str] = set()
     blob = f"{fid} {flabel}"
     if fid == "项目名称" or flabel == "项目名称":
@@ -381,7 +610,15 @@ def _summary_semantic_keys(fid: str, flabel: str) -> set[str]:
         keys.add("summary_device_count")
     if fid == "受检单位名称" or flabel == "受检单位名称":
         keys.add("summary_inspected_org_name")
-    if fid in ("f1", "委托编号") or flabel == "委托编号":
+    if flabel == "委托编号" or fid == "委托编号":
+        keys.add("summary_commission_no")
+    # 老模板 f1 为委托编号时兜底：只有 profile.f1_slot == commission_no 且无明确标签时才认定
+    if (
+        pid == "f1"
+        and not fid
+        and not flabel
+        and _resolve_report_template_profile(profile).f1_slot == "commission_no"
+    ):
         keys.add("summary_commission_no")
     if fid == "受检单位地址" or flabel == "受检单位地址":
         keys.add("summary_inspected_org_address")
@@ -580,6 +817,7 @@ def build_report_template_overlay_rects(
     cover_page_1based: int = 1,
     summary_page_1based: int = 3,
     apply_fixed_summary_rects: bool = True,
+    profile: Optional["ReportTemplateProfile"] = None,
 ) -> Dict[str, Any]:
     """从报告模板 pdf.fields / steps.pdfAnchor 解析封面与基本情况页取值框。"""
     out: Dict[str, Any] = {}
@@ -596,21 +834,22 @@ def build_report_template_overlay_rects(
             for key in _cover_semantic_keys(fid, flabel):
                 _assign_overlay_rect(out, key, fr_cover)
             if _template_field_page_1based(f) == int(cover_page_1based):
-                if pid == "f1":
+                if pid == "f1" and _cover_field_label_fits_slot(f, "cover_report_no"):
                     _assign_overlay_rect(out, "cover_report_no", fr_cover)
-                elif pid == "f2" and fid not in ("受检单位名称", "受检单位地址") and flabel not in (
-                    "受检单位名称",
-                    "受检单位地址",
-                ):
+                elif pid == "f2" and _cover_field_label_fits_slot(f, "cover_project_name_org"):
                     _assign_overlay_rect(out, "cover_project_name_org", fr_cover)
-                elif pid == "f3" and fid not in ("受检单位地址",) and flabel != "受检单位地址":
+                elif pid == "f3" and _cover_field_label_fits_slot(f, "cover_project_name_title"):
                     _assign_overlay_rect(out, "cover_project_name_title", fr_cover)
-                elif pid == "f4":
+                elif pid == "f4" and _cover_field_label_fits_slot(f, "cover_report_date"):
                     _assign_overlay_rect(out, "cover_report_date", fr_cover)
-                elif pid == "f5" and "cover_report_date" not in out:
+                elif (
+                    pid == "f5"
+                    and "cover_report_date" not in out
+                    and _cover_field_label_fits_slot(f, "cover_report_date")
+                ):
                     _assign_overlay_rect(out, "cover_report_date", fr_cover)
         if fr_summary is not None and not fr_summary.is_empty:
-            for key in _summary_semantic_keys(fid, flabel):
+            for key in _summary_semantic_keys(fid, flabel, pid=pid, profile=profile):
                 _union_assign_overlay_rect(out, key, fr_summary)
 
     for field in _iter_template_step_fields(parsed):
@@ -623,19 +862,24 @@ def build_report_template_overlay_rects(
         if fr_cover is not None and not fr_cover.is_empty:
             for key in _cover_semantic_keys(fid, flabel, hk):
                 _assign_overlay_rect(out, key, fr_cover)
-            if pid == "f1":
+            if pid == "f1" and _cover_field_label_fits_slot(field, "cover_report_no"):
                 _assign_overlay_rect(out, "cover_report_no", fr_cover)
-            elif pid == "f2":
+            elif pid == "f2" and _cover_field_label_fits_slot(field, "cover_project_name_org"):
                 _assign_overlay_rect(out, "cover_project_name_org", fr_cover)
-            elif pid == "f3" and "cover_project_name_title" not in out:
-                if hk == "受检单位" or flabel == "受检单位":
-                    _assign_overlay_rect(out, "cover_inspected_org", fr_cover)
-                else:
-                    _assign_overlay_rect(out, "cover_project_name_title", fr_cover)
-            elif pid == "f4":
+            elif (
+                pid == "f3"
+                and _cover_field_label_fits_slot(field, "cover_project_name_title")
+                and _cover_field_label_fits_slot(field, "cover_inspected_org")
+            ):
+                if "cover_project_name_title" not in out:
+                    if hk == "受检单位" or flabel == "受检单位":
+                        _assign_overlay_rect(out, "cover_inspected_org", fr_cover)
+                    else:
+                        _assign_overlay_rect(out, "cover_project_name_title", fr_cover)
+            elif pid == "f4" and _cover_field_label_fits_slot(field, "cover_report_date"):
                 _assign_overlay_rect(out, "cover_report_date", fr_cover)
         if fr_summary is not None and not fr_summary.is_empty:
-            for key in _summary_semantic_keys(fid, flabel):
+            for key in _summary_semantic_keys(fid, flabel, pid=pid, profile=profile):
                 _union_assign_overlay_rect(out, key, fr_summary)
     if apply_fixed_summary_rects:
         _finalize_summary_template_rects(out, summary_page_1based=summary_page_1based)
@@ -667,6 +911,7 @@ def _reconcile_cover_f4_f5_inspected_org_vs_date(
 ) -> None:
     """
     部分验收模板（如 dr-1）封面 f4=受检单位行、f5=报告日期；默认 pid 规则会把 f4 当作日期。
+    仅当 f4/f5 无明确语义标签时才按位置兜底，避免把新模板的委托单位名称/联系人等误判。
     """
     f4_rect = None
     f5_rect = None
@@ -678,9 +923,11 @@ def _reconcile_cover_f4_f5_inspected_org_vs_date(
         fr = _fitz_rect_from_template_field(f, cover_pi)
         if fr is None or fr.is_empty:
             continue
-        if pid == "f4":
+        fid = str(f.get("id") or "").strip()
+        flabel = str(f.get("label") or f.get("title") or "").strip()
+        if pid == "f4" and not fid and not flabel:
             f4_rect = fr
-        elif pid == "f5":
+        elif pid == "f5" and not fid and not flabel:
             f5_rect = fr
     if f4_rect is None or f5_rect is None:
         return
@@ -693,9 +940,14 @@ def build_summary_overlay_rects_from_template(
     parsed: Optional[dict],
     *,
     summary_page_1based: int = 3,
+    profile: Optional["ReportTemplateProfile"] = None,
 ) -> Dict[str, Any]:
     """兼容别名：仅基本情况页字段。"""
-    full = build_report_template_overlay_rects(parsed, summary_page_1based=summary_page_1based)
+    full = build_report_template_overlay_rects(
+        parsed,
+        summary_page_1based=summary_page_1based,
+        profile=profile,
+    )
     return {k: v for k, v in full.items() if k.startswith("summary_")}
 
 
@@ -7739,6 +7991,7 @@ def apply_merged_report_merge_overlay(
         cover_page_1based=1,
         summary_page_1based=nh,
         apply_fixed_summary_rects=use_global_fixed_rects,
+        profile=profile,
     )
     org_pdf_cell = _merge_read_summary_inspected_org_from_rect(doc, nh) if use_global_fixed_rects else ""
 
@@ -8064,13 +8317,16 @@ def apply_merged_report_merge_overlay(
                         )
 
         prof = _resolve_report_template_profile(profile)
-        skip_htmlpdf_slots = frozenset(
+        base_skip_slots = frozenset(
             str(x).strip().lower() for x in (prof.htmlpdf_basic_info_pdf_field_ids or ()) if str(x).strip()
         )
-        # 常见模板槽位：委托编号 / 受检单位地址（勿用写死的 f1/f3 误判）
-        _COMMISSION_PIDS = frozenset({"f1", "f3", "f5", "f6", "f20"})
-        _ADDRESS_PIDS = frozenset({"f3", "f5", "f7", "f8", "f22"})
-        if commission_no and not (skip_htmlpdf_slots & _COMMISSION_PIDS):
+        # 通过模板字段语义与 report_site_field_configs 动态推断委托编号 / 受检单位地址 PID；
+        # 无配置时回退到 legacy 硬编码，保证 CT/DR 等老模板继续可用。
+        explicit_skip_pids, commission_pids, address_pids = _resolve_overlay_skip_and_target_pids(
+            template_parsed, use_legacy_fallback=True
+        )
+        skip_htmlpdf_slots = base_skip_slots | explicit_skip_pids
+        if commission_no and not (skip_htmlpdf_slots & commission_pids):
             rr_comm = template_rects.get("summary_commission_no")
             if rr_comm is not None and not rr_comm.is_empty:
                 band = _merge_inset_rect(rr_comm, 1.0)
@@ -8093,7 +8349,7 @@ def apply_merged_report_merge_overlay(
                     al=ac,
                     profile=profile,
                 )
-        if inspected_addr and not (skip_htmlpdf_slots & _ADDRESS_PIDS):
+        if inspected_addr and not (skip_htmlpdf_slots & address_pids):
             rr_addr = template_rects.get("summary_inspected_org_address")
             if rr_addr is not None and not rr_addr.is_empty:
                 # 先钳到取值列竖线右缘，再内缩，避免字段框偏左时压表格线
