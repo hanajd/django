@@ -2358,8 +2358,13 @@ def _strip_summary_overlay_pdf_field_ids_from_mapping(
     report_template_fields: list | None = None,
     report_template_steps: list | None = None,
     task_obj=None,
+    preserve_pdf_field_ids: AbstractSet[str] | None = None,
 ) -> None:
-    """剔除基本情况叠印区 pdfFieldId（如 f49），避免红字与终稿叠印「N台」叠印。"""
+    """剔除基本情况叠印区 pdfFieldId（如 f49），避免红字与终稿叠印「N台」叠印。
+
+    模板编辑器显式配置的 report→site 映射字段不受叠印剔除影响，确保映射值
+    在后续 _pick_value_for_field 中仍可取到。
+    """
     if not _is_report_output_task(task_obj) or not isinstance(value_mapping, dict):
         return
     flat: list = []
@@ -2373,7 +2378,7 @@ def _strip_summary_overlay_pdf_field_ids_from_mapping(
 
     prof = get_report_template_profile(task_obj)
     for pid in prof.summary_overlay_pdf_field_ids or ():
-        if pid:
+        if pid and pid not in (preserve_pdf_field_ids or ()):
             value_mapping.pop(str(pid), None)
     for f in flat:
         if not isinstance(f, dict):
@@ -2381,7 +2386,7 @@ def _strip_summary_overlay_pdf_field_ids_from_mapping(
         if not _is_report_summary_overlay_managed_field(f, task_obj=task_obj):
             continue
         pid = _field_pdf_id(f)
-        if pid:
+        if pid and pid not in (preserve_pdf_field_ids or ()):
             value_mapping.pop(pid, None)
 
 
@@ -8861,6 +8866,17 @@ def _fill_template_fields_with_submit_enhanced(
         raw_sig_map = bindings.get("signature_map")
         if isinstance(raw_sig_map, dict):
             signature_map = raw_sig_map
+    explicit_report_pdf_ids = frozenset()
+    if isinstance(bindings, dict):
+        from apps.core.htmlpdf_report_mapping_service import (
+            parse_report_site_field_configs_from_bindings,
+        )
+
+        explicit_report_pdf_ids = frozenset(
+            str(cfg.get("reportPdfFieldId") or "").strip()
+            for cfg in parse_report_site_field_configs_from_bindings(bindings)
+            if str(cfg.get("reportPdfFieldId") or "").strip()
+        )
     reverse_field_map = _build_field_to_pdf_reverse_index(bindings)
     flat_report_fields: list = []
     _walk_template_field_dicts(template_fields, flat_report_fields)
@@ -9536,8 +9552,10 @@ def _fill_template_fields_with_submit_enhanced(
         field_type = (field.get("fieldType") or "").lower()
         if field_type == "text":
             if _is_report_summary_overlay_managed_field(field, task_obj=task_obj):
-                field["content"] = ""
-                continue
+                # 显式 report→site 映射的字段由 HTMLPDF 红字回填，不得因叠印区判定被清空。
+                if _field_pdf_id(field) not in explicit_report_pdf_ids:
+                    field["content"] = ""
+                    continue
             if _is_single_item_verdict_text_field(field):
                 field["content"] = ""
             else:
@@ -10184,6 +10202,7 @@ def _prepare_backfill_value_mapping(
     ):
         from apps.core.htmlpdf_report_mapping_service import (
             apply_report_site_field_map_to_value_mapping,
+            parse_report_site_field_configs_from_bindings,
             snapshot_explicit_report_site_field_mapping,
         )
 
@@ -10209,8 +10228,14 @@ def _prepare_backfill_value_mapping(
         explicit_site_field_snapshot = snapshot_explicit_report_site_field_mapping(
             value_mapping, bindings
         )
+        explicit_report_pdf_ids = frozenset(
+            str(cfg.get("reportPdfFieldId") or "").strip()
+            for cfg in parse_report_site_field_configs_from_bindings(bindings)
+            if str(cfg.get("reportPdfFieldId") or "").strip()
+        )
     else:
         explicit_site_field_snapshot = {}
+        explicit_report_pdf_ids = frozenset()
     _inject_hospital_equipment_cn_aliases(value_mapping, source_data)
     _inject_radio_enum_slug_checkbox_aliases(value_mapping, source_data)
     _inject_dose_rate_unit_mutex_pdf_aliases(
@@ -10289,6 +10314,7 @@ def _prepare_backfill_value_mapping(
             report_template_fields=report_template_fields if isinstance(report_template_fields, list) else [],
             report_template_steps=steps_for_report,
             task_obj=task_obj,
+            preserve_pdf_field_ids=explicit_report_pdf_ids,
         )
         _strip_report_preserve_original_keys_from_mapping(value_mapping)
         _strip_report_cover_overlay_pdf_ids_from_mapping(value_mapping, task_obj)

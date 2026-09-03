@@ -1236,6 +1236,8 @@ def _load_site_record_json_merged_only(
     cases_list = _cases_for_report_site_record_lookup(cases, project, report_task)
     if not cases_list:
         return {}, False, [], ""
+    from apps.api.inspection_report_make import _report_site_record_source_tasks
+
     case_pks = [int(c.pk) for c in cases_list]
     source_tasks = _report_site_record_source_tasks(project, report_task)
     cand_qs = (
