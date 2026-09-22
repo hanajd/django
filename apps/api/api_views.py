@@ -234,6 +234,7 @@ class LibraryOCRUploadAPIView(APIView):
                         reverse("api_library_ocr_task_status", kwargs={"task_id": task.pk})
                     ),
                     "project_id": task.project_id,
+                    "task_key": task.task_key or "",
                     "autofill_url": request.build_absolute_uri(
                         reverse("api_library_ocr_task_autofill", kwargs={"task_id": task.pk})
                     ),
@@ -266,6 +267,7 @@ class LibraryOCRTaskStatusAPIView(APIView):
                 "id": task.pk,
                 "status": task.status,
                 "project_id": task.project_id,
+                "task_key": task.task_key or "",
                 "batch_id": task.batch_id,
                 "error_message": task.error_message,
                 "result_summary": task.result_summary,
@@ -379,6 +381,7 @@ class LibraryOCRTaskAutofillAPIView(APIView):
         return Response(
             {
                 "task_id": task.pk,
+                "task_key": task.task_key or "",
                 "ready": True,
                 "json_file": {
                     "id": lf_payload.pk,

@@ -1,10 +1,10 @@
 {
   "enabled": true,
-  "version": "0.1.36",
-  "build_number": 36,
-  "filename": "放射安全检测报告-v0.1.36-build36.apk",
-  "file_size": 88482875,
-  "sha256": "706dd8bca0fa670fcede3f463ed449ef0833b9a4c842aa24f5baa4d1a5fcacc5",
-  "release_notes": "fix: 新建文字标记时编辑器默认为空标签",
+  "version": "0.1.38",
+  "build_number": 38,
+  "filename": "放射安全检测报告-v0.1.38-build38.apk",
+  "file_size": 88548415,
+  "sha256": "5e22f0490ec058103feff1be55f52c353112404e38ee6fe26eae227955a0a2cb",
+  "release_notes": "refactor: 优化草稿保存队列与提交流程状态管理",
   "force_update": false
 }

@@ -315,7 +315,7 @@ def _completion_map(project_ids: list[int]) -> dict[int, str]:
 
 
 def _bulk_submissions_by_project(project_ids: list[int]) -> dict[int, dict[str, InspectionSubmission]]:
-    """project_id -> task_no -> submission（含 case / workflow_state）。"""
+    """project_id -> stable task identity -> submission（旧数据仍按 taskNo）。"""
     if not project_ids:
         return {}
     out: dict[int, dict[str, InspectionSubmission]] = defaultdict(dict)
@@ -326,7 +326,12 @@ def _bulk_submissions_by_project(project_ids: list[int]) -> dict[int, dict[str, 
     )
     for sub in qs:
         bucket = out[sub.project_id]
-        if sub.task_no not in bucket:
+        key = (sub.task_key or sub.task_no or "").strip()
+        if key and key not in bucket:
+            bucket[key] = sub
+        # 旧代码路径仍会按 taskNo 查找；新提交的 taskNo 通常也是 taskKey，
+        # 因而不会引入第二份记录。
+        if sub.task_no and sub.task_no not in bucket:
             bucket[sub.task_no] = sub
     return out
 
@@ -370,7 +375,7 @@ def build_commission_project_item_progress(
     from apps.core.models import LibraryTask
 
     items: list[dict] = []
-    seen_task_nos: set[str] = set()
+    seen_task_keys: set[str] = set()
     exportable = exportable_site_task_keys(viewer, [project])
 
     def _has_site_source(task_no: str, library_task_id: int = 0) -> bool:
@@ -401,11 +406,16 @@ def build_commission_project_item_progress(
         site_rows = card.get("site_submit_tasks") or []
         if site_rows:
             for row in site_rows:
+                task_key = str(row.get("taskKey") or "").strip()
                 task_no = str(row.get("taskNo") or "").strip()
-                if not task_no or task_no in seen_task_nos:
+                identity = task_key or task_no
+                if not identity or identity in seen_task_keys:
                     continue
-                seen_task_nos.add(task_no)
-                sub = submissions_by_task.get(task_no)
+                seen_task_keys.add(identity)
+                if task_key:
+                    sub = submissions_by_task.get(task_key)
+                else:
+                    sub = submissions_by_task.get(task_no)
                 stage = _submission_workflow_stage(sub)
                 bar = build_issuance_progress_bar(stage or None)
                 case_id = sub.case_id if sub else None
@@ -415,6 +425,7 @@ def build_commission_project_item_progress(
                     project=project,
                     submission=sub,
                     viewer=viewer,
+                    task_key=task_key,
                 )
                 signed_slots = {
                     str(s.get("slot") or "")
@@ -436,6 +447,8 @@ def build_commission_project_item_progress(
                         "item_key": f"{project.pk}-{task_no}",
                         "equipment_title": equip_title or "—",
                         "task_no": task_no,
+                        "task_key": task_key,
+                        "project_equipment_id": row.get("projectEquipmentId"),
                         "task_label": row.get("label") or task_no,
                         "report_task_label": card.get("report_task_label") or "—",
                         "library_task_id": int(row.get("libraryTaskId") or 0) or 0,
@@ -453,7 +466,7 @@ def build_commission_project_item_progress(
                             has_case=bool(case_id),
                             signed_slots=signed_slots,
                             has_site_source=_has_site_source(
-                                task_no, int(row.get("libraryTaskId") or 0) or 0
+                                task_key or task_no, int(row.get("libraryTaskId") or 0) or 0
                             ),
                             variant_sign_targets=variant_sign_targets,
                         ),
@@ -482,7 +495,8 @@ def build_commission_project_item_progress(
             )
 
     for task_no, sub in sorted(submissions_by_task.items(), key=lambda x: x[0]):
-        if task_no in seen_task_nos:
+        identity = (sub.task_key or task_no or "").strip()
+        if identity in seen_task_keys:
             continue
         stage = _submission_workflow_stage(sub)
         bar = build_issuance_progress_bar(stage or None)
@@ -512,6 +526,7 @@ def build_commission_project_item_progress(
                 "item_key": f"{project.pk}-{task_no}-orphan",
                 "equipment_title": "其他提交",
                 "task_no": task_no,
+                "task_key": sub.task_key or "",
                 "task_label": f"{task_no} · {sub.report_type}",
                 "report_task_label": sub.report_type or "—",
                 "case_id": sub.case_id,

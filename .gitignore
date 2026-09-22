@@ -1,6 +1,12 @@
 media/
 db.sqlite3
 db.sqlite3-journal
+db.sqlite3-shm
+db.sqlite3-wal
 backups/
 # 思源可变字体按字重实例化后的缓存（可自动重建）
 fonts/cache/
+__pycache__/
+*.pyc
+output.log
+logs/

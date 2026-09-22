@@ -541,6 +541,13 @@ def _resolve_site_pdf_path_for_submit(
             library_project=project, case_no=task_no
         ).first()
         if case is None:
+            from apps.core.task_identity import parse_task_key
+
+            if parse_task_key(task_no) is not None:
+                case = InspectionCase.objects.filter(
+                    library_project=project, task_key=task_no
+                ).first()
+        if case is None:
             return None
         lf = (
             LibraryFile.objects.filter(

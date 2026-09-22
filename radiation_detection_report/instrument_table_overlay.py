@@ -617,15 +617,25 @@ def _cover_dangling_instrument_verticals(
     stub_to = _max_instrument_vert_stub_y(page, xs, below_y=new_bottom)
     stub_to = max(stub_to, float(fallback_bottom))
     text_y = _first_text_y_below(page, y0=new_bottom, x0=x_left, x1=x_right)
-    if text_y is not None:
+    # When the table is shortened, the merged left label may leave a final
+    # character between the new and old bottoms.  That text is still part of
+    # the old table, so it must not stop cleanup of the dangling grid lines.
+    # Only text below the complete erase range can be genuine following
+    # content and should constrain the white cover.
+    if text_y is not None and text_y > float(fallback_bottom) + 1.0:
         stub_to = min(stub_to, float(text_y) - 1.0)
     if stub_to <= new_bottom + 1.0:
         return
-    cover = fitz.Rect(x_left - 1.2, float(new_bottom) + 0.35, x_right + 1.2, stub_to + 0.6)
-    if cover.height < 0.8 or cover.width < 2.0:
+    cover_y0 = float(new_bottom) + 0.35
+    cover_y1 = stub_to + 0.6
+    if cover_y1 - cover_y0 < 0.8:
         return
     try:
-        page.draw_rect(cover, color=(1, 1, 1), fill=(1, 1, 1), width=0)
+        # Keep the cover narrow so text in the merged left label cell is not
+        # erased together with the dangling borders.
+        for x in (x_left, *[float(v) for v in xs[1:-1]], x_right):
+            cover = fitz.Rect(x - 1.2, cover_y0, x + 1.2, cover_y1)
+            page.draw_rect(cover, color=(1, 1, 1), fill=(1, 1, 1), width=0.5)
     except Exception:
         logger.exception("cover dangling instrument verticals failed")
         return

@@ -432,9 +432,14 @@ def apply_manual_workflow_advance(
 
         site_task = None
         task_no = ""
-        # 优先用提交上的 task_no 解析现场任务
+        # 新提交优先使用稳定 taskKey；旧提交才使用 taskNo 兼容解析。
         try:
-            task_no = str(getattr(submission, "task_no", "") or "").strip()
+            task_no = str(
+                getattr(submission, "task_key", "")
+                or getattr(submission, "task_no", "")
+                or getattr(case, "task_key", "")
+                or ""
+            ).strip()
         except Exception:
             task_no = ""
         if task_no:
@@ -443,8 +448,13 @@ def apply_manual_workflow_advance(
                 site_task = None
         has_source = False
         if site_task is not None:
+            from apps.core.task_identity import parse_task_key
+
             rows_ok, _notes, _errs = collect_latest_submit_rows_for_site_folder(
-                project, site_task, user
+                project,
+                site_task,
+                user,
+                task_key=task_no if parse_task_key(task_no) is not None else None,
             )
             has_source = bool(rows_ok)
         if not has_source:

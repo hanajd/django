@@ -338,6 +338,7 @@ def build_project_task_api_fields(
     *,
     task_no: str,
     ordered_tasks: list[LibraryTask] | None = None,
+    project_equipment_id: int | None = None,
 ) -> dict:
     """
     任务列表/详情 API 附加字段：区分路由用 ``taskNo`` 与展示用 ``inspectedNo``。
@@ -353,7 +354,19 @@ def build_project_task_api_fields(
         report_task = library_task
         report_task_no = task_no
     else:
-        report_task = parent_report_task_for_site_task(library_task, project)
+        report_task = None
+        if project_equipment_id:
+            report_task = (
+                project.library_tasks.filter(
+                    output_target=LibraryTask.OUTPUT_REPORT,
+                    report_source_tasks=library_task,
+                    project_equipment_links__pk=project_equipment_id,
+                )
+                .order_by("code", "id")
+                .first()
+            )
+        if report_task is None:
+            report_task = parent_report_task_for_site_task(library_task, project)
         if report_task is None and len(report_tasks_for_project(project)) == 1:
             report_task = report_tasks_for_project(project)[0]
         report_task_no = project_task_no_for_library_task(report_task, project, ordered_tasks=tasks) if report_task else ""
@@ -368,7 +381,27 @@ def build_project_task_api_fields(
             if no:
                 related_site_nos.append(no)
 
+    from apps.core.task_identity import task_key_for_library_task
+
+    task_key = task_key_for_library_task(
+        project, library_task, project_equipment_id=project_equipment_id
+    )
+    report_task_key = task_key_for_library_task(
+        project, report_task, project_equipment_id=project_equipment_id
+    )
+    related_site_task_keys = [
+        task_key_for_library_task(
+            project, st, project_equipment_id=project_equipment_id
+        )
+        for st in library_task.report_source_tasks.filter(
+            output_target=LibraryTask.OUTPUT_SITE_RECORD
+        ).order_by("code", "id")
+    ] if library_task.output_target == LibraryTask.OUTPUT_REPORT else []
+
     return {
+        "taskKey": task_key,
+        "reportTaskKey": report_task_key,
+        "relatedSiteRecordTaskKeys": [x for x in related_site_task_keys if x],
         "inspectedNo": inspected_no,
         "reportTaskId": report_task.id if report_task else None,
         "reportTaskNo": report_task_no,

@@ -275,7 +275,7 @@ def _coerce_value_template(raw: Any) -> str:
 
 
 _VALUE_TEMPLATE_PLACEHOLDER_RE = re.compile(r"\{[^{}]+\}")
-_BARE_SLOT_CONCAT_TEMPLATE_RE = re.compile(r"^(\s*\{\d+\}\s*)+$")
+_BARE_SLOT_CONCAT_TEMPLATE_RE = re.compile(r"^(\s*\{[^{}]+\}\s*)+$")
 
 
 def _value_template_has_slot_placeholders(template: str) -> bool:
@@ -286,6 +286,9 @@ def _value_template_has_slot_placeholders(template: str) -> bool:
 def _is_bare_slot_concat_template(template: str) -> bool:
     """模板仅为 {1}{2}… 连写、无字面分隔符时，不宜直接 render（会变成 10491104115）。"""
     return bool(_BARE_SLOT_CONCAT_TEMPLATE_RE.match(str(template or "").strip()))
+
+
+_ADJACENT_SLOT_PLACEHOLDER_RE = re.compile(r"\}\s*\{")
 
 
 def _is_signature_path_mapped_value(val: str) -> bool:
@@ -494,6 +497,8 @@ def _compose_report_site_field_final_value(
                 date_cn = _compose_chinese_test_date_from_parts(picked_parts)
                 if date_cn:
                     return date_cn, None
+            # 裸连写模板不允许回落到字面渲染（无分隔符会把数字粘成 167167.00）。
+            return "", None
         return render_report_value_template(tpl, slot_values), None
     if len(picked_parts) == 1:
         return picked_parts[0], None
@@ -1178,6 +1183,8 @@ def render_report_value_template(template: str, slot_values: dict[str, str]) -> 
     text = str(template or "")
     if not text.strip() or not slot_values:
         return text
+    # 相邻占位槽之间补空格：{1}{2}nGy/min 这类模板直接 replace 会把数值粘成 167167.00。
+    text = _ADJACENT_SLOT_PLACEHOLDER_RE.sub("} {", text)
     keys = sorted({str(k) for k in slot_values if str(k)}, key=lambda x: (-len(x), x))
     for key in keys:
         val = str(slot_values.get(key) or "")

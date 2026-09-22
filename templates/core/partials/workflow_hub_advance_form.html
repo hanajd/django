@@ -8,6 +8,7 @@
     <input type="hidden" name="action" value="{{ act.action|default:'advance_workflow' }}">
     <input type="hidden" name="project_id" value="{{ row.project_id }}">
     <input type="hidden" name="task_no" value="{{ row.task_no }}">
+    <input type="hidden" name="task_key" value="{{ row.task_key|default:'' }}">
     <input type="hidden" name="target_stage" value="{{ act.target_stage }}">
     {% if act.export_variant %}<input type="hidden" name="export_variant" value="{{ act.export_variant }}">{% endif %}
     {% if project_id %}<input type="hidden" name="filter_project_id" value="{{ project_id }}">{% endif %}

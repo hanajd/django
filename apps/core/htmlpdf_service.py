@@ -1233,6 +1233,33 @@ def build_filled_pdf(
                 except Exception:
                     pass
                 continue
+            if f.get("_qcVerdictEraseCell") and text:
+                # 模板自带「单项判定」栏位：先擦掉判定格内静态合格/不合格字，再走第二遍写值。
+                try:
+                    pt = fitz.Point(
+                        (raw_rect.x0 + raw_rect.x1) / 2.0,
+                        (raw_rect.y0 + raw_rect.y1) / 2.0,
+                    )
+                    cell = _smallest_table_cell_containing_point(
+                        _cells_for_page(page_index), pt
+                    )
+                    if (
+                        cell is not None
+                        and not cell.is_empty
+                        and cell.width >= 8
+                        and cell.height >= 8
+                    ):
+                        erase = fitz.Rect(
+                            cell.x0 + 1.0, cell.y0 + 1.0, cell.x1 - 1.0, cell.y1 - 1.0
+                        )
+                    else:
+                        erase = fitz.Rect(
+                            r.x0 - 1.5, r.y0 - 1.0, r.x1 + 1.5, r.y1 + 1.0
+                        )
+                    page.add_redact_annot(erase, fill=(1, 1, 1))
+                    pages_need_redact.add(page_index)
+                except Exception:
+                    pass
             if not text or not _pdf_text_field_wants_justify_for_instrument_line(f):
                 continue
             pt = fitz.Point((raw_rect.x0 + raw_rect.x1) / 2.0, (raw_rect.y0 + raw_rect.y1) / 2.0)

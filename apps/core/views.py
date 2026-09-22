@@ -4660,6 +4660,7 @@ def workflow_hub_report_generate(request):
             except ValueError:
                 project_id = 0
             task_no = (request.POST.get("task_no") or "").strip()
+            task_key = (request.POST.get("task_key") or "").strip()
             try:
                 site_task_id = int(request.POST.get("site_library_task_id") or 0)
             except ValueError:
@@ -4681,6 +4682,7 @@ def workflow_hub_report_generate(request):
                 request,
                 project_id=project_id,
                 task_no=task_no,
+                task_key=task_key,
                 site_task_id=site_task_id,
                 redirect_url=hub_back,
                 export_variants=export_variants,
@@ -4738,6 +4740,7 @@ def _workflow_hub_export_report(
     project_id: int,
     task_no: str,
     site_task_id: int,
+    task_key: str = "",
     redirect_url: str,
     export_variants: list | None = None,
 ):
@@ -4760,7 +4763,20 @@ def _workflow_hub_export_report(
         return redirect(redirect_url)
 
     site_task = None
-    if site_task_id:
+    stable_task_key = (task_key or "").strip()
+    if stable_task_key:
+        from apps.core.task_identity import parse_task_key, resolve_library_task_for_key
+
+        parsed = parse_task_key(stable_task_key)
+        site_task = resolve_library_task_for_key(project, stable_task_key)
+        if (
+            parsed is None
+            or site_task is None
+            or site_task.output_target != LibraryTask.OUTPUT_SITE_RECORD
+        ):
+            messages.error(request, "任务标识无效，已阻止导出，未使用其他报告模板")
+            return redirect(redirect_url)
+    elif site_task_id:
         site_task = LibraryTask.objects.filter(pk=site_task_id).first()
     if site_task is None and task_no:
         site_task = _resolve_library_task_for_task_no(task_no, project)
@@ -4787,13 +4803,18 @@ def _workflow_hub_export_report(
             .order_by("code", "id")
             .first()
         )
+        if stable_task_key:
+            rt = _resolve_report_task_for_case(stable_task_key, project)
+            if rt is None:
+                return None
+            return rt
         if rt is None and task_no:
             from apps.core.models import InspectionCase
 
             case = InspectionCase.objects.filter(case_no=task_no, library_project=project).first()
             if case is not None:
                 rt = _resolve_report_task_for_case(task_no, project)
-        if rt is None:
+        if rt is None and not stable_task_key:
             rt = (
                 project.library_tasks.filter(output_target=LibraryTask.OUTPUT_REPORT)
                 .order_by("code", "id")
@@ -4807,11 +4828,19 @@ def _workflow_hub_export_report(
         return redirect(redirect_url)
 
     rows_ok, info_notes, errors = collect_latest_submit_rows_for_site_folder(
-        project, site_task, request.user, tab="inspection_submit"
+        project,
+        site_task,
+        request.user,
+        tab="inspection_submit",
+        task_key=stable_task_key or None,
     )
     if not rows_ok:
         rows_ok, info_notes, errors = collect_latest_submit_rows_for_site_folder(
-            project, site_task, request.user, tab="site_record"
+            project,
+            site_task,
+            request.user,
+            tab="site_record",
+            task_key=stable_task_key or None,
         )
 
     if errors and not rows_ok:
@@ -4835,6 +4864,7 @@ def _workflow_hub_export_report(
         redirect_url=redirect_url,
         success_for_hub_preview=True,
         preferred_task_no=task_no,
+        preferred_task_key=stable_task_key,
         replace_prior_case_reports=True,
         export_variants=variants,
     )
@@ -5123,9 +5153,12 @@ def _workflow_hub_handle_advance_post(request, *, redirect_name: str) -> None:
         messages.error(request, "无权操作该委托")
         return
     task_no = (request.POST.get("task_no") or "").strip()
+    task_key = (request.POST.get("task_key") or "").strip()
     target_stage = (request.POST.get("target_stage") or "").strip()
+    sub_qs = InspectionSubmission.objects.filter(project=project)
+    sub_qs = sub_qs.filter(task_key=task_key) if task_key else sub_qs.filter(task_no=task_no)
     sub = (
-        InspectionSubmission.objects.filter(project=project, task_no=task_no)
+        sub_qs
         .select_related("case", "case__workflow_state")
         .first()
     )
@@ -5385,9 +5418,12 @@ def commission_manage(request):
                 messages.error(request, "无权操作该委托")
                 return redirect(redir + tab_q)
             task_no = (request.POST.get("task_no") or "").strip()
+            task_key = (request.POST.get("task_key") or "").strip()
             target_stage = (request.POST.get("target_stage") or "").strip()
+            sub_qs = InspectionSubmission.objects.filter(project=project)
+            sub_qs = sub_qs.filter(task_key=task_key) if task_key else sub_qs.filter(task_no=task_no)
             sub = (
-                InspectionSubmission.objects.filter(project=project, task_no=task_no)
+                sub_qs
                 .select_related("case", "case__workflow_state")
                 .first()
             )
@@ -5413,9 +5449,12 @@ def commission_manage(request):
                 messages.error(request, "无权操作该委托")
                 return redirect(redir + tab_q)
             task_no = (request.POST.get("task_no") or "").strip()
+            task_key = (request.POST.get("task_key") or "").strip()
             target_stage = (request.POST.get("target_stage") or "").strip()
+            sub_qs = InspectionSubmission.objects.filter(project=project)
+            sub_qs = sub_qs.filter(task_key=task_key) if task_key else sub_qs.filter(task_no=task_no)
             sub = (
-                InspectionSubmission.objects.filter(project=project, task_no=task_no)
+                sub_qs
                 .select_related("case", "case__workflow_state")
                 .first()
             )
@@ -6483,6 +6522,7 @@ def _run_merged_report_export_from_submit_rows(
     redirect_url: str | None = None,
     success_for_hub_preview: bool = False,
     preferred_task_no: str = "",
+    preferred_task_key: str = "",
     replace_prior_case_reports: bool = False,
     export_variants: list | None = None,
 ) -> HttpResponse:
@@ -6521,8 +6561,28 @@ def _run_merged_report_export_from_submit_rows(
 
     project = cases_for_load[0].library_project
     preferred = (preferred_task_no or "").strip()
+    preferred_key = (preferred_task_key or "").strip()
     persist_case = None
-    if preferred:
+    if preferred_key:
+        persist_case = (
+            InspectionCase.objects.filter(
+                task_key=preferred_key, library_project=project
+            ).first()
+            or next(
+                (c for c in cases_for_load if (c.task_key or "").strip() == preferred_key),
+                None,
+            )
+        )
+        if persist_case is None and cases_for_load:
+            c0 = cases_for_load[0]
+            if not (c0.task_key or "").strip():
+                c0.task_key = preferred_key
+                c0.save(update_fields=["task_key"])
+                persist_case = c0
+        if persist_case is None:
+            messages.error(request, "任务标识与现场记录案件不一致，已阻止导出")
+            return redirect(redir)
+    if preferred and not preferred_key:
         # 枢纽按叶子 task_no 导出时：报告必须挂到该任务对应案件，否则编制页仍显示「待编制」
         preferred_case = (
             InspectionCase.objects.filter(case_no=preferred, library_project=project).first()
@@ -6562,13 +6622,16 @@ def _run_merged_report_export_from_submit_rows(
         report_task,
         merged_submit,
         submit_merge_is_authoritative=True,
+        task_key=preferred_key or None,
     )
     if not isinstance(source_payload, dict) or not source_payload:
         messages.error(request, merge_note or "报告数据汇总失败")
         return redirect(redir)
 
     task_no_for_fill = (
-        preferred
+        preferred_key
+        or preferred
+        or str((merged_submit or {}).get("taskKey") or "").strip()
         or str(merged_submit.get("taskNo") or "").strip()
         or str(persist_case.case_no or "").strip()
     )
@@ -10762,11 +10825,40 @@ def library_task_management(request):
             if task_obj.output_target not in {LibraryTask.OUTPUT_SITE_RECORD, LibraryTask.OUTPUT_REPORT}:
                 messages.error(request, "仅现场记录/报告模板支持此导出入口")
                 return redirect(_library_task_management_redirect_url(request))
+            from apps.core.task_identity import (
+                parse_task_key,
+                task_key_for_library_task,
+                task_links_for_library_task,
+            )
+
+            task_links = task_links_for_library_task(project, task_obj)
+            stable_task_keys = {
+                task_key_for_library_task(
+                    project,
+                    task_obj,
+                    project_equipment_id=link.pk,
+                )
+                for link in task_links
+            }
+            if not task_links:
+                key = task_key_for_library_task(project, task_obj)
+                if key:
+                    stable_task_keys.add(key)
+            stable_task_keys.discard("")
+            if len(stable_task_keys) > 1:
+                messages.error(
+                    request,
+                    "该任务模板对应多个设备，请从项目工作台按具体设备任务导出，避免取错检测数据",
+                )
+                return redirect(
+                    reverse("library_task_management")
+                    + f"?manage_task={task_obj.pk}&export_project_id={project.pk}"
+                )
+            submission_qs = InspectionSubmission.objects.filter(project=project)
+            if stable_task_keys:
+                submission_qs = submission_qs.filter(task_key=next(iter(stable_task_keys)))
             latest_submission = (
-                InspectionSubmission.objects.filter(project=project)
-                .select_related("case")
-                .order_by("-updated_at", "-id")
-                .first()
+                submission_qs.select_related("case").order_by("-updated_at", "-id").first()
             )
             if latest_submission is None:
                 messages.error(request, "该项目下暂无可用的 submit 记录")
@@ -10779,6 +10871,15 @@ def library_task_management(request):
                 return redirect(
                     reverse("library_task_management") + f"?manage_task={task_obj.pk}&export_project_id={project.pk}"
                 )
+            task_identity = str(
+                latest_submission.task_key
+                or case.task_key
+                or latest_submission.task_no
+                or ""
+            ).strip()
+            stable_task_key = (
+                task_identity if parse_task_key(task_identity) is not None else ""
+            )
 
             from apps.api.inspection_pdf_service import (
                 _deep_merge_payload_dicts,
@@ -10793,6 +10894,7 @@ def library_task_management(request):
             if not payload:
                 payload = {
                     "taskNo": latest_submission.task_no,
+                    "taskKey": stable_task_key,
                     "projectId": project.code,
                     "reportInfo": latest_submission.report_info or {},
                     "hospitalInfo": latest_submission.hospital_info or {},
@@ -10804,6 +10906,7 @@ def library_task_management(request):
                 }
             else:
                 payload.setdefault("taskNo", latest_submission.task_no)
+                payload.setdefault("taskKey", stable_task_key)
                 payload.setdefault("projectId", project.code)
                 payload.setdefault(
                     "updatedAt",
@@ -10814,13 +10917,19 @@ def library_task_management(request):
                 payload.setdefault("equipmentInfo", latest_submission.equipment_info or {})
                 payload.setdefault("testResult", latest_submission.test_result or {})
             if task_obj.output_target == LibraryTask.OUTPUT_REPORT:
-                report_payload, source_reason = _load_site_record_payload_for_report(case, project, task_obj)
+                report_payload, source_reason = _load_site_record_payload_for_report(
+                    case,
+                    project,
+                    task_obj,
+                    task_key=stable_task_key or None,
+                )
                 if not isinstance(report_payload, dict) or not report_payload:
                     messages.error(request, source_reason or "未找到可用的现场记录，无法导出报告")
                     return redirect(
                         reverse("library_task_management") + f"?manage_task={task_obj.pk}&export_project_id={project.pk}"
                     )
                 report_payload.setdefault("taskNo", latest_submission.task_no)
+                report_payload.setdefault("taskKey", stable_task_key)
                 report_payload.setdefault("projectId", project.code)
                 report_payload.setdefault(
                     "updatedAt",
@@ -10832,7 +10941,7 @@ def library_task_management(request):
                 task_obj,
                 payload,
                 project=project,
-                task_no=latest_submission.task_no,
+                task_no=task_identity,
                 inspection_case=case,
             )
             if not filled_fields:
@@ -10842,7 +10951,7 @@ def library_task_management(request):
                 )
             ok, pdf_reason, _ = _persist_filled_pdf_from_submit(
                 request.user,
-                latest_submission.task_no,
+                task_identity,
                 case,
                 project,
                 filled_fields,

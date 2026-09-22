@@ -143,17 +143,6 @@ def library_task_equipment_context_by_task_id(
     """
     ctx: dict[int, dict[str, str]] = {}
     for link in project_equipment_queryset(project):
-        eq = link.equipment
-        dept = eq.department
-        if dept is not None:
-            commission_name = dept.full_display_name
-        else:
-            commission_name = (project.commission_organization or "").strip()
-            if not commission_name and project.commission_org_id:
-                org = project.commission_org
-                commission_name = org.full_display_name if org else ""
-        device_type = (eq.device_type or "").strip()
-        inspection_type = (link.inspection_type or "").strip()
         task = normalize_equipment_report_task(effective_report_task(link))
         if task is None:
             continue
@@ -162,36 +151,82 @@ def library_task_equipment_context_by_task_id(
             output_target=LibraryTask.OUTPUT_SITE_RECORD
         ).order_by("code", "id"):
             task_ids.add(src.pk)
-        payload = {
-            "commissionOrganization": commission_name,
-            "deviceType": device_type,
-            "inspectionType": inspection_type,
-        }
+        payload = project_equipment_context(link, project=project)
         for tid in task_ids:
             ctx[tid] = payload
     return ctx
 
 
+def project_equipment_context(
+    link: LibraryProjectEquipment,
+    *,
+    project: LibraryProject | None = None,
+) -> dict[str, str]:
+    """Return API display fields for one exact project-equipment relation."""
+    eq = link.equipment
+    dept = eq.department
+    if dept is not None:
+        commission_name = dept.full_display_name
+    else:
+        commission_name = (getattr(project, "commission_organization", "") or "").strip()
+        if not commission_name and getattr(project, "commission_org_id", None):
+            org = project.commission_org
+            commission_name = org.full_display_name if org else ""
+    return {
+        "commissionOrganization": commission_name,
+        "deviceType": (eq.device_type or "").strip(),
+        "inspectionType": (link.inspection_type or "").strip(),
+    }
+
+
 def site_submit_tasks_for_report_task(
     project: LibraryProject,
     report_task: LibraryTask | None,
+    *,
+    project_equipment_id: int | None = None,
 ) -> list[dict]:
-    """设备所挂载报告下的现场记录任务（含项目内 taskNo，供模拟提交）。"""
+    """设备所挂载报告下的现场记录任务及稳定 taskKey。"""
     from apps.core.project_numbering import project_task_no_for_library_task, project_tasks_ordered
+    from apps.core.task_identity import build_task_key
 
     if project is None or report_task is None:
         return []
     ordered = project_tasks_ordered(project)
     rows: list[dict] = []
+    link_id = int(project_equipment_id or 0)
+    if link_id <= 0:
+        links = list(
+            LibraryProjectEquipment.objects.filter(
+                project=project, report_task=report_task
+            ).order_by("sort_order", "id").values_list("pk", flat=True)
+        )
+        if len(links) == 1:
+            link_id = int(links[0])
     for st in report_task.report_source_tasks.filter(
         output_target=LibraryTask.OUTPUT_SITE_RECORD
     ).order_by("code", "id"):
         task_no = project_task_no_for_library_task(st, project, ordered_tasks=ordered)
         if not task_no:
             continue
+        task_key = build_task_key(
+            project_id=project.pk,
+            project_equipment_id=link_id,
+            library_task_id=st.pk,
+            output_target=st.output_target,
+        ) if link_id else ""
+        report_task_key = build_task_key(
+            project_id=project.pk,
+            project_equipment_id=link_id,
+            library_task_id=report_task.pk,
+            output_target=report_task.output_target,
+        ) if link_id else ""
         rows.append(
             {
                 "taskNo": task_no,
+                "displayTaskNo": task_no,
+                "taskKey": task_key,
+                "reportTaskKey": report_task_key,
+                "projectEquipmentId": link_id or None,
                 "libraryTaskId": st.pk,
                 "code": st.code or "",
                 "name": st.name or "",
@@ -211,7 +246,9 @@ def project_equipment_cards(project: LibraryProject) -> list[dict]:
         report_label = ""
         if task is not None:
             report_label = f"{task.code} · {task.name}"
-            site_submit_tasks = site_submit_tasks_for_report_task(project, task)
+            site_submit_tasks = site_submit_tasks_for_report_task(
+                project, task, project_equipment_id=link.pk
+            )
             site_labels = [
                 f"{row['code']} · {row['name']}" if row.get("code") else row.get("name") or "—"
                 for row in site_submit_tasks
@@ -282,7 +319,7 @@ def task_no_display_index(project: LibraryProject) -> dict[str, dict]:
                 detection_label = report_human
             else:
                 detection_label = site_task_name or task_no
-            index[task_no] = {
+            metadata = {
                 "equipment_title": equip_title,
                 "detection_label": detection_label,
                 "site_task_name": site_task_name,
@@ -290,6 +327,9 @@ def task_no_display_index(project: LibraryProject) -> dict[str, dict]:
                 "report_task_label": report_label,
                 "department_label": department_label,
             }
+            index.setdefault(task_no, metadata)
+            if row.get("taskKey"):
+                index[str(row["taskKey"])] = metadata
     return index
 
 

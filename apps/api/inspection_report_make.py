@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import os
 import re
 from datetime import date, datetime
@@ -43,6 +44,8 @@ from utils.report_fill_helpers import (
     qc_condition_text_has_unit_markers,
     split_contact_name_phone,
 )
+
+logger = logging.getLogger(__name__)
 
 # 报告质控区 steps 常把「检测条件/检测结果」绑到 testResult.test3、field30、testResult2 等 legacy 键；
 # 前端 type=number 易写入 0 或占位，若优先于 submitPath 会覆盖现场模板 dynamicData 解析出的正确词条。
@@ -1254,14 +1257,30 @@ def _resolve_submitter_display_name(
 
     if inspection_case is not None and project is not None:
         if tn:
+            from apps.core.task_identity import parse_task_key
+
+            sub_filters = {"case_id": inspection_case.pk, "project_id": project.pk}
+            if parse_task_key(tn) is not None:
+                sub_filters["task_key"] = tn
+            else:
+                sub_filters["task_no"] = tn
             sub = (
-                InspectionSubmission.objects.filter(
-                    task_no=tn, case_id=inspection_case.pk, project_id=project.pk
-                )
+                InspectionSubmission.objects.filter(**sub_filters)
                 .select_related("created_by")
                 .order_by("-submitted_at", "-updated_at", "-id")
                 .first()
             )
+            if sub is None and parse_task_key(tn) is None and (inspection_case.task_key or "").strip():
+                sub = (
+                    InspectionSubmission.objects.filter(
+                        task_key=inspection_case.task_key,
+                        case_id=inspection_case.pk,
+                        project_id=project.pk,
+                    )
+                    .select_related("created_by")
+                    .order_by("-submitted_at", "-updated_at", "-id")
+                    .first()
+                )
             if sub is not None:
                 s = _user_disp(sub.created_by)
                 if s:
@@ -7506,12 +7525,134 @@ def _qc_result_row_base_from_field(field: dict) -> str:
     return ""
 
 
+def _value_case_config_is_verdict_aggregate(config: dict | None) -> bool:
+    """返回是否为将多个检测值合并成一次合格/不合格输出的映射。"""
+    if not isinstance(config, dict):
+        return False
+    for rule in config.get("valueCases") or config.get("value_cases") or ():
+        if not isinstance(rule, dict) or not str(rule.get("condition") or "").strip():
+            continue
+        expression = str(
+            rule.get("expression")
+            if rule.get("expression") is not None
+            else rule.get("formula") or ""
+        ).strip()
+        if expression in ("合格", "不合格", "符合", "不符合"):
+            return True
+    return False
+
+
+def _aggregate_verdict_peer_result_pdf_ids(
+    flat_fields: list,
+    bindings: dict | None,
+) -> frozenset[str]:
+    """
+    找出已配置聚合判定映射的同行检测结果栏位。
+
+    聚合映射（例如四个偏离值统一写入一个状态格）已经负责输出一次
+    判定；这些结果栏位不再生成各自的 synthetic verdict，避免同一行出现
+    多个合格/不合格。通过目标栏位矩形与「检测结果/计算结果/报出值」栏位
+    的纵向重叠确定同行，不依赖 f 编号连续性。
+    """
+    if not isinstance(flat_fields, list) or not isinstance(bindings, dict):
+        return frozenset()
+    try:
+        from apps.core.htmlpdf_report_mapping_service import (
+            parse_report_site_field_configs_from_bindings,
+        )
+
+        configs = parse_report_site_field_configs_from_bindings(bindings)
+    except Exception:
+        return frozenset()
+    if not configs:
+        return frozenset()
+
+    by_pid = {
+        _field_pdf_id(field).strip().lower(): field
+        for field in flat_fields
+        if isinstance(field, dict) and _field_pdf_id(field).strip()
+    }
+    result_fields = []
+    for field in flat_fields:
+        if not isinstance(field, dict) or field.get("_syntheticQcVerdict"):
+            continue
+        if not _qc_result_row_base_from_field(field):
+            continue
+        rect = _pdf_field_page_xyxy(field)
+        if rect is not None:
+            result_fields.append((field, rect))
+
+    suppressed: set[str] = set()
+    for config in configs:
+        sources = config.get("sources") if isinstance(config.get("sources"), list) else []
+        if len(sources) < 2 or not _value_case_config_is_verdict_aggregate(config):
+            continue
+        target_pid = str(config.get("reportPdfFieldId") or "").strip().lower()
+        target = by_pid.get(target_pid)
+        target_rect = _pdf_field_page_xyxy(target) if target else None
+        if target_rect is None:
+            continue
+        target_page, tx0, ty0, tx1, ty1 = target_rect
+        for field, rect in result_fields:
+            peer_pid = _field_pdf_id(field).strip()
+            if not peer_pid:
+                continue
+            page, px0, py0, px1, py1 = rect
+            if page != target_page or px0 >= tx0:
+                continue
+            overlap = min(ty1, py1) - max(ty0, py0)
+            if overlap > 1.0:
+                suppressed.add(peer_pid.lower())
+    return frozenset(suppressed)
+
+
+def _find_real_verdict_field_covering_cell(
+    flat_fields: list,
+    page: int,
+    vx0: float,
+    vy0: float,
+    vx1: float,
+    vy1: float,
+):
+    """
+    模板若已在「单项判定」格内放置真实栏位（语义含单项判定），返回纵向重叠最多的那个。
+    由真实栏位负责回填并擦除格内静态字，不再生成合成域（否则同格双写）。
+    """
+    best = None
+    best_overlap = 0.0
+    cell_h = max(1.0, float(vy1) - float(vy0))
+    for f in flat_fields:
+        if not isinstance(f, dict) or f.get("_syntheticQcVerdict"):
+            continue
+        if not _is_single_item_verdict_text_field(f):
+            continue
+        rect = _pdf_field_page_xyxy(f)
+        if rect is None or int(rect[0]) != int(page):
+            continue
+        _fp, fx0, fy0, fx1, fy1 = rect
+        ix = min(float(vx1), float(fx1)) - max(float(vx0), float(fx0))
+        iy = min(float(vy1), float(fy1)) - max(float(vy0), float(fy0))
+        if ix <= 0 or iy <= 0:
+            continue
+        # 栏位中心须落在判定格 x 带内，避免把带 rule 的相邻栏（如判定标准）误判成判定格。
+        cx = (float(fx0) + float(fx1)) * 0.5
+        if not (float(vx0) - 6.0 <= cx <= float(vx1) + 6.0):
+            continue
+        if iy > best_overlap:
+            best_overlap = iy
+            best = f
+    if best is not None and best_overlap >= cell_h * 0.3:
+        return best
+    return None
+
+
 def _inject_synthetic_qc_verdict_pdf_fields(
     flat_fields: list,
     *,
     qc_pages: frozenset[int] | set[int] | None = None,
     result_col_max_x: float = 440.0,
     source_pdf_path: str | None = None,
+    suppress_peer_result_pdf_ids: AbstractSet[str] | None = None,
 ) -> int:
     """
     报告 PDF 质控表「单项判定」列常为模板静态「合格」字、未划框；
@@ -7520,6 +7661,11 @@ def _inject_synthetic_qc_verdict_pdf_fields(
     pages = qc_pages if qc_pages is not None else _QC_VERDICT_SYNTH_PAGES
     verdict_layouts = _load_pdf_qc_verdict_layouts(source_pdf_path)
     existing = {_field_pdf_id(f) for f in flat_fields if isinstance(f, dict)}
+    suppressed = {
+        str(pid or "").strip().lower()
+        for pid in (suppress_peer_result_pdf_ids or ())
+        if str(pid or "").strip()
+    }
     existing_verdict_cell: set[tuple[int, float]] = set()
     added = 0
     for f in flat_fields:
@@ -7539,6 +7685,8 @@ def _inject_synthetic_qc_verdict_pdf_fields(
         if not base:
             continue
         peer_pid = _field_pdf_id(f)
+        if peer_pid.strip().lower() in suppressed:
+            continue
         syn_pid = f"_synVerdict_{peer_pid}"
         if syn_pid in existing:
             continue
@@ -7555,6 +7703,14 @@ def _inject_synthetic_qc_verdict_pdf_fields(
         )
         cell_key = (int(page), round((float(vy0) + float(vy1)) * 0.5, 1))
         if cell_key in existing_verdict_cell:
+            continue
+        real_vf = _find_real_verdict_field_covering_cell(
+            flat_fields, int(page), vx0, vy0, vx1, vy1
+        )
+        if real_vf is not None:
+            # 模板已有真实判定栏位：由其回填并在渲染前擦除格内静态合格/不合格字。
+            real_vf["_qcVerdictEraseCell"] = True
+            existing_verdict_cell.add(cell_key)
             continue
         flat_fields.append(
             {
@@ -8880,13 +9036,19 @@ def _fill_template_fields_with_submit_enhanced(
     reverse_field_map = _build_field_to_pdf_reverse_index(bindings)
     flat_report_fields: list = []
     _walk_template_field_dicts(template_fields, flat_report_fields)
+    suppress_aggregate_peer_verdict_ids: frozenset[str] = frozenset()
     if (
         task_obj is not None
         and getattr(task_obj, "output_target", None) == LibraryTask.OUTPUT_REPORT
     ):
+        suppress_aggregate_peer_verdict_ids = _aggregate_verdict_peer_result_pdf_ids(
+            flat_report_fields,
+            bindings,
+        )
         _inject_synthetic_qc_verdict_pdf_fields(
             flat_report_fields,
             source_pdf_path=source_pdf_path,
+            suppress_peer_result_pdf_ids=suppress_aggregate_peer_verdict_ids,
         )
 
     try:
@@ -10438,6 +10600,8 @@ def _normalize_fields_for_htmlpdf(fields, *, task_obj=None):
                 row[k] = v.strip()
         if f.get("_syntheticQcVerdict"):
             row["_syntheticQcVerdict"] = True
+        if f.get("_qcVerdictEraseCell"):
+            row["_qcVerdictEraseCell"] = True
         normalized.append(row)
 
     def _walk(rows):
@@ -10483,9 +10647,104 @@ def _normalize_fields_for_htmlpdf(fields, *, task_obj=None):
                 best_by_rect[rect_key] = row
                 deduped.append(row)
         deduped.sort(key=_sort_key)
-        normalized = deduped
+        normalized = _dedupe_overlapping_report_text_fields(deduped)
 
     return normalized, skipped
+
+
+def _dedupe_overlapping_report_text_fields(rows: list) -> list:
+    """
+    报告导出兜底去重：同页两个 text 栏位矩形相交面积占比较小者 ≥70% 时只保留一个。
+    非合成栏位优先于 _syntheticQcVerdict 合成域，其次取 pdfFieldId 数字较小者；
+    两侧文本不同的重叠会记 warning，便于排查值错位的重复栏位。
+    """
+    if not rows:
+        return rows
+    kept: list[dict] = []
+    for row in rows:
+        if str(row.get("fieldType") or "text").lower() != "text":
+            kept.append(row)
+            continue
+        if not str(row.get("value") or "").strip():
+            kept.append(row)
+            continue
+        try:
+            page = int(row.get("page") or 0)
+            x0, y0, x1, y1 = (
+                float(row["x0"]),
+                float(row["y0"]),
+                float(row["x1"]),
+                float(row["y1"]),
+            )
+        except Exception:
+            kept.append(row)
+            continue
+        area = max(0.0, x1 - x0) * max(0.0, y1 - y0)
+        prev_dup = None
+        if area > 0:
+            for prev in kept:
+                if str(prev.get("fieldType") or "text").lower() != "text":
+                    continue
+                if not str(prev.get("value") or "").strip():
+                    continue
+                try:
+                    if int(prev.get("page") or 0) != page:
+                        continue
+                    px0, py0, px1, py1 = (
+                        float(prev["x0"]),
+                        float(prev["y0"]),
+                        float(prev["x1"]),
+                        float(prev["y1"]),
+                    )
+                except Exception:
+                    continue
+                iw = min(x1, px1) - max(x0, px0)
+                ih = min(y1, py1) - max(y0, py0)
+                if iw <= 0 or ih <= 0:
+                    continue
+                p_area = max(0.0, px1 - px0) * max(0.0, py1 - py0)
+                if p_area <= 0 or iw * ih / min(area, p_area) < 0.7:
+                    continue
+                prev_dup = prev
+                break
+        if prev_dup is None:
+            kept.append(row)
+            continue
+        cur_better = (
+            bool(prev_dup.get("_syntheticQcVerdict"))
+            and not row.get("_syntheticQcVerdict")
+        ) or (
+            bool(prev_dup.get("_syntheticQcVerdict"))
+            == bool(row.get("_syntheticQcVerdict"))
+            and _pdf_field_id_numeric(str(row.get("pdfFieldId") or ""))
+            < _pdf_field_id_numeric(str(prev_dup.get("pdfFieldId") or ""))
+        )
+        if cur_better:
+            kept.remove(prev_dup)
+            kept.append(row)
+        winner, loser = (row, prev_dup) if cur_better else (prev_dup, row)
+        if re.sub(r"\s+", "", str(loser.get("value") or "")) != re.sub(
+            r"\s+", "", str(winner.get("value") or "")
+        ):
+            logger.warning(
+                "report pdf field overlap dedupe: drop %s=%r keep %s=%r (page=%s rect=%s)",
+                loser.get("pdfFieldId") or loser.get("id"),
+                loser.get("value"),
+                winner.get("pdfFieldId") or winner.get("id"),
+                winner.get("value"),
+                page,
+                (x0, y0, x1, y1),
+            )
+
+    def _k(r):
+        try:
+            p = int(r.get("page") or 0)
+        except (TypeError, ValueError):
+            p = 0
+        return (p, float(r.get("y0") or 0), float(r.get("x0") or 0))
+
+    kept.sort(key=_k)
+    return kept
 
 
 def _sanitize_export_pdf_name_fragment(s: str, max_len: int = 72) -> str:
@@ -10554,18 +10813,33 @@ def resolve_site_record_pdf_name_parts(
         try:
             from apps.core.project_equipment_service import (
                 library_task_equipment_context_by_task_id,
+                project_equipment_context,
                 project_equipment_cards,
             )
 
             tid = int(getattr(task_obj, "pk", 0) or 0) if task_obj is not None else 0
-            ctx = library_task_equipment_context_by_task_id(project).get(tid) if tid else None
+            ctx = None
+            from apps.core.task_identity import parse_task_key
+
+            parsed = parse_task_key(task_no)
+            if parsed is not None and parsed.project_id == int(project.pk):
+                link = (
+                    project.project_equipments.filter(pk=parsed.project_equipment_id)
+                    .select_related("equipment", "equipment__department")
+                    .first()
+                )
+                if link is not None:
+                    ctx = project_equipment_context(link, project=project)
+            if ctx is None:
+                ctx = library_task_equipment_context_by_task_id(project).get(tid) if tid else None
             if ctx:
                 device_type = str(ctx.get("deviceType") or "").strip()
                 inspection_type = str(ctx.get("inspectionType") or "").strip()
             if (not device_type or not inspection_type) and task_no:
                 for card in project_equipment_cards(project):
                     for row in card.get("site_submit_tasks") or []:
-                        if str(row.get("taskNo") or "").strip() != str(task_no).strip():
+                        row_identity = str(row.get("taskKey") or row.get("taskNo") or "").strip()
+                        if row_identity != str(task_no).strip():
                             continue
                         eq = card.get("equipment")
                         if not device_type and eq is not None:

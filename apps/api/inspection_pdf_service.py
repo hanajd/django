@@ -16,6 +16,7 @@ from apps.core.models import (
     InspectionSubmission,
     LibraryFile,
     LibraryProject,
+    LibraryProjectEquipment,
     LibraryTask,
     LibraryTaskAssignment,
 )
@@ -138,6 +139,13 @@ def site_record_name_for_submit_storage(task_no: str, project) -> str:
 
 
 def _resolve_library_task_for_task_no(task_no: str, project=None):
+    # 新任务使用稳定 taskKey；只有旧数据才继续按 taskNo 动态序号解析。
+    if project is not None:
+        from apps.core.task_identity import resolve_library_task_for_key
+
+        stable_task = resolve_library_task_for_key(project, task_no)
+        if stable_task is not None:
+            return stable_task
     assignment_id = _parse_assignment_task_no(task_no)
     if assignment_id:
         qs = LibraryTaskAssignment.objects.select_related("library_task").filter(pk=assignment_id)
@@ -221,7 +229,9 @@ def resolve_site_record_library_task_for_file(
         return sorted(site_tasks, key=lambda x: ((x.code or ""), x.id))[0]
     if case is None:
         return None
-    task_no = (case.case_no or "").strip()
+    task_no = (
+        getattr(case, "task_key", "") or getattr(case, "case_no", "") or ""
+    ).strip()
     if not task_no:
         return None
     lt = _resolve_library_task_for_task_no(task_no, project)
@@ -277,7 +287,9 @@ def resolve_report_library_task_for_file(
             return parent
 
     if case is not None:
-        task_no = (case.case_no or "").strip()
+        task_no = (
+            getattr(case, "task_key", "") or getattr(case, "case_no", "") or ""
+        ).strip()
         if task_no:
             lt = _resolve_library_task_for_task_no(task_no, project)
             if lt is not None and lt.output_target == LibraryTask.OUTPUT_REPORT:
@@ -356,9 +368,24 @@ def resolve_report_task_for_case(
     ``allow_single_report_fallback`` 为 True 且项目仅一个报告任务时作兜底。
     """
     from apps.core.project_numbering import parent_report_task_for_site_task, report_tasks_for_project
+    from apps.core.task_identity import parse_task_key, resolve_library_task_for_key
 
     if project is None:
         return None
+    parsed = parse_task_key(task_no)
+    if parsed is not None:
+        lt = resolve_library_task_for_key(project, task_no)
+        if lt is None:
+            return None
+        if lt.output_target == LibraryTask.OUTPUT_REPORT:
+            return lt
+        # taskKey 中的 E 段锁定了项目设备关系，不能再取同现场任务的第一个父报告。
+        link = LibraryProjectEquipment.objects.filter(
+            pk=parsed.project_equipment_id,
+            project_id=project.pk,
+            report_task__report_source_tasks=lt,
+        ).select_related("report_task").first()
+        return link.report_task if link is not None else None
     lt = _resolve_library_task_for_task_no(task_no, project)
     if lt is not None and lt.output_target == LibraryTask.OUTPUT_REPORT:
         return lt
@@ -495,6 +522,7 @@ def _group_library_files_by_site_task(
     *,
     category: str,
     ext: str,
+    task_key: str | None = None,
 ) -> dict[int, list[LibraryFile]]:
     """将项目内某分类文件按现场记录任务分组（与文件库文件夹层级一致）。"""
     from apps.core.library_access import library_file_access_allowed
@@ -529,6 +557,16 @@ def _group_library_files_by_site_task(
                 case_cache[case_id] = case
         if case is None or case.library_project_id != project.pk:
             continue
+        if task_key:
+            c_key = (case.task_key or "").strip()
+            if c_key:
+                if c_key != str(task_key).strip():
+                    continue
+            else:
+                from apps.core.task_identity import parse_task_key
+                parsed = parse_task_key(task_key)
+                if not (parsed and parsed.library_task_id in site_task_pks):
+                    continue
         st = resolve_site_record_library_task_for_file(lf, case, project)
         if st is None or int(st.pk) not in by_site:
             continue
@@ -562,6 +600,7 @@ def _collect_latest_submit_rows_for_site_tasks(
     *,
     tab: str = "inspection_submit",
     source_mode: str = "tab",
+    task_key: str | None = None,
 ) -> tuple[list[tuple[LibraryFile, InspectionCase, dict]], list[str], list[str]]:
     """
     按现场记录任务（文件库文件夹）顺序，各取最新一条数据源后解析为提交 JSON。
@@ -580,16 +619,20 @@ def _collect_latest_submit_rows_for_site_tasks(
     site_pks = {int(st.pk) for st in site_tasks}
     if source_mode == "site_record_first":
         pdf_by_site = _group_library_files_by_site_task(
-            project, user, site_pks, category=LibraryFile.CATEGORY_SITE_RECORD, ext=".pdf"
+            project, user, site_pks, category=LibraryFile.CATEGORY_SITE_RECORD, ext=".pdf",
+            task_key=task_key,
         )
         json_by_site = _group_library_files_by_site_task(
-            project, user, site_pks, category=LibraryFile.CATEGORY_INSPECTION_SUBMIT, ext=".json"
+            project, user, site_pks, category=LibraryFile.CATEGORY_INSPECTION_SUBMIT, ext=".json",
+            task_key=task_key,
         )
     else:
         use_site_pdf = tab == "site_record"
         category = LibraryFile.CATEGORY_SITE_RECORD if use_site_pdf else LibraryFile.CATEGORY_INSPECTION_SUBMIT
         ext = ".pdf" if use_site_pdf else ".json"
-        single_by_site = _group_library_files_by_site_task(project, user, site_pks, category=category, ext=ext)
+        single_by_site = _group_library_files_by_site_task(
+            project, user, site_pks, category=category, ext=ext, task_key=task_key
+        )
         pdf_by_site = single_by_site if use_site_pdf else {pk: [] for pk in site_pks}
         json_by_site = single_by_site if not use_site_pdf else {pk: [] for pk in site_pks}
 
@@ -689,12 +732,13 @@ def collect_latest_submit_rows_for_site_folder(
     user,
     *,
     tab: str = "inspection_submit",
+    task_key: str | None = None,
 ) -> tuple[list[tuple[LibraryFile, InspectionCase, dict]], list[str], list[str]]:
     """现场记录文件夹：取该环节最新现场记录 PDF（无则回退检测提交 JSON）。"""
     if project is None or site_task is None:
         return [], [], ["项目或现场记录任务无效"]
     return _collect_latest_submit_rows_for_site_tasks(
-        project, [site_task], user, tab=tab, source_mode="site_record_first"
+        project, [site_task], user, tab=tab, source_mode="site_record_first", task_key=task_key
     )
 
 
@@ -788,6 +832,15 @@ def realign_site_task_from_case_linked_pdf(
         .order_by("-id")
         .first()
     )
+    if case is None:
+        from apps.core.task_identity import parse_task_key
+
+        if parse_task_key(raw) is not None:
+            case = (
+                InspectionCase.objects.filter(library_project=project, task_key=raw)
+                .order_by("-id")
+                .first()
+            )
     if case is None:
         return site_task, notes
 
@@ -1187,6 +1240,7 @@ def _cases_for_report_site_record_lookup(
     cases: Sequence[InspectionCase],
     project,
     report_task=None,
+    task_key: str | None = None,
 ) -> list[InspectionCase]:
     """
     报告合并现场记录 JSON 时，除当前 case 外，纳入本项目内各 report_source 现场任务
@@ -1196,6 +1250,35 @@ def _cases_for_report_site_record_lookup(
     from apps.core.models import LibraryTask, LibraryTaskAssignment
 
     case_list = _dedupe_inspection_cases_preserve_order(cases)
+    if task_key:
+        stable_key = str(task_key).strip()
+        from apps.core.task_identity import build_task_key, parse_task_key
+
+        parsed = parse_task_key(stable_key)
+        wanted_keys = {stable_key}
+        if (
+            parsed is not None
+            and parsed.output_target == LibraryTask.OUTPUT_REPORT
+            and project is not None
+            and report_task is not None
+        ):
+            for source_task in _report_site_record_source_tasks(project, report_task):
+                wanted_keys.add(
+                    build_task_key(
+                        project_id=parsed.project_id,
+                        project_equipment_id=parsed.project_equipment_id,
+                        library_task_id=source_task.pk,
+                        output_target=source_task.output_target,
+                    )
+                )
+            extra_cases = InspectionCase.objects.filter(
+                library_project=project,
+                task_key__in=wanted_keys,
+            )
+            case_list = _dedupe_inspection_cases_preserve_order(
+                [*case_list, *list(extra_cases)]
+            )
+        return [c for c in case_list if (c.task_key or "").strip() in wanted_keys]
     if (
         report_task is None
         or project is None
@@ -1219,6 +1302,7 @@ def _load_site_record_json_merged_only(
     cases: Sequence[InspectionCase],
     project,
     report_task=None,
+    task_key: str | None = None,
 ) -> tuple[dict, bool, list, str]:
     """
     合并「现场记录类文件库任务」关联的 .json（按报告来源任务）。
@@ -1233,7 +1317,9 @@ def _load_site_record_json_merged_only(
     返回 (merged, any_loaded, missing_task_codes, load_hint)。
     load_hint 为给人看的说明（非错误码）。
     """
-    cases_list = _cases_for_report_site_record_lookup(cases, project, report_task)
+    cases_list = _cases_for_report_site_record_lookup(
+        cases, project, report_task, task_key=task_key
+    )
     if not cases_list:
         return {}, False, [], ""
     from apps.api.inspection_report_make import _report_site_record_source_tasks
@@ -1274,6 +1360,8 @@ def _load_site_record_json_merged_only(
                 return {}, False, ["现场记录 JSON 结构无效"], ""
             merged = _deep_merge_payload_dicts(merged, payload)
             used = True
+    if not used and task_key:
+        return merged, False, missing_codes, ""
     if not used:
         loose_rows: list[LibraryFile] = []
         seen_loose: set[int] = set()
@@ -1331,9 +1419,13 @@ def _payload_dict_from_inspection_submission(sub, project) -> dict | None:
         return None
     raw = sub.raw_payload if isinstance(sub.raw_payload, dict) else {}
     if raw and SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(raw.keys()):
-        return _normalize_submit_payload_for_fill(raw)
+        payload = _normalize_submit_payload_for_fill(raw)
+        if isinstance(payload, dict):
+            payload.setdefault("taskKey", sub.task_key or getattr(sub.case, "task_key", "") or "")
+        return payload
     fb = {
         "taskNo": sub.task_no,
+        "taskKey": sub.task_key or getattr(sub.case, "task_key", "") or "",
         "projectId": getattr(project, "code", "") or "",
         "reportInfo": sub.report_info or {},
         "hospitalInfo": sub.hospital_info or {},
@@ -1356,6 +1448,7 @@ def _load_submit_json_from_library_files(
     *,
     user=None,
     scope_by_user: bool = False,
+    task_key: str | None = None,
 ) -> dict | None:
     """从文件库 inspection_submits 读取案件关联提交 JSON；可选仅当前用户上传的文件。"""
     lf_qs = LibraryFile.objects.filter(
@@ -1366,6 +1459,7 @@ def _load_submit_json_from_library_files(
     )
     if scope_by_user and user is not None:
         lf_qs = lf_qs.filter(created_by=user)
+    stable_key = str(task_key or "").strip()
     for lf in lf_qs.order_by("-created_at", "-id").distinct():
         if not (lf.original_name or "").lower().endswith(".json"):
             continue
@@ -1373,6 +1467,11 @@ def _load_submit_json_from_library_files(
             p = pipeline_service.library_absolute_path(lf.relative_path)
             data = json_std.loads(p.read_text(encoding="utf-8", errors="replace"))
         except Exception:
+            continue
+        if stable_key and (
+            not isinstance(data, dict)
+            or str(data.get("taskKey") or "").strip() != stable_key
+        ):
             continue
         if isinstance(data, dict) and SUBMIT_PAYLOAD_REQUIRED_KEYS.issubset(data.keys()):
             return _normalize_submit_payload_for_fill(data)
@@ -1393,10 +1492,15 @@ def resolve_submit_payload_for_site_export(
     from apps.core.library_access import library_user_can_assign_tasks_to_participants
 
     tn = (task_no or "").strip()
+    from apps.core.task_identity import parse_task_key
+
+    stable_key = tn if parse_task_key(tn) is not None else ""
     scope_by_user = user is not None and not library_user_can_assign_tasks_to_participants(user)
 
     sub_qs = InspectionSubmission.objects.filter(
-        task_no=tn, case_id=case.pk, project_id=project.pk
+        case_id=case.pk,
+        project_id=project.pk,
+        **({"task_key": stable_key} if stable_key else {"task_no": tn}),
     )
     if scope_by_user:
         sub_qs = sub_qs.filter(created_by=user)
@@ -1405,10 +1509,10 @@ def resolve_submit_payload_for_site_export(
     if submission is None and scope_by_user:
         submission = (
             InspectionSubmission.objects.filter(
-                task_no=tn,
                 case_id=case.pk,
                 project_id=project.pk,
                 created_by__isnull=True,
+                **({"task_key": stable_key} if stable_key else {"task_no": tn}),
             )
             .order_by("-updated_at_remote", "-updated_at", "-id")
             .first()
@@ -1420,7 +1524,11 @@ def resolve_submit_payload_for_site_export(
             return payload, submission
 
     file_payload = _load_submit_json_from_library_files(
-        case, project, user=user, scope_by_user=scope_by_user
+        case,
+        project,
+        user=user,
+        scope_by_user=scope_by_user,
+        task_key=stable_key or None,
     )
     return file_payload, None
 
@@ -1430,9 +1538,17 @@ def resolve_submit_payload_for_report(task_no: str, case: InspectionCase, projec
     解析用于报告回填的检测提交正文：优先同 taskNo 的 InspectionSubmission，其次同案件最新检测提交 .json 文件。
     """
     tn = (task_no or "").strip()
+    from apps.core.task_identity import parse_task_key
+
+    stable_key = tn if parse_task_key(tn) is not None else ""
     if tn:
+        filters = {"case_id": case.pk, "project_id": project.pk}
+        if stable_key:
+            filters["task_key"] = stable_key
+        else:
+            filters["task_no"] = tn
         sub = (
-            InspectionSubmission.objects.filter(task_no=tn, case_id=case.pk, project_id=project.pk)
+            InspectionSubmission.objects.filter(**filters)
             .order_by("-submitted_at", "-updated_at", "-id")
             .first()
         )
@@ -1440,7 +1556,9 @@ def resolve_submit_payload_for_report(task_no: str, case: InspectionCase, projec
             got = _payload_dict_from_inspection_submission(sub, project)
             if got:
                 return got
-    return _load_submit_json_from_library_files(case, project)
+    return _load_submit_json_from_library_files(
+        case, project, task_key=stable_key or None
+    )
 
 
 def _single_valid_submit_json_payload_for_case(case: InspectionCase, project) -> dict | None:
@@ -1547,6 +1665,7 @@ def load_report_payload_for_manual_export(
     submit_payload: dict,
     *,
     submit_merge_is_authoritative: bool = False,
+    task_key: str | None = None,
 ) -> tuple[dict | None, str]:
     """
     手动导出报告数据源：以检测提交 JSON（submit_payload）为基准，与同项目下若干案件的现场记录 JSON 深度合并；
@@ -1572,7 +1691,7 @@ def load_report_payload_for_manual_export(
             "taskNo/projectId/templateId 等仍以第一份为准）；未再读取文件库中另行挂载的现场记录任务 JSON。"
         )
     site_merged, site_loaded, missing_codes, site_load_hint = _load_site_record_json_merged_only(
-        cases_list, project, report_task
+        cases_list, project, report_task, task_key=task_key
     )
     if missing_codes and any(str(x).startswith("读取失败") for x in missing_codes):
         return None, missing_codes[0] if missing_codes else "现场记录读取失败"
@@ -1591,7 +1710,13 @@ def load_report_payload_for_manual_export(
     return out, "; ".join(hints)
 
 
-def _load_site_record_payload_for_report(case: InspectionCase, project, report_task=None):
+def _load_site_record_payload_for_report(
+    case: InspectionCase,
+    project,
+    report_task=None,
+    *,
+    task_key: str | None = None,
+):
     """
     读取用于生成报告的数据（优先关联「输出目标=现场记录」任务的 .json，不按文件库 category 判定）。
     若报告任务配置了 report_source_tasks，则按来源任务逐个读取最新现场记录 JSON 并做深度整合。
@@ -1600,7 +1725,10 @@ def _load_site_record_payload_for_report(case: InspectionCase, project, report_t
     结构化 JSON 需绑定到现场记录类任务才会参与报告合并。
     当没有任何可用的现场记录 JSON 时，依次回退：① 同案件最新检测提交 JSON 文件；② 数据库中最新已提交记录。
     """
-    merged, used, missing_codes, load_hint = _load_site_record_json_merged_only((case,), project, report_task)
+    stable_key = str(task_key or "").strip() or str(case.task_key or "").strip()
+    merged, used, missing_codes, load_hint = _load_site_record_json_merged_only(
+        (case,), project, report_task, task_key=stable_key or None
+    )
     for mc in missing_codes:
         mcs = str(mc)
         if mcs.startswith("读取失败:"):
@@ -1632,11 +1760,19 @@ def _load_site_record_payload_for_report(case: InspectionCase, project, report_t
             fb = json_std.loads(p.read_text(encoding="utf-8", errors="replace"))
         except Exception as exc:
             return None, f"检测提交 JSON 回退读取失败: {exc}"
+        if stable_key and (
+            not isinstance(fb, dict)
+            or str(fb.get("taskKey") or "").strip() != stable_key
+        ):
+            continue
         if not isinstance(fb, dict) or not fb:
             continue
         return fb, f"未找到现场记录 JSON，已回退使用检测提交文件：{lf.original_name}"
+    sub_filters = {"case_id": case.pk, "project_id": project.pk}
+    if stable_key:
+        sub_filters["task_key"] = stable_key
     sub = (
-        InspectionSubmission.objects.filter(case_id=case.pk, project_id=project.pk)
+        InspectionSubmission.objects.filter(**sub_filters)
         .order_by("-submitted_at", "-updated_at", "-id")
         .first()
     )

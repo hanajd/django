@@ -104,9 +104,12 @@ def resolve_case_for_project_library_task(
     return case, assignment
 
 
-def _empty_submit_payload(*, submission_task_no: str, project_public_id: str, now_iso: str) -> Dict[str, Any]:
+def _empty_submit_payload(
+    *, submission_task_no: str, project_public_id: str, now_iso: str, task_key: str = ""
+) -> Dict[str, Any]:
     return {
         "taskNo": submission_task_no,
+        "taskKey": task_key,
         "projectId": project_public_id,
         "reportType": DEFAULT_REPORT_TYPE,
         "createdAt": now_iso,
@@ -127,12 +130,14 @@ def _payload_from_submission_row(
     submission_task_no: str,
     project_public_id: str,
     now_iso: str,
+    task_key: str = "",
 ) -> Dict[str, Any]:
     if submission is None:
         return _empty_submit_payload(
             submission_task_no=submission_task_no,
             project_public_id=project_public_id,
             now_iso=now_iso,
+            task_key=task_key,
         )
     payload = submission.raw_payload if isinstance(submission.raw_payload, dict) else {}
     if not payload:
@@ -146,6 +151,7 @@ def _payload_from_submission_row(
             "instruments": [],
         }
     payload["taskNo"] = submission_task_no
+    payload["taskKey"] = payload.get("taskKey") or submission.task_key or ""
     payload["projectId"] = payload.get("projectId") or project_public_id
     payload["updatedAt"] = payload.get("updatedAt") or (
         submission.updated_at_remote.isoformat() if submission.updated_at_remote else now_iso
@@ -159,6 +165,7 @@ def build_runtime_frontend_for_inspection_export(
     project: LibraryProject,
     library_task: LibraryTask,
     display_task_no: str | None = None,
+    task_key: str | None = None,
     ph_map_id: str | None = None,
     case: InspectionCase | None = None,
     assignment: LibraryTaskAssignment | None = None,
@@ -167,16 +174,34 @@ def build_runtime_frontend_for_inspection_export(
     与 ``GET …/export-frontend-json`` 相同产物（含提交 defaultValue、filled_fields、六大章节 runtime）。
     """
     user = getattr(request, "user", None)
-    if case is None or assignment is None:
+    if case is None:
         case, assignment = resolve_case_for_project_library_task(
             project, library_task, user=user
         )
+    elif assignment is None:
+        from apps.api.inspection_views import _InspectionTaskAccessMixin
+
+        assignment = _InspectionTaskAccessMixin._get_project_task_assignment(
+            project=project, library_task=library_task, user=user
+        )
+        if assignment is None and user is not None and library_user_can_assign_tasks_to_participants(user):
+            assignment = (
+                LibraryTaskAssignment.objects.filter(
+                    project=project, library_task=library_task
+                )
+                .order_by("id")
+                .first()
+            )
+        if assignment is None:
+            raise InspectionFrontendExportError("任务未分配到当前项目")
     tasks = project_tasks_ordered(project)
-    api_task_no = (str(display_task_no).strip() if display_task_no else "") or (
+    stable_task_key = (str(task_key).strip() if task_key else "") or (case.task_key or "")
+    display_no = (str(display_task_no).strip() if display_task_no else "") or (
         project_task_no_for_library_task(library_task, project, ordered_tasks=tasks) or ""
     )
-    if not api_task_no:
-        api_task_no = (case.case_no or "").strip()
+    api_task_no = stable_task_key or display_no or (case.case_no or "").strip()
+    if not display_no:
+        display_no = project_task_no_for_library_task(library_task, project, ordered_tasks=tasks) or api_task_no
 
     task_obj = library_task
     if task_obj is None:
@@ -202,6 +227,7 @@ def build_runtime_frontend_for_inspection_export(
         if isinstance(scoped_payload, dict) and scoped_payload:
             payload = dict(scoped_payload)
             payload["taskNo"] = api_task_no
+            payload["taskKey"] = stable_task_key
             payload["projectId"] = payload.get("projectId") or project_public_id
             has_saved_submit = True
         else:
@@ -209,10 +235,15 @@ def build_runtime_frontend_for_inspection_export(
                 submission_task_no=api_task_no,
                 project_public_id=project_public_id,
                 now_iso=now_iso,
+                task_key=stable_task_key,
             )
     else:
         submission = (
-            InspectionSubmission.objects.filter(case=case, project=project)
+            InspectionSubmission.objects.filter(
+                case=case,
+                project=project,
+                **({"task_key": stable_task_key} if stable_task_key else {}),
+            )
             .order_by("-updated_at", "-id")
             .first()
         )
@@ -221,6 +252,7 @@ def build_runtime_frontend_for_inspection_export(
             submission_task_no=api_task_no,
             project_public_id=project_public_id,
             now_iso=now_iso,
+            task_key=stable_task_key,
         )
         has_saved_submit = submission is not None
 
@@ -248,7 +280,12 @@ def build_runtime_frontend_for_inspection_export(
         )
         if project_task_no:
             fill_task_no = project_task_no
-        site_payload, _ = _load_site_record_payload_for_report(case, project, task_obj)
+        site_payload, _ = _load_site_record_payload_for_report(
+            case,
+            project,
+            task_obj,
+            task_key=stable_task_key or None,
+        )
         if isinstance(site_payload, dict) and site_payload:
             payload = _deep_merge_payload_dicts(site_payload, payload)
 
@@ -317,7 +354,7 @@ def build_runtime_frontend_for_inspection_export(
         payload_for_defaults=payload,
         project_id=project_public_id,
         task_no=api_task_no,
-        inspected_display_no=display_inspected_no_for_fill(case, project, api_task_no),
+        inspected_display_no=display_inspected_no_for_fill(case, project, display_no),
         task_obj=task_obj,
         project_obj=project,
         prefill_instruments_from_dispatch=not has_saved_submit,

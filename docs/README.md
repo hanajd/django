@@ -90,6 +90,7 @@
 | [05-utils-and-pipelines.md](05-utils-and-pipelines.md) | `utils/`、管线目录与失败语义 |
 | [06-scripts-and-admin.md](06-scripts-and-admin.md) | `manage.py` 命令、Admin、运维清单 |
 | [07-features-catalog.md](07-features-catalog.md) | **功能总览**（用户可见能力 + 端点索引） |
+| [项目风险与优化建议.md](项目风险与优化建议.md) | **潜在 bug、系统性风险、优化路线与发布前检查清单** |
 | [外部依赖安装-Ollama-MinerU-LaTeX.md](外部依赖安装-Ollama-MinerU-LaTeX.md) | **Ollama / MinerU / TeX 安装、验收、排障** |
 | [评价报告书-LaTeX功能说明.md](评价报告书-LaTeX功能说明.md) | 评价报告书业务全流程 |
 | [评价报告表-F1功能说明.md](评价报告表-F1功能说明.md) | F.1 工作台与生成包 |

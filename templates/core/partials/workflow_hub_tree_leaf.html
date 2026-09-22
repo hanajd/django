@@ -116,6 +116,7 @@
             <input type="hidden" name="action" value="hub_export_report">
             <input type="hidden" name="project_id" value="{{ leaf.project_id|default:project_id }}">
             <input type="hidden" name="task_no" value="{{ leaf.task_no }}">
+            <input type="hidden" name="task_key" value="{{ leaf.task_key|default:'' }}">
             <input type="hidden" name="site_library_task_id" value="{{ leaf.site_library_task_id|default:0 }}">
             <input type="hidden" name="filter_project_id" value="{{ leaf.project_id|default:project_id }}">
             <input type="hidden" name="filter_task_no" value="">

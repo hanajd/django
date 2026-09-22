@@ -574,6 +574,7 @@ def _attach_site_record_files_to_progress(
             matched["stage_code"] = row.get("stage_code") or ""
             matched["stage_label"] = row.get("stage_label") or ""
             matched["task_no"] = row.get("task_no") or matched.get("task_no") or ""
+            matched["task_key"] = row.get("task_key") or matched.get("task_key") or ""
             matched["linked_progress"] = True
             eq_title = (row.get("equipment_title") or "").strip()
             if eq_title and eq_title != "—" and (matched.get("equipment_title") or "其他") in (
@@ -593,6 +594,7 @@ def _attach_site_record_files_to_progress(
                 matched["stage_code"] = row.get("stage_code") or ""
                 matched["stage_label"] = row.get("stage_label") or ""
                 matched["task_no"] = row.get("task_no") or matched.get("task_no") or ""
+                matched["task_key"] = row.get("task_key") or matched.get("task_key") or ""
                 matched["linked_progress"] = True
 
     for sc, _ts, idx, row, matched in pairs:
@@ -963,11 +965,12 @@ def _build_site_pdf_label_index(
 ) -> dict[str, dict[tuple, str]]:
     """
     现场记录 PDF → 与原始记录相同的展示名索引。
-    键：(project_id, task_no) / (project_id, library_task_id) / (project_id, case_id)
+    键：(project_id, task_key) / (project_id, task_no) / (project_id, library_task_id) / (project_id, case_id)
     """
     from apps.api.inspection_pdf_service import _task_no_strings_for_library_task
-    from apps.core.models import InspectionSubmission, LibraryTask
+    from apps.core.models import InspectionCase, InspectionSubmission, LibraryTask
 
+    by_task_key: dict[tuple, str] = {}
     by_task_no: dict[tuple, str] = {}
     by_task_id: dict[tuple, str] = {}
     by_case: dict[tuple, str] = {}
@@ -991,11 +994,28 @@ def _build_site_pdf_label_index(
         for sub in (
             InspectionSubmission.objects.filter(case_id__in=case_ids)
             .order_by("case_id", "-submitted_at", "-id")
-            .only("case_id", "task_no")
+            .only("case_id", "task_key", "task_no")
         ):
             cid = int(sub.case_id or 0)
             if cid and cid not in case_task_no and (sub.task_no or "").strip():
                 case_task_no[cid] = str(sub.task_no).strip()
+
+    case_task_key: dict[int, str] = {}
+    if case_ids:
+        for case in InspectionCase.objects.filter(pk__in=case_ids).only("id", "task_key"):
+            cid = int(case.pk or 0)
+            if cid and (case.task_key or "").strip():
+                case_task_key[cid] = str(case.task_key).strip()
+        # Older new-format records may have the key on the submission before it
+        # was copied to the case; use it only when the case has no key yet.
+        for sub in (
+            InspectionSubmission.objects.filter(case_id__in=case_ids)
+            .order_by("case_id", "-submitted_at", "-id")
+            .only("case_id", "task_key")
+        ):
+            cid = int(sub.case_id or 0)
+            if cid and cid not in case_task_key and (sub.task_key or "").strip():
+                case_task_key[cid] = str(sub.task_key).strip()
 
     def _put(bucket: dict[tuple, str], key: tuple, label: str) -> None:
         if not key[0] or not key[1] or not label:
@@ -1033,6 +1053,9 @@ def _build_site_pdf_label_index(
         ):
             cid = int(lf.link_object_id)
             _put(by_case, (pid, cid), label)
+            tkey = case_task_key.get(cid) or ""
+            if tkey:
+                _put(by_task_key, (pid, tkey), label)
             tn = case_task_no.get(cid) or ""
             if tn and proj is not None:
                 # 仅当提交序号确实属于本 PDF 绑定的现场任务时，才按 task_no 建索引，
@@ -1077,20 +1100,33 @@ def _build_site_pdf_label_index(
                 if "_" in base:
                     _put(by_task_no, (pid, base.replace("_", "/")), label)
 
-    return {"by_task_no": by_task_no, "by_task_id": by_task_id, "by_case": by_case}
+    return {
+        "by_task_key": by_task_key,
+        "by_task_no": by_task_no,
+        "by_task_id": by_task_id,
+        "by_case": by_case,
+    }
 
 
 def _resolve_site_pdf_label(
     index: dict[str, dict[tuple, str]],
     *,
     project_id: int,
+    task_key: str = "",
     task_no: str = "",
     site_task_id: int = 0,
     case_id: int = 0,
 ) -> str:
+    by_task_key = index.get("by_task_key") or {}
     by_task_no = index.get("by_task_no") or {}
     by_task_id = index.get("by_task_id") or {}
     by_case = index.get("by_case") or {}
+    # A new task must be isolated by its immutable key.  Do not fall back to
+    # taskNo, library task, or case because those values can be shared by
+    # multiple equipment/task variants.
+    if task_key:
+        hit = by_task_key.get((project_id, str(task_key).strip()))
+        return hit if hit and not _is_abstract_pdf_label(hit) else ""
     if site_task_id:
         hit = by_task_id.get((project_id, int(site_task_id)))
         if hit and not _is_abstract_pdf_label(hit):
@@ -1149,12 +1185,14 @@ def _apply_site_pdf_labels_for_report_generate(
         disp_index = task_no_display_index(p)
         for row in progress_map.get(p.pk) or []:
             task_no = str(row.get("task_no") or "").strip()
+            task_key = str(row.get("task_key") or "").strip()
             site_task_id = int(row.get("site_library_task_id") or 0) or 0
             case_id = int(row.get("case_id") or 0) or 0
-            disp = disp_index.get(task_no) or {}
+            disp = disp_index.get(task_key) or disp_index.get(task_no) or {}
             label = _resolve_site_pdf_label(
                 index,
                 project_id=p.pk,
+                task_key=task_key,
                 task_no=task_no,
                 site_task_id=site_task_id,
                 case_id=case_id,
@@ -1163,7 +1201,7 @@ def _apply_site_pdf_labels_for_report_generate(
             can_use_pdf_name = bool(
                 label and not _is_abstract_pdf_label(label) and site_task_id
             )
-            if not can_use_pdf_name:
+            if not can_use_pdf_name and not task_key:
                 # 同设备仅一条进度时，用该设备下原始记录 PDF 名对齐（多任务同设备不串名）
                 eq = (row.get("equipment_title") or "").strip()
                 if eq and eq not in ("其他", "—", "其他提交"):
@@ -1206,9 +1244,10 @@ def _apply_site_pdf_labels_for_report_generate(
         proj = projects_by_id.get(pid)
         site_task_id = 0
         task_no = ""
+        task_key = ""
         case_id = 0
         try:
-            from apps.core.models import LibraryTask
+            from apps.core.models import InspectionCase, LibraryTask
 
             for task in lf.library_tasks.all():
                 # 报告任务 → 取其源现场记录任务
@@ -1239,11 +1278,15 @@ def _apply_site_pdf_labels_for_report_generate(
                 if st is not None:
                     nos = _task_no_strings_for_library_task(proj, st)
                     task_no = nos[0] if nos else ""
+            if case_id:
+                case_task = InspectionCase.objects.filter(pk=case_id).only("task_key").first()
+                task_key = str(getattr(case_task, "task_key", "") or "").strip()
         except Exception:
             pass
         label = _resolve_site_pdf_label(
             index,
             project_id=pid,
+            task_key=task_key,
             task_no=task_no,
             site_task_id=site_task_id,
             case_id=case_id,
@@ -1283,7 +1326,8 @@ def _flatten_progress(
             row["equipment_key"] = title
             row["equipment_title"] = title
             task_no = str(row.get("task_no") or "").strip()
-            disp = disp_index.get(task_no) or {}
+            task_key = str(row.get("task_key") or "").strip()
+            disp = disp_index.get(task_key) or disp_index.get(task_no) or {}
             row["display_title"] = _friendly_task_display_title(row, disp)
             row["detection_label"] = (
                 disp.get("site_task_name")
@@ -1650,11 +1694,18 @@ def _annotate_report_generate_compile_status(
                                         rf_sites.add(int(src.pk))
                         if rf_sites and row_site not in rf_sites:
                             has_report = False
+                            sig["report_file"] = None
+                            sig["report_file_name"] = ""
+                            sig["report_preview_url"] = ""
+                            sig["report_download_url"] = ""
+                            sig["enabled"] = False
+                            row["report_preview_url"] = ""
                     except Exception:
                         pass
-            if not has_report and row_site and (int(pid), row_site) in site_task_has_report:
+            task_key = str(row.get("task_key") or "").strip()
+            if not has_report and not task_key and row_site and (int(pid), row_site) in site_task_has_report:
                 has_report = True
-            if not has_report:
+            if not has_report and not task_key:
                 case_id = int(row.get("case_id") or 0) or 0
                 task_no = str(row.get("task_no") or "").strip()
                 if case_id and (int(pid), case_id) in case_keys:

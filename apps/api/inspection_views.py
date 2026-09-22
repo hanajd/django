@@ -52,6 +52,7 @@ from apps.core.models import (
     LibraryFile,
     LibraryOCRProcessTask,
     LibraryProject,
+    LibraryProjectEquipment,
     LibraryProjectWorkflowMember,
     LibraryTask,
     LibraryTaskAssignment,
@@ -109,6 +110,17 @@ def _fail(message: str, http_status=status.HTTP_400_BAD_REQUEST, errors=None):
     return Response(payload, status=http_status)
 
 
+def _ocr_task_matches_inspection_task(task, project, case) -> bool:
+    """Keep task-scoped OCR results isolated while allowing old project-only jobs."""
+    if task is None or project is None or task.project_id != project.pk:
+        return False
+    request_key = str(getattr(case, "task_key", "") or "").strip()
+    stored_key = str(getattr(task, "task_key", "") or "").strip()
+    if request_key:
+        return stored_key == request_key
+    return not stored_key
+
+
 def _build_accessible_projects_payload(user, *, include_legacy_task_no: bool = False):
     if library_inspection_act_on_all_projects(user) and not library_user_can_assign_tasks_to_participants(user):
         project_ids = sorted(
@@ -152,6 +164,8 @@ def _inject_frontend_context_defaults(
     - inspectionNo / testnumber / 受检编号 / inspectedNo <- 项目内报告(案件)序号（与 display_inspected_no_for_fill 一致），缺省回退 task_no
     - taskNo 仍用真实任务/案件号 task_no，便于提交与路由
     """
+    from apps.core.task_identity import parse_task_key
+
     if not isinstance(frontend_obj, dict):
         return frontend_obj
     steps = frontend_obj.get("steps")
@@ -169,6 +183,7 @@ def _inject_frontend_context_defaults(
         "受检编号": inspected,
         "inspectedNo": inspected,
         "taskNo": task_no,
+        "taskKey": task_no if parse_task_key(task_no) is not None else "",
     }
     state_ns = f"p:{project_id}|t:{task_no}|"
 
@@ -823,7 +838,7 @@ def _persist_submit_signature_files(
 
 
 class _InspectionTaskAccessMixin:
-    """统一 taskNo -> 案件/项目 访问控制。"""
+    """统一 taskNo/taskKey -> 案件/项目访问控制。"""
 
     @staticmethod
     def _project_public_id(project: LibraryProject) -> str:
@@ -960,6 +975,11 @@ class _InspectionTaskAccessMixin:
 
     @staticmethod
     def _resolve_project_task_by_no(project: LibraryProject, task_no: str):
+        from apps.core.task_identity import resolve_library_task_for_key
+
+        stable_task = resolve_library_task_for_key(project, task_no)
+        if stable_task is not None:
+            return stable_task
         raw = str(task_no or "").strip()
         if not raw:
             return None
@@ -1017,6 +1037,16 @@ class _InspectionTaskAccessMixin:
         return ""
 
     @staticmethod
+    def _task_key_for_project_task(project, library_task, *, project_equipment_id=None) -> str:
+        from apps.core.task_identity import task_key_for_library_task
+
+        return task_key_for_library_task(
+            project,
+            library_task,
+            project_equipment_id=project_equipment_id,
+        )
+
+    @staticmethod
     def _parse_assignment_task_no(task_no: str):
         if not (task_no or "").startswith(AUTO_TASK_PREFIX):
             return None
@@ -1044,7 +1074,8 @@ class _InspectionTaskAccessMixin:
         if assignment.project_id:
             case = qs.filter(library_project_id=assignment.project_id).first()
         if case is None:
-            case = qs.first()
+            # 兼容历史无项目关联的案件；禁止回退到其他项目已占用的案件（防止跨项目数据串改）。
+            case = qs.filter(library_project_id__isnull=True).first()
         if case:
             return case
         return InspectionCase.objects.create(
@@ -1056,8 +1087,59 @@ class _InspectionTaskAccessMixin:
             created_by=assignment.assigned_by or assignment.assignee,
         )
 
+    def _ensure_case_for_task_key(self, project, task_key: str, library_task, user=None):
+        """Create/find a new case by stable identity without changing legacy cases."""
+        key = str(task_key or "").strip()
+        if not key:
+            raise ValueError("缺少稳定 taskKey，无法创建新任务")
+        case = InspectionCase.objects.filter(task_key=key).first()
+        if case is None:
+            case = InspectionCase.objects.filter(
+                case_no=key, library_project_id=project.pk
+            ).first()
+        if case is not None:
+            if not case.task_key:
+                case.task_key = key
+                case.save(update_fields=["task_key", "updated_at"])
+            return case
+        case, _created = InspectionCase.objects.get_or_create(
+            task_key=key,
+            defaults={
+                "case_no": key,
+                "inspected_organization": self._default_org(),
+                "notes": f"自动生成任务：{getattr(library_task, 'name', '') or key}",
+                "library_project": project,
+                "primary_contact": None,
+                "created_by": user,
+            },
+        )
+        return case
+
     @staticmethod
     def _resolve_case_project(request, task_no: str):
+        from apps.core.task_identity import parse_task_key, resolve_library_task_for_key
+
+        parsed_key = parse_task_key(task_no)
+        if parsed_key is not None:
+            project = LibraryProject.objects.filter(
+                pk=parsed_key.project_id, is_active=True
+            ).select_related(
+                "commission_org", "commission_org__parent", "commission_org__parent__parent"
+            ).first()
+            library_task = resolve_library_task_for_key(project, task_no) if project else None
+            if project is None or library_task is None:
+                return None, None, _fail("taskKey 无效或不属于当前项目", status.HTTP_404_NOT_FOUND)
+            assignment = _InspectionTaskAccessMixin._get_project_task_assignment(
+                project=project,
+                library_task=library_task,
+                user=request.user,
+            )
+            if assignment is None:
+                return None, None, _fail("当前用户无权访问该项目任务", status.HTTP_403_FORBIDDEN)
+            case = _InspectionTaskAccessMixin()._ensure_case_for_task_key(
+                project, task_no, library_task, user=request.user
+            )
+            return case, project, None
         case = (
             InspectionCase.objects.select_related(
                 "library_project",
@@ -1098,15 +1180,28 @@ class _InspectionTaskAccessMixin:
 
     def _submission_or_init(self, case, project, *, task_no=None):
         api_task_no = (task_no or case.case_no or "").strip()
-        obj = (
-            InspectionSubmission.objects.filter(case=case)
-            .prefetch_related("instruments")
-            .order_by("-updated_at", "-id")
-            .first()
-        )
+        from apps.core.task_identity import parse_task_key
+
+        identity_qs = InspectionSubmission.objects.filter(case=case)
+        if parse_task_key(api_task_no) is not None:
+            identity_qs = identity_qs.filter(task_key=api_task_no)
+        elif task_no:
+            identity_qs = identity_qs.filter(task_no=api_task_no)
+        obj = identity_qs.prefetch_related("instruments").order_by(
+            "-updated_at", "-id"
+        ).first()
+        if obj is None and task_no and (case.task_key or "").strip():
+            # 旧路径按显示序号查询，新任务的提交按稳定 task_key 存储；回退按 case.task_key 精确匹配。
+            obj = (
+                InspectionSubmission.objects.filter(case=case, task_key=case.task_key)
+                .prefetch_related("instruments")
+                .order_by("-updated_at", "-id")
+                .first()
+            )
         if obj:
             return obj
         return InspectionSubmission(
+            task_key=case.task_key,
             task_no=api_task_no,
             report_type=DEFAULT_REPORT_TYPE,
             status=InspectionSubmission.STATUS_PENDING,
@@ -1205,6 +1300,12 @@ class _InspectionTaskAccessMixin:
             inst_scoped = inst_export["instrumentsByScope"]
         body = {
             "taskNo": case.case_no,
+            "taskKey": case.task_key or "",
+            "displayTaskNo": (
+                self._build_project_task_no(proj, task_obj)
+                if proj is not None and task_obj is not None
+                else ""
+            ),
             "reportType": obj.report_type or DEFAULT_REPORT_TYPE,
             "status": obj.status or InspectionSubmission.STATUS_PENDING,
             "createdAt": (obj.created_at_remote or case.created_at).isoformat(),
@@ -1258,7 +1359,14 @@ class _InspectionTaskAccessMixin:
         )
         if assignment is None:
             return None, None, _fail("当前用户无权访问该项目任务", status.HTTP_403_FORBIDDEN)
-        case = self._ensure_case_for_assignment(assignment)
+        from apps.core.task_identity import parse_task_key
+
+        if parse_task_key(task_no) is not None:
+            case = self._ensure_case_for_task_key(
+                project, task_no, library_task, user=request.user
+            )
+        else:
+            case = self._ensure_case_for_assignment(assignment)
         if case.library_project_id != project.pk:
             case.library_project = project
             case.save(update_fields=["library_project", "updated_at"])
@@ -1291,7 +1399,10 @@ class InspectionPendingAPIView(_InspectionTaskAccessMixin, APIView):
         assignments = list(ass_qs.order_by("-created_at"))
         commission_ids_by_project: dict[int, set[int]] = {}
         case_by_no = {}
+        display_no_by_task = {}
         assigned_at_map = {}
+        has_project_equipment_by_project: dict[int, bool] = {}
+        from apps.core.task_identity import task_links_for_library_task
         for a in assignments:
             if a.project_id and a.library_task_id:
                 pid = int(a.project_id)
@@ -1300,15 +1411,47 @@ class InspectionPendingAPIView(_InspectionTaskAccessMixin, APIView):
                 allowed = commission_ids_by_project[pid]
                 if allowed and int(a.library_task_id) not in allowed:
                     continue
-            task_no = self._build_assignment_task_no(a)
-            if task_no in case_by_no:
+            legacy_task_no = self._build_assignment_task_no(a)
+            if a.project_id not in has_project_equipment_by_project:
+                has_project_equipment_by_project[a.project_id] = LibraryProjectEquipment.objects.filter(
+                    project_id=a.project_id
+                ).exists()
+            links = task_links_for_library_task(a.project, a.library_task)
+            if has_project_equipment_by_project[a.project_id] and not links:
+                logger.error(
+                    "skip assignment without equipment binding assignment_id=%s project_id=%s library_task_id=%s",
+                    a.pk,
+                    a.project_id,
+                    a.library_task_id,
+                )
                 continue
-            case = self._ensure_case_for_assignment(a)
-            case_by_no[task_no] = case
-            assigned_at_map[task_no] = a.created_at
+            for link in links or [None]:
+                stable_task_key = self._task_key_for_project_task(
+                    a.project,
+                    a.library_task,
+                    project_equipment_id=link.pk if link is not None else None,
+                )
+                task_no = stable_task_key or legacy_task_no
+                if not task_no or task_no in case_by_no:
+                    continue
+                case = (
+                    self._ensure_case_for_task_key(
+                        a.project, stable_task_key, a.library_task, user=request.user
+                    )
+                    if stable_task_key
+                    else self._ensure_case_for_assignment(a)
+                )
+                case_by_no[task_no] = case
+                display_no_by_task[task_no] = legacy_task_no
+                assigned_at_map[task_no] = a.created_at
+        submission_qs = InspectionSubmission.objects.filter(
+            Q(task_key__in=case_by_no.keys()) | Q(task_no__in=case_by_no.keys())
+        )
         submission_map = {
-            s.task_no: s
-            for s in InspectionSubmission.objects.filter(task_no__in=case_by_no.keys()).select_related("case")
+            key: s
+            for s in submission_qs.select_related("case")
+            for key in dict.fromkeys([s.task_key, s.task_no])
+            if key
         }
         allowed_status_pending = {
             InspectionSubmission.STATUS_PENDING,
@@ -1342,6 +1485,8 @@ class InspectionPendingAPIView(_InspectionTaskAccessMixin, APIView):
             rows.append(
                 {
                     "taskNo": task_no,
+                    "taskKey": case.task_key or "",
+                    "displayTaskNo": display_no_by_task.get(task_no, task_no),
                     "reportType": DEFAULT_REPORT_TYPE,
                     "status": status_val,
                     "createdAt": (sub.created_at_remote if sub else case.created_at).isoformat(),
@@ -1434,7 +1579,7 @@ class InspectionDetailAPIView(_InspectionTaskAccessMixin, APIView):
         if err_resp is not None:
             return err_resp
         project = case.library_project
-        obj = self._submission_or_init(case, project)
+        obj = self._submission_or_init(case, project, task_no=task_no)
         gen_tasks = list(_pick_submit_generation_tasks(task_no, project))
         task_obj = gen_tasks[0] if gen_tasks else None
         data = self._serialize_task_detail(
@@ -1454,15 +1599,23 @@ class InspectionStartAPIView(_InspectionTaskAccessMixin, APIView):
         case, project, err_resp = self._resolve_case_project(request, task_no)
         if err_resp is not None:
             return err_resp
-        obj = InspectionSubmission.objects.filter(task_no=task_no, case=case).first()
+        from apps.core.task_identity import parse_task_key
+
+        is_stable_task = parse_task_key(task_no) is not None
+        obj = InspectionSubmission.objects.filter(
+            case=case,
+            **({"task_key": task_no} if is_stable_task else {"task_no": task_no}),
+        ).first()
         if obj is None:
-            obj = (
-                InspectionSubmission.objects.filter(case=case)
-                .order_by("-updated_at", "-id")
-                .first()
-            )
+            if not is_stable_task:
+                obj = (
+                    InspectionSubmission.objects.filter(case=case)
+                    .order_by("-updated_at", "-id")
+                    .first()
+                )
         if obj is None:
             obj = InspectionSubmission.objects.create(
+                task_key=case.task_key,
                 task_no=task_no,
                 report_type=DEFAULT_REPORT_TYPE,
                 status=InspectionSubmission.STATUS_IN_PROGRESS,
@@ -1487,7 +1640,12 @@ class InspectionStartAPIView(_InspectionTaskAccessMixin, APIView):
         started_at = obj.started_at or timezone.now()
         return _ok(
             "任务已开始检测",
-            {"taskNo": task_no, "status": obj.status, "startedAt": started_at.isoformat()},
+            {
+                "taskNo": task_no,
+                "taskKey": obj.task_key or case.task_key or "",
+                "status": obj.status,
+                "startedAt": started_at.isoformat(),
+            },
         )
 
 
@@ -1505,15 +1663,23 @@ class InspectionDraftAPIView(_InspectionTaskAccessMixin, APIView):
         if not serializer.is_valid():
             return _fail("草稿保存失败：数据验证错误", status.HTTP_422_UNPROCESSABLE_ENTITY, serializer.errors)
         payload = serializer.validated_data
-        obj = InspectionSubmission.objects.filter(task_no=task_no, case=case).first()
+        from apps.core.task_identity import parse_task_key
+
+        is_stable_task = parse_task_key(task_no) is not None
+        obj = InspectionSubmission.objects.filter(
+            case=case,
+            **({"task_key": task_no} if is_stable_task else {"task_no": task_no}),
+        ).first()
         if obj is None:
-            obj = (
-                InspectionSubmission.objects.filter(case=case)
-                .order_by("-updated_at", "-id")
-                .first()
-            )
+            if not is_stable_task:
+                obj = (
+                    InspectionSubmission.objects.filter(case=case)
+                    .order_by("-updated_at", "-id")
+                    .first()
+                )
         if obj is None:
             obj = InspectionSubmission.objects.create(
+                task_key=case.task_key,
                 task_no=task_no,
                 report_type=DEFAULT_REPORT_TYPE,
                 status=InspectionSubmission.STATUS_IN_PROGRESS,
@@ -1594,6 +1760,7 @@ class InspectionDraftAPIView(_InspectionTaskAccessMixin, APIView):
             "草稿已保存",
             {
                 "taskNo": task_no,
+                "taskKey": obj.task_key or case.task_key or "",
                 "status": obj.status,
                 "draftSavedAt": obj.draft_saved_at.isoformat() if obj.draft_saved_at else None,
             },
@@ -1610,10 +1777,15 @@ class InspectionSubmitExecutionError(Exception):
         self.http_status = http_status
 
 
-def ensure_case_for_project_library_task(project, library_task, user):
+def ensure_case_for_project_library_task(
+    project, library_task, user, *, project_equipment_id: int | None = None
+):
     """确保项目内库任务有案件编号（与 App taskNo / 提交入库一致）。"""
     mixin = _InspectionTaskAccessMixin()
-    task_no = mixin._build_project_task_no(project, library_task)
+    task_key = mixin._task_key_for_project_task(
+        project, library_task, project_equipment_id=project_equipment_id
+    )
+    task_no = task_key or mixin._build_project_task_no(project, library_task)
     if not task_no:
         raise ValueError("任务未挂载到本项目")
     assignment = (
@@ -1628,7 +1800,11 @@ def ensure_case_for_project_library_task(project, library_task, user):
             assignee=user,
             assigned_by=user,
         )
-    case = mixin._ensure_case_for_assignment(assignment)
+    case = (
+        mixin._ensure_case_for_task_key(project, task_key, library_task, user=user)
+        if task_key
+        else mixin._ensure_case_for_assignment(assignment)
+    )
     if case.library_project_id != project.pk:
         case.library_project = project
         case.save(update_fields=["library_project", "updated_at"])
@@ -1652,17 +1828,22 @@ def execute_inspection_submit_for_task(
     返回成功时的 data 字典；失败抛 ``InspectionSubmitExecutionError``。
     """
     payload = dict(payload or {})
+    from apps.core.task_identity import parse_task_key
+
+    task_key = str(task_no or "").strip() if parse_task_key(task_no) else (case.task_key or "")
     if project is not None:
         from apps.core.project_numbering import project_task_no_for_library_task
 
         lt = library_task
         if lt is None:
             lt = _resolve_library_task_for_task_no(task_no, project)
-        if lt is not None:
+        if lt is not None and not task_key:
             canonical = project_task_no_for_library_task(lt, project)
             if canonical:
                 task_no = canonical
     payload["taskNo"] = task_no
+    if task_key:
+        payload["taskKey"] = task_key
     from apps.core.inspection_report_type import normalize_submit_report_type
 
     payload["reportType"] = normalize_submit_report_type(
@@ -1721,6 +1902,7 @@ def execute_inspection_submit_for_task(
     storage_payload = apply_submit_instruments_bundle(storage_payload, inst_bundle)
 
     submit_defaults = {
+        "task_key": task_key or None,
         "report_type": data["reportType"],
         "status": InspectionSubmission.STATUS_SUBMITTED,
         "case": case,
@@ -1740,11 +1922,28 @@ def execute_inspection_submit_for_task(
         "submitted_at": timezone.now(),
         "created_by": user,
     }
-    existing = InspectionSubmission.objects.filter(case=case).order_by("-updated_at", "-id").first()
+    existing_qs = InspectionSubmission.objects.filter(case=case)
+    if task_key:
+        existing_qs = existing_qs.filter(task_key=task_key)
+    existing = existing_qs.order_by("-updated_at", "-id").first()
     if existing is not None:
-        if existing.task_no != task_no:
-            InspectionSubmission.objects.filter(task_no=task_no).exclude(pk=existing.pk).delete()
-            existing.task_no = task_no
+        if not task_key and existing.task_no != task_no:
+            # 旧版 task_no 全局唯一：只清理本项目内的占用行，避免误删其他项目的提交；
+            # 若其他项目仍占用该 task_no，则保留原 task_no，跳过改名（防止唯一约束冲突）。
+            if project is not None:
+                InspectionSubmission.objects.filter(
+                    task_no=task_no, project_id=project.pk
+                ).exclude(pk=existing.pk).delete()
+            clash = InspectionSubmission.objects.filter(task_no=task_no).exclude(pk=existing.pk)
+            if not clash.exists():
+                existing.task_no = task_no
+            else:
+                logger.warning(
+                    "task_no %s 被其他项目提交占用，case=%s 保留原 task_no=%s",
+                    task_no,
+                    case.pk,
+                    existing.task_no,
+                )
         for field, value in submit_defaults.items():
             setattr(existing, field, value)
         existing.save()
@@ -1860,6 +2059,7 @@ def execute_inspection_submit_for_task(
         )
     return {
         "taskNo": task_no,
+        "taskKey": task_key,
         "status": obj.status,
         "submittedAt": obj.submitted_at.isoformat() if obj.submitted_at else None,
         "pdfGeneration": generation_results,
@@ -1927,7 +2127,9 @@ class InspectionProjectTaskListAPIView(APIView):
         from apps.core.project_numbering import build_project_task_api_fields
         from apps.core.project_equipment_service import (
             library_task_equipment_context_by_task_id,
+            project_equipment_context,
         )
+        from apps.core.task_identity import task_links_for_library_task
 
         all_ordered = list(project.library_tasks.order_by("code", "id"))
         allowed_ids = _InspectionTaskAccessMixin._commission_library_task_ids(project)
@@ -1947,6 +2149,7 @@ class InspectionProjectTaskListAPIView(APIView):
         rows = []
         template_cache = {}
         overseer = library_user_can_assign_tasks_to_participants(request.user)
+        has_project_equipment = LibraryProjectEquipment.objects.filter(project=project).exists()
         for library_task in tasks:
             if overseer:
                 assignment = LibraryTaskAssignment.objects.filter(
@@ -1960,9 +2163,16 @@ class InspectionProjectTaskListAPIView(APIView):
                 )
             if assignment is None and not overseer:
                 continue
-            task_no = _InspectionTaskAccessMixin._build_project_task_no(project, library_task)
-            if not task_no:
+            links = task_links_for_library_task(project, library_task)
+            if has_project_equipment and not links:
+                logger.error(
+                    "skip project task without equipment binding project_id=%s library_task_id=%s",
+                    project.pk,
+                    library_task.pk,
+                )
                 continue
+            # 一个现场模板可能被多个项目设备复用，必须按关系展开，不能取第一个设备。
+            link_ids = [int(link.pk) for link in links] or [0]
             if library_task.id not in template_cache:
                 template_cache[library_task.id] = (
                     _resolve_task_template_json(library_task),
@@ -1979,59 +2189,76 @@ class InspectionProjectTaskListAPIView(APIView):
                 ts = LibraryFile.objects.filter(pk=pdf_id).values_list("created_at", flat=True).first()
                 if ts:
                     pdf_updated_at = ts.isoformat()
-            eq_fields = equipment_ctx.get(library_task.id) or empty_equipment_ctx
-            rows.append(
-                {
-                    "assignmentId": assignment.pk if assignment else None,
-                    "taskNo": task_no,
-                    **build_project_task_api_fields(
-                        project,
-                        library_task,
-                        task_no=task_no,
-                        ordered_tasks=all_ordered,
-                    ),
-                    **eq_fields,
-                    "projectId": _InspectionTaskAccessMixin._project_public_id(project),
-                    "taskId": library_task.id,
-                    "taskCode": library_task.code,
-                    "taskName": library_task.name,
-                    "outputTarget": library_task.output_target,
-                    "assignedAt": (
-                        assignment.created_at.isoformat()
-                        if assignment is not None and assignment.created_at
-                        else ""
-                    ),
-                    "frontendTemplateDownloadUrl": (
-                        request.build_absolute_uri(
-                            reverse(
-                                "api_v2_inspection_project_task_export_frontend_json",
-                                kwargs={"project_id": _InspectionTaskAccessMixin._project_public_id(project), "task_no": task_no},
+            for link_id in link_ids:
+                display_task_no = _InspectionTaskAccessMixin._build_project_task_no(project, library_task)
+                task_key = _InspectionTaskAccessMixin._task_key_for_project_task(
+                    project, library_task, project_equipment_id=link_id or None
+                )
+                task_no = task_key or display_task_no
+                if not task_no:
+                    continue
+                link = next((x for x in links if int(x.pk) == link_id), None)
+                eq_fields = (
+                    project_equipment_context(link, project=project)
+                    if link is not None
+                    else (equipment_ctx.get(library_task.id) or empty_equipment_ctx)
+                )
+                rows.append(
+                    {
+                        "assignmentId": assignment.pk if assignment else None,
+                        "projectEquipmentId": link_id or None,
+                        "taskNo": task_no,
+                        "taskKey": task_key,
+                        "displayTaskNo": display_task_no,
+                        **build_project_task_api_fields(
+                            project,
+                            library_task,
+                            task_no=display_task_no,
+                            ordered_tasks=all_ordered,
+                            project_equipment_id=link_id or None,
+                        ),
+                        **eq_fields,
+                        "projectId": _InspectionTaskAccessMixin._project_public_id(project),
+                        "taskId": library_task.id,
+                        "taskCode": library_task.code,
+                        "taskName": library_task.name,
+                        "outputTarget": library_task.output_target,
+                        "assignedAt": (
+                            assignment.created_at.isoformat()
+                            if assignment is not None and assignment.created_at
+                            else ""
+                        ),
+                        "frontendTemplateDownloadUrl": (
+                            request.build_absolute_uri(
+                                reverse(
+                                    "api_v2_inspection_project_task_export_frontend_json",
+                                    kwargs={"project_id": _InspectionTaskAccessMixin._project_public_id(project), "task_no": task_no},
+                                )
                             )
-                        )
-                        if not tpl_error
-                        else ""
-                    ),
-                    "frontendTemplateMeta": {
-                        "templateFileId": tpl_id,
-                        "templateFileName": tpl_name,
-                        "templateUpdatedAt": tpl_updated_at,
-                        "exported": not bool(tpl_error),
-                        "error": tpl_error or "",
-                    },
-                    "templatePdfDownloadUrl": (
-                        request.build_absolute_uri(reverse("api_v2_library_file_download", kwargs={"pk": pdf_id}))
-                        if not pdf_error and pdf_id
-                        else ""
-                    ),
-                    "templatePdfMeta": {
-                        "templateFileId": pdf_id,
-                        "templateFileName": pdf_name,
-                        "templateUpdatedAt": pdf_updated_at,
-                        "ready": not bool(pdf_error),
-                        "error": pdf_error or "",
-                    },
-                }
-            )
+                            if not tpl_error
+                            else ""
+                        ),
+                        "frontendTemplateMeta": {
+                            "templateFileId": tpl_id,
+                            "templateFileName": tpl_name,
+                            "templateUpdatedAt": tpl_updated_at,
+                            "exported": not bool(tpl_error),
+                            "error": tpl_error or "",
+                        },
+                        "templatePdfDownloadUrl": (
+                            request.build_absolute_uri(reverse("api_v2_library_file_download", kwargs={"pk": pdf_id}))
+                            if not pdf_error and pdf_id
+                            else ""
+                        ),
+                        "templatePdfMeta": {
+                            "templateFileId": pdf_id,
+                            "templateFileName": pdf_name,
+                            "templateUpdatedAt": pdf_updated_at,
+                            "ready": not bool(pdf_error),
+                            "error": pdf_error or "",
+                        },
+                    }
+                )
         return _ok("获取成功", {"projectId": project.code, "count": len(rows), "list": rows})
 
 
@@ -2050,11 +2277,14 @@ class InspectionTaskFrontendJsonExportAPIView(_InspectionTaskAccessMixin, APIVie
             return _fail("未找到任务关联模板", status.HTTP_404_NOT_FOUND)
 
         try:
+            from apps.core.task_identity import parse_task_key
+
             frontend_obj = build_runtime_frontend_for_inspection_export(
                 request,
                 project=project,
                 library_task=task_obj,
                 display_task_no=display_task_no,
+                task_key=case.task_key or (task_no if parse_task_key(task_no) else ""),
                 case=case,
             )
         except InspectionFrontendExportError as exc:
@@ -2097,12 +2327,18 @@ class InspectionTaskManualExportReportAPIView(_InspectionTaskAccessMixin, APIVie
         if report_task is None:
             return _fail("项目下未找到报告任务", status.HTTP_409_CONFLICT)
 
+        from apps.core.task_identity import parse_task_key
+
         submit_payload = resolve_submit_payload_for_report(task_no, case, project)
         if not submit_payload:
             return _fail("未找到该任务的检测提交数据，无法回填报告", status.HTTP_409_CONFLICT)
 
         source_payload, source_reason = load_report_payload_for_manual_export(
-            (case,), project, report_task, submit_payload
+            (case,),
+            project,
+            report_task,
+            submit_payload,
+            task_key=task_no if parse_task_key(task_no) is not None else None,
         )
         if not isinstance(source_payload, dict) or not source_payload:
             return _fail(source_reason or "报告数据源合并失败", status.HTTP_409_CONFLICT)
@@ -2204,7 +2440,15 @@ class InspectionSignatureDownloadAPIView(_InspectionTaskAccessMixin, APIView):
         field = self._ROLE_FIELD_MAP.get(role)
         if not field:
             return Response({"detail": "role 必须为 author/reviewer/approver"}, status=400)
-        obj = get_object_or_404(InspectionSubmission, task_no=task_no, case=case)
+        from apps.core.task_identity import parse_task_key
+
+        obj_qs = InspectionSubmission.objects.filter(case=case)
+        obj_qs = (
+            obj_qs.filter(task_key=task_no)
+            if parse_task_key(task_no) is not None
+            else obj_qs.filter(task_no=task_no)
+        )
+        obj = get_object_or_404(obj_qs)
         content = getattr(obj, field, None)
         if not content:
             raise Http404("签名不存在")
@@ -2267,14 +2511,19 @@ class InspectionSignatureUploadAPIView(_InspectionTaskAccessMixin, APIView):
         if not raw:
             return _fail(f"signatures.{role} 不能为空", status.HTTP_400_BAD_REQUEST)
 
-        obj = (
-            InspectionSubmission.objects.filter(task_no=task_no, case=case)
-            .select_related("case", "project")
-            .first()
+        from apps.core.task_identity import parse_task_key
+
+        obj_qs = InspectionSubmission.objects.filter(case=case)
+        obj_qs = (
+            obj_qs.filter(task_key=task_no)
+            if parse_task_key(task_no) is not None
+            else obj_qs.filter(task_no=task_no)
         )
+        obj = obj_qs.select_related("case", "project").first()
         now = timezone.now()
         if obj is None:
             obj = InspectionSubmission(
+                task_key=case.task_key,
                 task_no=task_no,
                 report_type=DEFAULT_REPORT_TYPE,
                 status=InspectionSubmission.STATUS_IN_PROGRESS,
@@ -2344,6 +2593,7 @@ class InspectionSignatureUploadAPIView(_InspectionTaskAccessMixin, APIView):
             "签名上传成功",
             {
                 "taskNo": task_no,
+                "taskKey": obj.task_key or case.task_key or "",
                 "character": role,
                 "filename": filename,
                 "signDate": obj.sign_date.isoformat() if obj.sign_date else None,
@@ -2584,6 +2834,7 @@ class InspectionTaskOCRUploadAPIView(_InspectionTaskAccessMixin, APIView):
         task = LibraryOCRProcessTask.objects.create(
             created_by=request.user,
             project_id=project.pk,
+            task_key=getattr(_case, "task_key", "") or None,
             source_file_ids=[row["id"] for row in created],
             status=LibraryOCRProcessTask.STATUS_PENDING,
         )
@@ -2605,6 +2856,7 @@ class InspectionTaskOCRUploadAPIView(_InspectionTaskAccessMixin, APIView):
             "OCR 任务已创建",
             {
                 "taskNo": task_no,
+                "taskKey": task.task_key or "",
                 "uploaded": created,
                 "skipped": skipped,
                 "count": len(created),
@@ -2679,8 +2931,8 @@ class InspectionTaskOCRStatusAPIView(_InspectionTaskAccessMixin, APIView):
         if err_resp is not None:
             return err_resp
         task = get_object_or_404(LibraryOCRProcessTask, pk=ocr_task_id)
-        if task.project_id != project.pk:
-            return _fail("该 OCR 任务不属于当前 taskNo", status.HTTP_403_FORBIDDEN)
+        if not _ocr_task_matches_inspection_task(task, project, _case):
+            return _fail("该 OCR 任务不属于当前 taskKey", status.HTTP_403_FORBIDDEN)
         files = list(
             LibraryFile.objects.filter(pk__in=task.generated_json_file_ids, category=LibraryFile.CATEGORY_JSON)
             .order_by("created_at")
@@ -2698,6 +2950,7 @@ class InspectionTaskOCRStatusAPIView(_InspectionTaskAccessMixin, APIView):
             "获取成功",
             {
                 "taskNo": task_no,
+                "taskKey": task.task_key or getattr(_case, "task_key", "") or "",
                 "ocrTaskId": task.pk,
                 "status": task.status,
                 "projectId": task.project_id,
@@ -2719,8 +2972,8 @@ class InspectionTaskOCRAutofillAPIView(_InspectionTaskAccessMixin, APIView):
         if err_resp is not None:
             return err_resp
         task = get_object_or_404(LibraryOCRProcessTask, pk=ocr_task_id)
-        if task.project_id != project.pk:
-            return _fail("该 OCR 任务不属于当前 taskNo", status.HTTP_403_FORBIDDEN)
+        if not _ocr_task_matches_inspection_task(task, project, _case):
+            return _fail("该 OCR 任务不属于当前 taskKey", status.HTTP_403_FORBIDDEN)
         if task.status != LibraryOCRProcessTask.STATUS_SUCCESS:
             if task.status == LibraryOCRProcessTask.STATUS_FAILED:
                 return _fail("任务处理失败，无可用自动填写数据", status.HTTP_409_CONFLICT)
@@ -2796,6 +3049,7 @@ class InspectionTaskOCRAutofillAPIView(_InspectionTaskAccessMixin, APIView):
             "获取成功",
             {
                 "taskNo": task_no,
+                "taskKey": task.task_key or getattr(_case, "task_key", "") or "",
                 "ocrTaskId": task.pk,
                 "ready": True,
                 "jsonFile": {
@@ -2824,18 +3078,30 @@ class InspectionProjectTaskDetailAPIView(InspectionDetailAPIView):
         obj = self._submission_or_init(case, project, task_no=task_no)
         data = self._serialize_task_detail(case, obj)
         data = self._merge_commission_org_equipment_previous(request, case, obj, data)
+        display_task_no = self._build_project_task_no(project, library_task) or task_no
         data["projectId"] = self._project_public_id(case.library_project) if case.library_project_id else ""
         data["taskNo"] = task_no
+        data["taskKey"] = case.task_key or ""
+        data["displayTaskNo"] = display_task_no
         if library_task is not None and project is not None:
             from apps.core.project_numbering import build_project_task_api_fields
+            from apps.core.task_identity import parse_task_key
+
+            parsed_task_key = parse_task_key(task_no)
 
             data.update(
                 build_project_task_api_fields(
                     project,
                     library_task,
-                    task_no=task_no,
+                    task_no=display_task_no,
+                    project_equipment_id=(
+                        parsed_task_key.project_equipment_id
+                        if parsed_task_key is not None
+                        else None
+                    ),
                 )
             )
+            data["taskKey"] = case.task_key or ""
             data["inspectedNo"] = data.get("inspectedNo") or display_inspected_no_for_fill(
                 case, project, task_no
             )
@@ -2852,6 +3118,8 @@ class InspectionProjectTaskStartAPIView(InspectionStartAPIView):
             data = resp.data.get("data")
             if isinstance(data, dict):
                 data["taskNo"] = task_no
+                data["taskKey"] = case.task_key or ""
+                data["displayTaskNo"] = self._build_project_task_no(case.library_project, self._resolve_project_task_by_no(case.library_project, task_no)) or task_no
                 data["projectId"] = self._project_public_id(case.library_project) if case.library_project_id else project_id
         return resp
 
@@ -2866,6 +3134,8 @@ class InspectionProjectTaskDraftAPIView(InspectionDraftAPIView):
             data = resp.data.get("data")
             if isinstance(data, dict):
                 data["taskNo"] = task_no
+                data["taskKey"] = case.task_key or ""
+                data["displayTaskNo"] = self._build_project_task_no(case.library_project, self._resolve_project_task_by_no(case.library_project, task_no)) or task_no
                 data["projectId"] = self._project_public_id(case.library_project) if case.library_project_id else project_id
         return resp
 
@@ -2881,6 +3151,8 @@ class InspectionProjectTaskSubmitAPIView(InspectionSubmitByTaskAPIView):
             data = resp.data.get("data")
             if isinstance(data, dict):
                 data["taskNo"] = task_no
+                data["taskKey"] = case.task_key or ""
+                data["displayTaskNo"] = self._build_project_task_no(project, library_task) or task_no
                 data["projectId"] = self._project_public_id(case.library_project) if case.library_project_id else project_id
         return resp
 
@@ -2899,11 +3171,15 @@ class InspectionProjectTaskFrontendJsonExportAPIView(InspectionTaskFrontendJsonE
             user=request.user,
         )
         try:
+            from apps.core.task_identity import parse_task_key
+
+            display_task_no = self._build_project_task_no(project, library_task) or task_no
             frontend_obj = build_runtime_frontend_for_inspection_export(
                 request,
                 project=project,
                 library_task=library_task,
-                display_task_no=task_no,
+                display_task_no=display_task_no,
+                task_key=case.task_key or (task_no if parse_task_key(task_no) else ""),
                 case=case,
                 assignment=assignment,
             )

@@ -612,7 +612,7 @@ class LibraryTaskAssignment(models.Model):
 
 
 class LibraryOCRProcessTask(models.Model):
-    """OCR 上传后的异步流程任务。"""
+    """OCR 上传后的异步流程任务（新任务按 taskKey 绑定，兼容旧项目级任务）。"""
 
     STATUS_PENDING = "pending"
     STATUS_RUNNING = "running"
@@ -645,6 +645,14 @@ class LibraryOCRProcessTask(models.Model):
         on_delete=models.SET_NULL,
         related_name="ocr_tasks",
         verbose_name=_("项目"),
+    )
+    task_key = models.CharField(
+        max_length=128,
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name=_("稳定任务键"),
+        help_text=_("新检测任务的 OCR 结果归属键；历史项目级 OCR 任务保留为空。"),
     )
     source_file_ids = models.JSONField(default=list, blank=True, verbose_name=_("源文件ID列表"))
     generated_json_file_ids = models.JSONField(
@@ -1421,6 +1429,15 @@ class InspectionCase(models.Model):
     """一次检验/业务案件，串联单位、联系人、设备与记录。"""
 
     case_no = models.CharField(max_length=64, unique=True, db_index=True, verbose_name=_('案件编号'))
+    task_key = models.CharField(
+        max_length=128,
+        null=True,
+        blank=True,
+        unique=True,
+        db_index=True,
+        verbose_name=_('稳定任务键'),
+        help_text=_('新检测任务使用的稳定归属键；历史案件保留为空。'),
+    )
     inspected_organization = models.ForeignKey(
         InspectedOrganization,
         on_delete=models.PROTECT,
@@ -1575,7 +1592,7 @@ class Report(models.Model):
 
 
 class InspectionSubmission(models.Model):
-    """前端检测报告提交记录（按 taskNo 绑定后台案件与项目）。"""
+    """前端检测报告提交记录（新数据按 taskKey 绑定，兼容旧 taskNo）。"""
 
     STATUS_PENDING = "pending"
     STATUS_IN_PROGRESS = "in_progress"
@@ -1590,6 +1607,15 @@ class InspectionSubmission(models.Model):
         (STATUS_REJECTED, _("已驳回")),
     )
 
+    task_key = models.CharField(
+        max_length=128,
+        null=True,
+        blank=True,
+        unique=True,
+        db_index=True,
+        verbose_name=_("稳定任务键"),
+        help_text=_("新检测任务使用的稳定归属键；历史提交保留为空。"),
+    )
     task_no = models.CharField(max_length=64, unique=True, db_index=True, verbose_name=_("任务编号"))
     report_type = models.CharField(max_length=64, db_index=True, verbose_name=_("报告类型"))
     status = models.CharField(
@@ -1851,6 +1877,13 @@ class CaseReportSignatureRecord(models.Model):
         on_delete=models.SET_NULL,
         related_name="report_signature_records",
         verbose_name=_("检测提交"),
+    )
+    task_key = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+        db_index=True,
+        verbose_name=_("稳定任务键"),
     )
     task_no = models.CharField(max_length=64, blank=True, default="", db_index=True, verbose_name=_("任务编号"))
     export_variant = models.CharField(
@@ -2162,6 +2195,13 @@ class UserSignatureEvent(models.Model):
         on_delete=models.SET_NULL,
         related_name="signature_events",
         verbose_name=_("检测提交"),
+    )
+    task_key = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+        db_index=True,
+        verbose_name=_("稳定任务键"),
     )
     task_no = models.CharField(max_length=64, blank=True, default="", db_index=True, verbose_name=_("任务编号"))
     task_code = models.CharField(max_length=128, blank=True, default="", verbose_name=_("任务模板代码"))

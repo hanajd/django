@@ -303,6 +303,7 @@ def _insert_issue_date_digits(
         if len(rect) < 4 or not text:
             continue
         r = fitz.Rect(*rect)
+        r.normalize()
         if r.width < 4 or r.height < 4:
             continue
         target = float(label_fontsize) if label_fontsize and label_fontsize > 0 else float(r.height)
@@ -336,6 +337,41 @@ def _insert_issue_date_digits(
         page.insert_text(fitz.Point(x, baseline), text, **kwargs)
 
 
+def _rects_union(rects: list[list[float]] | None) -> list[float] | None:
+    xs0, ys0, xs1, ys1 = [], [], [], []
+    for r in rects or []:
+        if len(r) >= 4:
+            xs0.append(min(float(r[0]), float(r[2])))
+            ys0.append(min(float(r[1]), float(r[3])))
+            xs1.append(max(float(r[0]), float(r[2])))
+            ys1.append(max(float(r[1]), float(r[3])))
+    if not xs0:
+        return None
+    return [min(xs0), min(ys0), max(xs1), max(ys1)]
+
+
+def _issue_date_underline_guide(
+    digit_rects: list[list[float]],
+    label_rects: list[fitz.Rect] | None = None,
+    hint_rect: list[float] | tuple[float, ...] | None = None,
+) -> list[float] | None:
+    """
+    找签发日期下划线用的参考框。
+
+    必须用「已对齐到预印年/月/日的数字框」而不是模板 hint 框：hint 的垂直位置
+    可能落在上一行与本行之间，会把上一行（编制人/审核人）的下划线当成本栏位的线。
+    """
+    boxes = [list(dr) for dr in digit_rects if len(dr) >= 4]
+    for lr in label_rects or []:
+        boxes.append([float(lr.x0), float(lr.y0), float(lr.x1), float(lr.y1)])
+    guide = _rects_union(boxes)
+    if guide is not None:
+        return guide
+    if hint_rect is not None and len(hint_rect) >= 4:
+        return [float(hint_rect[i]) for i in range(4)]
+    return None
+
+
 def _clip_rects_above_underline(
     page: fitz.Page,
     digit_rects: list[list[float]],
@@ -346,16 +382,9 @@ def _clip_rects_above_underline(
     """将数字空白框底边收到下划线上方，避免白底擦断模板线。不抬高顶边。"""
     guide = hint_rect
     if guide is None or len(guide) < 4:
-        xs0, ys0, xs1, ys1 = [], [], [], []
-        for dr in digit_rects:
-            if len(dr) >= 4:
-                xs0.append(float(dr[0]))
-                ys0.append(float(dr[1]))
-                xs1.append(float(dr[2]))
-                ys1.append(float(dr[3]))
-        if not xs0:
+        guide = _rects_union(digit_rects)
+        if guide is None:
             return digit_rects
-        guide = [min(xs0), min(ys0), max(xs1), max(ys1)]
     ul = _find_field_underline(page, guide)
     if ul is None:
         return digit_rects
@@ -366,6 +395,12 @@ def _clip_rects_above_underline(
             out.append(dr)
             continue
         box = list(dr)
+        if box[1] > box[3]:
+            box[1], box[3] = box[3], box[1]
+        # 下划线不在框下方（跨行误匹配）时不裁剪，否则会得到负高度而丢字
+        if uy - gap <= box[1] + 4.0:
+            out.append(box)
+            continue
         if box[3] > uy - gap:
             box[3] = uy - gap
         # 过扁时宁可略降底边也不抬顶，避免数字相对「年/月/日」上浮
@@ -404,13 +439,14 @@ def _overlay_issue_date_on_pdf(
             hint = list(issue_spec.get("rect") or parts[0].get("rect") or [])
             if page_idx < doc.page_count:
                 page = doc[page_idx]
-                underline = _find_field_underline(page, hint) if hint else None
                 label_rects = _find_printed_ymd_label_rects(page, hint) if hint else None
                 label_fs = None
                 if label_rects:
                     label_fs = max(float(r.y1 - r.y0) for r in label_rects[:3])
                     digit_rects = _snap_digit_rects_y_to_ymd_labels(digit_rects, label_rects)
-                digit_rects = _clip_rects_above_underline(page, digit_rects, hint)
+                guide = _issue_date_underline_guide(digit_rects, label_rects, hint)
+                underline = _find_field_underline(page, guide) if guide else None
+                digit_rects = _clip_rects_above_underline(page, digit_rects, guide)
                 for dr in digit_rects:
                     if len(dr) >= 4:
                         page.draw_rect(
@@ -442,13 +478,14 @@ def _overlay_issue_date_on_pdf(
         if page_idx >= doc.page_count:
             raise ValueError(f"签发日期页码 {page_1based} 超出报告页数")
         page = doc[page_idx]
-        underline = _find_field_underline(page, rect)
         label_rects = _find_printed_ymd_label_rects(page, rect)
         label_fs = None
         if label_rects:
             label_fs = max(float(r.y1 - r.y0) for r in label_rects[:3])
             digit_rects = _digit_blank_rects_before_ymd_labels(label_rects, hint_rect=rect)
-            digit_rects = _clip_rects_above_underline(page, digit_rects, rect)
+            guide = _issue_date_underline_guide(digit_rects, label_rects, rect)
+            underline = _find_field_underline(page, guide) if guide else None
+            digit_rects = _clip_rects_above_underline(page, digit_rects, guide)
             # 重签时先擦除数字空白，避免叠字（不擦下划线）
             for dr in digit_rects:
                 if len(dr) >= 4:
@@ -458,6 +495,7 @@ def _overlay_issue_date_on_pdf(
             )
         else:
             # 找不到预印字时：将栏位三等分，仍只写数字（不写「年月日」文字）
+            underline = _find_field_underline(page, rect)
             content = _content_rect_above_underline(page, rect)
             x0, y0, x1, y1 = content.x0, content.y0, content.x1, content.y1
             w = (x1 - x0) / 3.0
@@ -926,6 +964,21 @@ def find_latest_report_library_file(
     if not include_issued_snapshot:
         candidates = [f for f in candidates if not is_issued_report_snapshot_file(f)]
     tn = (task_no or "").strip()
+    from apps.core.task_identity import parse_task_key
+    from apps.api.inspection_pdf_service import resolve_report_task_for_case
+
+    is_key = parse_task_key(tn) is not None
+    report_task = None
+    if tn:
+        report_task = resolve_report_task_for_case(
+            tn, project, allow_single_report_fallback=False
+        )
+    if report_task is not None:
+        candidates = [
+            f for f in candidates if f.library_tasks.filter(pk=report_task.pk).exists()
+        ]
+    elif is_key:
+        candidates = []
     if tn:
         safe = tn.replace("/", "_")
         matched = [
@@ -1011,7 +1064,14 @@ def resolve_report_library_task(
             return rt
     from apps.api.inspection_pdf_service import _resolve_library_task_for_task_no
 
-    site_task = _resolve_library_task_for_task_no(submission.task_no, project)
+    identity = (
+        submission.task_key
+        or getattr(submission.case, "task_key", "")
+        or submission.task_no
+        or ""
+    ).strip()
+
+    site_task = _resolve_library_task_for_task_no(identity, project)
     if site_task is not None and site_task.output_target == LibraryTask.OUTPUT_REPORT:
         return site_task
     if site_task is not None:
@@ -1025,6 +1085,10 @@ def resolve_report_library_task(
         )
         if rt:
             return rt
+    from apps.core.task_identity import parse_task_key
+
+    if parse_task_key(identity) is not None:
+        return None
     return (
         project.library_tasks.filter(output_target=LibraryTask.OUTPUT_REPORT)
         .order_by("code", "id")
@@ -1051,8 +1115,12 @@ def list_case_report_signature_records(
     if not include_voided:
         qs = qs.filter(voided_at__isnull=True)
     tn = (task_no or "").strip()
+    from apps.core.task_identity import parse_task_key
+
     if tn:
-        qs = qs.filter(task_no=tn)
+        qs = qs.filter(
+            **({"task_key": tn} if parse_task_key(tn) is not None else {"task_no": tn})
+        )
     if export_variant is not None and str(export_variant).strip():
         qs = qs.filter(export_variant=normalize_signature_export_variant(export_variant))
     return list(qs.order_by("sign_version", "signed_at", "id"))
@@ -1065,11 +1133,14 @@ def slot_already_signed(
     slot: str,
     export_variant: str | None = None,
 ) -> bool:
+    tn = (task_no or "").strip()
+    from apps.core.task_identity import parse_task_key
+
     qs = CaseReportSignatureRecord.objects.filter(
         case_id=case_id,
-        task_no=(task_no or "").strip(),
         slot=slot,
         voided_at__isnull=True,
+        **({"task_key": tn} if parse_task_key(tn) is not None else {"task_no": tn}),
     )
     if export_variant is not None and str(export_variant).strip():
         qs = qs.filter(export_variant=normalize_signature_export_variant(export_variant))
@@ -1136,11 +1207,14 @@ def signed_slots_for_export_variant(
     task_no: str,
     export_variant: str,
 ) -> set[str]:
+    tn = (task_no or "").strip()
+    from apps.core.task_identity import parse_task_key
+
     qs = CaseReportSignatureRecord.objects.filter(
         case_id=case_id,
-        task_no=(task_no or "").strip(),
         export_variant=normalize_signature_export_variant(export_variant),
         voided_at__isnull=True,
+        **({"task_key": tn} if parse_task_key(tn) is not None else {"task_no": tn}),
     ).exclude(slot=CaseReportSignatureRecord.SLOT_ISSUE_DATE)
     return {str(r.slot) for r in qs}
 
@@ -1161,7 +1235,11 @@ def void_case_report_signatures(
     )
     tn = (task_no or "").strip()
     if tn:
-        qs = qs.filter(task_no=tn)
+        from apps.core.task_identity import parse_task_key
+
+        qs = qs.filter(
+            **({"task_key": tn} if parse_task_key(tn) is not None else {"task_no": tn})
+        )
     if export_variants is not None:
         from radiation_detection_report.report_pdf_integrator import (
             normalize_report_export_variants,
@@ -1509,6 +1587,7 @@ def _log_signature_usage(
         project=project,
         case=case,
         submission=submission,
+        task_key=(submission.task_key or case.task_key or "").strip(),
         task_no=(submission.task_no or "").strip(),
         library_file=report_file,
         snapshot_path=report_file.relative_path if report_file else "",
@@ -1527,6 +1606,7 @@ def build_report_signature_status(
     project: LibraryProject,
     submission: InspectionSubmission | None,
     viewer: User,
+    task_key: str = "",
 ) -> dict[str, Any]:
     """委托管理 UI：报告签字状态面板数据（含各导出版本）。"""
     from radiation_detection_report.report_pdf_integrator import report_export_variant_label
@@ -1545,19 +1625,25 @@ def build_report_signature_status(
         "variants": [],
         "export_variant": "",
     }
-    if case is None or submission is None or not (submission.task_no or "").strip():
+    if case is None or submission is None or not (submission.task_no or task_key or "").strip():
         return empty
 
-    task_no = submission.task_no
+    task_no = submission.task_no if submission else ""
+    identity = (
+        task_key
+        or (submission.task_key if submission else "")
+        or getattr(case, "task_key", "")
+        or task_no
+    ).strip()
     variants = list_task_report_export_variants(
-        case=case, project=project, task_no=task_no
+        case=case, project=project, task_no=identity
     )
     report_file = None
     if variants:
         report_file = find_latest_report_library_file(
-            case=case, project=project, task_no=task_no, export_variant=variants[0]
+            case=case, project=project, task_no=identity, export_variant=variants[0]
         )
-    records_all = list_case_report_signature_records(case_id=case.pk, task_no=task_no)
+    records_all = list_case_report_signature_records(case_id=case.pk, task_no=identity)
 
     from apps.core.commission_workflow_progress import effective_workflow_stage
 
@@ -1613,7 +1699,7 @@ def build_report_signature_status(
     variant_rows: list[dict[str, Any]] = []
     for v in variants:
         v_file = find_latest_report_library_file(
-            case=case, project=project, task_no=task_no, export_variant=v
+            case=case, project=project, task_no=identity, export_variant=v
         )
         v_recs = [r for r in records_all if (r.export_variant or "full") == v]
         v_signed = {
@@ -1807,8 +1893,14 @@ def apply_report_signature_and_advance(
     ):
         return False, "无权执行该环节签字"
 
+    identity = (
+        submission.task_key
+        or getattr(case, "task_key", "")
+        or submission.task_no
+        or ""
+    ).strip()
     existing_variants = list_task_report_export_variants(
-        case=case, project=project, task_no=submission.task_no
+        case=case, project=project, task_no=identity
     )
     if not existing_variants:
         return False, "报告尚未生成，请先在项目工作台导出报告后再签字"
@@ -1829,7 +1921,7 @@ def apply_report_signature_and_advance(
     case_effective = effective_workflow_stage(case, submission)
     variant_signed = signed_slots_for_export_variant(
         case_id=case.pk,
-        task_no=submission.task_no,
+        task_no=identity,
         export_variant=variant,
     )
     variant_stage = variant_report_stage_from_signed_slots(
@@ -1861,7 +1953,7 @@ def apply_report_signature_and_advance(
     report_file = find_latest_report_library_file(
         case=case,
         project=project,
-        task_no=submission.task_no,
+        task_no=identity,
         export_variant=variant,
     )
     if report_file is None:
@@ -1915,16 +2007,23 @@ def apply_report_signature_and_advance(
         except ValueError as exc:
             return False, str(exc)
 
+    from apps.core.task_identity import parse_task_key
+
     sign_version = (
         CaseReportSignatureRecord.objects.filter(
-            case_id=case.pk, task_no=submission.task_no
+            case_id=case.pk,
+            **(
+                {"task_key": identity}
+                if parse_task_key(identity) is not None
+                else {"task_no": identity}
+            ),
         ).count()
         + 1
     )
     current_lf = _overwrite_current_report_file(
         report_file=report_file,
         pdf_bytes=pdf_after,
-        task_no=submission.task_no or "",
+        task_no=identity,
     )
     sha_after = _sha256_bytes(pdf_after)
 
@@ -1932,6 +2031,7 @@ def apply_report_signature_and_advance(
         case=case,
         project=project,
         submission=submission,
+        task_key=(submission.task_key or case.task_key or "").strip(),
         task_no=(submission.task_no or "").strip(),
         export_variant=variant,
         workflow_stage=variant_stage,
@@ -1964,6 +2064,7 @@ def apply_report_signature_and_advance(
             case=case,
             project=project,
             submission=submission,
+            task_key=(submission.task_key or case.task_key or "").strip(),
             task_no=(submission.task_no or "").strip(),
             export_variant=variant,
             workflow_stage=variant_stage,
@@ -1983,7 +2084,7 @@ def apply_report_signature_and_advance(
             project=project,
             report_task=report_task,
             case=case,
-            task_no=submission.task_no or "",
+            task_no=identity,
             current_report=current_lf,
             pdf_bytes=pdf_after,
         )

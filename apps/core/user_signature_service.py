@@ -96,6 +96,7 @@ def _log_signature_event(
     case: InspectionCase | None = None,
     submission: InspectionSubmission | None = None,
     task_no: str = "",
+    task_key: str = "",
     task_code: str = "",
     output_target: str = "",
     library_file: LibraryFile | None = None,
@@ -106,6 +107,17 @@ def _log_signature_event(
     slot = (usage_slot or "").strip()
     if slot and slot not in PROJECT_SIGNATURE_SLOTS:
         slot = REPORT_API_ROLE_TO_SLOT.get(slot, slot)
+    resolved_task_key = (task_key or "").strip() or str(
+        (getattr(submission, "task_key", "") or "")
+        or (getattr(case, "task_key", "") or "")
+        or ""
+    ).strip()
+    if not resolved_task_key:
+        from apps.core.task_identity import parse_task_key
+
+        cand = (task_no or getattr(submission, "task_no", "") or "").strip()
+        if parse_task_key(cand) is not None:
+            resolved_task_key = cand
     return UserSignatureEvent.objects.create(
         user=owner,
         user_signature=user_signature,
@@ -116,6 +128,7 @@ def _log_signature_event(
         case=case,
         submission=submission,
         task_no=(task_no or "").strip(),
+        task_key=resolved_task_key,
         task_code=(task_code or "").strip(),
         output_target=(output_target or "").strip(),
         library_file=library_file,

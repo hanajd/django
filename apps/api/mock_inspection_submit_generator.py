@@ -3577,6 +3577,7 @@ def resolve_frontend_template_for_mock_submit(
     project,
     library_task,
     task_no: str,
+    task_key: str = "",
     request=None,
 ) -> Tuple[dict, str]:
     """
@@ -3600,6 +3601,7 @@ def resolve_frontend_template_for_mock_submit(
                 project=project,
                 library_task=library_task,
                 display_task_no=task_no,
+                task_key=task_key or None,
             )
             if isinstance(fe, dict) and isinstance(fe.get("steps"), list) and fe["steps"]:
                 return fe, "export-frontend-json"
@@ -3617,6 +3619,7 @@ def build_mock_submit_for_project_task(
     project,
     library_task,
     task_no: str,
+    task_key: str = "",
     request=None,
     fill_ratio: float = 1.0,
     merge_task_binding: bool = True,
@@ -3640,6 +3643,7 @@ def build_mock_submit_for_project_task(
         project=project,
         library_task=library_task,
         task_no=task_no,
+        task_key=task_key,
         request=request,
     )
 
@@ -3659,6 +3663,8 @@ def build_mock_submit_for_project_task(
         fill_ratio=float(fill_ratio),
         library_task=library_task,
     )
+    if task_key:
+        payload["taskKey"] = str(task_key).strip()
     meta = payload.pop("_mockMeta", {}) or {}
 
     if merge_task_binding:
@@ -3729,7 +3735,9 @@ def execute_mock_submit_for_equipment_link(
     if link is None:
         raise ValueError("设备委托记录不存在")
     report_task = normalize_equipment_report_task(effective_report_task(link))
-    site_rows = site_submit_tasks_for_report_task(project, report_task)
+    site_rows = site_submit_tasks_for_report_task(
+        project, report_task, project_equipment_id=link.pk
+    )
     if not site_rows:
         raise ValueError("该设备未挂载现场记录任务")
 
@@ -3741,23 +3749,31 @@ def execute_mock_submit_for_equipment_link(
         if library_task is None:
             continue
         task_no = str(row["taskNo"]).strip()
+        task_key = str(row.get("taskKey") or "").strip()
         frontend_obj, _source = resolve_frontend_template_for_mock_submit(
             project=project,
             library_task=library_task,
             task_no=task_no,
+            task_key=task_key,
             request=request,
         )
         built = build_mock_submit_for_project_task(
             project=project,
             library_task=library_task,
             task_no=task_no,
+            task_key=task_key,
             request=request,
             fill_ratio=fill_ratio,
             merge_task_binding=True,
             include_backfill_preview=False,
         )
         payload = built.get("payload") if isinstance(built.get("payload"), dict) else {}
-        case, resolved_no = ensure_case_for_project_library_task(project, library_task, user)
+        case, resolved_no = ensure_case_for_project_library_task(
+            project,
+            library_task,
+            user,
+            project_equipment_id=link.pk,
+        )
         try:
             submit_data = execute_inspection_submit_for_task(
                 user,
@@ -3773,6 +3789,7 @@ def execute_mock_submit_for_equipment_link(
         submitted.append(
             {
                 "taskNo": resolved_no,
+                "taskKey": task_key or case.task_key or "",
                 "taskCode": row.get("code") or "",
                 "taskName": row.get("name") or "",
                 "mockMeta": built.get("meta") or {},

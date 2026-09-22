@@ -43,6 +43,7 @@ def decode_png_base64_any(value: str):
 class InspectionSubmitSerializer(serializers.Serializer):
     # 暂不校验 taskNo 格式；实际任务号以 URL / 视图层解析为准
     taskNo = serializers.CharField(max_length=64)
+    taskKey = serializers.CharField(max_length=128, required=False, allow_blank=True, default="")
     templateId = serializers.CharField(max_length=128, required=False, allow_blank=True, default="")
     reportType = serializers.CharField(max_length=64)
     createdAt = serializers.DateTimeField()
