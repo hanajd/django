@@ -147,6 +147,74 @@ class ReportFieldMappingRenderTests(SimpleTestCase):
         self.assertEqual(val, "")
 
 
+class NumericPdfValueFormattingTests(SimpleTestCase):
+    """数值计算结果只在 PDF 展示层格式化，不把浮点尾数带到表格里。"""
+
+    @staticmethod
+    def _task(output_target):
+        return type("Task", (), {"output_target": output_target})()
+
+    def test_computed_qc_values_use_field_precision_for_site_record(self):
+        from apps.api.inspection_report_make import _format_protection_numeric_pdf_text
+        from apps.core.models import LibraryTask
+
+        f183 = {
+            "id": "f183",
+            "type": "computed",
+            "precision": 2,
+            "formula": "(1*f180+0.5*f181+0.3*f182)/3",
+        }
+        f190 = {
+            "id": "f190",
+            "type": "computed",
+            "precision": 2,
+            "formula": "120-f189",
+        }
+
+        task = self._task(LibraryTask.OUTPUT_SITE_RECORD)
+        self.assertEqual(
+            _format_protection_numeric_pdf_text(
+                f183, "1.8333333333333333", task_obj=task
+            ),
+            "1.83",
+        )
+        self.assertEqual(
+            _format_protection_numeric_pdf_text(
+                f190, "1.40000000000001", task_obj=task
+            ),
+            "1.4",
+        )
+
+    def test_report_output_uses_the_same_numeric_formatting(self):
+        from apps.api.inspection_report_make import _format_protection_numeric_pdf_text
+        from apps.core.models import LibraryTask
+
+        field = {"id": "f183", "type": "computed", "precision": 2}
+        task = self._task(LibraryTask.OUTPUT_REPORT)
+        self.assertEqual(
+            _format_protection_numeric_pdf_text(
+                field, "1.8333333333333333", task_obj=task
+            ),
+            "1.83",
+        )
+
+    def test_explicit_round_formula_is_not_rounded_again(self):
+        from apps.api.inspection_report_make import _format_protection_numeric_pdf_text
+        from apps.core.models import LibraryTask
+
+        field = {
+            "id": "f159",
+            "type": "computed",
+            "precision": 2,
+            "formula": "round(f153/1000/sqrt(10/f157)*100, 3)",
+        }
+        task = self._task(LibraryTask.OUTPUT_SITE_RECORD)
+        self.assertEqual(
+            _format_protection_numeric_pdf_text(field, "0.297", task_obj=task),
+            "0.297",
+        )
+
+
 class SyntheticQcVerdictInjectionTests(SimpleTestCase):
     """报告「单项判定」格：模板已有真实栏位时不再注入合成域，改由真实栏位先擦后写。"""
 

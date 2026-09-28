@@ -2950,11 +2950,37 @@ def _submit_value_is_numeric_measurement(val) -> bool:
     return isinstance(val, (int, float))
 
 
+def _field_is_numeric_output_field(field: dict | None) -> bool:
+    """判断 PDF 回填栏位是否是模板声明的数值/计算栏位。"""
+    if not isinstance(field, dict):
+        return False
+    field_type = str(field.get("type") or "").strip().lower()
+    return field_type in {"number", "computed"}
+
+
+def _field_formula_has_explicit_rounding(field: dict | None) -> bool:
+    """模板公式已经明确 round 时，保留公式指定的小数位。"""
+    if not isinstance(field, dict):
+        return False
+    source = field.get("source") if isinstance(field.get("source"), dict) else {}
+    expression = str(
+        field.get("formula")
+        or field.get("fieldExpression")
+        or source.get("formula")
+        or source.get("pdfFieldExpression")
+        or ""
+    ).strip()
+    return bool(re.search(r"\bround\s*\(", expression, re.IGNORECASE))
+
+
 def _format_protection_numeric_pdf_text(field: dict, picked, *, task_obj=None) -> str:
     """
-    现场记录 PDF 数值展示：
-    - 第五章防护表：按热更新小数精度规则（可在调试设置关闭「回填套用精度」）
-    - 其余栏位：保持提交原样（字符串不转 double）
+    PDF 数值展示统一格式化：
+
+    - 第五章防护表继续使用其均值/报出值专用规则；
+    - 其它模板声明为 number/computed 的栏位按自身 ``precision`` 格式化；
+    - 公式已经明确 ``round(...)`` 时尊重公式指定的小数位；
+    - 只改变 PDF/报告展示，不改变提交 JSON 中的原始浮点值。
     """
     if picked is None or isinstance(picked, bool):
         return "" if picked is None else str(picked)
@@ -2962,7 +2988,10 @@ def _format_protection_numeric_pdf_text(field: dict, picked, *, task_obj=None) -
     text = text.strip()
     if not text or text == "/":
         return text
-    if task_obj is not None and getattr(task_obj, "output_target", None) != LibraryTask.OUTPUT_SITE_RECORD:
+    if task_obj is not None and getattr(task_obj, "output_target", None) not in (
+        LibraryTask.OUTPUT_SITE_RECORD,
+        LibraryTask.OUTPUT_REPORT,
+    ):
         return text
     try:
         from apps.core.decimal_precision_runtime_config import (
@@ -2971,13 +3000,20 @@ def _format_protection_numeric_pdf_text(field: dict, picked, *, task_obj=None) -
         from radiation_detection_report.chapter5_field_sync import (
             field_is_protection_chapter_numeric_cell,
             format_protection_cell_display,
+            format_protection_numeric_display,
+            resolve_field_number_precision,
         )
 
         if not get_decimal_precision_runtime_config().apply_on_backfill:
             return text
-        if not field_is_protection_chapter_numeric_cell(field):
+        if field_is_protection_chapter_numeric_cell(field):
+            return format_protection_cell_display(text, field, fixed=True)
+        if not _field_is_numeric_output_field(field):
             return text
-        return format_protection_cell_display(text, field, fixed=True)
+        if _field_formula_has_explicit_rounding(field):
+            return text
+        precision = resolve_field_number_precision(field)
+        return format_protection_numeric_display(text, precision=precision, fixed=False)
     except ImportError:
         return text
 
