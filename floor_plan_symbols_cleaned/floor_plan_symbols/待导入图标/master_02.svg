@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!-- 由 Microsoft Visio, SVG Export 生成 master_02.svg 页-1 -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:ev="http://www.w3.org/2001/xml-events"
+		xmlns:v="http://schemas.microsoft.com/visio/2003/SVGExtensions/" width="2.01264in" height="0.437411in"
+		viewBox="0 0 144.91 31.4936" xml:space="preserve" color-interpolation-filters="sRGB" class="st5">
+	<v:documentProperties v:langID="2052" v:metric="true" v:viewMarkup="false"/>
+
+	<style type="text/css">
+	<![CDATA[
+		.st1 {fill:none;stroke:#000000;stroke-linecap:round;stroke-linejoin:round;stroke-width:0.5}
+		.st2 {fill:#000000;font-family:宋体;font-size:0.833336em}
+		.st3 {font-family:Times New Roman;font-size:1em}
+		.st4 {fill:none;stroke:none;stroke-linecap:round;stroke-linejoin:round;stroke-width:0.75}
+		.st5 {fill:none;fill-rule:evenodd;font-size:12px;overflow:visible;stroke-linecap:square;stroke-miterlimit:3}
+	]]>
+	</style>
+
+	<g v:mID="0" v:index="1" v:groupContext="foregroundPage">
+		<title>页-1</title>
+		<v:pageProperties v:drawingScale="0.0393701" v:pageScale="0.0393701" v:drawingUnits="24" v:shadowOffsetX="8.50394"
+				v:shadowOffsetY="-8.50394"/>
+		<g id="group30-1" transform="translate(0.375,-0.25)" v:mID="30" v:groupContext="group">
+			<title>控制台K（带点位）</title>
+			<g id="shape31-2" v:mID="31" v:groupContext="shape" transform="translate(49.4028,3.55271E-15)">
+				<title>控制台K</title>
+				<desc>控制台K</desc>
+				<v:textBlock v:margins="rect(4,4,4,4)" v:tabSpace="42.5197"/>
+				<v:textRect cx="25.5118" cy="24.407" width="51.03" height="14.1732"/>
+				<rect x="0" y="17.3204" width="51.0236" height="14.1732" class="st1"/>
+							</g>
+			<g id="group32-6" transform="translate(0,-15.5906)" v:mID="32" v:groupContext="group">
+				<title>点（带序号1）</title>
+				<g id="shape33-7" v:mID="33" v:groupContext="shape" transform="translate(0,-3.11806)">
+					<title>工作表.33</title>
+					<desc>(1)</desc>
+					<v:textBlock v:margins="rect(4,4,4,4)" v:tabSpace="42.5197"/>
+					<v:textRect cx="72.08" cy="25.4136" width="144.16" height="12.16"/>
+					<rect x="0" y="19.3336" width="144.16" height="12.16" class="st4"/>
+									</g>
+			</g>
+		</g>
+	</g>
+</svg>

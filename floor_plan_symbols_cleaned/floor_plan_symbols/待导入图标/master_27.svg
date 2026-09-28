@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!-- 由 Microsoft Visio, SVG Export 生成 master_27.svg 页-1 -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:ev="http://www.w3.org/2001/xml-events"
+		xmlns:v="http://schemas.microsoft.com/visio/2003/SVGExtensions/" width="0.593885in" height="0.781107in"
+		viewBox="0 0 42.7597 56.2397" xml:space="preserve" color-interpolation-filters="sRGB" class="st3">
+	<v:documentProperties v:langID="2052" v:metric="true" v:viewMarkup="false"/>
+
+	<style type="text/css">
+	<![CDATA[
+		.st1 {fill:#000000;stroke:#000000;stroke-linecap:round;stroke-linejoin:round;stroke-width:0.24}
+		.st2 {fill:#ffffff;stroke:#000000;stroke-linecap:round;stroke-linejoin:round;stroke-width:0.24}
+		.st3 {fill:none;fill-rule:evenodd;font-size:12px;overflow:visible;stroke-linecap:square;stroke-miterlimit:3}
+	]]>
+	</style>
+
+	<g v:mID="0" v:index="1" v:groupContext="foregroundPage">
+		<title>页-1</title>
+		<v:pageProperties v:drawingScale="0.0393701" v:pageScale="0.0393701" v:drawingUnits="24" v:shadowOffsetX="8.50394"
+				v:shadowOffsetY="-8.50394"/>
+		<v:layer v:name="批注" v:index="0"/>
+		<g id="group158-1" transform="translate(0.12,-13.6)" v:mID="158" v:groupContext="group" v:layerMember="0">
+			<v:userDefs>
+				<v:ud v:nameU="AntiScale" v:val="VT0(50):26"/>
+				<v:ud v:nameU="visVersion" v:val="VT0(15):26"/>
+				<v:ud v:nameU="AntiScale" v:prompt="" v:val="VT0(1):26"/>
+			</v:userDefs>
+			<title>指北针1</title>
+			<g id="shape159-2" v:mID="159" v:groupContext="shape" v:layerMember="0">
+				<title>工作表.159</title>
+				<path d="M0 34.98 A21.2598 21.2598 0 0 1 42.52 34.98 A21.2598 21.2598 0 1 1 0 34.98 Z" class="st1"/>
+			</g>
+			<g id="shape160-4" v:mID="160" v:groupContext="shape" v:layerMember="0" transform="translate(0,-2.76717)">
+				<title>工作表.160</title>
+				<path d="M31.75 37.75 L42.52 37.75 L21.26 16.49 L0 37.75 L10.77 37.75 L10.77 56.24 L31.75 56.24 L31.75 37.75 ZM17.79
+							 50.5 L17.79 41.77 L19.5 41.77 L23.08 47.61 L23.08 41.77 L24.73 41.77 L24.73 50.5 L22.96 50.5 L19.44
+							 44.8 L19.44 50.5 L17.79 50.5 Z" class="st2"/>
+			</g>
+		</g>
+	</g>
+</svg>

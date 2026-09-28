@@ -1,0 +1,890 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!-- 由 Microsoft Visio, SVG Export 生成 master_03.svg 页-1 -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:ev="http://www.w3.org/2001/xml-events"
+		xmlns:v="http://schemas.microsoft.com/visio/2003/SVGExtensions/" width="3.01042in" height="2.53798in"
+		viewBox="0 0 216.751 182.735" xml:space="preserve" color-interpolation-filters="sRGB" class="st4">
+	<v:documentProperties v:langID="2052" v:metric="true" v:viewMarkup="false"/>
+
+	<style type="text/css">
+	<![CDATA[
+		.st1 {fill:#b3b3b3}
+		.st2 {fill:#b3b3b3;stroke:#000000;stroke-linecap:round;stroke-linejoin:round;stroke-width:0.75;visibility:hidden}
+		.st3 {stroke:#000000;stroke-linecap:round;stroke-linejoin:round;stroke-width:0.24}
+		.st4 {fill:none;fill-rule:evenodd;font-size:12px;overflow:visible;stroke-linecap:square;stroke-miterlimit:3}
+	]]>
+	</style>
+
+	<g v:mID="0" v:index="1" v:groupContext="foregroundPage">
+		<v:userDefs>
+			<v:ud v:nameU="VisAecPage" v:val="VT0(1):26"/>
+			<v:ud v:nameU="LineStyleIndex" v:val="VT0(0):26"/>
+			<v:ud v:nameU="LPrec" v:val="VT0(2):26"/>
+			<v:ud v:nameU="LUnits" v:val="VT0(0):26"/>
+			<v:ud v:nameU="ShowUnits" v:val="VT0(0):26"/>
+			<v:ud v:nameU="LInchPrec" v:val="VT0(4):26"/>
+		</v:userDefs>
+		<title>页-1</title>
+		<v:pageProperties v:drawingScale="0.0393701" v:pageScale="0.0393701" v:drawingUnits="24" v:shadowOffsetX="8.50394"
+				v:shadowOffsetY="-8.50394"/>
+		<v:layer v:name="建筑围护" v:index="0"/>
+		<v:layer v:name="墙壁" v:index="1"/>
+		<g id="group34-1" transform="translate(29.0052,-29.0052)" v:mID="34" v:groupContext="group" v:layerMember="0;1">
+			<v:custProps>
+				<v:cp v:nameU="Width" v:lbl="宽度" v:type="2" v:format="#.#### u" v:langID="2052" v:val="VT0(110.23622047244):21"/>
+				<v:cp v:nameU="Length" v:lbl="长度" v:type="2" v:format="#.#### u" v:langID="2052" v:val="VT0(86.614173228346):21"/>
+				<v:cp v:nameU="ShapeClass" v:lbl="形状类" v:invis="true" v:langID="2052" v:val="VT4(建筑物组件)"/>
+				<v:cp v:nameU="ShapeType" v:lbl="形状类型" v:invis="true" v:langID="2052" v:val="VT4(房间)"/>
+				<v:cp v:nameU="SubShapeType" v:lbl="子形状类型" v:invis="true" v:langID="2052" v:val="VT4()"/>
+				<v:cp v:nameU="Width" v:lbl="" v:prompt="" v:type="0" v:format="" v:sortKey="" v:invis="false" v:ask="false"
+						v:langID="0" v:cal="0" v:val="VT0(110.23622047244):1"/>
+				<v:cp v:nameU="Length" v:lbl="" v:prompt="" v:type="0" v:format="" v:sortKey="" v:invis="false" v:ask="false"
+						v:langID="0" v:cal="0" v:val="VT0(86.614173228346):1"/>
+			</v:custProps>
+			<v:userDefs>
+				<v:ud v:nameU="LastWidth" v:val="VT0(110.23622047244):21"/>
+				<v:ud v:nameU="LastLength" v:val="VT0(86.614173228346):21"/>
+				<v:ud v:nameU="WatchWidth" v:val="VT0(0):26"/>
+				<v:ud v:nameU="WatchLength" v:val="VT0(0):26"/>
+				<v:ud v:nameU="WatchWidthProp" v:val="VT0(0):26"/>
+				<v:ud v:nameU="WatchLengthProp" v:val="VT0(0):26"/>
+				<v:ud v:nameU="visObjectType" v:val="VT0(110):26"/>
+				<v:ud v:nameU="visBESelected" v:val="VT0(1):26"/>
+				<v:ud v:nameU="visVersion" v:val="VT0(15):26"/>
+				<v:ud v:nameU="SolSH" v:val="VT4({5D50005D-537C-4738-9C46-130C74335A6D})"/>
+				<v:ud v:nameU="ShapeClass" v:prompt="建筑物组件" v:val="VT0(3):26"/>
+				<v:ud v:nameU="ShapeType" v:prompt="房间" v:val="VT0(47):26"/>
+				<v:ud v:nameU="SubShapeType" v:prompt="" v:val="VT0(0):26"/>
+				<v:ud v:nameU="AntiScale" v:val="VT0(50):26"/>
+				<v:ud v:nameU="HasText" v:val="VT0(0):5"/>
+				<v:ud v:nameU="LastWidth" v:prompt="" v:val="VT0(2.2047244094488):1"/>
+				<v:ud v:nameU="LastLength" v:prompt="" v:val="VT0(1.7322834645669):27"/>
+				<v:ud v:nameU="AntiScale" v:prompt="" v:val="VT0(1):26"/>
+			</v:userDefs>
+			<title>60mm墙厚机房（牙科）</title>
+			<g id="group35-2" transform="translate(2.8777E-13,-124.724)" v:mID="35" v:groupContext="group" v:layerMember="0;1">
+				<v:custProps>
+					<v:cp v:nameU="T" v:lbl="墙壁厚度" v:type="4" v:format="50 mm;100 mm;150 mm;200 mm;250 mm;300 mm;150 mm.;60 mm"
+							v:sortKey="visWall02" v:invis="false" v:langID="1033" v:val="VT0(2.3622047244094):24"/>
+					<v:cp v:nameU="RefLn" v:lbl="参考线偏移" v:type="4"
+							v:format="-150 mm;-125 mm;-100 mm;-75 mm;-50 mm;-25 mm;0 mm;25 mm;50 mm;75 mm;100 mm;125 mm;150 mm"
+							v:sortKey="visWall07" v:invis="true" v:langID="2052" v:val="VT0(0):24"/>
+					<v:cp v:nameU="Material" v:type="0" v:invis="true" v:langID="2052"/>
+					<v:cp v:nameU="VisWallHeight" v:lbl="墙高" v:type="4"
+							v:format="2 m;2.1 m;2.2 m;2.3 m;2.4 m;2.5 m;2.6 m;2.7 m;2.8 m;2.9 m;3 m;2.6 m." v:sortKey="visWall03"
+							v:invis="false" v:langID="2052" v:val="VT0(102.36220472441):21"/>
+					<v:cp v:nameU="VisWallLength" v:lbl="墙长" v:type="4" v:format="1 m;2 m;3 m;4 m;5 m;6 m;7 m;8 m;3 m.;4.5 m"
+							v:sortKey="visWall01" v:invis="false" v:langID="2052" v:val="VT0(110.23622047244):21"/>
+					<v:cp v:nameU="visWallJustify" v:lbl="墙壁对齐方式" v:type="1" v:format="居中;边缘;自定义" v:sortKey="visWall04"
+							v:invis="false" v:langID="2052" v:val="VT4(边缘)"/>
+					<v:cp v:nameU="visWallSegment" v:lbl="墙段" v:type="1" v:format="曲线形;直线形" v:sortKey="visWall05" v:invis="false"
+							v:langID="2052" v:val="VT4(直线形)"/>
+					<v:cp v:nameU="Radius" v:lbl="墙半径" v:type="4" v:format="3 m;4 m;5 m;6 m;7 m;8 m;4 m." v:sortKey="visWall06"
+							v:invis="true" v:langID="2052" v:val="VT0(118.11023622047):21"/>
+					<v:cp v:nameU="ShapeClass" v:lbl="形状类" v:type="0" v:invis="true" v:langID="2052" v:val="VT4(建筑物组件)"/>
+					<v:cp v:nameU="ShapeType" v:lbl="形状类型" v:type="0" v:invis="true" v:langID="2052" v:val="VT4(墙壁)"/>
+					<v:cp v:nameU="SubShapeType" v:lbl="子形状类型" v:type="0" v:invis="true" v:langID="2052" v:val="VT4()"/>
+					<v:cp v:nameU="FireRating" v:lbl="防火等级" v:type="0" v:sortKey="visWall15" v:invis="false" v:langID="2052"/>
+					<v:cp v:nameU="BaseElevation" v:lbl="基本标高" v:type="2" v:sortKey="visWall09" v:invis="false" v:langID="2052"
+							v:val="VT0(0):24"/>
+					<v:cp v:nameU="VisWallLength" v:lbl="" v:prompt="" v:type="0" v:format="" v:sortKey="" v:invis="false"
+							v:ask="false" v:langID="0" v:cal="0" v:val="VT0(110.23622047244):1"/>
+				</v:custProps>
+				<v:userDefs>
+					<v:ud v:nameU="LX1"/>
+					<v:ud v:nameU="LY1"/>
+					<v:ud v:nameU="RX1" v:val="VT0(2.1221543041368E-13):21"/>
+					<v:ud v:nameU="RY1" v:val="VT0(86.614173228346):21"/>
+					<v:ud v:nameU="A1" v:val="VT0(1.5707963267949):32"/>
+					<v:ud v:nameU="T1" v:val="VT0(2.3622047244094):24"/>
+					<v:ud v:nameU="RefLn1" v:val="VT0(0):26"/>
+					<v:ud v:nameU="Mtrl1" v:prompt="0=Unknown, 1=Wall" v:val="VT0(1):26"/>
+					<v:ud v:nameU="JointType1" v:prompt="5.3902719325076E-15M" v:val="VT0(1):26"/>
+					<v:ud v:nameU="1" v:prompt="---------------------------------" v:val="VT4(---------------------------------)"/>
+					<v:ud v:nameU="RelA1" v:val="VT0(1.5707963267949):32"/>
+					<v:ud v:nameU="EndsDontMeet1" v:prompt="Within radius of User.Fuzz" v:val="VT0(0):5"/>
+					<v:ud v:nameU="ShapeGone1" v:val="VT0(0):5"/>
+					<v:ud v:nameU="AngTooSharp1"/>
+					<v:ud v:nameU="AngTooBlunt1" v:val="VT0(0):26"/>
+					<v:ud v:nameU="EndNotOnLine1" v:prompt="Within distance User.Fuzz of being on line." v:val="VT0(0):5"/>
+					<v:ud v:nameU="DiffMtrls1" v:prompt="" v:val="VT0(0):5"/>
+					<v:ud v:nameU="CornerClose1" v:val="VT0(0):5"/>
+					<v:ud v:nameU="TClose1" v:val="VT0(0):26"/>
+					<v:ud v:nameU="11" v:prompt="---------------------------------" v:val="VT4(---------------------------------)"/>
+					<v:ud v:nameU="Closed1" v:val="VT0(0):5"/>
+					<v:ud v:nameU="Corner1" v:val="VT0(1):5"/>
+					<v:ud v:nameU="TJointOpen1" v:val="VT0(0):5"/>
+					<v:ud v:nameU="TJointClosed1" v:val="VT0(0):5"/>
+					<v:ud v:nameU="_" v:prompt="=================" v:val="VT4(=================)"/>
+					<v:ud v:nameU="LX2" v:val="VT0(110.23622047244):21"/>
+					<v:ud v:nameU="LY2" v:val="VT0(86.614173228346):21"/>
+					<v:ud v:nameU="RX2"/>
+					<v:ud v:nameU="RY2"/>
+					<v:ud v:nameU="A2" v:val="VT0(-1.5707963267949):32"/>
+					<v:ud v:nameU="T2" v:val="VT0(2.3622047244094):24"/>
+					<v:ud v:nameU="RefLn2" v:val="VT0(0):26"/>
+					<v:ud v:nameU="Mtrl2" v:prompt="0=Unknown, 1=Wall" v:val="VT0(1):26"/>
+					<v:ud v:nameU="JointType2" v:prompt="2.8M" v:val="VT0(1):26"/>
+					<v:ud v:nameU="2" v:prompt="---------------------------------" v:val="VT4(---------------------------------)"/>
+					<v:ud v:nameU="RelA2" v:val="VT0(4.7123889803847):32"/>
+					<v:ud v:nameU="EndsDontMeet2" v:prompt="Within radius of User.Fuzz" v:val="VT0(0):5"/>
+					<v:ud v:nameU="ShapeGone2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="AngTooSharp2"/>
+					<v:ud v:nameU="AngTooBlunt2" v:val="VT0(0):26"/>
+					<v:ud v:nameU="EndNotOnLine2" v:prompt="Within distance User.Fuzz of being on line." v:val="VT0(0):5"/>
+					<v:ud v:nameU="DiffMtrls2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="CornerClose2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="TClose2" v:val="VT0(0):26"/>
+					<v:ud v:nameU="22" v:prompt="---------------------------------" v:val="VT4(---------------------------------)"/>
+					<v:ud v:nameU="Closed2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="Corner2" v:val="VT0(1):5"/>
+					<v:ud v:nameU="TJointOpen2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="TJointClosed2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="__" v:prompt="=================" v:val="VT4(=================)"/>
+					<v:ud v:nameU="Fuzz" v:val="VT0(0.19685039370079):24"/>
+					<v:ud v:nameU="LineStyleIndex" v:val="VT0(0):26"/>
+					<v:ud v:nameU="WallShape" v:prompt="Shape Identifier"/>
+					<v:ud v:nameU="OverLayT" v:val="VT0(0.23622047244094):24"/>
+					<v:ud v:nameU="3D_type" v:val="VT0(2):26"/>
+					<v:ud v:nameU="3D_offset" v:val="VT0(0):26"/>
+					<v:ud v:nameU="3D_extrude_length" v:val="VT0(102.36220472441):21"/>
+					<v:ud v:nameU="Is_arc" v:val="VT0(0):5"/>
+					<v:ud v:nameU="2D_length_check" v:val="VT0(118.11023622047):21"/>
+					<v:ud v:nameU="visWallPriority" v:val="VT0(50):26"/>
+					<v:ud v:nameU="visObjectType" v:prompt="Wall" v:val="VT0(101):26"/>
+					<v:ud v:nameU="visBESelected" v:val="VT0(0):26"/>
+					<v:ud v:nameU="CleanupBegin" v:val="VT0(86.614173228347):21"/>
+					<v:ud v:nameU="CleanupEnd" v:val="VT0(196.85039370079):21"/>
+					<v:ud v:nameU="PreviousWidth" v:val="VT0(110.23622047244):26"/>
+					<v:ud v:nameU="RefLn" v:val="VT0(0):26"/>
+					<v:ud v:nameU="CurveSwitch" v:val="VT0(1):26"/>
+					<v:ud v:nameU="ControlsY1" v:val="VT0(0):27"/>
+					<v:ud v:nameU="visVersion" v:val="VT0(15):26"/>
+					<v:ud v:nameU="SolSH" v:val="VT4({5D50005D-537C-4738-9C46-130C74335A6D})"/>
+					<v:ud v:nameU="ShapeClass" v:prompt="建筑物组件" v:val="VT0(3):26"/>
+					<v:ud v:nameU="ShapeType" v:prompt="墙壁" v:val="VT0(44):26"/>
+					<v:ud v:nameU="SubShapeType" v:prompt="" v:val="VT0(0):26"/>
+					<v:ud v:nameU="CurveLookup" v:val="VT0(1):26"/>
+					<v:ud v:nameU="AntiScale" v:val="VT0(50):26"/>
+					<v:ud v:nameU="HasText" v:val="VT0(0):5"/>
+					<v:ud v:nameU="RX1" v:prompt="" v:val="VT0(4.2443086082737E-15):1"/>
+					<v:ud v:nameU="RY1" v:prompt="" v:val="VT0(1.7322834645669):1"/>
+					<v:ud v:nameU="JointType1" v:prompt="1.0780543865015E-13MM" v:val="VT0(0):26"/>
+					<v:ud v:nameU="LX2" v:prompt="" v:val="VT0(2.2047244094488):1"/>
+					<v:ud v:nameU="LY2" v:prompt="" v:val="VT0(1.7322834645669):1"/>
+					<v:ud v:nameU="JointType2" v:prompt="56MM" v:val="VT0(0):26"/>
+					<v:ud v:nameU="Fuzz" v:prompt="" v:val="VT0(0.0039370078740157):24"/>
+					<v:ud v:nameU="OverLayT" v:prompt="" v:val="VT0(0.0047244094488189):24"/>
+					<v:ud v:nameU="2D_length_check" v:prompt="" v:val="VT0(2.3622047244094):21"/>
+					<v:ud v:nameU="CleanupBegin" v:prompt="" v:val="VT0(1.7322834645669):1"/>
+					<v:ud v:nameU="CleanupEnd" v:prompt="" v:val="VT0(3.9370078740157):1"/>
+					<v:ud v:nameU="AntiScale" v:prompt="" v:val="VT0(1):26"/>
+				</v:userDefs>
+				<title>工作表.35</title>
+				<g id="shape36-3" v:mID="36" v:groupContext="shape" v:layerMember="0;1">
+					<title>工作表.36</title>
+					<v:userDefs>
+						<v:ud v:nameU="WallFill" v:prompt="Shape Identifier"/>
+					</v:userDefs>
+					<path d="M-3.4 179.33 L162.14 179.33 L158.74 182.73 L0 182.73 L-3.4 179.33 Z" class="st1"/>
+				</g>
+				<g id="shape37-6" v:mID="37" v:groupContext="shape" v:layerMember="0;1"
+						transform="translate(-129.213,311.948) rotate(-135)">
+					<title>工作表.37</title>
+					<v:userDefs>
+						<v:ud v:nameU="WallCap" v:prompt="Shape Identifier"/>
+					</v:userDefs>
+					<rect x="0" y="182.395" width="4.81055" height="0.340157" class="st2"/>
+				</g>
+				<g id="shape38-8" v:mID="38" v:groupContext="shape" v:layerMember="0;1"
+						transform="translate(291.355,308.546) rotate(135)">
+					<title>工作表.38</title>
+					<v:userDefs>
+						<v:ud v:nameU="WallCap" v:prompt="Shape Identifier"/>
+					</v:userDefs>
+					<rect x="0" y="182.395" width="4.81055" height="0.340157" class="st2"/>
+				</g>
+				<g id="shape39-10" v:mID="39" v:groupContext="shape" v:layerMember="0;1">
+					<title>工作表.39</title>
+					<v:userDefs>
+						<v:ud v:nameU="WallRefLine" v:prompt="Shape Identifier"/>
+					</v:userDefs>
+				</g>
+				<g id="shape40-12" v:mID="40" v:groupContext="shape" v:layerMember="0;1">
+					<title>工作表.40</title>
+					<v:userDefs>
+						<v:ud v:nameU="WallCompGeom1" v:prompt="Shape Identifier" v:val="VT0(-0.66693806165226):26"/>
+					</v:userDefs>
+					<path d="M-3.4 179.33 L162.14 179.33" class="st3"/>
+					<path d="M0 182.73 L158.74 182.73" class="st3"/>
+				</g>
+				<g id="shape41-16" v:mID="41" v:groupContext="shape" v:layerMember="0;1" transform="translate(43.0083,-3.40157)">
+					<title>工作表.41</title>
+					<v:custProps>
+						<v:cp v:nameU="LPrec" v:lbl="精度" v:type="1" v:format="0;0.0;0.00;0.000;0.0000" v:sortKey="2"
+								v:invis="false" v:langID="2052" v:val="VT4(0.00)"/>
+						<v:cp v:nameU="LUnits" v:lbl="单位" v:type="1"
+								v:format=" 使用绘图页的单位;.英尺-英寸 (1&#39;-0&#34;);.英尺 (1.00&#39;);.英寸;.英尺 (1.00ft);.英里;-毫米;-厘米;-米;-千米"
+								v:sortKey="1" v:invis="false" v:langID="2052" v:val="VT4( 使用绘图页的单位)"/>
+						<v:cp v:nameU="ShowUnits" v:lbl="单位显示" v:type="1" v:format="不显示单位;显示单位" v:sortKey="4" v:invis="false"
+								v:langID="2052" v:val="VT4(不显示单位)"/>
+						<v:cp v:nameU="LInchPrec" v:lbl="精度" v:type="1" v:format="    1 in.; 1/2 in.; 1/4 in.; 1/8 in.;1/16 in."
+								v:sortKey="3" v:invis="true" v:langID="2052" v:val="VT4(1/16 in.)"/>
+					</v:custProps>
+					<v:userDefs>
+						<v:ud v:nameU="Hide" v:val="VT0(1):5"/>
+						<v:ud v:nameU="LUnitsFactor" v:val="VT0(0):24"/>
+						<v:ud v:nameU="FormatString" v:val="VT4(0.00)"/>
+						<v:ud v:nameU="LengthText" v:val="VT4(2800.00)"/>
+						<v:ud v:nameU="Length" v:val="VT0(110.23622047244):24"/>
+						<v:ud v:nameU="LPFString" v:prompt="Linear Precision Formatting String" v:val="VT4(0.00)"/>
+						<v:ud v:nameU="LPrec" v:val="VT0(2):26"/>
+						<v:ud v:nameU="LPrecInd" v:val="VT0(2):26"/>
+						<v:ud v:nameU="LPrecVal" v:val="VT4(0.00)"/>
+						<v:ud v:nameU="LUnits" v:val="VT0(0):26"/>
+						<v:ud v:nameU="LUnitsInd" v:prompt="0=Dwg, 1=Arch, 2=Dec Ft, 3+ = other" v:val="VT0(0):26"/>
+						<v:ud v:nameU="LUnitsVal" v:val="VT4( 使用绘图页的单位)"/>
+						<v:ud v:nameU="ShowUnits" v:val="VT0(0):26"/>
+						<v:ud v:nameU="ShowUnitsInd" v:val="VT0(0):26"/>
+						<v:ud v:nameU="ShowUnitsVal" v:val="VT4(不显示单位)"/>
+						<v:ud v:nameU="FeetInch" v:val="VT0(0):26"/>
+						<v:ud v:nameU="Feet" v:val="VT0(0):26"/>
+						<v:ud v:nameU="Inch" v:val="VT0(0):26"/>
+						<v:ud v:nameU="InchPrec" v:val="VT0(16):26"/>
+						<v:ud v:nameU="WatchLength" v:val="VT0(110.23622047244):21"/>
+						<v:ud v:nameU="DrawingUnitFactor" v:val="VT0(0):24"/>
+						<v:ud v:nameU="HideArrow" v:val="VT0(0):5"/>
+						<v:ud v:nameU="LInchPrecInd" v:val="VT0(4):26"/>
+						<v:ud v:nameU="DirArrowSize" v:val="VT0(5.3340833333333):1"/>
+						<v:ud v:nameU="DirArrowOffset" v:val="VT0(27.50137500055):1"/>
+						<v:ud v:nameU="LInchPrec" v:val="VT0(4):26"/>
+						<v:ud v:nameU="LInchPrecVal" v:val="VT4(1/16 in.)"/>
+						<v:ud v:nameU="WatchLength" v:prompt="" v:val="VT0(110.23622047244):1"/>
+						<v:ud v:nameU="DirArrowSize" v:prompt="" v:val="VT0(0.10668166666667):1"/>
+						<v:ud v:nameU="DirArrowOffset" v:prompt="" v:val="VT0(0.55002750055):1"/>
+					</v:userDefs>
+					<v:textBlock v:margins="rect(4,0,0,0)" v:tabSpace="42.5197"/>
+					<v:textRect cx="36.3618" cy="169.933" width="72.73" height="25.6036"/>
+				</g>
+			</g>
+			<g id="group42-18" transform="translate(341.475,58.0103) rotate(90)" v:mID="42" v:groupContext="group"
+					v:layerMember="0;1">
+				<v:custProps>
+					<v:cp v:nameU="T" v:lbl="墙壁厚度" v:type="4" v:format="50 mm;100 mm;150 mm;200 mm;250 mm;300 mm;150 mm.;60 mm"
+							v:sortKey="visWall02" v:invis="false" v:langID="1033" v:val="VT0(2.3622047244094):24"/>
+					<v:cp v:nameU="RefLn" v:lbl="参考线偏移" v:type="4"
+							v:format="-150 mm;-125 mm;-100 mm;-75 mm;-50 mm;-25 mm;0 mm;25 mm;50 mm;75 mm;100 mm;125 mm;150 mm"
+							v:sortKey="visWall07" v:invis="true" v:langID="2052" v:val="VT0(0):24"/>
+					<v:cp v:nameU="Material" v:type="0" v:invis="true" v:langID="2052"/>
+					<v:cp v:nameU="VisWallHeight" v:lbl="墙高" v:type="4"
+							v:format="2 m;2.1 m;2.2 m;2.3 m;2.4 m;2.5 m;2.6 m;2.7 m;2.8 m;2.9 m;3 m;2.6 m." v:sortKey="visWall03"
+							v:invis="false" v:langID="2052" v:val="VT0(102.36220472441):21"/>
+					<v:cp v:nameU="VisWallLength" v:lbl="墙长" v:type="4" v:format="1 m;2 m;3 m;4 m;5 m;6 m;7 m;8 m;3 m.;4.5 m"
+							v:sortKey="visWall01" v:invis="false" v:langID="2052" v:val="VT0(86.614173228346):21"/>
+					<v:cp v:nameU="visWallJustify" v:lbl="墙壁对齐方式" v:type="1" v:format="居中;边缘;自定义" v:sortKey="visWall04"
+							v:invis="false" v:langID="2052" v:val="VT4(边缘)"/>
+					<v:cp v:nameU="visWallSegment" v:lbl="墙段" v:type="1" v:format="曲线形;直线形" v:sortKey="visWall05" v:invis="false"
+							v:langID="2052" v:val="VT4(直线形)"/>
+					<v:cp v:nameU="Radius" v:lbl="墙半径" v:type="4" v:format="3 m;4 m;5 m;6 m;7 m;8 m;4 m." v:sortKey="visWall06"
+							v:invis="true" v:langID="2052" v:val="VT0(118.11023622047):21"/>
+					<v:cp v:nameU="ShapeClass" v:lbl="形状类" v:type="0" v:invis="true" v:langID="2052" v:val="VT4(建筑物组件)"/>
+					<v:cp v:nameU="ShapeType" v:lbl="形状类型" v:type="0" v:invis="true" v:langID="2052" v:val="VT4(墙壁)"/>
+					<v:cp v:nameU="SubShapeType" v:lbl="子形状类型" v:type="0" v:invis="true" v:langID="2052" v:val="VT4()"/>
+					<v:cp v:nameU="FireRating" v:lbl="防火等级" v:type="0" v:sortKey="visWall15" v:invis="false" v:langID="2052"/>
+					<v:cp v:nameU="BaseElevation" v:lbl="基本标高" v:type="2" v:sortKey="visWall09" v:invis="false" v:langID="2052"
+							v:val="VT0(0):24"/>
+					<v:cp v:nameU="VisWallLength" v:lbl="" v:prompt="" v:type="0" v:format="" v:sortKey="" v:invis="false"
+							v:ask="false" v:langID="0" v:cal="0" v:val="VT0(86.614173228346):1"/>
+				</v:custProps>
+				<v:userDefs>
+					<v:ud v:nameU="LX1"/>
+					<v:ud v:nameU="LY1"/>
+					<v:ud v:nameU="RX1" v:val="VT0(110.23622047244):21"/>
+					<v:ud v:nameU="RY1" v:val="VT0(86.614173228346):21"/>
+					<v:ud v:nameU="A1" v:val="VT0(0):32"/>
+					<v:ud v:nameU="T1" v:val="VT0(2.3622047244094):24"/>
+					<v:ud v:nameU="RefLn1" v:val="VT0(0):26"/>
+					<v:ud v:nameU="Mtrl1" v:prompt="0=Unknown, 1=Wall" v:val="VT0(1):26"/>
+					<v:ud v:nameU="JointType1" v:prompt="2.8M" v:val="VT0(1):26"/>
+					<v:ud v:nameU="1" v:prompt="---------------------------------" v:val="VT4(---------------------------------)"/>
+					<v:ud v:nameU="RelA1" v:val="VT0(1.5707963267949):32"/>
+					<v:ud v:nameU="EndsDontMeet1" v:prompt="Within radius of User.Fuzz" v:val="VT0(0):5"/>
+					<v:ud v:nameU="ShapeGone1" v:val="VT0(0):5"/>
+					<v:ud v:nameU="AngTooSharp1"/>
+					<v:ud v:nameU="AngTooBlunt1" v:val="VT0(0):26"/>
+					<v:ud v:nameU="EndNotOnLine1" v:prompt="Within distance User.Fuzz of being on line." v:val="VT0(0):5"/>
+					<v:ud v:nameU="DiffMtrls1" v:prompt="" v:val="VT0(0):5"/>
+					<v:ud v:nameU="CornerClose1" v:val="VT0(0):5"/>
+					<v:ud v:nameU="TClose1" v:val="VT0(0):26"/>
+					<v:ud v:nameU="11" v:prompt="---------------------------------" v:val="VT4(---------------------------------)"/>
+					<v:ud v:nameU="Closed1" v:val="VT0(0):5"/>
+					<v:ud v:nameU="Corner1" v:val="VT0(1):5"/>
+					<v:ud v:nameU="TJointOpen1" v:val="VT0(0):5"/>
+					<v:ud v:nameU="TJointClosed1" v:val="VT0(0):5"/>
+					<v:ud v:nameU="_" v:prompt="=================" v:val="VT4(=================)"/>
+					<v:ud v:nameU="LX2" v:val="VT0(110.23622047244):21"/>
+					<v:ud v:nameU="LY2" v:val="VT0(-1.1880274541909E-13):21"/>
+					<v:ud v:nameU="RX2"/>
+					<v:ud v:nameU="RY2"/>
+					<v:ud v:nameU="A2" v:val="VT0(-3.1415926535898):32"/>
+					<v:ud v:nameU="T2" v:val="VT0(2.3622047244094):24"/>
+					<v:ud v:nameU="RefLn2" v:val="VT0(0):26"/>
+					<v:ud v:nameU="Mtrl2" v:prompt="0=Unknown, 1=Wall" v:val="VT0(1):26"/>
+					<v:ud v:nameU="JointType2" v:prompt="2.8M" v:val="VT0(1):26"/>
+					<v:ud v:nameU="2" v:prompt="---------------------------------" v:val="VT4(---------------------------------)"/>
+					<v:ud v:nameU="RelA2" v:val="VT0(4.7123889803847):32"/>
+					<v:ud v:nameU="EndsDontMeet2" v:prompt="Within radius of User.Fuzz" v:val="VT0(0):5"/>
+					<v:ud v:nameU="ShapeGone2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="AngTooSharp2"/>
+					<v:ud v:nameU="AngTooBlunt2" v:val="VT0(0):26"/>
+					<v:ud v:nameU="EndNotOnLine2" v:prompt="Within distance User.Fuzz of being on line." v:val="VT0(0):5"/>
+					<v:ud v:nameU="DiffMtrls2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="CornerClose2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="TClose2" v:val="VT0(0):26"/>
+					<v:ud v:nameU="22" v:prompt="---------------------------------" v:val="VT4(---------------------------------)"/>
+					<v:ud v:nameU="Closed2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="Corner2" v:val="VT0(1):5"/>
+					<v:ud v:nameU="TJointOpen2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="TJointClosed2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="__" v:prompt="=================" v:val="VT4(=================)"/>
+					<v:ud v:nameU="Fuzz" v:val="VT0(0.19685039370079):24"/>
+					<v:ud v:nameU="LineStyleIndex" v:val="VT0(0):26"/>
+					<v:ud v:nameU="WallShape" v:prompt="Shape Identifier"/>
+					<v:ud v:nameU="OverLayT" v:val="VT0(0.23622047244094):24"/>
+					<v:ud v:nameU="3D_type" v:val="VT0(2):26"/>
+					<v:ud v:nameU="3D_offset" v:val="VT0(0):26"/>
+					<v:ud v:nameU="3D_extrude_length" v:val="VT0(102.36220472441):21"/>
+					<v:ud v:nameU="Is_arc" v:val="VT0(0):5"/>
+					<v:ud v:nameU="2D_length_check" v:val="VT0(98.425196850394):21"/>
+					<v:ud v:nameU="visWallPriority" v:val="VT0(50):26"/>
+					<v:ud v:nameU="visObjectType" v:prompt="Wall" v:val="VT0(101):26"/>
+					<v:ud v:nameU="visBESelected" v:val="VT0(0):26"/>
+					<v:ud v:nameU="CleanupBegin" v:val="VT0(196.85039370079):21"/>
+					<v:ud v:nameU="CleanupEnd" v:val="VT0(110.23622047244):21"/>
+					<v:ud v:nameU="PreviousWidth" v:val="VT0(86.614173228346):26"/>
+					<v:ud v:nameU="RefLn" v:val="VT0(0):26"/>
+					<v:ud v:nameU="CurveSwitch" v:val="VT0(1):26"/>
+					<v:ud v:nameU="ControlsY1" v:val="VT0(0):27"/>
+					<v:ud v:nameU="visVersion" v:val="VT0(15):26"/>
+					<v:ud v:nameU="SolSH" v:val="VT4({5D50005D-537C-4738-9C46-130C74335A6D})"/>
+					<v:ud v:nameU="ShapeClass" v:prompt="建筑物组件" v:val="VT0(3):26"/>
+					<v:ud v:nameU="ShapeType" v:prompt="墙壁" v:val="VT0(44):26"/>
+					<v:ud v:nameU="SubShapeType" v:prompt="" v:val="VT0(0):26"/>
+					<v:ud v:nameU="CurveLookup" v:val="VT0(1):26"/>
+					<v:ud v:nameU="AntiScale" v:val="VT0(50):26"/>
+					<v:ud v:nameU="HasText" v:val="VT0(0):5"/>
+					<v:ud v:nameU="RX1" v:prompt="" v:val="VT0(2.2047244094488):1"/>
+					<v:ud v:nameU="RY1" v:prompt="" v:val="VT0(1.7322834645669):1"/>
+					<v:ud v:nameU="JointType1" v:prompt="56MM" v:val="VT0(0):26"/>
+					<v:ud v:nameU="LX2" v:prompt="" v:val="VT0(2.2047244094488):1"/>
+					<v:ud v:nameU="LY2" v:prompt="" v:val="VT0(-2.3760549083818E-15):1"/>
+					<v:ud v:nameU="JointType2" v:prompt="56MM" v:val="VT0(0):26"/>
+					<v:ud v:nameU="Fuzz" v:prompt="" v:val="VT0(0.0039370078740157):24"/>
+					<v:ud v:nameU="OverLayT" v:prompt="" v:val="VT0(0.0047244094488189):24"/>
+					<v:ud v:nameU="2D_length_check" v:prompt="" v:val="VT0(1.9685039370079):21"/>
+					<v:ud v:nameU="CleanupBegin" v:prompt="" v:val="VT0(3.9370078740157):1"/>
+					<v:ud v:nameU="CleanupEnd" v:prompt="" v:val="VT0(2.2047244094488):1"/>
+					<v:ud v:nameU="AntiScale" v:prompt="" v:val="VT0(1):26"/>
+				</v:userDefs>
+				<title>工作表.42</title>
+				<g id="shape43-19" v:mID="43" v:groupContext="shape" v:layerMember="0;1">
+					<title>工作表.43</title>
+					<v:userDefs>
+						<v:ud v:nameU="WallFill" v:prompt="Shape Identifier"/>
+					</v:userDefs>
+					<path d="M-3.4 179.33 L128.13 179.33 L124.72 182.73 L0 182.73 L-3.4 179.33 Z" class="st1"/>
+				</g>
+				<g id="shape44-22" v:mID="44" v:groupContext="shape" v:layerMember="0;1"
+						transform="translate(-129.213,311.948) rotate(-135)">
+					<title>工作表.44</title>
+					<v:userDefs>
+						<v:ud v:nameU="WallCap" v:prompt="Shape Identifier"/>
+					</v:userDefs>
+					<rect x="0" y="182.395" width="4.81055" height="0.340157" class="st2"/>
+				</g>
+				<g id="shape45-24" v:mID="45" v:groupContext="shape" v:layerMember="0;1"
+						transform="translate(257.339,308.546) rotate(135)">
+					<title>工作表.45</title>
+					<v:userDefs>
+						<v:ud v:nameU="WallCap" v:prompt="Shape Identifier"/>
+					</v:userDefs>
+					<rect x="0" y="182.395" width="4.81055" height="0.340157" class="st2"/>
+				</g>
+				<g id="shape46-26" v:mID="46" v:groupContext="shape" v:layerMember="0;1">
+					<title>工作表.46</title>
+					<v:userDefs>
+						<v:ud v:nameU="WallRefLine" v:prompt="Shape Identifier"/>
+					</v:userDefs>
+				</g>
+				<g id="shape47-28" v:mID="47" v:groupContext="shape" v:layerMember="0;1">
+					<title>工作表.47</title>
+					<v:userDefs>
+						<v:ud v:nameU="WallCompGeom1" v:prompt="Shape Identifier" v:val="VT0(-0.66693806165226):26"/>
+					</v:userDefs>
+					<path d="M-3.4 179.33 L128.13 179.33" class="st3"/>
+					<path d="M0 182.73 L124.72 182.73" class="st3"/>
+				</g>
+				<g id="shape48-32" v:mID="48" v:groupContext="shape" v:layerMember="0;1" transform="translate(26.0004,-3.40157)">
+					<title>工作表.48</title>
+					<v:custProps>
+						<v:cp v:nameU="LPrec" v:lbl="精度" v:type="1" v:format="0;0.0;0.00;0.000;0.0000" v:sortKey="2"
+								v:invis="false" v:langID="2052" v:val="VT4(0.00)"/>
+						<v:cp v:nameU="LUnits" v:lbl="单位" v:type="1"
+								v:format=" 使用绘图页的单位;.英尺-英寸 (1&#39;-0&#34;);.英尺 (1.00&#39;);.英寸;.英尺 (1.00ft);.英里;-毫米;-厘米;-米;-千米"
+								v:sortKey="1" v:invis="false" v:langID="2052" v:val="VT4( 使用绘图页的单位)"/>
+						<v:cp v:nameU="ShowUnits" v:lbl="单位显示" v:type="1" v:format="不显示单位;显示单位" v:sortKey="4" v:invis="false"
+								v:langID="2052" v:val="VT4(不显示单位)"/>
+						<v:cp v:nameU="LInchPrec" v:lbl="精度" v:type="1" v:format="    1 in.; 1/2 in.; 1/4 in.; 1/8 in.;1/16 in."
+								v:sortKey="3" v:invis="true" v:langID="2052" v:val="VT4(1/16 in.)"/>
+					</v:custProps>
+					<v:userDefs>
+						<v:ud v:nameU="Hide" v:val="VT0(1):5"/>
+						<v:ud v:nameU="LUnitsFactor" v:val="VT0(0):24"/>
+						<v:ud v:nameU="FormatString" v:val="VT4(0.00)"/>
+						<v:ud v:nameU="LengthText" v:val="VT4(2200.00)"/>
+						<v:ud v:nameU="Length" v:val="VT0(86.614173228346):24"/>
+						<v:ud v:nameU="LPFString" v:prompt="Linear Precision Formatting String" v:val="VT4(0.00)"/>
+						<v:ud v:nameU="LPrec" v:val="VT0(2):26"/>
+						<v:ud v:nameU="LPrecInd" v:val="VT0(2):26"/>
+						<v:ud v:nameU="LPrecVal" v:val="VT4(0.00)"/>
+						<v:ud v:nameU="LUnits" v:val="VT0(0):26"/>
+						<v:ud v:nameU="LUnitsInd" v:prompt="0=Dwg, 1=Arch, 2=Dec Ft, 3+ = other" v:val="VT0(0):26"/>
+						<v:ud v:nameU="LUnitsVal" v:val="VT4( 使用绘图页的单位)"/>
+						<v:ud v:nameU="ShowUnits" v:val="VT0(0):26"/>
+						<v:ud v:nameU="ShowUnitsInd" v:val="VT0(0):26"/>
+						<v:ud v:nameU="ShowUnitsVal" v:val="VT4(不显示单位)"/>
+						<v:ud v:nameU="FeetInch" v:val="VT0(0):26"/>
+						<v:ud v:nameU="Feet" v:val="VT0(0):26"/>
+						<v:ud v:nameU="Inch" v:val="VT0(0):26"/>
+						<v:ud v:nameU="InchPrec" v:val="VT0(16):26"/>
+						<v:ud v:nameU="WatchLength" v:val="VT0(86.614173228346):21"/>
+						<v:ud v:nameU="DrawingUnitFactor" v:val="VT0(0):24"/>
+						<v:ud v:nameU="HideArrow" v:val="VT0(0):5"/>
+						<v:ud v:nameU="LInchPrecInd" v:val="VT0(4):26"/>
+						<v:ud v:nameU="DirArrowSize" v:val="VT0(5.3340833333333):1"/>
+						<v:ud v:nameU="DirArrowOffset" v:val="VT0(27.50137500055):1"/>
+						<v:ud v:nameU="LInchPrec" v:val="VT0(4):26"/>
+						<v:ud v:nameU="LInchPrecVal" v:val="VT4(1/16 in.)"/>
+						<v:ud v:nameU="WatchLength" v:prompt="" v:val="VT0(86.614173228346):1"/>
+						<v:ud v:nameU="DirArrowSize" v:prompt="" v:val="VT0(0.10668166666667):1"/>
+						<v:ud v:nameU="DirArrowOffset" v:prompt="" v:val="VT0(0.55002750055):1"/>
+					</v:userDefs>
+					<v:textBlock v:margins="rect(4,0,0,0)" v:tabSpace="42.5197"/>
+					<v:textRect cx="36.3618" cy="169.933" width="72.73" height="25.6036" transform="rotate(-180)"/>
+				</g>
+			</g>
+			<g id="group49-34" transform="translate(158.74,365.47) rotate(180)" v:mID="49" v:groupContext="group"
+					v:layerMember="0;1">
+				<v:custProps>
+					<v:cp v:nameU="T" v:lbl="墙壁厚度" v:type="4" v:format="50 mm;100 mm;150 mm;200 mm;250 mm;300 mm;150 mm.;60 mm"
+							v:sortKey="visWall02" v:invis="false" v:langID="1033" v:val="VT0(2.3622047244094):24"/>
+					<v:cp v:nameU="RefLn" v:lbl="参考线偏移" v:type="4"
+							v:format="-150 mm;-125 mm;-100 mm;-75 mm;-50 mm;-25 mm;0 mm;25 mm;50 mm;75 mm;100 mm;125 mm;150 mm"
+							v:sortKey="visWall07" v:invis="true" v:langID="2052" v:val="VT0(0):24"/>
+					<v:cp v:nameU="Material" v:type="0" v:invis="true" v:langID="2052"/>
+					<v:cp v:nameU="VisWallHeight" v:lbl="墙高" v:type="4"
+							v:format="2 m;2.1 m;2.2 m;2.3 m;2.4 m;2.5 m;2.6 m;2.7 m;2.8 m;2.9 m;3 m;2.6 m." v:sortKey="visWall03"
+							v:invis="false" v:langID="2052" v:val="VT0(102.36220472441):21"/>
+					<v:cp v:nameU="VisWallLength" v:lbl="墙长" v:type="4" v:format="1 m;2 m;3 m;4 m;5 m;6 m;7 m;8 m;3 m.;4.5 m"
+							v:sortKey="visWall01" v:invis="false" v:langID="2052" v:val="VT0(110.23622047244):21"/>
+					<v:cp v:nameU="visWallJustify" v:lbl="墙壁对齐方式" v:type="1" v:format="居中;边缘;自定义" v:sortKey="visWall04"
+							v:invis="false" v:langID="2052" v:val="VT4(边缘)"/>
+					<v:cp v:nameU="visWallSegment" v:lbl="墙段" v:type="1" v:format="曲线形;直线形" v:sortKey="visWall05" v:invis="false"
+							v:langID="2052" v:val="VT4(直线形)"/>
+					<v:cp v:nameU="Radius" v:lbl="墙半径" v:type="4" v:format="3 m;4 m;5 m;6 m;7 m;8 m;4 m." v:sortKey="visWall06"
+							v:invis="true" v:langID="2052" v:val="VT0(118.11023622047):21"/>
+					<v:cp v:nameU="ShapeClass" v:lbl="形状类" v:type="0" v:invis="true" v:langID="2052" v:val="VT4(建筑物组件)"/>
+					<v:cp v:nameU="ShapeType" v:lbl="形状类型" v:type="0" v:invis="true" v:langID="2052" v:val="VT4(墙壁)"/>
+					<v:cp v:nameU="SubShapeType" v:lbl="子形状类型" v:type="0" v:invis="true" v:langID="2052" v:val="VT4()"/>
+					<v:cp v:nameU="FireRating" v:lbl="防火等级" v:type="0" v:sortKey="visWall15" v:invis="false" v:langID="2052"/>
+					<v:cp v:nameU="BaseElevation" v:lbl="基本标高" v:type="2" v:sortKey="visWall09" v:invis="false" v:langID="2052"
+							v:val="VT0(0):24"/>
+					<v:cp v:nameU="VisWallLength" v:lbl="" v:prompt="" v:type="0" v:format="" v:sortKey="" v:invis="false"
+							v:ask="false" v:langID="0" v:cal="0" v:val="VT0(110.23622047244):1"/>
+				</v:custProps>
+				<v:userDefs>
+					<v:ud v:nameU="LX1"/>
+					<v:ud v:nameU="LY1"/>
+					<v:ud v:nameU="RX1" v:val="VT0(110.23622047244):21"/>
+					<v:ud v:nameU="RY1" v:val="VT0(-1.8758328224067E-14):21"/>
+					<v:ud v:nameU="A1" v:val="VT0(-1.5707963267949):32"/>
+					<v:ud v:nameU="T1" v:val="VT0(2.3622047244094):24"/>
+					<v:ud v:nameU="RefLn1" v:val="VT0(0):26"/>
+					<v:ud v:nameU="Mtrl1" v:prompt="0=Unknown, 1=Wall" v:val="VT0(1):26"/>
+					<v:ud v:nameU="JointType1" v:prompt="2.8M" v:val="VT0(1):26"/>
+					<v:ud v:nameU="1" v:prompt="---------------------------------" v:val="VT4(---------------------------------)"/>
+					<v:ud v:nameU="RelA1" v:val="VT0(1.5707963267949):32"/>
+					<v:ud v:nameU="EndsDontMeet1" v:prompt="Within radius of User.Fuzz" v:val="VT0(0):5"/>
+					<v:ud v:nameU="ShapeGone1" v:val="VT0(0):5"/>
+					<v:ud v:nameU="AngTooSharp1"/>
+					<v:ud v:nameU="AngTooBlunt1" v:val="VT0(0):26"/>
+					<v:ud v:nameU="EndNotOnLine1" v:prompt="Within distance User.Fuzz of being on line." v:val="VT0(0):5"/>
+					<v:ud v:nameU="DiffMtrls1" v:prompt="" v:val="VT0(0):5"/>
+					<v:ud v:nameU="CornerClose1" v:val="VT0(0):5"/>
+					<v:ud v:nameU="TClose1" v:val="VT0(0):26"/>
+					<v:ud v:nameU="11" v:prompt="---------------------------------" v:val="VT4(---------------------------------)"/>
+					<v:ud v:nameU="Closed1" v:val="VT0(0):5"/>
+					<v:ud v:nameU="Corner1" v:val="VT0(1):5"/>
+					<v:ud v:nameU="TJointOpen1" v:val="VT0(0):5"/>
+					<v:ud v:nameU="TJointClosed1" v:val="VT0(0):5"/>
+					<v:ud v:nameU="_" v:prompt="=================" v:val="VT4(=================)"/>
+					<v:ud v:nameU="LX2" v:val="VT0(0):21"/>
+					<v:ud v:nameU="LY2" v:val="VT0(-5.1898041419918E-13):21"/>
+					<v:ud v:nameU="RX2"/>
+					<v:ud v:nameU="RY2"/>
+					<v:ud v:nameU="A2" v:val="VT0(1.5707963267949):32"/>
+					<v:ud v:nameU="T2" v:val="VT0(2.3622047244094):24"/>
+					<v:ud v:nameU="RefLn2" v:val="VT0(0):26"/>
+					<v:ud v:nameU="Mtrl2" v:prompt="0=Unknown, 1=Wall" v:val="VT0(1):26"/>
+					<v:ud v:nameU="JointType2" v:prompt="0M" v:val="VT0(1):26"/>
+					<v:ud v:nameU="2" v:prompt="---------------------------------" v:val="VT4(---------------------------------)"/>
+					<v:ud v:nameU="RelA2" v:val="VT0(4.7123889803847):32"/>
+					<v:ud v:nameU="EndsDontMeet2" v:prompt="Within radius of User.Fuzz" v:val="VT0(0):5"/>
+					<v:ud v:nameU="ShapeGone2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="AngTooSharp2"/>
+					<v:ud v:nameU="AngTooBlunt2" v:val="VT0(0):26"/>
+					<v:ud v:nameU="EndNotOnLine2" v:prompt="Within distance User.Fuzz of being on line." v:val="VT0(0):5"/>
+					<v:ud v:nameU="DiffMtrls2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="CornerClose2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="TClose2" v:val="VT0(0):26"/>
+					<v:ud v:nameU="22" v:prompt="---------------------------------" v:val="VT4(---------------------------------)"/>
+					<v:ud v:nameU="Closed2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="Corner2" v:val="VT0(1):5"/>
+					<v:ud v:nameU="TJointOpen2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="TJointClosed2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="__" v:prompt="=================" v:val="VT4(=================)"/>
+					<v:ud v:nameU="Fuzz" v:val="VT0(0.19685039370079):24"/>
+					<v:ud v:nameU="LineStyleIndex" v:val="VT0(0):26"/>
+					<v:ud v:nameU="WallShape" v:prompt="Shape Identifier"/>
+					<v:ud v:nameU="OverLayT" v:val="VT0(0.23622047244094):24"/>
+					<v:ud v:nameU="3D_type" v:val="VT0(2):26"/>
+					<v:ud v:nameU="3D_offset" v:val="VT0(0):26"/>
+					<v:ud v:nameU="3D_extrude_length" v:val="VT0(102.36220472441):21"/>
+					<v:ud v:nameU="Is_arc" v:val="VT0(0):5"/>
+					<v:ud v:nameU="2D_length_check" v:val="VT0(118.11023622047):21"/>
+					<v:ud v:nameU="visWallPriority" v:val="VT0(50):26"/>
+					<v:ud v:nameU="visObjectType" v:prompt="Wall" v:val="VT0(101):26"/>
+					<v:ud v:nameU="visBESelected" v:val="VT0(0):26"/>
+					<v:ud v:nameU="CleanupBegin" v:val="VT0(110.23622047244):21"/>
+					<v:ud v:nameU="CleanupEnd" v:val="VT0(-5.1898041419918E-13):21"/>
+					<v:ud v:nameU="PreviousWidth" v:val="VT0(110.23622047244):26"/>
+					<v:ud v:nameU="RefLn" v:val="VT0(0):26"/>
+					<v:ud v:nameU="CurveSwitch" v:val="VT0(1):26"/>
+					<v:ud v:nameU="ControlsY1" v:val="VT0(0):27"/>
+					<v:ud v:nameU="visVersion" v:val="VT0(15):26"/>
+					<v:ud v:nameU="SolSH" v:val="VT4({5D50005D-537C-4738-9C46-130C74335A6D})"/>
+					<v:ud v:nameU="ShapeClass" v:prompt="建筑物组件" v:val="VT0(3):26"/>
+					<v:ud v:nameU="ShapeType" v:prompt="墙壁" v:val="VT0(44):26"/>
+					<v:ud v:nameU="SubShapeType" v:prompt="" v:val="VT0(0):26"/>
+					<v:ud v:nameU="CurveLookup" v:val="VT0(1):26"/>
+					<v:ud v:nameU="AntiScale" v:val="VT0(50):26"/>
+					<v:ud v:nameU="HasText" v:val="VT0(0):5"/>
+					<v:ud v:nameU="RX1" v:prompt="" v:val="VT0(2.2047244094488):1"/>
+					<v:ud v:nameU="RY1" v:prompt="" v:val="VT0(-3.7516656448134E-16):1"/>
+					<v:ud v:nameU="JointType1" v:prompt="56MM" v:val="VT0(0):26"/>
+					<v:ud v:nameU="LX2" v:prompt="" v:val="VT0(0):1"/>
+					<v:ud v:nameU="LY2" v:prompt="" v:val="VT0(-1.0379608283984E-14):1"/>
+					<v:ud v:nameU="JointType2" v:prompt="0MM" v:val="VT0(0):26"/>
+					<v:ud v:nameU="Fuzz" v:prompt="" v:val="VT0(0.0039370078740157):24"/>
+					<v:ud v:nameU="OverLayT" v:prompt="" v:val="VT0(0.0047244094488189):24"/>
+					<v:ud v:nameU="2D_length_check" v:prompt="" v:val="VT0(2.3622047244094):21"/>
+					<v:ud v:nameU="CleanupBegin" v:prompt="" v:val="VT0(2.2047244094488):1"/>
+					<v:ud v:nameU="CleanupEnd" v:prompt="" v:val="VT0(-1.0379608283984E-14):1"/>
+					<v:ud v:nameU="AntiScale" v:prompt="" v:val="VT0(1):26"/>
+				</v:userDefs>
+				<title>工作表.49</title>
+				<g id="shape50-35" v:mID="50" v:groupContext="shape" v:layerMember="0;1">
+					<title>工作表.50</title>
+					<v:userDefs>
+						<v:ud v:nameU="WallFill" v:prompt="Shape Identifier"/>
+					</v:userDefs>
+					<path d="M-3.4 179.33 L162.14 179.33 L158.74 182.73 L0 182.73 L-3.4 179.33 Z" class="st1"/>
+				</g>
+				<g id="shape51-38" v:mID="51" v:groupContext="shape" v:layerMember="0;1"
+						transform="translate(-129.213,311.948) rotate(-135)">
+					<title>工作表.51</title>
+					<v:userDefs>
+						<v:ud v:nameU="WallCap" v:prompt="Shape Identifier"/>
+					</v:userDefs>
+					<rect x="0" y="182.395" width="4.81055" height="0.340157" class="st2"/>
+				</g>
+				<g id="shape52-40" v:mID="52" v:groupContext="shape" v:layerMember="0;1"
+						transform="translate(291.355,308.546) rotate(135)">
+					<title>工作表.52</title>
+					<v:userDefs>
+						<v:ud v:nameU="WallCap" v:prompt="Shape Identifier"/>
+					</v:userDefs>
+					<rect x="0" y="182.395" width="4.81055" height="0.340157" class="st2"/>
+				</g>
+				<g id="shape53-42" v:mID="53" v:groupContext="shape" v:layerMember="0;1">
+					<title>工作表.53</title>
+					<v:userDefs>
+						<v:ud v:nameU="WallRefLine" v:prompt="Shape Identifier"/>
+					</v:userDefs>
+				</g>
+				<g id="shape54-44" v:mID="54" v:groupContext="shape" v:layerMember="0;1">
+					<title>工作表.54</title>
+					<v:userDefs>
+						<v:ud v:nameU="WallCompGeom1" v:prompt="Shape Identifier" v:val="VT0(-0.66693806165226):26"/>
+					</v:userDefs>
+					<path d="M-3.4 179.33 L162.14 179.33" class="st3"/>
+					<path d="M0 182.73 L158.74 182.73" class="st3"/>
+				</g>
+				<g id="shape55-48" v:mID="55" v:groupContext="shape" v:layerMember="0;1" transform="translate(43.0083,-3.40157)">
+					<title>工作表.55</title>
+					<v:custProps>
+						<v:cp v:nameU="LPrec" v:lbl="精度" v:type="1" v:format="0;0.0;0.00;0.000;0.0000" v:sortKey="2"
+								v:invis="false" v:langID="2052" v:val="VT4(0.00)"/>
+						<v:cp v:nameU="LUnits" v:lbl="单位" v:type="1"
+								v:format=" 使用绘图页的单位;.英尺-英寸 (1&#39;-0&#34;);.英尺 (1.00&#39;);.英寸;.英尺 (1.00ft);.英里;-毫米;-厘米;-米;-千米"
+								v:sortKey="1" v:invis="false" v:langID="2052" v:val="VT4( 使用绘图页的单位)"/>
+						<v:cp v:nameU="ShowUnits" v:lbl="单位显示" v:type="1" v:format="不显示单位;显示单位" v:sortKey="4" v:invis="false"
+								v:langID="2052" v:val="VT4(不显示单位)"/>
+						<v:cp v:nameU="LInchPrec" v:lbl="精度" v:type="1" v:format="    1 in.; 1/2 in.; 1/4 in.; 1/8 in.;1/16 in."
+								v:sortKey="3" v:invis="true" v:langID="2052" v:val="VT4(1/16 in.)"/>
+					</v:custProps>
+					<v:userDefs>
+						<v:ud v:nameU="Hide" v:val="VT0(1):5"/>
+						<v:ud v:nameU="LUnitsFactor" v:val="VT0(0):24"/>
+						<v:ud v:nameU="FormatString" v:val="VT4(0.00)"/>
+						<v:ud v:nameU="LengthText" v:val="VT4(2800.00)"/>
+						<v:ud v:nameU="Length" v:val="VT0(110.23622047244):24"/>
+						<v:ud v:nameU="LPFString" v:prompt="Linear Precision Formatting String" v:val="VT4(0.00)"/>
+						<v:ud v:nameU="LPrec" v:val="VT0(2):26"/>
+						<v:ud v:nameU="LPrecInd" v:val="VT0(2):26"/>
+						<v:ud v:nameU="LPrecVal" v:val="VT4(0.00)"/>
+						<v:ud v:nameU="LUnits" v:val="VT0(0):26"/>
+						<v:ud v:nameU="LUnitsInd" v:prompt="0=Dwg, 1=Arch, 2=Dec Ft, 3+ = other" v:val="VT0(0):26"/>
+						<v:ud v:nameU="LUnitsVal" v:val="VT4( 使用绘图页的单位)"/>
+						<v:ud v:nameU="ShowUnits" v:val="VT0(0):26"/>
+						<v:ud v:nameU="ShowUnitsInd" v:val="VT0(0):26"/>
+						<v:ud v:nameU="ShowUnitsVal" v:val="VT4(不显示单位)"/>
+						<v:ud v:nameU="FeetInch" v:val="VT0(0):26"/>
+						<v:ud v:nameU="Feet" v:val="VT0(0):26"/>
+						<v:ud v:nameU="Inch" v:val="VT0(0):26"/>
+						<v:ud v:nameU="InchPrec" v:val="VT0(16):26"/>
+						<v:ud v:nameU="WatchLength" v:val="VT0(110.23622047244):21"/>
+						<v:ud v:nameU="DrawingUnitFactor" v:val="VT0(0):24"/>
+						<v:ud v:nameU="HideArrow" v:val="VT0(0):5"/>
+						<v:ud v:nameU="LInchPrecInd" v:val="VT0(4):26"/>
+						<v:ud v:nameU="DirArrowSize" v:val="VT0(5.3340833333333):1"/>
+						<v:ud v:nameU="DirArrowOffset" v:val="VT0(27.50137500055):1"/>
+						<v:ud v:nameU="LInchPrec" v:val="VT0(4):26"/>
+						<v:ud v:nameU="LInchPrecVal" v:val="VT4(1/16 in.)"/>
+						<v:ud v:nameU="WatchLength" v:prompt="" v:val="VT0(110.23622047244):1"/>
+						<v:ud v:nameU="DirArrowSize" v:prompt="" v:val="VT0(0.10668166666667):1"/>
+						<v:ud v:nameU="DirArrowOffset" v:prompt="" v:val="VT0(0.55002750055):1"/>
+					</v:userDefs>
+					<v:textBlock v:margins="rect(4,0,0,0)" v:tabSpace="42.5197"/>
+					<v:textRect cx="36.3618" cy="169.933" width="72.73" height="25.6036" transform="rotate(-180)"/>
+				</g>
+			</g>
+			<g id="group56-50" transform="translate(-182.735,182.735) rotate(-90)" v:mID="56" v:groupContext="group"
+					v:layerMember="0;1">
+				<v:custProps>
+					<v:cp v:nameU="T" v:lbl="墙壁厚度" v:type="4" v:format="50 mm;100 mm;150 mm;200 mm;250 mm;300 mm;150 mm.;60 mm"
+							v:sortKey="visWall02" v:invis="false" v:langID="1033" v:val="VT0(2.3622047244094):24"/>
+					<v:cp v:nameU="RefLn" v:lbl="参考线偏移" v:type="4"
+							v:format="-150 mm;-125 mm;-100 mm;-75 mm;-50 mm;-25 mm;0 mm;25 mm;50 mm;75 mm;100 mm;125 mm;150 mm"
+							v:sortKey="visWall07" v:invis="true" v:langID="2052" v:val="VT0(0):24"/>
+					<v:cp v:nameU="Material" v:type="0" v:invis="true" v:langID="2052"/>
+					<v:cp v:nameU="VisWallHeight" v:lbl="墙高" v:type="4"
+							v:format="2 m;2.1 m;2.2 m;2.3 m;2.4 m;2.5 m;2.6 m;2.7 m;2.8 m;2.9 m;3 m;2.6 m." v:sortKey="visWall03"
+							v:invis="false" v:langID="2052" v:val="VT0(102.36220472441):21"/>
+					<v:cp v:nameU="VisWallLength" v:lbl="墙长" v:type="4" v:format="1 m;2 m;3 m;4 m;5 m;6 m;7 m;8 m;3 m.;4.5 m"
+							v:sortKey="visWall01" v:invis="false" v:langID="2052" v:val="VT0(86.614173228347):21"/>
+					<v:cp v:nameU="visWallJustify" v:lbl="墙壁对齐方式" v:type="1" v:format="居中;边缘;自定义" v:sortKey="visWall04"
+							v:invis="false" v:langID="2052" v:val="VT4(边缘)"/>
+					<v:cp v:nameU="visWallSegment" v:lbl="墙段" v:type="1" v:format="曲线形;直线形" v:sortKey="visWall05" v:invis="false"
+							v:langID="2052" v:val="VT4(直线形)"/>
+					<v:cp v:nameU="Radius" v:lbl="墙半径" v:type="4" v:format="3 m;4 m;5 m;6 m;7 m;8 m;4 m." v:sortKey="visWall06"
+							v:invis="true" v:langID="2052" v:val="VT0(118.11023622047):21"/>
+					<v:cp v:nameU="ShapeClass" v:lbl="形状类" v:type="0" v:invis="true" v:langID="2052" v:val="VT4(建筑物组件)"/>
+					<v:cp v:nameU="ShapeType" v:lbl="形状类型" v:type="0" v:invis="true" v:langID="2052" v:val="VT4(墙壁)"/>
+					<v:cp v:nameU="SubShapeType" v:lbl="子形状类型" v:type="0" v:invis="true" v:langID="2052" v:val="VT4()"/>
+					<v:cp v:nameU="FireRating" v:lbl="防火等级" v:type="0" v:sortKey="visWall15" v:invis="false" v:langID="2052"/>
+					<v:cp v:nameU="BaseElevation" v:lbl="基本标高" v:type="2" v:sortKey="visWall09" v:invis="false" v:langID="2052"
+							v:val="VT0(0):24"/>
+					<v:cp v:nameU="VisWallLength" v:lbl="" v:prompt="" v:type="0" v:format="" v:sortKey="" v:invis="false"
+							v:ask="false" v:langID="0" v:cal="0" v:val="VT0(86.614173228347):1"/>
+				</v:custProps>
+				<v:userDefs>
+					<v:ud v:nameU="LX1"/>
+					<v:ud v:nameU="LY1"/>
+					<v:ud v:nameU="RX1" v:val="VT0(0):21"/>
+					<v:ud v:nameU="RY1" v:val="VT0(-5.1898041419918E-13):21"/>
+					<v:ud v:nameU="A1" v:val="VT0(-3.1415926535898):32"/>
+					<v:ud v:nameU="T1" v:val="VT0(2.3622047244094):24"/>
+					<v:ud v:nameU="RefLn1" v:val="VT0(0):26"/>
+					<v:ud v:nameU="Mtrl1" v:prompt="0=Unknown, 1=Wall" v:val="VT0(1):26"/>
+					<v:ud v:nameU="JointType1" v:prompt="0M" v:val="VT0(1):26"/>
+					<v:ud v:nameU="1" v:prompt="---------------------------------" v:val="VT4(---------------------------------)"/>
+					<v:ud v:nameU="RelA1" v:val="VT0(1.5707963267949):32"/>
+					<v:ud v:nameU="EndsDontMeet1" v:prompt="Within radius of User.Fuzz" v:val="VT0(0):5"/>
+					<v:ud v:nameU="ShapeGone1" v:val="VT0(0):5"/>
+					<v:ud v:nameU="AngTooSharp1"/>
+					<v:ud v:nameU="AngTooBlunt1" v:val="VT0(0):26"/>
+					<v:ud v:nameU="EndNotOnLine1" v:prompt="Within distance User.Fuzz of being on line." v:val="VT0(0):5"/>
+					<v:ud v:nameU="DiffMtrls1" v:prompt="" v:val="VT0(0):5"/>
+					<v:ud v:nameU="CornerClose1" v:val="VT0(0):5"/>
+					<v:ud v:nameU="TClose1" v:val="VT0(0):26"/>
+					<v:ud v:nameU="11" v:prompt="---------------------------------" v:val="VT4(---------------------------------)"/>
+					<v:ud v:nameU="Closed1" v:val="VT0(0):5"/>
+					<v:ud v:nameU="Corner1" v:val="VT0(1):5"/>
+					<v:ud v:nameU="TJointOpen1" v:val="VT0(0):5"/>
+					<v:ud v:nameU="TJointClosed1" v:val="VT0(0):5"/>
+					<v:ud v:nameU="_" v:prompt="=================" v:val="VT4(=================)"/>
+					<v:ud v:nameU="LX2" v:val="VT0(2.1221543041368E-13):21"/>
+					<v:ud v:nameU="LY2" v:val="VT0(86.614173228346):21"/>
+					<v:ud v:nameU="RX2"/>
+					<v:ud v:nameU="RY2"/>
+					<v:ud v:nameU="A2" v:val="VT0(0):32"/>
+					<v:ud v:nameU="T2" v:val="VT0(2.3622047244094):24"/>
+					<v:ud v:nameU="RefLn2" v:val="VT0(0):26"/>
+					<v:ud v:nameU="Mtrl2" v:prompt="0=Unknown, 1=Wall" v:val="VT0(1):26"/>
+					<v:ud v:nameU="JointType2" v:prompt="5.3902719325076E-15M" v:val="VT0(1):26"/>
+					<v:ud v:nameU="2" v:prompt="---------------------------------" v:val="VT4(---------------------------------)"/>
+					<v:ud v:nameU="RelA2" v:val="VT0(4.7123889803847):32"/>
+					<v:ud v:nameU="EndsDontMeet2" v:prompt="Within radius of User.Fuzz" v:val="VT0(0):5"/>
+					<v:ud v:nameU="ShapeGone2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="AngTooSharp2"/>
+					<v:ud v:nameU="AngTooBlunt2" v:val="VT0(0):26"/>
+					<v:ud v:nameU="EndNotOnLine2" v:prompt="Within distance User.Fuzz of being on line." v:val="VT0(0):5"/>
+					<v:ud v:nameU="DiffMtrls2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="CornerClose2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="TClose2" v:val="VT0(0):26"/>
+					<v:ud v:nameU="22" v:prompt="---------------------------------" v:val="VT4(---------------------------------)"/>
+					<v:ud v:nameU="Closed2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="Corner2" v:val="VT0(1):5"/>
+					<v:ud v:nameU="TJointOpen2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="TJointClosed2" v:val="VT0(0):5"/>
+					<v:ud v:nameU="__" v:prompt="=================" v:val="VT4(=================)"/>
+					<v:ud v:nameU="Fuzz" v:val="VT0(0.19685039370079):24"/>
+					<v:ud v:nameU="LineStyleIndex" v:val="VT0(0):26"/>
+					<v:ud v:nameU="WallShape" v:prompt="Shape Identifier"/>
+					<v:ud v:nameU="OverLayT" v:val="VT0(0.23622047244094):24"/>
+					<v:ud v:nameU="3D_type" v:val="VT0(2):26"/>
+					<v:ud v:nameU="3D_offset" v:val="VT0(0):26"/>
+					<v:ud v:nameU="3D_extrude_length" v:val="VT0(102.36220472441):21"/>
+					<v:ud v:nameU="Is_arc" v:val="VT0(0):5"/>
+					<v:ud v:nameU="2D_length_check" v:val="VT0(98.425196850394):21"/>
+					<v:ud v:nameU="visWallPriority" v:val="VT0(50):26"/>
+					<v:ud v:nameU="visObjectType" v:prompt="Wall" v:val="VT0(101):26"/>
+					<v:ud v:nameU="visBESelected" v:val="VT0(0):26"/>
+					<v:ud v:nameU="CleanupBegin" v:val="VT0(-5.1898041419918E-13):21"/>
+					<v:ud v:nameU="CleanupEnd" v:val="VT0(86.614173228347):21"/>
+					<v:ud v:nameU="PreviousWidth" v:val="VT0(86.614173228347):26"/>
+					<v:ud v:nameU="RefLn" v:val="VT0(0):26"/>
+					<v:ud v:nameU="CurveSwitch" v:val="VT0(1):26"/>
+					<v:ud v:nameU="ControlsY1" v:val="VT0(0):27"/>
+					<v:ud v:nameU="visVersion" v:val="VT0(15):26"/>
+					<v:ud v:nameU="SolSH" v:val="VT4({5D50005D-537C-4738-9C46-130C74335A6D})"/>
+					<v:ud v:nameU="ShapeClass" v:prompt="建筑物组件" v:val="VT0(3):26"/>
+					<v:ud v:nameU="ShapeType" v:prompt="墙壁" v:val="VT0(44):26"/>
+					<v:ud v:nameU="SubShapeType" v:prompt="" v:val="VT0(0):26"/>
+					<v:ud v:nameU="CurveLookup" v:val="VT0(1):26"/>
+					<v:ud v:nameU="AntiScale" v:val="VT0(50):26"/>
+					<v:ud v:nameU="HasText" v:val="VT0(0):5"/>
+					<v:ud v:nameU="RX1" v:prompt="" v:val="VT0(0):1"/>
+					<v:ud v:nameU="RY1" v:prompt="" v:val="VT0(-1.0379608283984E-14):1"/>
+					<v:ud v:nameU="JointType1" v:prompt="0MM" v:val="VT0(0):26"/>
+					<v:ud v:nameU="LX2" v:prompt="" v:val="VT0(4.2443086082737E-15):1"/>
+					<v:ud v:nameU="LY2" v:prompt="" v:val="VT0(1.7322834645669):1"/>
+					<v:ud v:nameU="JointType2" v:prompt="1.0780543865015E-13MM" v:val="VT0(0):26"/>
+					<v:ud v:nameU="Fuzz" v:prompt="" v:val="VT0(0.0039370078740157):24"/>
+					<v:ud v:nameU="OverLayT" v:prompt="" v:val="VT0(0.0047244094488189):24"/>
+					<v:ud v:nameU="2D_length_check" v:prompt="" v:val="VT0(1.9685039370079):21"/>
+					<v:ud v:nameU="CleanupBegin" v:prompt="" v:val="VT0(-1.0379608283984E-14):1"/>
+					<v:ud v:nameU="CleanupEnd" v:prompt="" v:val="VT0(1.7322834645669):1"/>
+					<v:ud v:nameU="AntiScale" v:prompt="" v:val="VT0(1):26"/>
+				</v:userDefs>
+				<title>工作表.56</title>
+				<g id="shape57-51" v:mID="57" v:groupContext="shape" v:layerMember="0;1">
+					<title>工作表.57</title>
+					<v:userDefs>
+						<v:ud v:nameU="WallFill" v:prompt="Shape Identifier"/>
+					</v:userDefs>
+					<path d="M-3.4 179.33 L128.13 179.33 L124.72 182.73 L0 182.73 L-3.4 179.33 Z" class="st1"/>
+				</g>
+				<g id="shape58-54" v:mID="58" v:groupContext="shape" v:layerMember="0;1"
+						transform="translate(-129.213,311.948) rotate(-135)">
+					<title>工作表.58</title>
+					<v:userDefs>
+						<v:ud v:nameU="WallCap" v:prompt="Shape Identifier"/>
+					</v:userDefs>
+					<rect x="0" y="182.395" width="4.81055" height="0.340157" class="st2"/>
+				</g>
+				<g id="shape59-56" v:mID="59" v:groupContext="shape" v:layerMember="0;1"
+						transform="translate(257.339,308.546) rotate(135)">
+					<title>工作表.59</title>
+					<v:userDefs>
+						<v:ud v:nameU="WallCap" v:prompt="Shape Identifier"/>
+					</v:userDefs>
+					<rect x="0" y="182.395" width="4.81055" height="0.340157" class="st2"/>
+				</g>
+				<g id="shape60-58" v:mID="60" v:groupContext="shape" v:layerMember="0;1">
+					<title>工作表.60</title>
+					<v:userDefs>
+						<v:ud v:nameU="WallRefLine" v:prompt="Shape Identifier"/>
+					</v:userDefs>
+				</g>
+				<g id="shape61-60" v:mID="61" v:groupContext="shape" v:layerMember="0;1">
+					<title>工作表.61</title>
+					<v:userDefs>
+						<v:ud v:nameU="WallCompGeom1" v:prompt="Shape Identifier" v:val="VT0(-0.66693806165226):26"/>
+					</v:userDefs>
+					<path d="M-3.4 179.33 L128.13 179.33" class="st3"/>
+					<path d="M0 182.73 L124.72 182.73" class="st3"/>
+				</g>
+				<g id="shape62-64" v:mID="62" v:groupContext="shape" v:layerMember="0;1" transform="translate(26.0004,-3.40157)">
+					<title>工作表.62</title>
+					<v:custProps>
+						<v:cp v:nameU="LPrec" v:lbl="精度" v:type="1" v:format="0;0.0;0.00;0.000;0.0000" v:sortKey="2"
+								v:invis="false" v:langID="2052" v:val="VT4(0.00)"/>
+						<v:cp v:nameU="LUnits" v:lbl="单位" v:type="1"
+								v:format=" 使用绘图页的单位;.英尺-英寸 (1&#39;-0&#34;);.英尺 (1.00&#39;);.英寸;.英尺 (1.00ft);.英里;-毫米;-厘米;-米;-千米"
+								v:sortKey="1" v:invis="false" v:langID="2052" v:val="VT4( 使用绘图页的单位)"/>
+						<v:cp v:nameU="ShowUnits" v:lbl="单位显示" v:type="1" v:format="不显示单位;显示单位" v:sortKey="4" v:invis="false"
+								v:langID="2052" v:val="VT4(不显示单位)"/>
+						<v:cp v:nameU="LInchPrec" v:lbl="精度" v:type="1" v:format="    1 in.; 1/2 in.; 1/4 in.; 1/8 in.;1/16 in."
+								v:sortKey="3" v:invis="true" v:langID="2052" v:val="VT4(1/16 in.)"/>
+					</v:custProps>
+					<v:userDefs>
+						<v:ud v:nameU="Hide" v:val="VT0(1):5"/>
+						<v:ud v:nameU="LUnitsFactor" v:val="VT0(0):24"/>
+						<v:ud v:nameU="FormatString" v:val="VT4(0.00)"/>
+						<v:ud v:nameU="LengthText" v:val="VT4(2200.00)"/>
+						<v:ud v:nameU="Length" v:val="VT0(86.614173228347):24"/>
+						<v:ud v:nameU="LPFString" v:prompt="Linear Precision Formatting String" v:val="VT4(0.00)"/>
+						<v:ud v:nameU="LPrec" v:val="VT0(2):26"/>
+						<v:ud v:nameU="LPrecInd" v:val="VT0(2):26"/>
+						<v:ud v:nameU="LPrecVal" v:val="VT4(0.00)"/>
+						<v:ud v:nameU="LUnits" v:val="VT0(0):26"/>
+						<v:ud v:nameU="LUnitsInd" v:prompt="0=Dwg, 1=Arch, 2=Dec Ft, 3+ = other" v:val="VT0(0):26"/>
+						<v:ud v:nameU="LUnitsVal" v:val="VT4( 使用绘图页的单位)"/>
+						<v:ud v:nameU="ShowUnits" v:val="VT0(0):26"/>
+						<v:ud v:nameU="ShowUnitsInd" v:val="VT0(0):26"/>
+						<v:ud v:nameU="ShowUnitsVal" v:val="VT4(不显示单位)"/>
+						<v:ud v:nameU="FeetInch" v:val="VT0(0):26"/>
+						<v:ud v:nameU="Feet" v:val="VT0(0):26"/>
+						<v:ud v:nameU="Inch" v:val="VT0(0):26"/>
+						<v:ud v:nameU="InchPrec" v:val="VT0(16):26"/>
+						<v:ud v:nameU="WatchLength" v:val="VT0(86.614173228347):21"/>
+						<v:ud v:nameU="DrawingUnitFactor" v:val="VT0(0):24"/>
+						<v:ud v:nameU="HideArrow" v:val="VT0(0):5"/>
+						<v:ud v:nameU="LInchPrecInd" v:val="VT0(4):26"/>
+						<v:ud v:nameU="DirArrowSize" v:val="VT0(5.3340833333333):1"/>
+						<v:ud v:nameU="DirArrowOffset" v:val="VT0(27.50137500055):1"/>
+						<v:ud v:nameU="LInchPrec" v:val="VT0(4):26"/>
+						<v:ud v:nameU="LInchPrecVal" v:val="VT4(1/16 in.)"/>
+						<v:ud v:nameU="WatchLength" v:prompt="" v:val="VT0(86.614173228347):1"/>
+						<v:ud v:nameU="DirArrowSize" v:prompt="" v:val="VT0(0.10668166666667):1"/>
+						<v:ud v:nameU="DirArrowOffset" v:prompt="" v:val="VT0(0.55002750055):1"/>
+					</v:userDefs>
+					<v:textBlock v:margins="rect(4,0,0,0)" v:tabSpace="42.5197"/>
+					<v:textRect cx="36.3618" cy="169.933" width="72.73" height="25.6036"/>
+				</g>
+			</g>
+		</g>
+	</g>
+</svg>

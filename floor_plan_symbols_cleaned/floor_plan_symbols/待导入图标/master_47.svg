@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!-- 由 Microsoft Visio, SVG Export 生成 master_47.svg 页-1 -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:ev="http://www.w3.org/2001/xml-events"
+		xmlns:v="http://schemas.microsoft.com/visio/2003/SVGExtensions/" width="2.01264in" height="0.239554in"
+		viewBox="0 0 144.91 17.2479" xml:space="preserve" color-interpolation-filters="sRGB" class="st4">
+	<v:documentProperties v:langID="2052" v:metric="true" v:viewMarkup="false"/>
+
+	<style type="text/css">
+	<![CDATA[
+		.st1 {fill:#000000;stroke:#000000;stroke-linecap:round;stroke-linejoin:round;stroke-width:0.24}
+		.st2 {fill:none;stroke:none;stroke-linecap:round;stroke-linejoin:round;stroke-width:0.75}
+		.st3 {fill:#000000;font-family:宋体;font-size:0.833336em}
+		.st4 {fill:none;fill-rule:evenodd;font-size:12px;overflow:visible;stroke-linecap:square;stroke-miterlimit:3}
+	]]>
+	</style>
+
+	<g v:mID="0" v:index="1" v:groupContext="foregroundPage">
+		<title>页-1</title>
+		<v:pageProperties v:drawingScale="0.0393701" v:pageScale="0.0393701" v:drawingUnits="24" v:shadowOffsetX="8.50394"
+				v:shadowOffsetY="-8.50394"/>
+		<g id="group276-1" transform="translate(0.375,-0.12)" v:mID="276" v:groupContext="group">
+			<title>楼下（带23序号）</title>
+			<g id="group277-2" transform="translate(62.3622,17.4879) rotate(180)" v:mID="277" v:groupContext="group">
+				<title>楼上.37</title>
+				<g id="shape278-3" v:mID="278" v:groupContext="shape">
+					<title>三角形</title>
+					<v:userDefs>
+						<v:ud v:nameU="visVersion" v:val="VT0(14):26"/>
+					</v:userDefs>
+					<path d="M18.32 17.25 L8.5 0.24 L-1.32 17.25 L18.32 17.25 Z" class="st1"/>
+				</g>
+			</g>
+			<g id="shape279-5" v:mID="279" v:groupContext="shape" transform="translate(0,-2.42393)">
+				<title>工作表.279</title>
+				<desc>(23)</desc>
+				<v:textBlock v:margins="rect(4,4,4,4)" v:tabSpace="42.5197"/>
+				<v:textRect cx="72.08" cy="11.1679" width="144.16" height="12.16"/>
+				<rect x="0" y="5.08787" width="144.16" height="12.16" class="st2"/>
+							</g>
+		</g>
+	</g>
+</svg>

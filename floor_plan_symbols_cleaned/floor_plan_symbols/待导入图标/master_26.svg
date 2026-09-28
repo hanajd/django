@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!-- 由 Microsoft Visio, SVG Export 生成 master_26.svg 页-1 -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:ev="http://www.w3.org/2001/xml-events"
+		xmlns:v="http://schemas.microsoft.com/visio/2003/SVGExtensions/" width="0.600968in" height="0.784648in"
+		viewBox="0 0 43.2697 56.4947" xml:space="preserve" color-interpolation-filters="sRGB" class="st3">
+	<v:documentProperties v:langID="2052" v:metric="true" v:viewMarkup="false"/>
+
+	<style type="text/css">
+	<![CDATA[
+		.st1 {fill:#000000;stroke:none;stroke-linecap:round;stroke-linejoin:round;stroke-width:0.75}
+		.st2 {fill:#000000;font-family:宋体;font-size:0.748032em;font-weight:bold}
+		.st3 {fill:none;fill-rule:evenodd;font-size:12px;overflow:visible;stroke-linecap:square;stroke-miterlimit:3}
+	]]>
+	</style>
+
+	<g v:mID="0" v:index="1" v:groupContext="foregroundPage">
+		<title>页-1</title>
+		<v:pageProperties v:drawingScale="0.0393701" v:pageScale="0.0393701" v:drawingUnits="24" v:shadowOffsetX="8.50394"
+				v:shadowOffsetY="-8.50394"/>
+		<v:layer v:name="批注" v:index="0"/>
+		<g id="group155-1" transform="translate(0.375,-13.6)" v:mID="155" v:groupContext="group" v:layerMember="0">
+			<v:userDefs>
+				<v:ud v:nameU="AntiScale" v:val="VT0(50):26"/>
+				<v:ud v:nameU="LimitHeight" v:val="VT0(0):5"/>
+				<v:ud v:nameU="LimitWidth" v:val="VT0(0):5"/>
+				<v:ud v:nameU="visVersion" v:val="VT0(14):26"/>
+				<v:ud v:nameU="AntiScale" v:prompt="" v:val="VT0(1):26"/>
+			</v:userDefs>
+			<title>指北针4</title>
+			<g id="shape156-2" v:mID="156" v:groupContext="shape" v:layerMember="0">
+				<title>工作表.156</title>
+				<desc>北</desc>
+				<v:textBlock v:margins="rect(0,0,0,0)" v:tabSpace="42.5197"/>
+				<v:textRect cx="21.2598" cy="43.7388" width="13.54" height="8.50394"/>
+				<path d="M5.31 39.49 L37.2 39.49 L37.2 29.92 L42.52 29.92 L21.26 13.98 L0 29.92 L5.31 29.92 L5.31 39.49 ZM5.31 56.49
+							 L37.2 56.49 L37.2 47.86 L5.31 47.86 L5.31 56.49 Z" class="st1"/>
+							</g>
+		</g>
+	</g>
+</svg>

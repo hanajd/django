@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!-- 由 Microsoft Visio, SVG Export 生成 master_21.svg 页-1 -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:ev="http://www.w3.org/2001/xml-events"
+		xmlns:v="http://schemas.microsoft.com/visio/2003/SVGExtensions/" width="0.801349in" height="1.97982in"
+		viewBox="0 0 57.6971 142.547" xml:space="preserve" color-interpolation-filters="sRGB" class="st2">
+	<v:documentProperties v:langID="2052" v:metric="true" v:viewMarkup="false"/>
+
+	<style type="text/css">
+	<![CDATA[
+		.st1 {fill:none;stroke:none;stroke-linecap:round;stroke-linejoin:round;stroke-width:0.75}
+		.st2 {fill:none;fill-rule:evenodd;font-size:12px;overflow:visible;stroke-linecap:square;stroke-miterlimit:3}
+	]]>
+	</style>
+
+	<g v:mID="0" v:index="1" v:groupContext="foregroundPage">
+		<title>页-1</title>
+		<v:pageProperties v:drawingScale="0.0393701" v:pageScale="0.0393701" v:drawingUnits="24" v:shadowOffsetX="8.50394"
+				v:shadowOffsetY="-8.50394"/>
+		<g id="shape1-1" v:mID="1" v:groupContext="shape" transform="translate(0.375,-0.375)">
+			<title>楼梯</title>
+			<rect v:rectContext="foreign" x="0" y="0.749998" width="56.9471" height="141.797" class="st1"/>
+			<switch>
+				<foreignObject x="0" y="0.749998" width="56.9471" height="141.797"
+						requiredExtensions="http://schemas.microsoft.com/visio/2003/SVGExtensions/">
+					<v:foreignData v:orgSize="3820" v:data="data:metafile;base64,eNrtl89LG1EQx2df3iab1VYrBXuoqFBDLrUWrPSFRgptWkr
+								tLVAP3jzag4inHNpFpCAeNHjp/+DB/8KDf4YHT70XhEpnOvPem2yF/gHuwIT9znzystkf891NAOALxOhgDpV+VQf4PgEw1/v
+								0DiCBn/cBnmG9ppgEs2gAvLQAEwagncBI/MgzeL1vAReAOVxvCvP92w9vECtooYH7+o2465TWauLiv3EVA6mhqqVfSzLAJoz
+								9rdDWuDnOV+2tNdS/aAdLe1FFFVXcpaDJsWx4Vr0oKZoXNrkHPDlMQsMiw7w2o99/ih2qL9RwHsFhnuKn184e5s6mI32qRX3
+								TdPamGfU26m2lLzNnL7Oo+6j7Sp83nD1vRO1QO6VP686e1qOeQT2j9FHq7FEatUFtlN61zu7aqK9qzl7Vol5Hva70hXH2wkT
+								dRd1V+ixx9iyJeh71vNIneMxO1PHCf4THz3vJA8xxOQ9jmJMQ/ahZ0rloH76/iiftOP9//zlpy95VeUUVVdztWAKePTQIloF
+								n0G21h1Ij55hS/RbmY6Cn1n9jQTjqfcZ8UuoPpef9xTMd6XcU4z1HrzMsMd6HNHMgzEFg2Js0syfMXmDYrzQzEGYQGPYwzew
+								IsxMY9jXNbAmzFRj2Os1sCrMZGPY/zWwIsxEY9kTN9IXpB4Z9UjNrwqwFhr1TMz1heoFhP9VMV5huYNhjNbMizEpg2Hc1syj
+								MYmDYizXTEqYVGPZnzcwKMxsY9mzNTAszHRj2cc14750MDHu7ZjJhssCw35eveX9dM8PPAP4ewdfIwm9jFP4exFfQ4iNET6e
+								ntra6/9rqHsNXVHgkdc+T/gPd33GU"/>
+				</foreignObject>
+				<svg viewBox="0 0 58.146 145" enable-background="new" color-interpolation-filters="sRGB" height="141.797"
+						preserveAspectRatio="none" width="56.9471" x="0" y="0.749998">
+					<defs>
+						<clipPath id="mfid25">
+							<rect id="mfid26" x="0" y="0" width="58.146" height="145"/>
+						</clipPath>
+					</defs>
+					<g clip-path="url(#mfid25)">
+						<g transform="matrix(0.053407, 0, 0, 0.053624, 0, 0)">
+							<g stroke-width="14.339" stroke="#000000" stroke-miterlimit="10" fill="none">
+								<polyline points="5,2699 5,5" fill="none"/>
+								<polyline points="1081,2699 1081,5" fill="none"/>
+								<polyline points="5,2699 1081,2699" fill="none"/>
+								<polyline points="5,2558 1081,2558" fill="none"/>
+								<polyline points="5,2416 1081,2416" fill="none"/>
+								<polyline points="5,2274 1081,2274" fill="none"/>
+								<polyline points="5,2132 1081,2132" fill="none"/>
+								<polyline points="5,1990 1081,1990" fill="none"/>
+								<polyline points="5,1849 1081,1849" fill="none"/>
+								<polyline points="5,1707 1081,1707" fill="none"/>
+								<polyline points="5,1565 1081,1565" fill="none"/>
+								<polyline points="5,1423 1081,1423" fill="none"/>
+								<polyline points="5,1282 1081,1282" fill="none"/>
+								<polyline points="5,1140 1081,1140" fill="none"/>
+								<polyline points="5,998 1081,998" fill="none"/>
+								<polyline points="5,856 1081,856" fill="none"/>
+								<polyline points="5,714 1081,714" fill="none"/>
+								<polyline points="5,573 1081,573" fill="none"/>
+								<polyline points="5,431 1081,431" fill="none"/>
+								<polyline points="5,289 1081,289" fill="none"/>
+								<polyline points="5,147 1081,147" fill="none"/>
+								<polyline points="5,5 1081,5" fill="none"/>
+							</g>
+						</g>
+						<mask id="mfid27" fill-rule="evenodd" fill="white" stroke="none"/>
+					</g>
+				</svg>
+			</switch>
+			<rect v:rectContext="foreign" x="0" y="0.749998" width="56.9471" height="141.797" class="st1"/>
+		</g>
+	</g>
+</svg>

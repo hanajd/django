@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!-- 由 Microsoft Visio, SVG Export 生成 master_25.svg 页-1 -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:ev="http://www.w3.org/2001/xml-events"
+		xmlns:v="http://schemas.microsoft.com/visio/2003/SVGExtensions/" width="0.364747in" height="0.464714in"
+		viewBox="0 0 26.2618 33.4594" xml:space="preserve" color-interpolation-filters="sRGB" class="st2">
+	<v:documentProperties v:langID="2052" v:metric="true" v:viewMarkup="false"/>
+
+	<style type="text/css">
+	<![CDATA[
+		.st1 {fill:none;stroke:none;stroke-linecap:round;stroke-linejoin:round;stroke-width:0.75}
+		.st2 {fill:none;fill-rule:evenodd;font-size:12px;overflow:visible;stroke-linecap:square;stroke-miterlimit:3}
+	]]>
+	</style>
+
+	<g v:mID="0" v:index="1" v:groupContext="foregroundPage">
+		<title>页-1</title>
+		<v:pageProperties v:drawingScale="0.0393701" v:pageScale="0.0393701" v:drawingUnits="24" v:shadowOffsetX="8.50394"
+				v:shadowOffsetY="-8.50394"/>
+		<g id="shape1-1" v:mID="1" v:groupContext="shape" transform="translate(0.375,-0.375)">
+			<title>指北针3</title>
+			<rect v:rectContext="foreign" x="0" y="0.749999" width="25.5118" height="32.7094" class="st1"/>
+			<switch>
+				<foreignObject x="0" y="0.749999" width="25.5118" height="32.7094"
+						requiredExtensions="http://schemas.microsoft.com/visio/2003/SVGExtensions/">
+					<v:foreignData v:orgSize="3760" v:data="data:metafile;base64,eNrtVr1rFEEUfzM7u7N7H3vexojxi4A5PfxCJYqIgqCnSLA
+								JatAoyMGlOEIQsUkhbmGT/iCSUkgdK5uDKxQOMaUp4x+QSq8SxML39t7kZi8XtLHKPfgx89783ps3M8t7KwBgHiEYXxCKJiz
+								rowCdwwDjlXu3ifE+BLiIdq9HSfxiDXBFARQkQNnyJ3mb8eHGGwUYAJ6h433EnVt3byItBgfgw6nPX4l3zaNYAYBzDK0aXEl
+								WDAqO8MHFMZtYaJaTzshGONCG+k90gb4shjKUoewlocoxKakUAFzq06heKJGHbuWQgoqFj/gl0/5ncQVLG/yWImWVcA7HCWc
+								UPobL2blwOpjNV3Qzu+quBSuqrq+rkruixpxVd1FU9AJMBxEsZxdgM78otgpjzlKx5Daiuu5Ea0EjamaXirP5rcJcuJmneN0
+								d03k4MMiqOGsX0vm5kEnyc+C114konwd+JzInTHO9ZPyBJzVnyyW+KuVL8/SeO2+qG8dL1kuOhLZuyLaOkngljEf6d92Sr/y
+								WnPc9aXhTvhJt/U4Yvek9llX9bVv/5F0WVX10W6/q04iW7O7nJG8KUETk+B2ziH2IdXphPG7Qp2dYN2LWN7C/OSN/X79AuuK
+								bHPaaoQxlT8t56NYeKgST0K1Bg2z72UadJ7LWTyCOIOSA2CXmSWuOXSt+iONz9r8KvX93/GX/L13pJMY9CMDVdmd+ZDcctQt
+								HWXOfz1BGPOIzvOAzUCy7+5j7cTmeGBDb5Vi73dWZAfuovn1obuf6r+9StnKYQUwg6pwnjceZZzriDOdT5/gveS/FHLtL2vF
+								Czv0AxzOd03CeIA4haohx5phuajhPEQXmFJljOqzh1Nhe47xobrpu2Xpvcwf4bxKbOUpsvn3cJ56CXi+130j0vVfZuveQvyN
+								h+ZL+B4lcmHA="/>
+				</foreignObject>
+				<svg viewBox="0 0 203.26 260.99" enable-background="new" color-interpolation-filters="sRGB" height="32.7094"
+						preserveAspectRatio="none" width="25.5118" x="0" y="0.749999">
+					<defs>
+						<clipPath id="mfid32">
+							<rect id="mfid33" x="0" y="0" width="203.26" height="260.99"/>
+						</clipPath>
+					</defs>
+					<g clip-path="url(#mfid32)">
+						<g transform="matrix(0.053477, 0, 0, 0.053626, 0, 0)">
+							<g stroke-width="111.74" stroke="#000000" stroke-miterlimit="10" fill="none">
+								<polygon
+										points="3778,2967 3686,2386 3419,1861 3003,1445 2479,1178 1898,1085 1317,1178 793,1445 377,1861 110,2386 18,2967 110,3548 377,4073 793,4489 1317,4756 1898,4849 2479,4756 3003,4489 3419,4073 3686,3548 3778,2967"/>
+							</g>
+							<g fill-rule="evenodd" stroke-width="111.74" stroke="none" fill="#000000">
+								<polygon points="1663,4849 1898,1085 2133,4849"/>
+							</g>
+							<g stroke-width="111.74" stroke="#000000" stroke-miterlimit="10" fill="none">
+								<polygon points="1663,4849 1898,1085 2133,4849 1663,4849"/>
+							</g>
+							<g fill-rule="evenodd" stroke-width="111.74" stroke="#000000" stroke-miterlimit="10" fill="#000000">
+								<polyline points="1990,660 1990,18" fill="none"/>
+								<polyline points="1990,660 2031,702 2173,702 2156,518" fill="none"/>
+								<polyline points="2123,260 1990,418" fill="none"/>
+								<polyline points="1723,602 1890,477" fill="none"/>
+								<polyline points="1731,310 1890,285" fill="none"/>
+								<polyline points="1890,43 1890,702" fill="none"/>
+							</g>
+						</g>
+						<mask id="mfid34" fill-rule="evenodd" fill="white" stroke="none"/>
+					</g>
+				</svg>
+			</switch>
+			<rect v:rectContext="foreign" x="0" y="0.749999" width="25.5118" height="32.7094" class="st1"/>
+		</g>
+	</g>
+</svg>

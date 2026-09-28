@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!-- 由 Microsoft Visio, SVG Export 生成 master_41.svg 页-1 -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:ev="http://www.w3.org/2001/xml-events"
+		xmlns:v="http://schemas.microsoft.com/visio/2003/SVGExtensions/" width="2.01264in" height="0.515144in"
+		viewBox="0 0 144.91 37.0904" xml:space="preserve" color-interpolation-filters="sRGB" class="st4">
+	<v:documentProperties v:langID="2052" v:metric="true" v:viewMarkup="false"/>
+
+	<style type="text/css">
+	<![CDATA[
+		.st1 {fill:none;stroke:none;stroke-linecap:round;stroke-linejoin:round;stroke-width:0.75}
+		.st2 {fill:#000000;font-family:宋体;font-size:0.833336em}
+		.st3 {fill:#000000;stroke:#000000;stroke-linecap:round;stroke-linejoin:round;stroke-width:0.24}
+		.st4 {fill:none;fill-rule:evenodd;font-size:12px;overflow:visible;stroke-linecap:square;stroke-miterlimit:3}
+	]]>
+	</style>
+
+	<g v:mID="0" v:index="1" v:groupContext="foregroundPage">
+		<title>页-1</title>
+		<v:pageProperties v:drawingScale="0.0393701" v:pageScale="0.0393701" v:drawingUnits="24" v:shadowOffsetX="8.50394"
+				v:shadowOffsetY="-8.50394"/>
+		<g id="group243-1" transform="translate(0.375,-0.12)" v:mID="243" v:groupContext="group">
+			<title>楼上楼下（带序号）</title>
+			<g id="shape244-2" v:mID="244" v:groupContext="shape" transform="translate(0,-1.41732)">
+				<title>工作表.244</title>
+				<desc>(23)</desc>
+				<v:textBlock v:margins="rect(4,4,4,4)" v:tabSpace="42.5197"/>
+				<v:textRect cx="72.08" cy="31.0104" width="144.16" height="12.16"/>
+				<rect x="0" y="24.9304" width="144.16" height="12.16" class="st1"/>
+							</g>
+			<g id="group245-5" transform="translate(19.6391,0)" v:mID="245" v:groupContext="group">
+				<title>工作表.245</title>
+				<g id="group246-6" transform="translate(25.5118,-19.8425)" v:mID="246" v:groupContext="group">
+					<title>楼上（带22序号）</title>
+					<g id="shape247-7" v:mID="247" v:groupContext="shape">
+						<title>三角形</title>
+						<v:userDefs>
+							<v:ud v:nameU="visVersion" v:val="VT0(14):26"/>
+						</v:userDefs>
+						<path d="M18.32 37.09 L8.5 20.08 L-1.32 37.09 L18.32 37.09 Z" class="st3"/>
+					</g>
+					<g id="shape248-9" v:mID="248" v:groupContext="shape" transform="translate(9.30176,-2.42393)">
+						<title>工作表.248</title>
+						<desc>(22)</desc>
+						<v:textBlock v:margins="rect(4,4,4,4)" v:tabSpace="42.5197"/>
+						<v:textRect cx="16.609" cy="31.0104" width="33.22" height="12.16"/>
+						<rect x="0" y="24.9304" width="33.2179" height="12.16" class="st1"/>
+											</g>
+				</g>
+				<g id="group249-12" transform="translate(42.5197,57.1729) rotate(180)" v:mID="249" v:groupContext="group">
+					<title>楼上.37</title>
+					<g id="shape250-13" v:mID="250" v:groupContext="shape">
+						<title>三角形</title>
+						<v:userDefs>
+							<v:ud v:nameU="visVersion" v:val="VT0(14):26"/>
+						</v:userDefs>
+						<path d="M18.32 37.09 L8.5 20.08 L-1.32 37.09 L18.32 37.09 Z" class="st3"/>
+					</g>
+				</g>
+			</g>
+		</g>
+	</g>
+</svg>

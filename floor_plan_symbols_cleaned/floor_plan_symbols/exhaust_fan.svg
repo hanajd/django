@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- 占位图形：待 Visio 模具导出的正式 SVG 替换（保持 viewBox 居中即可） -->
+  <circle cx="32" cy="32" r="27" fill="#FFFFFF" stroke="#222222" stroke-width="2.5"/>
+  <path d="M32 32 C32 18 40 12 46 16 C50 19 44 27 32 32 Z" fill="#CBD5E1" stroke="#222222" stroke-width="2"/>
+  <path d="M32 32 C46 32 52 40 48 46 C45 50 37 44 32 32 Z" fill="#CBD5E1" stroke="#222222" stroke-width="2"/>
+  <path d="M32 32 C32 46 24 52 18 48 C14 45 20 37 32 32 Z" fill="#CBD5E1" stroke="#222222" stroke-width="2"/>
+  <path d="M32 32 C18 32 12 24 16 18 C19 14 27 20 32 32 Z" fill="#CBD5E1" stroke="#222222" stroke-width="2"/>
+  <circle cx="32" cy="32" r="5" fill="#FFFFFF" stroke="#222222" stroke-width="2"/>
+</svg>

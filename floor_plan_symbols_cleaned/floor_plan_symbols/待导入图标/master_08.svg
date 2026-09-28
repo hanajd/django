@@ -1,0 +1,324 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!-- 由 Microsoft Visio, SVG Export 生成 master_08.svg 页-1 -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:ev="http://www.w3.org/2001/xml-events"
+		xmlns:v="http://schemas.microsoft.com/visio/2003/SVGExtensions/" width="16.9064in" height="16.635in"
+		viewBox="0 0 1217.26 1197.72" xml:space="preserve" color-interpolation-filters="sRGB" class="st8">
+	<v:documentProperties v:langID="2052" v:metric="true" v:viewMarkup="false"/>
+
+	<style type="text/css">
+	<![CDATA[
+		.st1 {fill:#ffffff;stroke:#ffffff;stroke-linecap:round;stroke-linejoin:round;stroke-width:0.24}
+		.st2 {fill:#ffffff}
+		.st3 {stroke:#000000;stroke-linecap:round;stroke-linejoin:round;stroke-width:0.24}
+		.st4 {fill:#ffffff;stroke:#000000;stroke-linecap:round;stroke-linejoin:round;stroke-width:0.24}
+		.st5 {fill:#ffffff;stroke:#000000;stroke-linecap:round;stroke-linejoin:round;stroke-width:0.24;visibility:hidden}
+		.st6 {fill:#000000;font-family:宋体;font-size:1.5em}
+		.st7 {fill:#000000;font-family:Times New Roman;font-size:0.833336em}
+		.st8 {fill:none;fill-rule:evenodd;font-size:12px;overflow:visible;stroke-linecap:square;stroke-miterlimit:3}
+	]]>
+	</style>
+
+	<g v:mID="0" v:index="1" v:groupContext="foregroundPage">
+		<v:custProps>
+			<v:cp v:nameU="VisDoorFrameWidth" v:lbl="门框宽度" v:type="4"
+					v:format="10 mm;20 mm;30 mm;40 mm;50 mm;60 mm;70 mm;80 mm;90 mm;100 mm" v:sortKey="0" v:invis="true"
+					v:langID="2052" v:cal="0" v:val="VT4(50 mm)"/>
+			<v:cp v:nameU="VisDoorFrameDepth" v:lbl="门框深度" v:type="4" v:format="墙框;100 mm;150 mm;200 mm;250 mm;300 mm"
+					v:sortKey="0" v:invis="true" v:langID="2052" v:cal="0" v:val="VT4(50 mm)"/>
+			<v:cp v:nameU="VisDoorStopWidth" v:lbl="门挡宽度" v:type="4"
+					v:format="10 mm;20 mm;30 mm;40 mm;50 mm;60 mm;70 mm;80 mm;90 mm;100 mm" v:sortKey="0" v:invis="true"
+					v:langID="2052" v:cal="0" v:val="VT4(20 mm)"/>
+			<v:cp v:nameU="VisDoorStopDepth" v:lbl="门挡深度" v:type="4"
+					v:format="10 mm;20 mm;30 mm;40 mm;50 mm;60 mm;70 mm;80 mm;90 mm;100 mm" v:sortKey="0" v:invis="true"
+					v:langID="2052" v:cal="0" v:val="VT4(50 mm)"/>
+			<v:cp v:nameU="VisDoorThresDepthIn" v:lbl="门槛内宽度" v:type="4"
+					v:format="10 mm;20 mm;30 mm;40 mm;50 mm;60 mm;70 mm;80 mm;90 mm;100 mm" v:sortKey="0" v:invis="true"
+					v:langID="2052" v:cal="0" v:val="VT4(50 mm)"/>
+			<v:cp v:nameU="VisDoorThresWidthIn" v:lbl="门槛内深度" v:type="4"
+					v:format="0 mm;10 mm;20 mm;30 mm;40 mm;50 mm;60 mm;70 mm;80 mm;90 mm;100 mm" v:sortKey="0" v:invis="true"
+					v:langID="2052" v:cal="0" v:val="VT4(50 mm)"/>
+			<v:cp v:nameU="VisDoorThresDepthOut" v:lbl="门槛外深度" v:type="4"
+					v:format="0 mm;10 mm;20 mm;30 mm;40 mm;50 mm;60 mm;70 mm;80 mm;90 mm;100 mm" v:sortKey="0" v:invis="true"
+					v:langID="2052" v:cal="0" v:val="VT4(50 mm)"/>
+			<v:cp v:nameU="VisDoorThresWidthOut" v:lbl="门槛外宽度" v:type="4"
+					v:format="0 mm;10 mm;20 mm;30 mm;40 mm;50 mm;60 mm;70 mm;80 mm;90 mm;100 mm" v:sortKey="0" v:invis="true"
+					v:langID="2052" v:cal="0" v:val="VT4(50 mm)"/>
+			<v:cp v:nameU="VisDoorPanelThickness" v:lbl="门板厚度" v:type="4"
+					v:format="10 mm;20 mm;30 mm;40 mm;50 mm;60 mm;70 mm;80 mm;90 mm;100 mm" v:sortKey="0" v:invis="true"
+					v:langID="2052" v:cal="0" v:val="VT4(50 mm)"/>
+		</v:custProps>
+		<v:userDefs>
+			<v:ud v:nameU="VisAecPage" v:val="VT0(1):26"/>
+			<v:ud v:nameU="LPrec" v:val="VT0(2):26"/>
+			<v:ud v:nameU="LUnits" v:val="VT0(0):26"/>
+			<v:ud v:nameU="ShowUnits" v:val="VT0(0):26"/>
+			<v:ud v:nameU="LInchPrec" v:val="VT0(4):26"/>
+			<v:ud v:nameU="VisDoorPanelsClosed" v:prompt="Show all doors closed" v:val="VT0(0):26"/>
+			<v:ud v:nameU="VisDoorShowHeader" v:prompt="Show all door headers" v:val="VT0(0):26"/>
+			<v:ud v:nameU="VisDoorShowPanel" v:prompt="Show all door panels" v:val="VT0(1):26"/>
+			<v:ud v:nameU="VisDoorShowSwing" v:prompt="Show all door swings" v:val="VT0(1):26"/>
+			<v:ud v:nameU="VisDoorShowThreshold" v:prompt="Show all door thresholds" v:val="VT0(0):26"/>
+			<v:ud v:nameU="VisDoorShowThresIn" v:prompt="Show all door interior thresholds" v:val="VT0(1):26"/>
+			<v:ud v:nameU="VisDoorShowThresOut" v:prompt="Show all door exterior thresholds" v:val="VT0(1):26"/>
+			<v:ud v:nameU="VisDoorFrameToWall" v:prompt="Draw door frame depths same as wall thickness" v:val="VT0(1):26"/>
+			<v:ud v:nameU="VisDoorSwingAs" v:prompt="Draw all door swings as: 0 = arc, 1 = line" v:val="VT0(0):26"/>
+			<v:ud v:nameU="VisDoorShowFrame" v:prompt="Show all door frames" v:val="VT0(1):26"/>
+			<v:ud v:nameU="VisDoorShowStop" v:prompt="Show all door stops" v:val="VT0(1):26"/>
+			<v:ud v:nameU="VisDoorShowTag" v:prompt="Show all door tags" v:val="VT0(0):26"/>
+		</v:userDefs>
+		<title>页-1</title>
+		<v:pageProperties v:drawingScale="0.0393701" v:pageScale="0.0393701" v:drawingUnits="24" v:shadowOffsetX="8.50394"
+				v:shadowOffsetY="-8.50394"/>
+		<v:layer v:name="建筑围护" v:index="0"/>
+		<v:layer v:name="门" v:index="1"/>
+		<g id="group74-1" transform="translate(84.9324,-48.189) scale(-1,1)" v:mID="74" v:groupContext="group" v:layerMember="0;1">
+			<v:custProps>
+				<v:cp v:nameU="VisDoorHeight" v:lbl="门高" v:type="4" v:format="2100 mm;2300 mm;2350 mm;2400 mm;2700 mm;3000 mm"
+						v:sortKey="2" v:invis="false" v:langID="2052" v:val="VT0(82.677165354331):24"/>
+				<v:cp v:nameU="RefLn" v:lbl="参考线偏移" v:type="2" v:format="" v:invis="true" v:langID="2052" v:val="VT0(0):26"/>
+				<v:cp v:nameU="SubType" v:lbl="门宽" v:type="4"
+						v:format="600 mm;700 mm;800 mm;900 mm;1000 mm;1200 mm;1500 mm;1800 mm;2100 mm" v:sortKey="1"
+						v:invis="false" v:langID="2052" v:val="VT0(35.433070866142):24"/>
+				<v:cp v:nameU="SubVisDoorFrameWidth" v:lbl="门框宽度" v:type="4"
+						v:format="10 mm;20 mm;30 mm;40 mm;50 mm;60 mm;70 mm;80 mm;90 mm;100 mm" v:invis="true" v:langID="2052"
+						v:val="VT4(50 mm)"/>
+				<v:cp v:nameU="SubVisDoorFrameDepth" v:lbl="门框深度" v:type="4" v:format="墙框;100 mm;150 mm;200 mm;250 mm;300 mm;50 mm"
+						v:invis="true" v:langID="2052" v:val="VT4(50 mm)"/>
+				<v:cp v:nameU="SubVisDoorStopWidth" v:lbl="门挡宽度" v:type="4"
+						v:format="10 mm;20 mm;30 mm;40 mm;50 mm;60 mm;70 mm;80 mm;90 mm;100 mm" v:invis="true" v:langID="2052"
+						v:val="VT4(20 mm)"/>
+				<v:cp v:nameU="SubVisDoorStopDepth" v:lbl="门挡深度" v:type="4"
+						v:format="10 mm;20 mm;30 mm;40 mm;50 mm;60 mm;70 mm;80 mm;90 mm;100 mm" v:invis="true" v:langID="2052"
+						v:val="VT4(50 mm)"/>
+				<v:cp v:nameU="SubVisDoorThresDepthIn" v:lbl="门槛内深度" v:type="4"
+						v:format="10 mm;20 mm;30 mm;40 mm;50 mm;60 mm;70 mm;80 mm;90 mm;100 mm" v:invis="true" v:langID="2052"
+						v:val="VT4(50 mm)"/>
+				<v:cp v:nameU="SubVisDoorThresWidthIn" v:lbl="门槛内宽度" v:type="4"
+						v:format="0 mm;10 mm;20 mm;30 mm;40 mm;50 mm;60 mm;70 mm;80 mm;90 mm;100 mm" v:invis="true" v:langID="2052"
+						v:val="VT4(50 mm)"/>
+				<v:cp v:nameU="SubVisDoorThresDepthOut" v:lbl="门槛外深度" v:type="4"
+						v:format="0 mm;10 mm;20 mm;30 mm;40 mm;50 mm;60 mm;70 mm;80 mm;90 mm;100 mm" v:invis="true" v:langID="2052"
+						v:val="VT4(50 mm)"/>
+				<v:cp v:nameU="SubVisDoorThresWidthOut" v:lbl="门槛外宽度" v:type="4"
+						v:format="0 mm;10 mm;20 mm;30 mm;40 mm;50 mm;60 mm;70 mm;80 mm;90 mm;100 mm" v:invis="true" v:langID="2052"
+						v:val="VT4(50 mm)"/>
+				<v:cp v:nameU="SubVisDoorPanelThickness" v:lbl="门板厚度" v:type="4"
+						v:format="10 mm;20 mm;30 mm;40 mm;50 mm;60 mm;70 mm;80 mm;90 mm;100 mm" v:invis="true" v:langID="2052"
+						v:val="VT4(50 mm)"/>
+				<v:cp v:nameU="VisDoorLeaf" v:lbl="门扇宽度" v:type="4"
+						v:format="300 mm;350 mm;400 mm;450 mm;500 mm;600 mm;750 mm;900 mm;1050 mm" v:invis="true" v:langID="2052"
+						v:val="VT0(17.716535433071):24"/>
+				<v:cp v:nameU="VisDoorSpring" v:lbl="门弹簧高度" v:type="4" v:format="1050 mm;1150 mm;1200 mm;1350 mm;1500 mm"
+						v:invis="true" v:langID="2052" v:val="VT0(41.338582677165):24"/>
+				<v:cp v:nameU="VisDoorAlongWallOffset" v:lbl="门沿着墙壁的偏移" v:type="4" v:format="0 mm;50 mm;100 mm;150 mm;200 mm"
+						v:invis="true" v:langID="2052" v:val="VT0(3.9370078740157):24"/>
+				<v:cp v:nameU="SubShapeType" v:lbl="门类型" v:type="1" v:format="单悬门;双悬门" v:sortKey="3" v:invis="false"
+						v:langID="2052" v:val="VT4(单)"/>
+				<v:cp v:nameU="VisJustification" v:lbl="门在墙壁内的偏移" v:type="1" v:format="左对齐;居中;右对齐" v:sortKey="4" v:invis="true"
+						v:langID="2052" v:val="VT4(居中)"/>
+				<v:cp v:nameU="VisDoorOpenPercent" v:lbl="门开启百分比" v:type="4" v:format="0;25;50;75;100;36.2595;45;30;49.5073"
+						v:sortKey="5" v:invis="false" v:langID="2052" v:val="VT0(50):26"/>
+				<v:cp v:nameU="ShapeClass" v:lbl="形状类" v:type="0" v:invis="true" v:langID="2052" v:val="VT4(建筑物组件)"/>
+				<v:cp v:nameU="ShapeType" v:lbl="形状类型" v:type="0" v:invis="true" v:langID="2052" v:val="VT4(门)"/>
+				<v:cp v:nameU="FireRating" v:lbl="防火等级" v:type="0" v:invis="false" v:langID="2052"/>
+				<v:cp v:nameU="DoorNumber" v:lbl="门编号" v:type="0" v:sortKey="6" v:invis="false" v:langID="2052"/>
+				<v:cp v:nameU="BaseElevation" v:lbl="基本标高" v:type="2" v:langID="2052"/>
+				<v:cp v:nameU="VisDoorOpenPercent" v:lbl="" v:prompt="" v:type="0" v:format="" v:sortKey="" v:invis="false"
+						v:ask="false" v:langID="0" v:cal="0" v:val="VT0(73.038447064941):26"/>
+			</v:custProps>
+			<v:userDefs>
+				<v:ud v:nameU="AntiScale" v:val="VT0(50):26"/>
+				<v:ud v:nameU="VisIsDouble" v:val="VT0(0):5"/>
+				<v:ud v:nameU="TextAng" v:val="VT0(3.1415926535898):37"/>
+				<v:ud v:nameU="SubShapeLocPinY" v:val="VT0(3.9370078740157):24"/>
+				<v:ud v:nameU="WallOpening"/>
+				<v:ud v:nameU="LinkedToWall"/>
+				<v:ud v:nameU="3D_type" v:val="VT0(1):26"/>
+				<v:ud v:nameU="3D_model_id" v:val="VT4(门)"/>
+				<v:ud v:nameU="VisDoorInWallOffset" v:val="VT0(0):26"/>
+				<v:ud v:nameU="VisWallLinePattern" v:val="VT0(1):26"/>
+				<v:ud v:nameU="VisWallRefLn" v:val="VT0(0):26"/>
+				<v:ud v:nameU="SubVisDoorShowFrame" v:val="VT0(1):26"/>
+				<v:ud v:nameU="visObjectType" v:prompt="Door" v:val="VT0(102):26"/>
+				<v:ud v:nameU="visDoorUIDisableCodes" v:val="VT0(4):26"/>
+				<v:ud v:nameU="SubVisDoorShowStop" v:val="VT0(1):26"/>
+				<v:ud v:nameU="visBESelected" v:val="VT0(1):26"/>
+				<v:ud v:nameU="VisWallLineWeight" v:val="VT0(0.0033333333333333):3"/>
+				<v:ud v:nameU="VisWallLineColor" v:val="VT0(0):26"/>
+				<v:ud v:nameU="SubVisDoorPanelsClosed" v:val="VT0(0):26"/>
+				<v:ud v:nameU="SubVisDoorShowSwing" v:val="VT0(1):26"/>
+				<v:ud v:nameU="SubVisDoorFrameToWall" v:val="VT0(1):26"/>
+				<v:ud v:nameU="SubVisDoorShowPanel" v:val="VT0(1):26"/>
+				<v:ud v:nameU="SubVisDoorShowHeader" v:val="VT0(0):26"/>
+				<v:ud v:nameU="SubVisDoorShowTag" v:val="VT0(0):26"/>
+				<v:ud v:nameU="SubVisDoorShowThreshold" v:val="VT0(0):26"/>
+				<v:ud v:nameU="JustfyLookup" v:val="VT0(1):26"/>
+				<v:ud v:nameU="RefLn" v:val="VT0(0):26"/>
+				<v:ud v:nameU="HasText" v:val="VT0(1):5"/>
+				<v:ud v:nameU="VisWallLineWeightInch" v:val="VT0(0.16666666666666):26"/>
+				<v:ud v:nameU="SubVisDoorSwingAs" v:val="VT0(0):26"/>
+				<v:ud v:nameU="SubVisDoorShowThresIn" v:val="VT0(1):26"/>
+				<v:ud v:nameU="SubVisDoorShowThresOut" v:val="VT0(1):26"/>
+				<v:ud v:nameU="visVersion" v:val="VT0(15):26"/>
+				<v:ud v:nameU="BottomBow" v:val="VT0(0):26"/>
+				<v:ud v:nameU="TopBow" v:val="VT0(0):26"/>
+				<v:ud v:nameU="PreviousWallParam" v:val="VT0(0.88421050988994):26"/>
+				<v:ud v:nameU="PreviousWallDir" v:val="VT0(0):26"/>
+				<v:ud v:nameU="TriggerOpeningLink"/>
+				<v:ud v:nameU="SolSH" v:val="VT4({5D50005D-537C-4738-9C46-130C74335A6D})"/>
+				<v:ud v:nameU="ShapeClass" v:prompt="建筑物组件" v:val="VT0(3):26"/>
+				<v:ud v:nameU="ShapeType" v:prompt="门" v:val="VT0(10):26"/>
+				<v:ud v:nameU="SubShapeType" v:prompt="单" v:val="VT0(74):26"/>
+				<v:ud v:nameU="AntiScale" v:prompt="" v:val="VT0(1):26"/>
+				<v:ud v:nameU="SubShapeLocPinY" v:prompt="" v:val="VT0(0.078740157480315):27"/>
+				<v:ud v:nameU="VisWallLineWeightInch" v:prompt="" v:val="VT0(0.0033333333333333):26"/>
+			</v:userDefs>
+			<title>900-M1平开门</title>
+			<desc>M1</desc>
+			<g id="shape75-2" v:mID="75" v:groupContext="shape" v:layerMember="0;1">
+				<title>工作表.75</title>
+				<v:userDefs>
+					<v:ud v:nameU="Overhang" v:val="VT0(0.099999999999999):26"/>
+					<v:ud v:nameU="SubVisDoorFrameWidth" v:val="VT0(1.9685039370079):24"/>
+					<v:ud v:nameU="visBESnapObject" v:val="VT0(1):26"/>
+					<v:ud v:nameU="Overhang" v:prompt="" v:val="VT0(0.002):26"/>
+					<v:ud v:nameU="SubVisDoorFrameWidth" v:prompt="" v:val="VT0(0.039370078740157):24"/>
+				</v:userDefs>
+				<path d="M-2.83 1197.86 L53.86 1197.86 L53.86 1191.91 L-2.83 1191.91 L-2.83 1197.86 Z" class="st1"/>
+			</g>
+			<g id="shape76-4" v:mID="76" v:groupContext="shape" v:layerMember="0;1" transform="translate(-5.66929,2.83465)">
+				<title>工作表.76</title>
+				<v:userDefs>
+					<v:ud v:nameU="DropOnPageScale" v:val="VT0(1):27"/>
+					<v:ud v:nameU="DropOnPageScale" v:prompt="" v:val="VT0(0.02):27"/>
+				</v:userDefs>
+			</g>
+			<g id="shape77-6" v:mID="77" v:groupContext="shape" v:layerMember="0;1" transform="translate(-5.66929,-5.66929)">
+				<title>工作表.77</title>
+				<v:userDefs>
+					<v:ud v:nameU="DropOnPageScale" v:val="VT0(1):27"/>
+					<v:ud v:nameU="DropOnPageScale" v:prompt="" v:val="VT0(0.02):27"/>
+				</v:userDefs>
+			</g>
+			<g id="shape78-8" v:mID="78" v:groupContext="shape" v:layerMember="0;1" transform="translate(-2.83465,0)">
+				<title>工作表.78</title>
+			</g>
+			<g id="shape79-10" v:mID="79" v:groupContext="shape" v:layerMember="0;1" transform="translate(-2.83465,0)">
+				<title>工作表.79</title>
+				<v:userDefs>
+					<v:ud v:nameU="DropOnPageScale" v:val="VT0(1):27"/>
+					<v:ud v:nameU="DropOnPageScale" v:prompt="" v:val="VT0(0.02):27"/>
+				</v:userDefs>
+				<path d="M56.69 1197.72 L56.69 1192.05 L53.86 1192.05 L53.86 1194.88 L53.86 1197.72 L56.69 1197.72 ZM0 1197.72 L0
+							 1192.05 L2.83 1192.05 L2.83 1194.88 L2.83 1197.72 L0 1197.72 Z" class="st2"/>
+				<path d="M56.69 1197.72 L56.69 1192.05 L53.86 1192.05 L53.86 1194.88M53.86 1197.72 L56.69 1197.72M0 1197.72 L0 1192.05
+							 L2.83 1192.05 L2.83 1194.88M2.83 1197.72 L0 1197.72" class="st3"/>
+			</g>
+			<g id="shape80-13" v:mID="80" v:groupContext="shape" v:layerMember="0;1">
+				<title>工作表.80</title>
+				<v:userDefs>
+					<v:ud v:nameU="SubVisDoorFrameWidth" v:val="VT0(0.78740157480315):24"/>
+					<v:ud v:nameU="DropOnPageScale" v:val="VT0(1):27"/>
+					<v:ud v:nameU="SubVisDoorFrameWidth" v:prompt="" v:val="VT0(0.015748031496063):24"/>
+					<v:ud v:nameU="DropOnPageScale" v:prompt="" v:val="VT0(0.02):27"/>
+				</v:userDefs>
+				<path d="M51.02 1194.88 L49.89 1194.88 L49.89 1197.72 L51.02 1197.72 L51.02 1194.88 ZM0 1194.88 L1.13 1194.88 L1.13
+							 1197.72 L0 1197.72 L0 1194.88 Z" class="st2"/>
+				<path d="M51.02 1194.88 L49.89 1194.88 L49.89 1197.72 L51.02 1197.72M0 1194.88 L1.13 1194.88 L1.13 1197.72 L0 1197.72"
+						class="st3"/>
+			</g>
+			<g id="shape81-16" v:mID="81" v:groupContext="shape" v:layerMember="0;1" transform="translate(-2.83465,0)">
+				<title>工作表.81</title>
+				<v:userDefs>
+					<v:ud v:nameU="SubVisDoorFrameDepth" v:val="VT0(1.9685039370079):24"/>
+					<v:ud v:nameU="DropOnPageScale" v:val="VT0(1):27"/>
+					<v:ud v:nameU="SubVisDoorFrameDepth" v:prompt="" v:val="VT0(0.039370078740157):24"/>
+					<v:ud v:nameU="DropOnPageScale" v:prompt="" v:val="VT0(0.02):27"/>
+				</v:userDefs>
+				<path d="M56.69 1197.72 L56.69 1192.05" class="st3"/>
+				<path d="M0 1197.72 L0 1192.05" class="st3"/>
+			</g>
+			<g id="shape82-20" v:mID="82" v:groupContext="shape" v:layerMember="0;1" transform="translate(0,-5.66929)">
+				<title>工作表.82</title>
+				<v:userDefs>
+					<v:ud v:nameU="VisDoorShowSwingAsArc" v:val="VT0(1):5"/>
+					<v:ud v:nameU="VisDoorShowSwingAsLine" v:val="VT0(0):26"/>
+				</v:userDefs>
+				<path d="M0 1197.72 A51.0236 51.0236 0 0 1 84.81 1159.49" class="st3"/>
+			</g>
+			<g id="shape83-23" v:mID="83" v:groupContext="shape" v:layerMember="0;1"
+					transform="translate(980.153,1945.09) rotate(131.469)">
+				<title>工作表.83</title>
+				<rect x="0" y="1194.88" width="51.0236" height="2.83465" class="st4"/>
+			</g>
+			<g id="shape84-25" v:mID="84" v:groupContext="shape" v:layerMember="0;1" transform="translate(0,2392.6) scale(1,-1)">
+				<title>工作表.84</title>
+				<v:userDefs>
+					<v:ud v:nameU="VisDoorShowSwingAsArc" v:val="VT0(1):5"/>
+					<v:ud v:nameU="VisDoorShowSwingAsLine" v:val="VT0(0):26"/>
+				</v:userDefs>
+			</g>
+			<g id="shape85-27" v:mID="85" v:groupContext="shape" v:layerMember="0;1"
+					transform="translate(-1146.7,1245.91) rotate(-90)">
+				<title>工作表.85</title>
+				<v:userDefs>
+					<v:ud v:nameU="DropOnPageScale" v:val="VT0(1):27"/>
+					<v:ud v:nameU="DropOnPageScale" v:prompt="" v:val="VT0(0.02):27"/>
+				</v:userDefs>
+				<rect x="0" y="1194.88" width="51.0236" height="2.83465" class="st5"/>
+			</g>
+			<g id="shape86-29" v:mID="86" v:groupContext="shape" v:layerMember="0;1" transform="translate(-6.30501,-5.66929)">
+				<title>工作表.86</title>
+				<v:custProps>
+					<v:cp v:nameU="LPrec" v:lbl="精度" v:type="1" v:format="0;0.0;0.00;0.000;0.0000" v:sortKey="2" v:invis="false"
+							v:langID="2052" v:val="VT4(0.00)"/>
+					<v:cp v:nameU="LUnits" v:lbl="单位" v:type="1"
+							v:format=" 使用绘图页的单位;.英尺-英寸 (1&#39;-0&#34;);.英尺 (1.00&#39;);.英寸;.英尺 (1.00ft);.英里;-毫米;-厘米;-米;-千米"
+							v:sortKey="1" v:invis="false" v:langID="2052" v:val="VT4( 使用绘图页的单位)"/>
+					<v:cp v:nameU="ShowUnits" v:lbl="单位显示" v:type="1" v:format="不显示单位;显示单位" v:sortKey="4" v:invis="false"
+							v:langID="2052" v:val="VT4(不显示单位)"/>
+					<v:cp v:nameU="LInchPrec" v:lbl="精度" v:type="1" v:format="    1 in.; 1/2 in.; 1/4 in.; 1/8 in.;1/16 in."
+							v:sortKey="3" v:invis="true" v:langID="2052" v:val="VT4(1/16 in.)"/>
+				</v:custProps>
+				<v:userDefs>
+					<v:ud v:nameU="Hide" v:val="VT0(0):5"/>
+					<v:ud v:nameU="LUnitsFactor" v:val="VT0(0):24"/>
+					<v:ud v:nameU="FormatString" v:val="VT4(0.00)"/>
+					<v:ud v:nameU="LengthText" v:val="VT4(900.00)"/>
+					<v:ud v:nameU="Length" v:val="VT0(35.433070866142):24"/>
+					<v:ud v:nameU="LPFString" v:prompt="Linear Precision Formatting String" v:val="VT4(0.00)"/>
+					<v:ud v:nameU="LPrec" v:val="VT0(2):26"/>
+					<v:ud v:nameU="LPrecInd" v:val="VT0(2):26"/>
+					<v:ud v:nameU="LPrecVal" v:val="VT4(0.00)"/>
+					<v:ud v:nameU="LUnits" v:val="VT0(0):26"/>
+					<v:ud v:nameU="LUnitsInd" v:prompt="0=Dwg, 1=Arch, 2=Dec Ft, 3+ = other" v:val="VT0(0):26"/>
+					<v:ud v:nameU="LUnitsVal" v:val="VT4( 使用绘图页的单位)"/>
+					<v:ud v:nameU="ShowUnits" v:val="VT0(0):26"/>
+					<v:ud v:nameU="ShowUnitsInd" v:val="VT0(0):26"/>
+					<v:ud v:nameU="ShowUnitsVal" v:val="VT4(不显示单位)"/>
+					<v:ud v:nameU="FeetInch" v:val="VT0(0):26"/>
+					<v:ud v:nameU="Feet" v:val="VT0(0):26"/>
+					<v:ud v:nameU="Inch" v:val="VT0(0):26"/>
+					<v:ud v:nameU="InchPrec" v:val="VT0(16):26"/>
+					<v:ud v:nameU="WatchLength" v:val="VT0(35.433070866142):24"/>
+					<v:ud v:nameU="DrawingUnitFactor" v:val="VT0(0):24"/>
+					<v:ud v:nameU="HideArrow" v:val="VT0(1):5"/>
+					<v:ud v:nameU="LInchPrecInd" v:val="VT0(4):26"/>
+					<v:ud v:nameU="DirArrowSize" v:val="VT0(5.3340833333333):1"/>
+					<v:ud v:nameU="DirArrowOffset" v:val="VT0(24.06387500055):1"/>
+					<v:ud v:nameU="LInchPrec" v:val="VT0(4):26"/>
+					<v:ud v:nameU="LInchPrecVal" v:val="VT4(1/16 in.)"/>
+					<v:ud v:nameU="DirArrowSize" v:prompt="" v:val="VT0(0.10668166666667):1"/>
+					<v:ud v:nameU="DirArrowOffset" v:prompt="" v:val="VT0(0.48127750055):1"/>
+				</v:userDefs>
+				<v:textBlock v:margins="rect(4,0,0,0)" v:tabSpace="42.5197"/>
+				<v:textRect cx="31.8168" cy="1184.92" width="63.64" height="25.6036" transform="rotate(-180)"/>
+							</g>
+			<g id="shape74-32" v:mID="74" v:groupContext="groupContent" v:layerMember="0;1">
+				<v:textBlock v:margins="rect(4,4,4,4)" v:tabSpace="42.5197"/>
+				<v:textRect cx="-1120.13" cy="58.1908" width="24.4" height="20.0036"/>
+							</g>
+		</g>
+	</g>
+</svg>
