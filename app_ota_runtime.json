@@ -1,10 +1,10 @@
 {
   "enabled": true,
-  "version": "0.1.38",
-  "build_number": 38,
-  "filename": "放射安全检测报告-v0.1.38-build38.apk",
-  "file_size": 88548415,
-  "sha256": "5e22f0490ec058103feff1be55f52c353112404e38ee6fe26eae227955a0a2cb",
-  "release_notes": "refactor: 优化草稿保存队列与提交流程状态管理",
+  "version": "0.1.39",
+  "build_number": 39,
+  "filename": "放射安全检测报告-v0.1.39-build39.apk",
+  "file_size": 88637682,
+  "sha256": "f409fba8de90216091cf168284612dfaccf1fd6de1079beeba8b9350b27e05d0",
+  "release_notes": "refactor: 移除动态精度规整逻辑，计算链保留全精度数值",
   "force_update": false
 }
