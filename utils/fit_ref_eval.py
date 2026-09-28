@@ -13,6 +13,7 @@ import re
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from utils.pdf_field_formulas import (
+    FIT_EQUATION_COEFFICIENT_PRECISION,
     is_fit_model_expression,
     migrate_fit_rule_expression,
     normalize_pdf_field_id,
@@ -215,7 +216,9 @@ def compute_fit_ab_for_field(
     return (kind, ab[0], ab[1])
 
 
-def format_fit_equation_latex(kind: str, a: float, b: float, *, precision: int = 2) -> str:
+def format_fit_equation_latex(
+    kind: str, a: float, b: float, *, precision: int = FIT_EQUATION_COEFFICIENT_PRECISION
+) -> str:
     prec = max(0, int(precision))
 
     def fmt(v: float) -> str:
@@ -343,7 +346,7 @@ def expand_fit_ref_functions(
     value_mapping: Mapping[str, Any],
     *,
     field_by_pid: Optional[Mapping[str, Mapping[str, Any]]] = None,
-    precision: int = 2,
+    precision: int = FIT_EQUATION_COEFFICIENT_PRECISION,
     _depth: int = 0,
 ) -> Optional[str]:
     """
@@ -425,7 +428,7 @@ def evaluate_with_fit_refs(
     value_mapping: Mapping[str, Any],
     *,
     field_by_pid: Optional[Mapping[str, Mapping[str, Any]]] = None,
-    precision: int = 2,
+    precision: int = FIT_EQUATION_COEFFICIENT_PRECISION,
     constants: Optional[Mapping[str, Any]] = None,
     enums: Optional[Mapping[str, Any]] = None,
     lookup_tables: Optional[Mapping[str, Any]] = None,

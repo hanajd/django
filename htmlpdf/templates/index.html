@@ -4677,6 +4677,76 @@
             return '((' + num + ')*(' + num + ')/' + den + ')';
         }
 
+        /** 公式串中各 f 号的出现次数，用于判断展开式是否仍对应当前点列 */
+        function pdfFieldRefCounts(expr) {
+            const out = {};
+            const re = /\bf(\d+)\b/gi;
+            let m;
+            while ((m = re.exec(String(expr || '')))) {
+                const pid = 'f' + parseInt(m[1], 10);
+                out[pid] = (out[pid] || 0) + 1;
+            }
+            return out;
+        }
+
+        function samePdfFieldRefCounts(a, b) {
+            const ka = Object.keys(a);
+            if (ka.length !== Object.keys(b).length) return false;
+            return ka.every((k) => a[k] === b[k]);
+        }
+
+        /** 已展开的 R² 式无法再解析 fit(y=...)，按 fitKind/标签 → ln() 落在 x 还是 y 推断 */
+        function inferExpandedFitKind(expr, xList, yList, rule) {
+            const byRule = inferFitRuleModelKind(rule || {});
+            if (byRule) return byRule;
+            const text = String(expr || '');
+            const hit = (ids) => (ids || []).some((raw) => {
+                const pid = String(raw || '').trim().toLowerCase();
+                return pid && new RegExp('\\bln\\s*\\(\\s*' + pid + '\\s*\\)', 'i').test(text);
+            });
+            if (hit(xList)) return 'log';
+            if (hit(yList)) return 'exp';
+            return 'linear';
+        }
+
+        /**
+         * R² 展开式自检：引用的点与 fitBinding.x/y 对不上时按点列重算。
+         * 主格点列改过、R² 只镜像了 fitBinding 而展开式仍是旧快照时会退化（只剩 2 点的
+         * Pearson 恒等于 1）。只比较 f 号出现次数，故 round(...) 一类二次编辑在点列没变时不动。
+         */
+        function syncFitR2RuleExpressions(r2Field) {
+            if (!r2Field || !r2Field.fitBinding) return 0;
+            const xb = Array.isArray(r2Field.fitBinding.x) ? r2Field.fitBinding.x : [];
+            const yb = Array.isArray(r2Field.fitBinding.y) ? r2Field.fitBinding.y : [];
+            if (!xb.length || !yb.length) return 0;
+            const rules = Array.isArray(r2Field.formulaRules) ? r2Field.formulaRules : [];
+            let changed = 0;
+            let primary = '';
+            rules.forEach((r) => {
+                if (!r || typeof r !== 'object') return;
+                const expr = String(r.expression || r.formula || '').trim();
+                if (!expr || isFitModelExpression(expr) || parseFitR2MasterPid(expr)) return;
+                const canonical = buildPearsonR2Expression(xb, yb, inferExpandedFitKind(expr, xb, yb, r));
+                if (!canonical) return;
+                if (!samePdfFieldRefCounts(pdfFieldRefCounts(expr), pdfFieldRefCounts(canonical))) {
+                    r.expression = canonical;
+                    r.formula = canonical;
+                    changed++;
+                }
+                if (!primary) primary = String(r.expression || '');
+            });
+            if (changed && primary) {
+                ['fieldExpression', 'formula', 'pdfFieldExpression'].forEach((k) => {
+                    const cur = String(r2Field[k] || '').trim();
+                    if (!cur || isFitModelExpression(cur) || parseFitR2MasterPid(cur)) return;
+                    if (!samePdfFieldRefCounts(pdfFieldRefCounts(cur), pdfFieldRefCounts(primary))) {
+                        r2Field[k] = primary;
+                    }
+                });
+            }
+            return changed;
+        }
+
         /** OLS 变换点列（与 R² / 拟合系数同一约定） */
         function buildOlsTransformedXY(xList, yList, fitKindOrModel) {
             const kind = parseFitModelKind(fitKindOrModel) || String(fitKindOrModel || 'linear').trim().toLowerCase();
@@ -4895,6 +4965,8 @@
                     r2Field.fitBinding.y = (master.fitBinding.y || []).slice();
                     r2Field.fitBinding.r2FieldId = '';
                     syncR2RuleConditionsFromMaster(r2Field, master);
+                    // 点列变过就重算 Pearson，避免留下退化的旧展开式（2 点时恒等于 1）
+                    syncFitR2RuleExpressions(r2Field);
                 }
                 return;
             }

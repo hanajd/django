@@ -5291,11 +5291,13 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
             field_obj["rule"] = ""
         # 拟合主格 / R²：从 pdf 归一化项写入（覆盖 testResult→number 等通用类型推断）
         from utils.pdf_field_formulas import (
+            FIT_EQUATION_COEFFICIENT_PRECISION,
             build_fit_r2_expression,
             is_fit_model_expression,
             normalize_pdf_field_id,
             parse_fit_r2_master_pid,
             resolve_fit_r2_master_pid,
+            sync_fit_r2_rule_expressions,
         )
 
         r2_master = resolve_fit_r2_master_pid(item)
@@ -5345,6 +5347,7 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
                 }
             if isinstance(rules, list) and rules:
                 field_obj["formulaRules"] = copy.deepcopy(rules)
+            sync_fit_r2_rule_expressions(field_obj)
         elif is_direct_r2 and isinstance(fb, dict) and (fb.get("x") or fb.get("y")):
             field_obj["type"] = "computed"
             field_obj["defaultValue"] = None
@@ -5362,6 +5365,7 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
             if fe:
                 field_obj["fieldExpression"] = fe
                 field_obj["formula"] = fe
+            sync_fit_r2_rule_expressions(field_obj)
         elif isinstance(fb, dict) and (fb.get("x") or fb.get("y") or fb.get("r2FieldId")):
             field_obj["fitBinding"] = copy.deepcopy(fb)
             field_obj["type"] = "computed"
@@ -5381,6 +5385,9 @@ def build_frontend_schema_by_rules(template_obj: Dict[str, Any], *, merge_split_
                 if not str(field_obj.get("formula") or "").strip():
                     field_obj["formula"] = "fit(y=a*x+b)"
                 apply_fit_equation_display_format(field_obj)
+                # 方程系数默认 3 位，与检测机构计算表格（Excel 趋势线）对齐
+                if field_obj.get("precision") in (None, ""):
+                    field_obj["precision"] = FIT_EQUATION_COEFFICIENT_PRECISION
             field_obj["dependsOn"] = list(field_obj.get("dependsOn") or [])
         # 条件公式 / 单条公式：覆盖 testResult→number，强制 type=computed
         elif (isinstance(rules, list) and rules) or str(

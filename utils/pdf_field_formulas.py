@@ -12,7 +12,7 @@ from __future__ import annotations
 import copy
 import re
 from collections import defaultdict, deque
-from typing import Any, Dict, List, Mapping, Optional, Set
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set
 
 _PDF_FID_RE = re.compile(r"\bf(\d+)\b", re.IGNORECASE)
 _FID_KEY_RE = re.compile(r"^f\d+$", re.IGNORECASE)
@@ -37,6 +37,8 @@ _FIT_MODEL_EXPR_BY_KIND = {
     "log": "fit(y=a*ln(x)+b)",
     "exp": "fit(y=a*exp(b*x))",
 }
+# 拟合方程系数展示位数：与检测机构 Excel 趋势线（3 位）对齐
+FIT_EQUATION_COEFFICIENT_PRECISION = 3
 _FIT_KIND_BY_CANON_MODEL = {
     "a*x+b": "linear",
     "a*ln(x)+b": "log",
@@ -325,6 +327,97 @@ def build_pearson_r2_expression(
     num = f"(({n})*({sxy})-({sx})*({sy}))"
     den = f"((({n})*({sx2})-({sx})*({sx}))*(({n})*({sy2})-({sy})*({sy})))"
     return f"(({num})*({num})/{den})"
+
+
+def _expression_pdf_field_ref_counts(expression: str) -> Dict[str, int]:
+    """公式串中各 f 号的出现次数（multiset），用于比对展开式是否仍对应当前点列。"""
+    out: Dict[str, int] = {}
+    for m in _PDF_FID_RE.finditer(str(expression or "")):
+        pid = normalize_pdf_field_id(m.group(0))
+        if pid:
+            out[pid] = out.get(pid, 0) + 1
+    return out
+
+
+def infer_expanded_fit_kind(
+    expression: str,
+    x_ids: Sequence[Any],
+    y_ids: Sequence[Any],
+    *,
+    fit_kind: str = "",
+    label: str = "",
+) -> str:
+    """已展开的 R² / 引用式无法再解析 ``fit(y=...)``，按 fitKind → 标签 → ``ln()`` 落点推断。"""
+    kind = str(fit_kind or "").strip().lower()
+    if kind in ("linear", "log", "exp"):
+        return kind
+    lb = str(label or "")
+    if "对数" in lb or "log" in lb.lower():
+        return "log"
+    if "指数" in lb or "exp" in lb.lower():
+        return "exp"
+    if "线性" in lb or "linear" in lb.lower():
+        return "linear"
+    expr = str(expression or "")
+    for ids, guess in ((x_ids, "log"), (y_ids, "exp")):
+        for raw in ids or []:
+            pid = normalize_pdf_field_id(str(raw or ""))
+            if pid and re.search(r"\bln\s*\(\s*%s\s*\)" % pid, expr, flags=re.IGNORECASE):
+                return guess
+    return "linear"
+
+
+def sync_fit_r2_rule_expressions(field: Dict[str, Any]) -> int:
+    """
+    R² 从格自检：Pearson 展开式引用的点与 ``fitBinding.x/y`` 对不上时按点列重算。
+
+    主格点列改动后 R² 只镜像了 ``fitBinding``、展开式却仍是旧快照（点数变少时
+    Pearson 会退化成恒等于 1），这里按点列重新生成。只比较公式里 f 号的**出现次数**，
+    所以 ``round(...)`` 一类二次编辑在点列没变时不会被误判重写。返回改写的规则条数。
+    """
+    if not isinstance(field, dict):
+        return 0
+    fb = field.get("fitBinding")
+    if not isinstance(fb, Mapping):
+        return 0
+    x_ids = fb.get("x") if isinstance(fb.get("x"), list) else []
+    y_ids = fb.get("y") if isinstance(fb.get("y"), list) else []
+    if not x_ids or not y_ids:
+        return 0
+    rules = field.get("formulaRules")
+    if not isinstance(rules, list) or not rules:
+        return 0
+
+    changed = 0
+    primary = ""
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        expr = str(rule.get("expression") or rule.get("formula") or "").strip()
+        # 模型式 / 旧哨兵由主格链路处理，不在这里重写
+        if not expr or is_fit_model_expression(expr) or parse_fit_r2_master_pid(expr):
+            continue
+        kind = infer_expanded_fit_kind(
+            expr, x_ids, y_ids, fit_kind=str(rule.get("fitKind") or ""), label=str(rule.get("label") or "")
+        )
+        canonical = build_pearson_r2_expression(x_ids, y_ids, fit_kind=kind)
+        if not canonical:
+            continue
+        if _expression_pdf_field_ref_counts(expr) != _expression_pdf_field_ref_counts(canonical):
+            rule["expression"] = canonical
+            rule["formula"] = canonical
+            changed += 1
+        if not primary:
+            primary = str(rule.get("expression") or "")
+
+    if changed and primary:
+        for key in ("fieldExpression", "formula", "pdfFieldExpression"):
+            cur = str(field.get(key) or "").strip()
+            if not cur or is_fit_model_expression(cur) or parse_fit_r2_master_pid(cur):
+                continue
+            if _expression_pdf_field_ref_counts(cur) != _expression_pdf_field_ref_counts(primary):
+                field[key] = primary
+    return changed
 
 
 def resolve_fit_r2_master_pid(field: Mapping[str, Any]) -> str:
